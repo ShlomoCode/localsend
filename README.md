@@ -108,7 +108,7 @@ For more information on the LocalSend Protocol, see the [documentation](https://
 
 To compile LocalSend from the source code, follow these steps:
 
-1. Install Flutter [directly](https://flutter.dev) or using [fvm](https://fvm.app) (see [version required](.fvmrc))
+1. Install Flutter 3.13 [directly](https://flutter.dev) or using [fvm](https://fvm.app) (see [version required](.fvmrc))
 2. Clone the `LocalSend` repository
 3. Run `cd app` to enter the app directory
 4. Run `flutter pub get` to download dependencies
