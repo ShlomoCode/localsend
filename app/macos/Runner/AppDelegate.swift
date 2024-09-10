@@ -15,6 +15,8 @@ class AppDelegate: FlutterAppDelegate {
     }
     
     override func applicationDidFinishLaunching(_ notification: Notification) {
+        print("[prefix]: [1] applicationDidFinishLaunching")
+        
         let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
         channel = FlutterMethodChannel(name: "main-delegate-channel", binaryMessenger: controller.engine.binaryMessenger)
         channel?.setMethodCallHandler(handleFlutterCall)
@@ -27,6 +29,7 @@ class AppDelegate: FlutterAppDelegate {
     private func setupPendingItemsObservation() {
         self.pendingFilesObservation = Defaults.observe(.pendingFiles) { change in
             guard !Defaults[.pendingFiles].isEmpty else { return }
+            print("[prefix]: [2] there are pending files, calling sendPendingItemsToFlutter")
             self.sendPendingItemsToFlutter()
         }
         
@@ -100,12 +103,15 @@ class AppDelegate: FlutterAppDelegate {
         }
         
         if !filePaths.isEmpty{
-            channel?.invokeMethod("onPendingFiles", arguments: filePaths)
+            print("[prefix]: [3]: invoking onPendingFiles with \(filePaths.count) filePaths")
+            self.channel?.invokeMethod("onPendingFiles", arguments: filePaths)
         }
+        
         if !pendingStrings.isEmpty     {
             channel?.invokeMethod("onPendingStrings", arguments: pendingStrings)
         }
         
+        print("[prefix]: [4]: we empty the UserDefaults")
         Defaults[.pendingFiles] = []
         Defaults[.pendingStrings] = []
 
@@ -118,6 +124,7 @@ class AppDelegate: FlutterAppDelegate {
         case "getPendingFiles":
             let pendingFileBookmarks = Defaults[.pendingFiles]
             var filePaths: [String] = []
+            print("[prefix]: [5]: getPendingFiles called. In the UserDefaults there are \(pendingFileBookmarks.count) pending files. responding with them")
             
             for bookmark in pendingFileBookmarks {
                 if let url = SecurityScopedResourceManager.shared.startAccessing(bookmark: bookmark) {

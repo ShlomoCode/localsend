@@ -46,11 +46,12 @@ final class ShareController: ExtensionController {
         
         // Launch localsend app if it's not running
         let localsendAppURL = getParentAppURL()
-        launchAppIfNeeded(appURL: localsendAppURL)
+        // launchAppIfNeeded(appURL: localsendAppURL)
         
         // Close the share extension
         context.completeRequest(returningItems: [], completionHandler: nil)
         
+        print("[prefix]: [pre]: the share extension saved the files to the UserDefaults and finishing its job")
         return []
     }
 }

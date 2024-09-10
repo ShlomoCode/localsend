@@ -69,6 +69,7 @@ Stream<List<String>> get pendingStringsStream => _pendingStringsStreamController
 
 void setupMethodCallHandler() {
   _methodChannel.setMethodCallHandler((call) async {
+    print('[prefix]: [6]: dart side: method ${call.method} called with arguments ${call.arguments}');
     switch (call.method) {
       case 'onPendingFiles':
         _pendingFilesStreamController.add((call.arguments as List).cast<String>());
