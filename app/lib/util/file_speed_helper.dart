@@ -1,3 +1,5 @@
+import 'package:localsend_app/gen/strings.g.dart';
+
 /// Returns bytes per second
 int getFileSpeed({
   required int start,
@@ -5,7 +7,7 @@ int getFileSpeed({
   required int bytes,
 }) {
   final deltaTime = end - start;
-  return (1000 * bytes) ~/ deltaTime; // multiply by 1000 to convert millis to seconds
+  return (1000 * bytes) ~/ deltaTime;
 }
 
 String getRemainingTime({
@@ -16,21 +18,21 @@ String getRemainingTime({
   
   if (totalSeconds < 60) {
     final seconds = totalSeconds;
-    return '0:${seconds.toString().padLeft(2, '0')}';
+    return t.progressPage.remainingTime.seconds(n: 0, ss: seconds.toString().padLeft(2, '0'));
   } else if (totalSeconds < 3600) {
     final minutes = totalSeconds ~/ 60;
     final seconds = totalSeconds % 60;
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+    return t.progressPage.remainingTime.minutes(n: minutes, ss: seconds.toString().padLeft(2, '0'));
   } else if (totalSeconds < 86400) {
     final hours = totalSeconds ~/ 3600;
     final minutes = (totalSeconds % 3600) ~/ 60;
-    return '${hours}h ${minutes}m';
+    return t.progressPage.remainingTime.hours(h: hours, m: minutes);
   } else {
     final days = totalSeconds ~/ 86400;
     final remainingAfterDays = totalSeconds % 86400;
     final hours = remainingAfterDays ~/ 3600;
     final minutes = (remainingAfterDays % 3600) ~/ 60;
-    return '${days}d ${hours}h ${minutes}m';
+    return t.progressPage.remainingTime.days(d: days, h: hours, m: minutes);
   }
 }
 

@@ -281,6 +281,7 @@ class TranslationsProgressPageEn {
   String get titleReceiving => 'Receiving files';
   String get savedToGallery => 'Saved in Photos';
   late final TranslationsProgressPageTotalEn total = TranslationsProgressPageTotalEn.internal(_root);
+  late final TranslationsProgressPageRemainingTimeEn remainingTime = TranslationsProgressPageRemainingTimeEn.internal(_root);
 }
 
 // Path: webSharePage
@@ -1112,4 +1113,17 @@ class TranslationsProgressPageTotalTitleEn {
   String get finishedError => 'Finished with error';
   String get canceledSender => 'Canceled by sender';
   String get canceledReceiver => 'Canceled by receiver';
+}
+
+// Path: progressPage.remainingTime
+class TranslationsProgressPageRemainingTimeEn {
+  TranslationsProgressPageRemainingTimeEn.internal(this._root);
+
+  final Translations _root; // ignore: unused_field
+
+  // Translations
+  String seconds({required Object n, required Object ss}) => '${n}:${ss}';
+  String minutes({required Object n, required Object ss}) => '${n}:${ss}';
+  String hours({required Object h, required Object m}) => '${h}h ${m}m';
+  String days({required Object d, required Object h, required Object m}) => '${d}d ${h}h ${m}m';
 }
