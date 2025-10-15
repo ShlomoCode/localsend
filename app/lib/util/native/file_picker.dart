@@ -20,7 +20,6 @@ import 'package:localsend_app/util/native/cross_file_converters.dart';
 import 'package:localsend_app/util/native/pick_directory_path.dart';
 import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/ui/asset_picker_translated_text_delegate.dart';
-import 'package:localsend_app/util/ui/drag_select_asset_picker_delegate.dart';
 import 'package:localsend_app/widget/dialogs/loading_dialog.dart';
 import 'package:localsend_app/widget/dialogs/message_input_dialog.dart';
 import 'package:localsend_app/widget/dialogs/no_permission_dialog.dart';
@@ -247,20 +246,13 @@ Future<void> _pickMedia(BuildContext context, Ref ref) async {
   }
 
   final oldBrightness = Theme.of(context).brightness;
-  
-  // Get permission state
-  final permissionState = await PhotoManager.requestPermissionExtend();
-  
   // ignore: use_build_context_synchronously
-  final List<AssetEntity>? result = await AssetPicker.pickAssetsWithDelegate(
+  final List<AssetEntity>? result = await AssetPicker.pickAssets(
     context,
-    delegate: DragSelectAssetPickerBuilderDelegate(
-      provider: DefaultAssetPickerProvider(
-        maxAssets: 999,
-        selectedAssets: [],
-      ),
-      initialPermission: permissionState,
-      textDelegate: const TranslatedAssetPickerTextDelegate(),
+    pickerConfig: const AssetPickerConfig(
+      maxAssets: 999,
+      textDelegate: TranslatedAssetPickerTextDelegate(),
+      dragToSelect: true,
     ),
   );
 
