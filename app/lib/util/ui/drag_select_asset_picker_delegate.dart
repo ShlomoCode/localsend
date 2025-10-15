@@ -27,7 +27,6 @@ class DragSelectAssetPickerBuilderDelegate extends DefaultAssetPickerBuilderDele
   Offset? _dragStartPosition;
   final Set<int> _dragSelectedIndices = {};
   bool _initialSelectionState = false;
-  List<AssetEntity> _currentAssets = [];
   
   // Grid configuration - we'll need to calculate this
   int _crossAxisCount = 4;
@@ -80,24 +79,25 @@ class DragSelectAssetPickerBuilderDelegate extends DefaultAssetPickerBuilderDele
     _dragStartPosition = position;
     _dragSelectedIndices.clear();
     
-    // Get the current assets list
-    _currentAssets = provider.currentAssets.toList();
-    
     // Calculate which item was initially pressed
     final int? index = _getIndexFromPosition(position, context);
-    if (index != null && index < _currentAssets.length) {
-      final asset = _currentAssets[index];
-      _dragSelectedIndices.add(index);
-      
-      // Remember if we're selecting or deselecting
-      _initialSelectionState = !provider.selectedAssets.contains(asset);
-      
-      // Toggle the first item
-      if (provider.selectedAssets.contains(asset)) {
-        provider.unSelectAsset(asset);
-      } else {
-        provider.selectAsset(asset);
-      }
+    if (index == null) return;
+    
+    // Get the current assets - using provider's current path assets
+    final currentAssets = currentAssetsListenable.value;
+    if (index >= currentAssets.length) return;
+    
+    final asset = currentAssets[index];
+    _dragSelectedIndices.add(index);
+    
+    // Remember if we're selecting or deselecting
+    _initialSelectionState = !provider.selectedAssets.contains(asset);
+    
+    // Toggle the first item
+    if (provider.selectedAssets.contains(asset)) {
+      provider.unSelectAsset(asset);
+    } else {
+      provider.selectAsset(asset);
     }
   }
 
@@ -105,13 +105,17 @@ class DragSelectAssetPickerBuilderDelegate extends DefaultAssetPickerBuilderDele
     if (!_isDragging || _dragStartPosition == null) return;
     
     final int? index = _getIndexFromPosition(position, context);
-    if (index == null || index >= _currentAssets.length) return;
+    if (index == null) return;
+    
+    // Get current assets
+    final currentAssets = currentAssetsListenable.value;
+    if (index >= currentAssets.length) return;
     
     // Skip if already processed
     if (_dragSelectedIndices.contains(index)) return;
     
     _dragSelectedIndices.add(index);
-    final asset = _currentAssets[index];
+    final asset = currentAssets[index];
     
     // Apply selection/deselection based on initial state
     final bool isCurrentlySelected = provider.selectedAssets.contains(asset);
@@ -136,6 +140,8 @@ class DragSelectAssetPickerBuilderDelegate extends DefaultAssetPickerBuilderDele
     if (renderBox == null) return null;
     
     final size = renderBox.size;
+    final currentAssets = currentAssetsListenable.value;
+    if (currentAssets.isEmpty) return null;
     
     // Estimate item size based on grid count
     // This is a simplification - actual calculation depends on GridView configuration
@@ -149,6 +155,6 @@ class DragSelectAssetPickerBuilderDelegate extends DefaultAssetPickerBuilderDele
     if (column < 0 || column >= _crossAxisCount || row < 0) return null;
     
     final int index = row * _crossAxisCount + column;
-    return index < _currentAssets.length ? index : null;
+    return index < currentAssets.length ? index : null;
   }
 }
