@@ -51,12 +51,7 @@ class ReceiveHistoryPage extends StatelessWidget {
     Dispatcher<ReceiveHistoryService, List<ReceiveHistoryEntry>> dispatcher,
   ) async {
     if (entry.path != null) {
-      await openFile(
-        context,
-        entry.fileType,
-        entry.path!,
-        onDeleteTap: () => dispatcher.dispatchAsync(RemoveHistoryEntryAction(entry.id)),
-      );
+      await openFile(context, entry.fileType, entry.path!, onDeleteTap: () => dispatcher.dispatchAsync(RemoveHistoryEntryAction(entry.id)));
     }
   }
 
@@ -97,10 +92,7 @@ class ReceiveHistoryPage extends StatelessWidget {
                   onPressed: entries.isEmpty
                       ? null
                       : () async {
-                          final result = await showDialog(
-                            context: context,
-                            builder: (_) => const HistoryClearDialog(),
-                          );
+                          final result = await showDialog(context: context, builder: (_) => const HistoryClearDialog());
 
                           if (context.mounted && result == true) {
                             await context.redux(receiveHistoryProvider).dispatchAsync(RemoveAllHistoryEntriesAction());
@@ -120,117 +112,126 @@ class ReceiveHistoryPage extends StatelessWidget {
             )
           else
             ...entries.map((entry) {
+              bool fileExists = false;
+              if (entry.path != null) {
+                try {
+                  fileExists = File(entry.path!).existsSync();
+                } catch (_) {
+                  fileExists = false;
+                }
+              }
+              final isClickable = (entry.path != null && fileExists) || entry.isMessage;
+              final availableOptions = fileExists ? _optionsAll : _optionsWithoutOpen;
+
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                child: InkWell(
-                  splashColor: Colors.transparent,
-                  splashFactory: NoSplash.splashFactory,
-                  highlightColor: Colors.transparent,
-                  hoverColor: Colors.transparent,
-                  onTap: entry.path != null || entry.isMessage
-                      ? () async {
-                          if (entry.isMessage) {
-                            final vm = ViewProvider((ref) {
-                              return ReceivePageVm(
-                                status: SessionStatus.waiting,
-                                sender: Device(
-                                  signalingId: null,
-                                  ip: '0.0.0.0',
-                                  version: '1.0.0',
-                                  port: 8080,
-                                  https: false,
-                                  fingerprint: 'fingerprint',
-                                  alias: entry.senderAlias,
-                                  deviceModel: 'deviceModel',
-                                  deviceType: DeviceType.web,
-                                  download: true,
-                                  discoveryMethods: const {},
-                                ),
-                                showSenderInfo: false,
-                                files: [],
-                                message: entry.fileName,
-                                onAccept: () {},
-                                onDecline: () {},
-                                onClose: () {},
-                              );
-                            });
-
-                            // ignore: unawaited_futures
-                            context.push(() => ReceivePage(vm));
-                            return;
-                          }
-
-                          await _openFile(context, entry, context.redux(receiveHistoryProvider));
-                        }
-                      : null,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      FilePathThumbnail(
-                        path: entry.path,
-                        fileType: entry.fileType,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 3),
-                            Text(
-                              entry.fileName,
-                              style: const TextStyle(fontSize: 16),
-                              maxLines: 1,
-                              overflow: TextOverflow.fade,
-                              softWrap: false,
-                            ),
-                            Text(
-                              '${entry.timestampString} - ${entry.fileSize.asReadableFileSize} - ${entry.senderAlias}',
-                              maxLines: 1,
-                              overflow: TextOverflow.fade,
-                              softWrap: false,
-                              style: const TextStyle(color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      PopupMenuButton<_EntryOption>(
-                        onSelected: (_EntryOption item) async {
-                          switch (item) {
-                            case _EntryOption.open:
-                              await _openFile(context, entry, context.redux(receiveHistoryProvider));
-                              break;
-                            case _EntryOption.showInFolder:
-                              if (entry.path != null) {
-                                await openFolder(
-                                  folderPath: File(entry.path!).parent.path,
-                                  fileName: path.basename(entry.path!),
+                child: MouseRegion(
+                  cursor: isClickable ? SystemMouseCursors.click : MouseCursor.defer,
+                  child: InkWell(
+                    splashColor: Colors.transparent,
+                    splashFactory: NoSplash.splashFactory,
+                    highlightColor: Colors.transparent,
+                    hoverColor: Colors.transparent,
+                    onTap: isClickable
+                        ? () async {
+                            if (entry.isMessage) {
+                              final vm = ViewProvider((ref) {
+                                return ReceivePageVm(
+                                  status: SessionStatus.waiting,
+                                  sender: Device(
+                                    signalingId: null,
+                                    ip: '0.0.0.0',
+                                    version: '1.0.0',
+                                    port: 8080,
+                                    https: false,
+                                    fingerprint: 'fingerprint',
+                                    alias: entry.senderAlias,
+                                    deviceModel: 'deviceModel',
+                                    deviceType: DeviceType.web,
+                                    download: true,
+                                    discoveryMethods: const {},
+                                  ),
+                                  showSenderInfo: false,
+                                  files: [],
+                                  message: entry.fileName,
+                                  onAccept: () {},
+                                  onDecline: () {},
+                                  onClose: () {},
                                 );
-                              }
-                              break;
-                            case _EntryOption.info:
-                              // ignore: use_build_context_synchronously
-                              await showDialog(
-                                context: context,
-                                builder: (_) => FileInfoDialog(entry: entry),
-                              );
-                              break;
-                            case _EntryOption.delete:
-                              // ignore: use_build_context_synchronously
-                              await context.redux(receiveHistoryProvider).dispatchAsync(RemoveHistoryEntryAction(entry.id));
-                              break;
+                              });
+
+                              // ignore: unawaited_futures
+                              context.push(() => ReceivePage(vm));
+                              return;
+                            }
+
+                            await _openFile(context, entry, context.redux(receiveHistoryProvider));
                           }
-                        },
-                        itemBuilder: (BuildContext context) {
-                          return (entry.path != null ? _optionsAll : _optionsWithoutOpen).map((e) {
-                            return PopupMenuItem<_EntryOption>(
-                              value: e,
-                              child: Text(e.label),
-                            );
-                          }).toList();
-                        },
-                      ),
-                    ],
+                        : null,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FilePathThumbnail(path: entry.path, fileType: entry.fileType),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 3),
+                              Text(
+                                entry.fileName,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isClickable ? null : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.38),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
+                              ),
+                              Text(
+                                '${entry.timestampString} - ${entry.fileSize.asReadableFileSize} - ${entry.senderAlias}',
+                                maxLines: 1,
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
+                                style: TextStyle(color: isClickable ? Colors.grey : Colors.grey.withValues(alpha: 0.38)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        if (isClickable)
+                          PopupMenuButton<_EntryOption>(
+                            onSelected: (_EntryOption item) async {
+                              switch (item) {
+                                case _EntryOption.open:
+                                  await _openFile(context, entry, context.redux(receiveHistoryProvider));
+                                  break;
+                                case _EntryOption.showInFolder:
+                                  if (entry.path != null) {
+                                    await openFolder(folderPath: File(entry.path!).parent.path, fileName: path.basename(entry.path!));
+                                  }
+                                  break;
+                                case _EntryOption.info:
+                                  // ignore: use_build_context_synchronously
+                                  await showDialog(
+                                    context: context,
+                                    builder: (_) => FileInfoDialog(entry: entry),
+                                  );
+                                  break;
+                                case _EntryOption.delete:
+                                  // ignore: use_build_context_synchronously
+                                  await context.redux(receiveHistoryProvider).dispatchAsync(RemoveHistoryEntryAction(entry.id));
+                                  break;
+                              }
+                            },
+                            itemBuilder: (BuildContext context) {
+                              return availableOptions.map((e) {
+                                return PopupMenuItem<_EntryOption>(value: e, child: Text(e.label));
+                              }).toList();
+                            },
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               );
