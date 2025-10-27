@@ -30,16 +30,25 @@ Future<void> saveFile({
   required DateTime? lastAccessed,
   required void Function(int savedBytes) onProgress,
 }) async {
+  // Check if we're saving an APK file to Downloads on Android
+  // This is to prevent Android's package manager from scanning the file while it's being written
+  final isApkToDownloads = androidSdkInt != null && 
+                           !saveToGallery &&
+                           name.toLowerCase().endsWith('.apk') &&
+                           destinationPath.contains('/Download');
+  
   if (!saveToGallery && androidSdkInt != null) {
     // Use SAF to save the file
     // When saveToGallery is enabled, the destination is always the app's cache directory so we don't need to use SAF
     SafWriteStreamInfo? safInfo;
 
     if (documentUri != null || destinationPath.startsWith('content://')) {
-      _logger.info('Using SAF to save file to ${documentUri ?? destinationPath} as $name');
+      // For APK files going to Downloads, use a temporary name during transfer
+      final safName = isApkToDownloads ? '$name.tmp' : name;
+      _logger.info('Using SAF to save file to ${documentUri ?? destinationPath} as $safName');
       safInfo = await _saf.startWriteStream(
         documentUri ?? destinationPath,
-        name,
+        safName,
         lookupMimeType(name) ?? (isImage ? 'image/*' : '*/*'),
       );
     } else {
@@ -47,10 +56,12 @@ Future<void> saveFile({
       if (sdCardPath != null) {
         // Use Android SAF to save the file to the SD card
         final uriString = ContentUriHelper.encodeTreeUri(sdCardPath.path.parentPath());
+        // For APK files going to Downloads, use a temporary name during transfer
+        final safName = isApkToDownloads ? '$name.tmp' : name;
         _logger.info('Using SAF to save file to $uriString');
         safInfo = await _saf.startWriteStream(
           'content://com.android.externalstorage.documents/tree/${sdCardPath.sdCardId}:$uriString',
-          name,
+          safName,
           lookupMimeType(name) ?? (isImage ? 'image/*' : '*/*'),
         );
       }
@@ -71,13 +82,29 @@ Future<void> saveFile({
         flush: null,
         close: () async {
           await _saf.endWriteStream(sessionID);
+          
+          // For APK files to Downloads, rename from .tmp to .apk after transfer completes
+          if (isApkToDownloads && documentUri != null) {
+            try {
+              _logger.info('Renaming APK file from temporary name to final name');
+              await android_channel.renameFile(
+                parentUri: documentUri,
+                oldName: '$name.tmp',
+                newName: name,
+              );
+            } catch (e) {
+              _logger.warning('Failed to rename APK file after transfer', e);
+            }
+          }
         },
       );
       return;
     }
   }
 
-  final file = File(destinationPath);
+  // For APK files to Downloads using regular file I/O, use a temporary path during transfer
+  final actualDestinationPath = isApkToDownloads ? '$destinationPath.tmp' : destinationPath;
+  final file = File(actualDestinationPath);
   final sink = file.openWrite();
   await _saveFile(
     destinationPath: destinationPath,
@@ -90,14 +117,28 @@ Future<void> saveFile({
     flush: sink.flush,
     close: () async {
       await sink.close();
+      
+      // For APK files to Downloads, rename from .tmp to .apk after transfer completes
+      if (isApkToDownloads) {
+        try {
+          _logger.info('Renaming APK file from temporary path to final path');
+          await file.rename(destinationPath);
+        } catch (e) {
+          _logger.warning('Failed to rename APK file after transfer', e);
+          rethrow;
+        }
+      }
+      
       if (lastModified != null) {
         try {
-          await file.setLastModified(lastModified);
+          final finalFile = File(destinationPath);
+          await finalFile.setLastModified(lastModified);
         } catch (_) {}
       }
       if (lastAccessed != null) {
         try {
-          await file.setLastAccessed(lastAccessed);
+          final finalFile = File(destinationPath);
+          await finalFile.setLastAccessed(lastAccessed);
         } catch (_) {}
       }
     },

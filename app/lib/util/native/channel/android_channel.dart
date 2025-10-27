@@ -92,6 +92,19 @@ Future<void> openGallery() async {
   await _methodChannel.invokeMethod('openGallery');
 }
 
+Future<void> renameFile({
+  required String parentUri,
+  required String oldName,
+  required String newName,
+}) async {
+  _logger.info('Renaming file from $oldName to $newName in $parentUri');
+  await _methodChannel.invokeMethod('renameFile', {
+    'parentUri': parentUri,
+    'oldName': oldName,
+    'newName': newName,
+  });
+}
+
 @MappableClass()
 class PickDirectoryResult with PickDirectoryResultMappable {
   final String directoryUri;

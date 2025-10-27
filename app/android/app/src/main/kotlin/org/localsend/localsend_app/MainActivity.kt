@@ -59,6 +59,8 @@ class MainActivity : FlutterActivity() {
                     result.success(isAnimationsEnabled())
                 }
 
+                "renameFile" -> handleRenameFile(call, result)
+
                 else -> result.notImplemented()
             }
         }
@@ -257,6 +259,61 @@ class MainActivity : FlutterActivity() {
         intent.action = Intent.ACTION_VIEW
         intent.type = "image/*"
         startActivity(intent)
+    }
+
+    @SuppressLint("WrongConstant")
+    private fun handleRenameFile(call: MethodCall, result: MethodChannel.Result) {
+        val parentUri = Uri.parse(call.argument<String>("parentUri")!!)
+        val oldName = call.argument<String>("oldName")!!
+        val newName = call.argument<String>("newName")!!
+
+        try {
+            // Find the file with the old name
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                parentUri,
+                DocumentsContract.getDocumentId(parentUri)
+            )
+            
+            var targetDocumentUri: Uri? = null
+            var cursor: Cursor? = null
+            
+            try {
+                cursor = contentResolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                    ),
+                    null,
+                    null,
+                    null
+                )
+                
+                if (cursor != null) {
+                    while (cursor.moveToNext()) {
+                        val displayName = cursor.getString(1)
+                        if (displayName == oldName) {
+                            val documentId = cursor.getString(0)
+                            targetDocumentUri = DocumentsContract.buildDocumentUriUsingTree(parentUri, documentId)
+                            break
+                        }
+                    }
+                }
+            } finally {
+                cursor?.close()
+            }
+            
+            if (targetDocumentUri == null) {
+                result.error("FILE_NOT_FOUND", "File $oldName not found", null)
+                return
+            }
+            
+            // Rename the document
+            DocumentsContract.renameDocument(contentResolver, targetDocumentUri, newName)
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("RENAME_FAILED", "Failed to rename file: ${e.message}", null)
+        }
     }
 }
 
