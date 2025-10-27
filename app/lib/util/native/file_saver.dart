@@ -98,6 +98,7 @@ Future<void> saveFile({
               );
             } catch (e) {
               _logger.warning('Failed to rename APK file after transfer', e);
+              rethrow;
             }
           }
         },
@@ -111,7 +112,7 @@ Future<void> saveFile({
   final file = File(actualDestinationPath);
   final sink = file.openWrite();
   await _saveFile(
-    destinationPath: destinationPath,
+    destinationPath: actualDestinationPath,  // Pass the actual path being written to
     saveToGallery: saveToGallery,
     isImage: isImage,
     stream: stream,
