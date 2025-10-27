@@ -32,10 +32,14 @@ Future<void> saveFile({
 }) async {
   // Check if we're saving an APK file to Downloads on Android
   // This is to prevent Android's package manager from scanning the file while it's being written
+  // The detection works for both regular file paths and content URIs
+  final isApkFile = name.toLowerCase().endsWith('.apk');
+  final isDownloadsPath = destinationPath.contains('/Download') || 
+                          (documentUri != null && documentUri.contains('Download'));
   final isApkToDownloads = androidSdkInt != null && 
                            !saveToGallery &&
-                           name.toLowerCase().endsWith('.apk') &&
-                           destinationPath.contains('/Download');
+                           isApkFile &&
+                           isDownloadsPath;
   
   if (!saveToGallery && androidSdkInt != null) {
     // Use SAF to save the file
