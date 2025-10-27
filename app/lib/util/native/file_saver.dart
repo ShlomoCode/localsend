@@ -139,6 +139,12 @@ Future<void> saveFile({
           await file.rename(destinationPath);
         } catch (e) {
           _logger.warning('Failed to rename APK file after transfer', e);
+          // Try to clean up the temporary file
+          try {
+            await file.delete();
+          } catch (deleteError) {
+            _logger.warning('Failed to delete temporary file', deleteError);
+          }
           rethrow;
         }
       }
