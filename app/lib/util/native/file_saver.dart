@@ -30,43 +30,34 @@ Future<void> saveFile({
   required DateTime? lastAccessed,
   required void Function(int savedBytes) onProgress,
 }) async {
-  // Check if we're saving an APK file to Downloads on Android
-  // This is to prevent Android's package manager from scanning the file while it's being written
-  // The detection works for both regular file paths and content URIs
-  final isApkFile = name.toLowerCase().endsWith('.apk');
-  final isDownloadsPath = destinationPath.contains('/Download') || 
-                          (documentUri != null && documentUri.contains('Download'));
-  final isApkToDownloads = androidSdkInt != null && 
-                           !saveToGallery &&
-                           isApkFile &&
-                           isDownloadsPath;
-  
   if (!saveToGallery && androidSdkInt != null) {
     // Use SAF to save the file
     // When saveToGallery is enabled, the destination is always the app's cache directory so we don't need to use SAF
     SafWriteStreamInfo? safInfo;
 
     if (documentUri != null || destinationPath.startsWith('content://')) {
-      // For APK files going to Downloads, use a temporary name during transfer
-      final safName = isApkToDownloads ? '$name.tmp' : name;
-      _logger.info('Using SAF to save file to ${documentUri ?? destinationPath} as $safName');
+      _logger.info('Using SAF to save file to ${documentUri ?? destinationPath} as $name');
+      // Use generic MIME type for APK files to prevent Android PackageManager from scanning
+      // the file while it's being written, which can cause the write to hang at 99%
+      final mimeType = _getSafeMimeType(name, isImage);
       safInfo = await _saf.startWriteStream(
         documentUri ?? destinationPath,
-        safName,
-        lookupMimeType(name) ?? (isImage ? 'image/*' : '*/*'),
+        name,
+        mimeType,
       );
     } else {
       final sdCardPath = getSdCardPath(destinationPath);
       if (sdCardPath != null) {
         // Use Android SAF to save the file to the SD card
         final uriString = ContentUriHelper.encodeTreeUri(sdCardPath.path.parentPath());
-        // For APK files going to Downloads, use a temporary name during transfer
-        final safName = isApkToDownloads ? '$name.tmp' : name;
         _logger.info('Using SAF to save file to $uriString');
+        // Use generic MIME type for APK files to prevent Android PackageManager from scanning
+        // the file while it's being written, which can cause the write to hang at 99%
+        final mimeType = _getSafeMimeType(name, isImage);
         safInfo = await _saf.startWriteStream(
           'content://com.android.externalstorage.documents/tree/${sdCardPath.sdCardId}:$uriString',
-          safName,
-          lookupMimeType(name) ?? (isImage ? 'image/*' : '*/*'),
+          name,
+          mimeType,
         );
       }
     }
@@ -86,42 +77,16 @@ Future<void> saveFile({
         flush: null,
         close: () async {
           await _saf.endWriteStream(sessionID);
-          
-          // For APK files to Downloads, rename from .tmp to .apk after transfer completes
-          if (isApkToDownloads && documentUri != null) {
-            try {
-              _logger.info('Renaming APK file from temporary name to final name');
-              await android_channel.renameFile(
-                parentUri: documentUri,
-                oldName: '$name.tmp',
-                newName: name,
-              );
-            } catch (e) {
-              _logger.warning('Failed to rename APK file after transfer', e);
-              // Try to clean up the temporary file
-              try {
-                await android_channel.deleteFile(
-                  parentUri: documentUri,
-                  fileName: '$name.tmp',
-                );
-              } catch (deleteError) {
-                _logger.warning('Failed to delete temporary file', deleteError);
-              }
-              rethrow;
-            }
-          }
         },
       );
       return;
     }
   }
 
-  // For APK files to Downloads using regular file I/O, use a temporary path during transfer
-  final actualDestinationPath = isApkToDownloads ? '$destinationPath.tmp' : destinationPath;
-  final file = File(actualDestinationPath);
+  final file = File(destinationPath);
   final sink = file.openWrite();
   await _saveFile(
-    destinationPath: actualDestinationPath,  // Pass the actual path being written to
+    destinationPath: destinationPath,
     saveToGallery: saveToGallery,
     isImage: isImage,
     stream: stream,
@@ -131,34 +96,14 @@ Future<void> saveFile({
     flush: sink.flush,
     close: () async {
       await sink.close();
-      
-      // For APK files to Downloads, rename from .tmp to .apk after transfer completes
-      if (isApkToDownloads) {
-        try {
-          _logger.info('Renaming APK file from temporary path to final path');
-          await file.rename(destinationPath);
-        } catch (e) {
-          _logger.warning('Failed to rename APK file after transfer', e);
-          // Try to clean up the temporary file
-          try {
-            await file.delete();
-          } catch (deleteError) {
-            _logger.warning('Failed to delete temporary file', deleteError);
-          }
-          rethrow;
-        }
-      }
-      
       if (lastModified != null) {
         try {
-          final finalFile = File(destinationPath);
-          await finalFile.setLastModified(lastModified);
+          await file.setLastModified(lastModified);
         } catch (_) {}
       }
       if (lastAccessed != null) {
         try {
-          final finalFile = File(destinationPath);
-          await finalFile.setLastAccessed(lastAccessed);
+          await file.setLastAccessed(lastAccessed);
         } catch (_) {}
       }
     },
@@ -273,6 +218,19 @@ Future<(String, String?, String)> digestFilePathAndPrepareDirectory({
 }
 
 final _sdCardPathRegex = RegExp(r'^/storage/([A-Fa-f0-9]{4}-[A-Fa-f0-9]{4})/(.*)$');
+
+/// Returns a MIME type that won't trigger Android system scanning during file write.
+/// For APK files, returns 'application/octet-stream' instead of 'application/vnd.android.package-archive'
+/// to prevent PackageManager from attempting to scan the file while it's being written.
+String _getSafeMimeType(String name, bool isImage) {
+  // Check if this is an APK file
+  if (name.toLowerCase().endsWith('.apk')) {
+    // Use generic binary MIME type to prevent Android from scanning during write
+    return 'application/octet-stream';
+  }
+  // For other files, use the standard MIME type lookup
+  return lookupMimeType(name) ?? (isImage ? 'image/*' : '*/*');
+}
 
 class SdCardPath {
   final String sdCardId;
