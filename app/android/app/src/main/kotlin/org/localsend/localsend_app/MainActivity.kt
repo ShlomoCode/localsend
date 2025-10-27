@@ -61,6 +61,8 @@ class MainActivity : FlutterActivity() {
 
                 "renameFile" -> handleRenameFile(call, result)
 
+                "deleteFile" -> handleDeleteFile(call, result)
+
                 else -> result.notImplemented()
             }
         }
@@ -313,6 +315,60 @@ class MainActivity : FlutterActivity() {
             result.success(null)
         } catch (e: Exception) {
             result.error("RENAME_FAILED", "Failed to rename file: ${e.message}", null)
+        }
+    }
+
+    @SuppressLint("WrongConstant")
+    private fun handleDeleteFile(call: MethodCall, result: MethodChannel.Result) {
+        val parentUri = Uri.parse(call.argument<String>("parentUri")!!)
+        val fileName = call.argument<String>("fileName")!!
+
+        try {
+            // Find the file to delete
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                parentUri,
+                DocumentsContract.getDocumentId(parentUri)
+            )
+            
+            var targetDocumentUri: Uri? = null
+            var cursor: Cursor? = null
+            
+            try {
+                cursor = contentResolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                    ),
+                    null,
+                    null,
+                    null
+                )
+                
+                if (cursor != null) {
+                    while (cursor.moveToNext()) {
+                        val displayName = cursor.getString(1)
+                        if (displayName == fileName) {
+                            val documentId = cursor.getString(0)
+                            targetDocumentUri = DocumentsContract.buildDocumentUriUsingTree(parentUri, documentId)
+                            break
+                        }
+                    }
+                }
+            } finally {
+                cursor?.close()
+            }
+            
+            if (targetDocumentUri == null) {
+                result.error("FILE_NOT_FOUND", "File $fileName not found", null)
+                return
+            }
+            
+            // Delete the document
+            DocumentsContract.deleteDocument(contentResolver, targetDocumentUri)
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("DELETE_FAILED", "Failed to delete file: ${e.message}", null)
         }
     }
 }

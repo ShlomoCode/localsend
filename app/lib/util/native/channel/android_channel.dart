@@ -105,6 +105,17 @@ Future<void> renameFile({
   });
 }
 
+Future<void> deleteFile({
+  required String parentUri,
+  required String fileName,
+}) async {
+  _logger.info('Deleting file $fileName in $parentUri');
+  await _methodChannel.invokeMethod('deleteFile', {
+    'parentUri': parentUri,
+    'fileName': fileName,
+  });
+}
+
 @MappableClass()
 class PickDirectoryResult with PickDirectoryResultMappable {
   final String directoryUri;
