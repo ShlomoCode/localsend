@@ -19,6 +19,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
+          cache: true
 
       - name: Dependencies (app)
         working-directory: app
@@ -46,6 +47,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
+          cache: true
 
       - name: Dependencies (app)
         working-directory: app

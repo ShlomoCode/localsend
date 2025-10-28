@@ -34,6 +34,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
+          cache: true
 
       - name: Configure safe directory for Git
         run: git config --global --add safe.directory "/opt/hostedtoolcache/flutter/stable-${{ env.FLUTTER_VERSION }}-x64"
