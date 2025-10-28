@@ -76,10 +76,17 @@ install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
 
 install(FILES
   "${BINARY_NAME}.exe.manifest"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+# Optional MSIX helper files for Windows share sheet support
+# These files need to be generated using scripts/compile_windows_msix_helper.ps1
+install(FILES
   "localsend_msix_helper.msix"
   "install_msix_helper.ps1"
   DESTINATION "${CMAKE_INSTALL_PREFIX}"
-  COMPONENT Runtime)
+  COMPONENT Runtime
+  OPTIONAL)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
