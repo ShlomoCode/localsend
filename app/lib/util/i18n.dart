@@ -7,6 +7,7 @@ Future<void> initI18n() async {
       continue;
     }
 
+    final usesDualPluralForm = locale == AppLocale.he;
     await LocaleSettings.setPluralResolver(
       locale: locale,
       cardinalResolver: (n, {zero, one, two, few, many, other}) {
@@ -15,6 +16,9 @@ Future<void> initI18n() async {
         }
         if (n == 1) {
           return one ?? other ?? n.toString();
+        }
+        if (n == 2 && usesDualPluralForm) {
+          return two ?? other ?? n.toString();
         }
         return other ?? n.toString();
       },

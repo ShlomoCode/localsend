@@ -270,10 +270,24 @@
     "remainingTime": {
       "seconds": "{n}:{ss}",
       "minutes": "{n}:{ss}",
-      "hours": "{h}h {m}m",
-      "days": "{d}d {h}h {m}m",
-      "@hours": "Use 'h' for hours abbreviation and 'm' for minutes",
-      "@days": "Use 'd' for days, 'h' for hours, and 'm' for minutes"
+      "units": {
+        "day(param=d, ignoreMissing)": {
+          "one": "{d}d",
+          "other": "{d}d"
+        },
+        "hour(param=h, ignoreMissing)": {
+          "one": "{h}h",
+          "other": "{h}h"
+        },
+        "minute(param=m, ignoreMissing)": {
+          "one": "{m}m",
+          "other": "{m}m"
+        }
+      },
+      "hours": "@:progressPage.remainingTime.units.hour @:progressPage.remainingTime.units.minute",
+      "days": "@:progressPage.remainingTime.units.day @:progressPage.remainingTime.units.hour @:progressPage.remainingTime.units.minute",
+      "@hours": "Combine the localized hour and minute units",
+      "@days": "Combine the localized day, hour, and minute units"
     }
   },
   "webSharePage": {

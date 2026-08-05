@@ -1384,15 +1384,19 @@ class Translations$progressPage$remainingTime$en {
   /// en: '{n}:{ss}'
   String minutes({required Object n, required Object ss}) => '${n}:${ss}';
 
-  /// Use 'h' for hours abbreviation and 'm' for minutes
-  ///
-  /// en: '{h}h {m}m'
-  String hours({required Object h, required Object m}) => '${h}h ${m}m';
+  late final Translations$progressPage$remainingTime$units$en units = Translations$progressPage$remainingTime$units$en.internal(_root);
 
-  /// Use 'd' for days, 'h' for hours, and 'm' for minutes
+  /// Combine the localized hour and minute units
   ///
-  /// en: '{d}d {h}h {m}m'
-  String days({required Object d, required Object h, required Object m}) => '${d}d ${h}h ${m}m';
+  /// en: '(one) {{h}h} (other) {{h}h} (one) {{m}m} (other) {{m}m}'
+  String hours({required num h, required num m}) =>
+      '${_root.progressPage.remainingTime.units.hour(h: h)} ${_root.progressPage.remainingTime.units.minute(m: m)}';
+
+  /// Combine the localized day, hour, and minute units
+  ///
+  /// en: '(one) {{d}d} (other) {{d}d} (one) {{h}h} (other) {{h}h} (one) {{m}m} (other) {{m}m}'
+  String days({required num d, required num h, required num m}) =>
+      '${_root.progressPage.remainingTime.units.day(d: d)} ${_root.progressPage.remainingTime.units.hour(h: h)} ${_root.progressPage.remainingTime.units.minute(m: m)}';
 }
 
 // Path: whatsNewPage.changes
@@ -1900,6 +1904,36 @@ class Translations$progressPage$total$title$en {
 
   /// en: 'Canceled by receiver'
   String get canceledReceiver => 'Canceled by receiver';
+}
+
+// Path: progressPage.remainingTime.units
+class Translations$progressPage$remainingTime$units$en {
+  Translations$progressPage$remainingTime$units$en.internal(this._root);
+
+  final Translations _root; // ignore: unused_field
+
+  // Translations
+
+  /// en: '(one) {{d}d} (other) {{d}d}'
+  String day({required num d}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(
+    d,
+    one: '${d}d',
+    other: '${d}d',
+  );
+
+  /// en: '(one) {{h}h} (other) {{h}h}'
+  String hour({required num h}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(
+    h,
+    one: '${h}h',
+    other: '${h}h',
+  );
+
+  /// en: '(one) {{m}m} (other) {{m}m}'
+  String minute({required num m}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(
+    m,
+    one: '${m}m',
+    other: '${m}m',
+  );
 }
 
 // Path: whatsNewPage.changes.v1_18_0

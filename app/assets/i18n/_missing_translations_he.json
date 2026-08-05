@@ -45,14 +45,6 @@
   "sendPage": {
     "calculatingChecksum": "מאמת שלמות ({curr} / {n})"
   },
-  "progressPage": {
-    "remainingTime": {
-      "seconds": "{n}:{ss}",
-      "minutes": "{n}:{ss}",
-      "hours": "{h} שעות ו-{m} דקות",
-      "days": "{d} ימים, {h} שעות ו-{m} דקות"
-    }
-  },
   "webReceivePage": {
     "title": "קבלה באמצעות קישור"
   },

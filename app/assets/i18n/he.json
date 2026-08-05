@@ -238,6 +238,29 @@
       "count": "קבצים: {curr}/{n}",
       "size": "גודל: {curr}/{n}",
       "speed": "מהירות: {speed}/שניה"
+    },
+    "remainingTime": {
+      "seconds": "{n}:{ss}",
+      "minutes": "{n}:{ss}",
+      "units": {
+        "day(param=d, ignoreMissing)": {
+          "one": "{d} יום",
+          "two": "יומיים",
+          "other": "{d} ימים"
+        },
+        "hour(param=h, ignoreMissing)": {
+          "one": "{h} שעה",
+          "two": "שעתיים",
+          "other": "{h} שעות"
+        },
+        "minute(param=m, ignoreMissing)": {
+          "one": "ו-{m} דקה",
+          "two": "ושתי דקות",
+          "other": "ו-{m} דקות"
+        }
+      },
+      "hours": "@:progressPage.remainingTime.units.hour @:progressPage.remainingTime.units.minute",
+      "days": "@:progressPage.remainingTime.units.day, @:progressPage.remainingTime.units.hour @:progressPage.remainingTime.units.minute"
     }
   },
   "webSharePage": {
