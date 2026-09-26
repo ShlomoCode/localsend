@@ -15,6 +15,7 @@ import 'package:localsend_app/provider/animation_provider.dart';
 import 'package:localsend_app/provider/app_arguments_provider.dart';
 import 'package:localsend_app/provider/device_info_provider.dart';
 import 'package:localsend_app/provider/network/nearby_devices_provider.dart';
+import 'package:localsend_app/provider/network/send_provider.dart';
 import 'package:localsend_app/provider/network/server/server_provider.dart';
 import 'package:localsend_app/provider/network/webrtc/signaling_provider.dart';
 import 'package:localsend_app/provider/persistence_provider.dart';
@@ -43,6 +44,7 @@ import 'package:localsend_app/widget/dialogs/local_network_dialog.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/dto/file_dto.dart';
 import 'package:localsend_isolates/model/dto/multicast_dto.dart';
+import 'package:localsend_isolates/model/session_status.dart';
 import 'package:localsend_isolates/rust/api/logging.dart' as rust_logging;
 import 'package:localsend_isolates/rust/frb_generated.dart';
 import 'package:localsend_isolates/util/logger.dart';
@@ -264,7 +266,7 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
         hasInitialShare = true;
         // ignore: unawaited_futures
         ref.global.dispatchAsync(
-          _HandleShareIntentAction(
+          HandleShareIntentAction(
             payload: initialSharedPayload,
           ),
         );
@@ -274,7 +276,7 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
     _sharedMediaSubscription?.cancel(); // ignore: unawaited_futures
     _sharedMediaSubscription = shareHandler.sharedMediaStream.listen((SharedMedia payload) async {
       await ref.global.dispatchAsync(
-        _HandleShareIntentAction(
+        HandleShareIntentAction(
           payload: payload,
         ),
       );
@@ -313,15 +315,32 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
   // [FOSS_REMOVE_END]
 }
 
-class _HandleShareIntentAction extends AsyncGlobalAction {
+class HandleShareIntentAction extends AsyncGlobalAction {
   final SharedMedia payload;
 
-  _HandleShareIntentAction({
+  HandleShareIntentAction({
     required this.payload,
   });
 
   @override
   Future<void> reduce() async {
+    final completedSessions = ref
+        .read(sendProvider)
+        .values
+        .where(
+          (session) => !session.background && (session.status == SessionStatus.finished || session.status == SessionStatus.finishedWithErrors),
+        );
+    if (completedSessions.isNotEmpty) {
+      for (final session in completedSessions.toList()) {
+        ref.notifier(sendProvider).closeSession(session.sessionId, clearSelection: false);
+      }
+      // Incoming attachments may already be in a cache directory.
+      // Preserve them while clearing files from the previous selection.
+      final incomingPaths = payload.attachments?.whereType<SharedAttachment>().map((attachment) => attachment.path).toSet() ?? <String>{};
+      ref.redux(selectedSendingFilesProvider).dispatch(ClearSelectionAction(preserveCachePaths: incomingPaths));
+      ref.global.dispatch(NavigateAction.popUntilRoot());
+    }
+
     final message = payload.content;
     if (message != null && message.trim().isNotEmpty) {
       ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: message));
