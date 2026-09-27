@@ -164,6 +164,7 @@ pub struct WebI18n {
     pub file_name: String,
     pub size: String,
     pub drop_hint: String,
+    pub upload: String,
 }
 
 impl Default for WebI18n {
@@ -180,6 +181,7 @@ impl Default for WebI18n {
             file_name: "File name".to_string(),
             size: "Size".to_string(),
             drop_hint: "Place items to share.".to_string(),
+            upload: "Upload".to_string(),
         }
     }
 }
@@ -288,11 +290,7 @@ pub(crate) fn index(state: &AppState) -> Response<BoxedBody> {
             pages.download_html.as_deref().unwrap_or(DOWNLOAD_HTML),
             "text/html; charset=utf-8",
         ),
-        WebShare::Upload => html_response(
-            StatusCode::OK,
-            pages.upload_html.as_deref().unwrap_or(UPLOAD_HTML),
-            "text/html; charset=utf-8",
-        ),
+        WebShare::Upload => web_page(pages.upload_html.as_deref(), UPLOAD_HTML, &state.web.i18n),
         WebShare::Disabled => error_403_page(pages),
     }
 }
@@ -486,6 +484,25 @@ fn html_response(
         http::HeaderValue::from_static(content_type),
     );
     response
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn web_page(custom: Option<&str>, built_in: &str, i18n: &WebI18n) -> Response<BoxedBody> {
+    if let Some(custom) = custom {
+        return html_response(StatusCode::OK, custom, "text/html; charset=utf-8");
+    }
+    let page = built_in
+        .replace("{{upload}}", &escape_html(&i18n.upload))
+        .replace("{{dropHint}}", &escape_html(&i18n.drop_hint));
+    html_response(StatusCode::OK, &page, "text/html; charset=utf-8")
 }
 
 fn error_403_page(pages: &WebPages) -> Response<BoxedBody> {
