@@ -8,7 +8,6 @@ import 'package:system_date_time_format/system_date_time_format.dart';
 // such as en_IL. Before returning to DateFormat.yMd/jm, verify those locales
 // and user-selected system formats, which locale data alone may not reflect.
 
-/// Formats displayed dates and times using the device's regional preferences.
 class SystemDateTimeFormatter {
   static String dateTime(BuildContext context, DateTime value) => '${date(context, value)} ${time(context, value)}';
 
