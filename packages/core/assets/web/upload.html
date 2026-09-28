@@ -70,8 +70,8 @@
 
 <h1 style="padding: 0.5em">LocalSend</h1>
 <div id="content">
-    <button id="upload-button" type="button">{{upload}}</button>
-    <p id="drop-hint">{{dropHint}}</p>
+    <button id="upload-button" type="button">Upload</button>
+    <p id="drop-hint">Place items to share.</p>
     <input id="file-input" type="file" multiple style="display: none">
     <p id="status-text"></p>
     <p id="progress-text"></p>
@@ -112,10 +112,10 @@
         if (response.status === 200) {
           i18n = JSON.parse(response.responseText);
           if (i18n.upload) {
-            document.getElementById('upload-button').innerText = i18n.upload;
+            document.getElementById('upload-button').textContent = i18n.upload;
           }
           if (i18n.dropHint) {
-            document.getElementById('drop-hint').innerText = i18n.dropHint;
+            document.getElementById('drop-hint').textContent = i18n.dropHint;
           }
           then();
         }

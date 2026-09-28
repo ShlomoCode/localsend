@@ -290,7 +290,11 @@ pub(crate) fn index(state: &AppState) -> Response<BoxedBody> {
             pages.download_html.as_deref().unwrap_or(DOWNLOAD_HTML),
             "text/html; charset=utf-8",
         ),
-        WebShare::Upload => web_page(pages.upload_html.as_deref(), UPLOAD_HTML, &state.web.i18n),
+        WebShare::Upload => html_response(
+            StatusCode::OK,
+            pages.upload_html.as_deref().unwrap_or(UPLOAD_HTML),
+            "text/html; charset=utf-8",
+        ),
         WebShare::Disabled => error_403_page(pages),
     }
 }
@@ -484,16 +488,6 @@ fn html_response(
         http::HeaderValue::from_static(content_type),
     );
     response
-}
-
-fn web_page(custom: Option<&str>, built_in: &str, i18n: &WebI18n) -> Response<BoxedBody> {
-    if let Some(custom) = custom {
-        return html_response(StatusCode::OK, custom, "text/html; charset=utf-8");
-    }
-    let page = built_in
-        .replace("{{upload}}", &html_escape::encode_text(&i18n.upload))
-        .replace("{{dropHint}}", &html_escape::encode_text(&i18n.drop_hint));
-    html_response(StatusCode::OK, &page, "text/html; charset=utf-8")
 }
 
 fn error_403_page(pages: &WebPages) -> Response<BoxedBody> {

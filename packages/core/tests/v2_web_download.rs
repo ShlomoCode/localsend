@@ -338,8 +338,9 @@ async fn test_upload_page() {
     let body = response.text().await.unwrap();
     assert!(body.contains("LocalSend"));
     assert!(body.contains("prepare-upload"));
-    assert!(body.contains(">Choose &amp; &lt;upload&gt;</button>"));
-    assert!(body.contains(">Drop items here</p>"));
+    assert!(body.contains(">Upload</button>"));
+    assert!(body.contains(">Place items to share.</p>"));
+    assert!(!body.contains("Choose & <upload>"));
     // The download page is not served without web download.
     assert!(!body.contains("prepare-download"));
 
