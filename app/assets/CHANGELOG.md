@@ -1,6 +1,6 @@
 ## Unreleased
 
-- fix: format timestamps using system date and time settings (@ShlomoCode)
+- feat: format timestamps using system date and time settings (@ShlomoCode)
 - fix(macos): file sharing via Share Extension doesn't work in DMG builds (@ShlomoCode, @vdmkotai)
 - fix: show the real error when a file cannot be read while sending, instead of transferring it as an empty file (@leopalmieri-spec)
 
