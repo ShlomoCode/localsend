@@ -48,7 +48,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('9/27/2026 3:54 PM'), findsOneWidget);
 
-    // Some platforms return a time pattern with seconds even for the short format.
+    // A returned HH:mm:ss pattern must not add seconds to the displayed time.
     timePattern = 'HH:mm:ss';
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();

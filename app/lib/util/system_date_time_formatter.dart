@@ -22,7 +22,7 @@ class SystemDateTimeFormatter {
   }
 
   static String _withoutSeconds(String pattern) {
-    // Some platforms include seconds in the system's short time pattern.
+    // Keep the existing minute precision when the returned pattern is, for example, HH:mm:ss.
     final seconds = RegExp(r's+').firstMatch(pattern);
     if (seconds == null) return pattern;
     var start = seconds.start;
