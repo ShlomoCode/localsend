@@ -486,22 +486,13 @@ fn html_response(
     response
 }
 
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 fn web_page(custom: Option<&str>, built_in: &str, i18n: &WebI18n) -> Response<BoxedBody> {
     if let Some(custom) = custom {
         return html_response(StatusCode::OK, custom, "text/html; charset=utf-8");
     }
     let page = built_in
-        .replace("{{upload}}", &escape_html(&i18n.upload))
-        .replace("{{dropHint}}", &escape_html(&i18n.drop_hint));
+        .replace("{{upload}}", &html_escape::encode_text(&i18n.upload))
+        .replace("{{dropHint}}", &html_escape::encode_text(&i18n.drop_hint));
     html_response(StatusCode::OK, &page, "text/html; charset=utf-8")
 }
 
