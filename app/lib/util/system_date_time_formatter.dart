@@ -22,7 +22,7 @@ class SystemDateTimeFormatter {
   }
 
   static String _withoutSeconds(String pattern) {
-    // Keep the existing minute precision when the returned pattern is, for example, HH:mm:ss.
+    // On Linux, the plugin reads T_FMT, which can include seconds (e.g. %T becomes HH:mm:ss).
     final seconds = RegExp(r's+').firstMatch(pattern);
     if (seconds == null) return pattern;
     var start = seconds.start;

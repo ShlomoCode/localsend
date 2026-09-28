@@ -48,7 +48,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('9/27/2026 3:54 PM'), findsOneWidget);
 
-    // A returned HH:mm:ss pattern must not add seconds to the displayed time.
+    // Linux's T_FMT may yield HH:mm:ss; keep minute precision in the UI.
     timePattern = 'HH:mm:ss';
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
