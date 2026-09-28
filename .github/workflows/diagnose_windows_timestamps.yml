@@ -1,0 +1,104 @@
+name: Diagnose Windows file timestamps
+
+on:
+  push:
+    branches: [codex/diagnose-windows-timestamps]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            timezone: UTC
+            label: windows-2022-utc
+          - os: windows-2025
+            timezone: UTC
+            label: windows-2025-utc
+          - os: windows-2025
+            timezone: Israel Standard Time
+            label: windows-2025-israel
+          - os: windows-2025
+            timezone: Pacific Standard Time
+            label: windows-2025-pacific
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LS_DIAGNOSTIC_OUTPUT: ${{ github.workspace }}/diagnostic-output
+      LS_RUST_LIBRARY: ${{ github.workspace }}/target/debug/rust_lib_localsend_app.dll
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Record environment
+        run: |
+          New-Item -ItemType Directory -Force $env:LS_DIAGNOSTIC_OUTPUT | Out-Null
+          Set-TimeZone -Id '${{ matrix.timezone }}'
+          git rev-parse HEAD
+          Get-TimeZone
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber
+          Get-Volume | Select-Object DriveLetter, FileSystem, FileSystemLabel
+          Get-Item "$env:SystemRoot/System32/ucrtbase.dll" | Select-Object -ExpandProperty VersionInfo
+      - name: Create fixtures and exercise Windows APIs
+        id: native
+        continue-on-error: true
+        run: ./support/diagnostics/windows_timestamp_probe.ps1
+      - name: Exercise native file and folder dialogs
+        id: picker
+        continue-on-error: true
+        run: ./support/diagnostics/windows_picker_probe.ps1
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - name: Record SDK versions
+        run: |
+          flutter --version
+          dart --version
+      - name: Exercise Dart filesystem APIs
+        id: dart
+        continue-on-error: true
+        run: dart support/diagnostics/windows_timestamp_probe.dart
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: timestamp-diagnostics-${{ matrix.os }}
+      - name: Build real Rust bridge
+        run: cargo build --locked --package rust_lib_localsend_app
+      - name: Resolve app dependencies
+        working-directory: app
+        run: flutter pub get
+      - name: Exercise actual app selection actions and Rust metadata
+        id: app
+        continue-on-error: true
+        working-directory: app
+        run: |
+          flutter test test/diagnostics/windows_timestamp_test.dart --reporter expanded 2>&1 | Tee-Object -FilePath "$env:LS_DIAGNOSTIC_OUTPUT/app-tests.log"
+          exit $LASTEXITCODE
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: timestamps-${{ matrix.label }}
+          path: diagnostic-output/
+          if-no-files-found: warn
+      - name: Report probe outcomes
+        if: always()
+        run: |
+          $outcomes = @{
+            native = '${{ steps.native.outcome }}'
+            picker = '${{ steps.picker.outcome }}'
+            dart = '${{ steps.dart.outcome }}'
+            app = '${{ steps.app.outcome }}'
+          }
+          $outcomes | ConvertTo-Json
+          if ($outcomes.Values | Where-Object { $_ -ne 'success' }) { exit 1 }
