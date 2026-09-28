@@ -1,0 +1,32 @@
+name: Diagnose released Windows ARM UI
+
+on:
+  push:
+    branches: [codex/diagnose-windows-timestamps]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  released_windows_ui:
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    env:
+      LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
+    steps:
+      - uses: actions/checkout@v6
+      - name: Launch official v1.18.2 ARM64 release and capture desktop
+        run: .\support\diagnostics\windows_release_ui_probe.ps1
+      - name: Preserve release process log and screenshot
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows11-arm-v1.18.2-release-ui
+          path: |
+            release-ui-output/release-ui-report.json
+            release-ui-output/desktop.png
+          if-no-files-found: error

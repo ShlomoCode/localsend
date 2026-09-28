@@ -5,6 +5,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart' show XFile, XTypeGroup;
+// ignore: depend_on_referenced_packages
+import 'package:file_selector_platform_interface/file_selector_platform_interface.dart' show FileSelectorPlatform;
 import 'package:flutter/material.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart' show ExternalLibrary;
@@ -108,6 +111,55 @@ void main() {
         container.disposeContainer();
       }
     });
+  }
+
+  testWidgets('missing selected file reaches the app error dialog and logger', (tester) async {
+    final missingPath = p.join(fixturesRoot, 'deliberately-missing-file-for-error-control.txt');
+    expect(File(missingPath).existsSync(), isFalse, reason: 'The control path must be absent to force XFile.length to fail');
+    final originalPlatform = FileSelectorPlatform.instance;
+    final container = RefenaContainer();
+    final warnings = <LogRecord>[];
+    final subscription = Logger.root.onRecord.listen((record) {
+      if (record.loggerName == 'FilePickerHelper' && record.level >= Level.WARNING) warnings.add(record);
+    });
+    try {
+      FileSelectorPlatform.instance = _MissingFileSelector(missingPath);
+      final context = await _mountPickerContext(tester, container);
+      if (!context.mounted) fail('Picker context detached before error control');
+      final action = context.ref.global.dispatchAsync(PickFileAction(option: FilePickerOption.file, context: context));
+
+      for (var attempt = 0; attempt < 50 && find.byType(NoPermissionDialog).evaluate().isEmpty; attempt++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      }
+      expect(find.byType(NoPermissionDialog), findsOneWidget, reason: 'PickFileAction did not show its error dialog for $missingPath');
+
+      Routerino.navigatorKey.currentState!.pop();
+      await tester.pumpAndSettle();
+      await action.timeout(const Duration(seconds: 5), onTimeout: () => fail('PickFileAction remained blocked after dismissing NoPermissionDialog'));
+      expect(
+        warnings.any((record) => record.error is FileSystemException && record.error.toString().contains(missingPath)),
+        isTrue,
+        reason: 'FilePickerHelper did not log the original FileSystemException for $missingPath. Records: $warnings',
+      );
+      expect(container.read(selectedSendingFilesProvider), isEmpty, reason: 'A failed file must not enter the selection');
+    } finally {
+      FileSelectorPlatform.instance = originalPlatform;
+      await subscription.cancel();
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.disposeContainer();
+    }
+  });
+}
+
+class _MissingFileSelector extends FileSelectorPlatform {
+  final String missingPath;
+
+  _MissingFileSelector(this.missingPath);
+
+  @override
+  Future<List<XFile>> openFiles({List<XTypeGroup>? acceptedTypeGroups, String? initialDirectory, String? confirmButtonText}) async {
+    return [XFile(missingPath)];
   }
 }
 
