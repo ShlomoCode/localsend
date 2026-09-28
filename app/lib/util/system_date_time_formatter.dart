@@ -21,14 +21,8 @@ class SystemDateTimeFormatter {
     return (pattern == null ? DateFormat.jm(_locale) : DateFormat(_withoutSeconds(pattern), _locale)).format(value);
   }
 
-  static String _withoutSeconds(String pattern) {
-    // On Linux, the plugin reads T_FMT, which can include seconds (e.g. %T becomes HH:mm:ss).
-    final seconds = RegExp(r's+').firstMatch(pattern);
-    if (seconds == null) return pattern;
-    var start = seconds.start;
-    if (start > 0 && ':., '.contains(pattern[start - 1])) start--;
-    return pattern.replaceRange(start, seconds.end, '');
-  }
+  // On Linux, T_FMT may include seconds even where the UI uses minute precision.
+  static String _withoutSeconds(String pattern) => pattern.replaceFirst(RegExp(r'(?<=m)[:., ]+s+'), '');
 
   static String get _locale {
     final deviceLocale = WidgetsBinding.instance.platformDispatcher.locale.toString();

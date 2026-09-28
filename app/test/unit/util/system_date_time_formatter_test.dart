@@ -53,5 +53,10 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(find.text('9/27/2026 15:54'), findsOneWidget);
+
+    timePattern = "HH:mm 'seconds'";
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.text('9/27/2026 15:54 seconds'), findsOneWidget);
   });
 }
