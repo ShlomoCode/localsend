@@ -3,8 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:localsend_app/gen/strings.g.dart';
-import 'package:localsend_app/model/persistence/receive_history_entry.dart';
-import 'package:localsend_isolates/model/file_type.dart';
+import 'package:localsend_app/util/system_date_time_formatter.dart';
 import 'package:system_date_time_format/system_date_time_format.dart';
 
 void main() {
@@ -28,24 +27,14 @@ void main() {
     tester.binding.platformDispatcher.localeTestValue = const Locale('en', 'IL');
     addTearDown(tester.binding.platformDispatcher.clearLocaleTestValue);
 
-    final entry = ReceiveHistoryEntry(
-      id: '1',
-      fileName: 'example.txt',
-      fileType: FileType.text,
-      path: null,
-      savedToGallery: false,
-      isMessage: false,
-      fileSize: 1,
-      senderAlias: 'sender',
-      timestamp: DateTime(2026, 9, 27, 15, 54),
-    );
+    final timestamp = DateTime(2026, 9, 27, 15, 54);
 
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
         child: SDTFScope(
           child: Builder(
-            builder: (context) => Text(entry.timestampString(context)),
+            builder: (context) => Text(SystemDateTimeFormatter.dateTime(context, timestamp)),
           ),
         ),
       ),
