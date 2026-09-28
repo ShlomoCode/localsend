@@ -54,9 +54,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('9/27/2026 15:54'), findsOneWidget);
 
+    timePattern = 'h:mm a:ss';
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.text('9/27/2026 3:54 PM'), findsOneWidget);
+
     timePattern = "HH:mm 'seconds'";
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(find.text('9/27/2026 15:54 seconds'), findsOneWidget);
+
+    timePattern = "HH:mm 'm:ss'";
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.text('9/27/2026 15:54 m:ss'), findsOneWidget);
   });
 }

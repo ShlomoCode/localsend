@@ -22,7 +22,14 @@ class SystemDateTimeFormatter {
   }
 
   // On Linux, T_FMT may include seconds even where the UI uses minute precision.
-  static String _withoutSeconds(String pattern) => pattern.replaceFirst(RegExp(r'(?<=m)[:., ]+s+'), '');
+  static String _withoutSeconds(String pattern) {
+    final parts = pattern.split("'");
+    // Only even-indexed parts are outside quoted literals.
+    for (var i = 0; i < parts.length; i += 2) {
+      parts[i] = parts[i].replaceFirst(RegExp(r'[:., ]?s+'), '');
+    }
+    return parts.join("'");
+  }
 
   static String get _locale {
     final deviceLocale = WidgetsBinding.instance.platformDispatcher.locale.toString();
