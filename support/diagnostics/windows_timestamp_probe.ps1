@@ -131,7 +131,8 @@ $cases = @(
     @{ name = '1979-58'; time = [DateTime]::Parse('1979-12-31T23:59:58Z').ToUniversalTime() },
     @{ name = '1970'; time = [DateTime]::Parse('1970-01-01T00:00:00Z').ToUniversalTime() },
     @{ name = '1969'; time = [DateTime]::Parse('1969-12-31T23:59:59Z').ToUniversalTime() },
-    @{ name = '1601'; time = [DateTime]::Parse('1601-01-01T00:00:00Z').ToUniversalTime() }
+    # FILETIME zero means "leave unchanged" to SetFileTime, so use one second later.
+    @{ name = '1601-plus-one-second'; time = [DateTime]::Parse('1601-01-01T00:00:01Z').ToUniversalTime() }
 )
 
 $manifest = @()

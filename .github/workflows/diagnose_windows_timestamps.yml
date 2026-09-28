@@ -32,6 +32,7 @@ jobs:
       run:
         shell: pwsh
     env:
+      LS_WINDOWS_DIAGNOSTIC: '1'
       LS_DIAGNOSTIC_OUTPUT: ${{ github.workspace }}/diagnostic-output
       LS_RUST_LIBRARY: ${{ github.workspace }}/target/debug/rust_lib_localsend_app.dll
 
@@ -67,11 +68,19 @@ jobs:
         id: dart
         continue-on-error: true
         run: dart support/diagnostics/windows_timestamp_probe.dart
+      - name: Preserve early probe evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: lowlevel-${{ matrix.label }}
+          path: diagnostic-output/
+          if-no-files-found: warn
       - name: Install pinned Rust toolchain
         run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
           key: timestamp-diagnostics-${{ matrix.os }}
+          cache-on-failure: true
       - name: Build real Rust bridge
         run: cargo build --locked --package rust_lib_localsend_app
       - name: Resolve app dependencies

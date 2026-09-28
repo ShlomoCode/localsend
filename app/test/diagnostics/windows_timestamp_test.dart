@@ -31,6 +31,10 @@ void main() {
 
   final fixturesRoot = Platform.environment['LS_TIMESTAMP_FIXTURES'];
   final rustLibrary = Platform.environment['LS_RUST_LIBRARY'];
+  if (fixturesRoot == null && rustLibrary == null && Platform.environment['LS_WINDOWS_DIAGNOSTIC'] != '1') {
+    test('Windows filesystem timestamp diagnostic', () {}, skip: 'Run through the Windows timestamp diagnostic workflow');
+    return;
+  }
   if (fixturesRoot == null || rustLibrary == null) {
     test('timestamp fixture harness is configured', () {
       fail(
