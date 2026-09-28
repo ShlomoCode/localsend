@@ -1,8 +1,6 @@
 name: Diagnose Windows file timestamps
 
 on:
-  push:
-    branches: [codex/diagnose-windows-timestamps]
   workflow_dispatch:
 
 permissions:

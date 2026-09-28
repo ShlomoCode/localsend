@@ -1,0 +1,95 @@
+name: Diagnose full Windows file selection
+
+on:
+  push:
+    branches: [codex/diagnose-windows-timestamps]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows11_native:
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LS_DIAGNOSTIC_OUTPUT: ${{ github.workspace }}/diagnostic-output
+    steps:
+      - uses: actions/checkout@v6
+      - name: Record Windows 11 environment
+        run: |
+          New-Item -ItemType Directory -Force $env:LS_DIAGNOSTIC_OUTPUT | Out-Null
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber
+          Get-Volume | Select-Object DriveLetter, FileSystem, FileSystemLabel
+      - name: Create exact timestamp fixtures and exercise Windows APIs
+        run: ./support/diagnostics/windows_timestamp_probe.ps1
+      - name: Exercise native file and folder dialogs
+        run: ./support/diagnostics/windows_picker_probe.ps1
+      - name: Preserve Windows 11 evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows11-native-selection
+          path: diagnostic-output/
+          if-no-files-found: warn
+
+  select_and_add:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LS_WINDOWS_DIAGNOSTIC: '1'
+      LS_DIAGNOSTIC_OUTPUT: ${{ github.workspace }}/diagnostic-output
+      LS_RUST_LIBRARY: ${{ github.workspace }}/target/debug/rust_lib_localsend_app.dll
+      LS_DIALOG_DRIVER: ${{ github.workspace }}/support/diagnostics/windows_dialog_select.ps1
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create exact timestamp fixtures
+        run: |
+          New-Item -ItemType Directory -Force $env:LS_DIAGNOSTIC_OUTPUT | Out-Null
+          ./support/diagnostics/windows_timestamp_probe.ps1
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - name: Prepare native Flutter build
+        run: |
+          flutter config --enable-windows-desktop
+          flutter devices
+          rustup toolchain install --profile minimal
+          # The install rule copies this MSIX helper; it is never used by the test app.
+          New-Item -ItemType File -Force app/windows/localsend_msix_helper.msix | Out-Null
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: timestamp-full-windows
+          cache-on-failure: true
+      - name: Build real Rust bridge
+        run: cargo build --locked --package rust_lib_localsend_app
+      - name: Resolve Flutter packages and Cargokit
+        run: |
+          Push-Location app
+          flutter pub get
+          Pop-Location
+          Push-Location packages/localsend_isolates/rust_builder/cargokit/build_tool
+          flutter pub get
+          Pop-Location
+      - name: Run native picker through LocalSend selection action
+        id: full
+        working-directory: app
+        run: |
+          flutter test integration_test/windows_timestamp_flow_test.dart -d windows --reporter expanded 2>&1 | Tee-Object -FilePath "$env:LS_DIAGNOSTIC_OUTPUT/full-flow.log"
+          exit $LASTEXITCODE
+      - name: Preserve full-flow evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: full-windows-selection
+          path: diagnostic-output/
+          if-no-files-found: error
