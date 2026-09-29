@@ -16,7 +16,9 @@ class CrossFileConverters {
   static Future<CrossFile> convertAssetEntity(AssetEntity asset) async {
     final file = (await asset.originFile)!;
     final metadata = await readFileMetadata(path: file.path);
-    final assetDate = defaultTargetPlatform == TargetPlatform.iOS ? _preferredAssetDate(asset) : null;
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    final modified = isIos ? _assetDateFromSeconds(asset.modifiedDateSecond) : null;
+    final created = isIos ? _assetDateFromSeconds(asset.createDateSecond) : null;
     return CrossFile(
       name: await asset.titleAsync,
       fileType: asset.type == AssetType.video ? FileType.video : FileType.image,
@@ -25,7 +27,7 @@ class CrossFileConverters {
       asset: asset,
       path: file.path,
       bytes: null,
-      lastModified: assetDate ?? metadata?.modified,
+      lastModified: modified ?? created ?? metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
   }
@@ -106,12 +108,6 @@ class CrossFileConverters {
       lastAccessed: null,
     );
   }
-}
-
-String? _preferredAssetDate(AssetEntity asset) {
-  final modified = _assetDateFromSeconds(asset.modifiedDateSecond);
-  final created = _assetDateFromSeconds(asset.createDateSecond);
-  return modified ?? created;
 }
 
 String? _assetDateFromSeconds(int? seconds) {
