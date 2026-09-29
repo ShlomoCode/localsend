@@ -12,6 +12,10 @@ jobs:
   released_windows_ui:
     runs-on: windows-11-arm
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        selection_mode: [File, Folder]
     defaults:
       run:
         shell: powershell
@@ -19,14 +23,15 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
-      - name: Launch official v1.18.2 ARM64 release and capture desktop
-        run: .\support\diagnostics\windows_release_ui_probe.ps1
+      - name: Launch official v1.18.2 ARM64 release and select ${{ matrix.selection_mode }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }}
       - name: Print Send-tab evidence when artifact download is unavailable
         if: always()
         run: |
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
+          $afterFolderImage = 'release-ui-output/app-window-after-folder.png'
           if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Raw }
           if (Test-Path -LiteralPath $image) {
             Write-Output ('APP_WINDOW_SEND_PNG_BASE64=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($image)))
@@ -34,15 +39,19 @@ jobs:
           if (Test-Path -LiteralPath $afterFileImage) {
             Write-Output ('APP_WINDOW_AFTER_FILE_PNG_BASE64=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($afterFileImage)))
           }
+          if (Test-Path -LiteralPath $afterFolderImage) {
+            Write-Output ('APP_WINDOW_AFTER_FOLDER_PNG_BASE64=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($afterFolderImage)))
+          }
       - name: Preserve release process log and screenshot
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: windows11-arm-v1.18.2-release-ui
+          name: windows11-arm-v1.18.2-release-ui-${{ matrix.selection_mode }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png
             release-ui-output/app-window.png
             release-ui-output/app-window-send.png
             release-ui-output/app-window-after-file.png
+            release-ui-output/app-window-after-folder.png
           if-no-files-found: error
