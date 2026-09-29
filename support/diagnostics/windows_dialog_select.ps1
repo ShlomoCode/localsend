@@ -52,6 +52,7 @@ namespace LocalSendDialogSelect {
     public string Error;
     public string InputMethod;
     public string ForegroundHwnd;
+    public string ForegroundHwndAfterClick;
     public string ScreenHitHwnd;
     public int ScreenHitOwnerProcessId;
     public bool CursorVerified;
@@ -213,7 +214,9 @@ namespace LocalSendDialogSelect {
           foreground = GetForegroundWindow();
         }
         click.ForegroundHwnd = Hex(foreground);
-        if (foreground != dialog) { click.Error = "Native dialog is not the foreground input window."; return click; }
+        // A user can activate a background dialog by clicking its visible
+        // item. Do not require foreground ownership when the screen hit test
+        // below proves that the item itself is exposed to pointer input.
         if (!SetCursorPos(screenX, screenY)) {
           click.Error = "Could not move the system cursor to the visible dialog item: " + Marshal.GetLastWin32Error();
           return click;
@@ -240,6 +243,8 @@ namespace LocalSendDialogSelect {
         };
         click.SentInputCount = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
         click.Posted = click.SentInputCount == (uint)inputs.Length;
+        Thread.Sleep(50);
+        click.ForegroundHwndAfterClick = Hex(GetForegroundWindow());
         if (!click.Posted) click.Error = "SendInput did not enqueue both click events: " + Marshal.GetLastWin32Error();
       } else {
         IntPtr lParam = new IntPtr((point.Y << 16) | point.X);
@@ -500,6 +505,7 @@ function Invoke-ShellItem {
       SelectionPattern = $null
       WasSelectedBefore = $null
       MouseClick = $null
+      MouseClickRetry = $null
       ConfirmationClick = $null
       IsSelected = $false
     }
@@ -656,6 +662,17 @@ function Invoke-ShellItem {
         Start-Sleep -Milliseconds 100
         $result.ShellItem.IsSelected = [bool] $selectedPattern.Current.IsSelected
       } while (-not $result.ShellItem.IsSelected -and [DateTime]::UtcNow -lt $selectionDeadline)
+      if (-not $result.ShellItem.IsSelected -and $useSendInput) {
+        # The first click on a background dialog may only activate it.
+        $retryClick = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $true)
+        $result.ShellItem.MouseClickRetry = $retryClick
+        if (-not $retryClick.Posted) { throw "Could not retry the visible Shell item using SendInput: $($retryClick.Error)" }
+        $selectionDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+          Start-Sleep -Milliseconds 100
+          $result.ShellItem.IsSelected = [bool] $selectedPattern.Current.IsSelected
+        } while (-not $result.ShellItem.IsSelected -and [DateTime]::UtcNow -lt $selectionDeadline)
+      }
       $result.ShellItem.SelectionPattern = "SelectionItemPattern.Current.IsSelected after $($click.InputMethod) click"
     } else {
       $selectedPattern.Select()
