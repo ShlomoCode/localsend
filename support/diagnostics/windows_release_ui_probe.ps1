@@ -539,6 +539,10 @@ namespace LocalSendReleaseUiProbe {
     [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
     if ($RecordDemo) {
       if ($FixtureMethod -ne 'IssuePowerShell' -or $SelectionMode -ne 'File') { throw 'RecordDemo requires IssuePowerShell and File mode.' }
+      $runnerPrivacyHosts = @(Get-Process -Name WWAHost -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+      foreach ($privacyHostId in $runnerPrivacyHosts) {
+        Stop-Process -Id $privacyHostId -Force -ErrorAction Stop
+      }
       $runnerOverlays = @([LocalSendReleaseUiProbe.Windows]::All() | Where-Object {
         $_.Visible -and $_.Title -eq 'Microsoft account' -and $_.ClassName -in @('Shell_OOBEProxy', 'Windows.UI.Core.CoreWindow')
       })
@@ -553,6 +557,7 @@ namespace LocalSendReleaseUiProbe {
         $_.Visible -and $_.Title -eq 'Microsoft account' -and $_.ClassName -in @('Shell_OOBEProxy', 'Windows.UI.Core.CoreWindow')
       })
       if ($remainingOverlays.Count -gt 0) { throw 'Runner first-run overlay reappeared before recording.' }
+      if (@(Get-Process -Name WWAHost -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Runner privacy host restarted before recording.' }
       $recordScript = Join-Path $PSScriptRoot 'windows_record_desktop.ps1'
       $recordStdout = Join-Path $OutputDirectory 'recording.stdout.txt'
       $recordStderr = Join-Path $OutputDirectory 'recording.stderr.txt'
@@ -560,7 +565,7 @@ namespace LocalSendReleaseUiProbe {
       $recordProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $recordArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $recordStdout -RedirectStandardError $recordStderr
       Start-Sleep -Seconds 2
       if ($recordProcess.HasExited) { throw "Screen recorder exited early: $([IO.File]::ReadAllText($recordStderr))" }
-      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; runnerOverlaysDismissed = $runnerOverlays; frames = 0; error = $null }
+      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; runnerPrivacyHostsStopped = $runnerPrivacyHosts; runnerOverlaysDismissed = $runnerOverlays; frames = 0; error = $null }
     }
     $issueParsedDate = $null
     $issueParseCulture = $null
