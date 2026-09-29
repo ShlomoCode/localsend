@@ -247,6 +247,10 @@ async fn test_web_page() {
     assert!(body.contains("LocalSend"));
     assert!(body.contains("prepare-download"));
 
+    let response = client.get(format!("{base_url}/file-size.js")).send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.headers().get("content-type").unwrap(), "application/javascript; charset=utf-8");
+
     let response = client
         .get(format!("{base_url}/i18n.json"))
         .send()

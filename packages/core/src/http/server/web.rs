@@ -66,6 +66,7 @@ pub enum WebDownloadEvent {
 }
 
 const DOWNLOAD_HTML: &str = include_str!("../../../assets/web/download.html");
+const FILE_SIZE_JS: &str = include_str!("../../../assets/web/file-size.js");
 const UPLOAD_HTML: &str = include_str!("../../../assets/web/upload.html");
 const ERROR_403_HTML: &str = include_str!("../../../assets/web/error-403.html");
 
@@ -305,6 +306,14 @@ pub(crate) fn i18n(state: &AppState) -> Result<Response<BoxedBody>, AppError> {
         body: &state.web.i18n,
     }
     .into_response())
+}
+
+pub(crate) fn file_size_script() -> Response<BoxedBody> {
+    html_response(
+        StatusCode::OK,
+        FILE_SIZE_JS,
+        "application/javascript; charset=utf-8",
+    )
 }
 
 pub(crate) async fn prepare_download(
