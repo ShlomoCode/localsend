@@ -4,6 +4,8 @@ param(
   [Parameter(Mandatory = $true)][int] $TargetProcessId,
   [Parameter(Mandatory = $true)][string] $Path,
   [Parameter(Mandatory = $true)][ValidateSet('File', 'Folder')][string] $Mode,
+  [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry',
+  [string] $DialogScreenshotPath,
   [ValidateRange(1, 120)][int] $TimeoutSeconds = 15
 )
 
@@ -33,6 +35,9 @@ namespace LocalSendDialogSelect {
     public int TargetProcessId;
     public string Path;
     public string Mode;
+    public string SelectionMethod;
+    public object Navigation;
+    public object ShellItem;
     public string DialogHwnd;
     public string DialogTitle;
     public string EditHwnd;
@@ -58,6 +63,7 @@ namespace LocalSendDialogSelect {
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
@@ -92,7 +98,7 @@ namespace LocalSendDialogSelect {
       }
       return Closed(hwnd);
     }
-    private static IntPtr FindDialog(int processId) {
+    public static IntPtr FindDialog(int processId) {
       IntPtr found = IntPtr.Zero;
       EnumWindows((hwnd, data) => {
         uint owner;
@@ -116,8 +122,36 @@ namespace LocalSendDialogSelect {
       }
       return score;
     }
+    public static bool DialogOpen(IntPtr hwnd) { return !Closed(hwnd); }
+    public static bool Capture(IntPtr hwnd, IntPtr hdc) { return PrintWindow(hwnd, hdc, 2) || PrintWindow(hwnd, hdc, 0); }
+    public static string ReadText(IntPtr hwnd) { return Text(hwnd); }
+    public static IntPtr FindFilenameEdit(IntPtr dialog) {
+      IntPtr best = IntPtr.Zero;
+      int bestScore = -1;
+      EnumChildWindows(dialog, (hwnd, data) => {
+        int score = FilenameScore(hwnd, dialog);
+        if (score > bestScore) { best = hwnd; bestScore = score; }
+        return true;
+      }, IntPtr.Zero);
+      return bestScore >= 80 ? best : IntPtr.Zero;
+    }
+    public static bool SetFilenameEdit(IntPtr edit, string value) {
+      IntPtr response;
+      IntPtr sent = SendMessageTimeout(edit, WM_SETTEXT, IntPtr.Zero, value, SMTO_ABORTIFHUNG, 2000, out response);
+      return sent != IntPtr.Zero && response != IntPtr.Zero && String.Equals(Text(edit), value, StringComparison.OrdinalIgnoreCase);
+    }
+    public static bool PressOk(IntPtr dialog) {
+      IntPtr button = IntPtr.Zero;
+      EnumChildWindows(dialog, (hwnd, data) => {
+        if (GetDlgCtrlID(hwnd) == IDOK && Class(hwnd) == "Button" && IsWindowVisible(hwnd)) { button = hwnd; return false; }
+        return true;
+      }, IntPtr.Zero);
+      IntPtr response;
+      if (button != IntPtr.Zero && SendMessageTimeoutPtr(button, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out response) != IntPtr.Zero) return true;
+      return SendMessageTimeoutPtr(dialog, WM_COMMAND, new IntPtr(IDOK), IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out response) != IntPtr.Zero;
+    }
     public static Result Run(int processId, string path, string mode, int timeoutSeconds) {
-      Result result = new Result { TargetProcessId = processId, Path = path, Mode = mode };
+      Result result = new Result { TargetProcessId = processId, Path = path, Mode = mode, SelectionMethod = "PathEntry" };
       DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
       try {
         Process.GetProcessById(processId); // Fail early when the app already exited.
@@ -192,16 +226,197 @@ namespace LocalSendDialogSelect {
 }
 '@
 
+function Get-DialogElements($Root) {
+  $found = New-Object System.Collections.ArrayList
+  $descendants = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($element in $descendants) {
+    try {
+      $current = $element.Current
+      $rect = $current.BoundingRectangle
+      [void] $found.Add([pscustomobject]@{
+        Element = $element
+        Name = [string] $current.Name
+        ControlType = [string] $current.ControlType.ProgrammaticName
+        AutomationId = [string] $current.AutomationId
+        Visible = -not $current.IsOffscreen -and -not $rect.IsEmpty
+        Bounds = [ordered]@{ left = $rect.Left; top = $rect.Top; width = $rect.Width; height = $rect.Height }
+      })
+    } catch { }
+  }
+  return $found.ToArray()
+}
+
+function Test-AddressContext($Element) {
+  try {
+    $ancestor = $Element
+    for ($depth = 0; $depth -lt 8 -and $ancestor; $depth++) {
+      $current = $ancestor.Current
+      $label = [string] $current.Name
+      $kind = [string] $current.ControlType.ProgrammaticName
+      $className = [string] $current.ClassName
+      if ($label -match '(?i)address|breadcrumb' -or $kind -match 'ToolBar' -or $className -match '(?i)breadcrumb|address') {
+        return $true
+      }
+      $ancestor = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
+    }
+  } catch { }
+  return $false
+}
+
+function Invoke-ShellItem {
+  $targetPath = [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]@('\', '/'))
+  $parentPath = [System.IO.Path]::GetDirectoryName($targetPath)
+  $targetName = [System.IO.Path]::GetFileName($targetPath)
+  $parentName = [System.IO.Path]::GetFileName($parentPath.TrimEnd([char[]]@('\', '/')))
+  $navigationInput = $parentPath.TrimEnd([char[]]@('\', '/')) + '\'
+  $result = [ordered]@{
+    Success = $false
+    Error = $null
+    TargetProcessId = $TargetProcessId
+    Path = $targetPath
+    Mode = $Mode
+    SelectionMethod = 'ShellItem'
+    DialogHwnd = $null
+    Navigation = [ordered]@{
+      ParentDirectory = $parentPath
+      Input = $navigationInput
+      EditReadbackBeforeOpen = $null
+      EditReadbackAfterOpen = $null
+      AddressEvidence = @()
+      DialogStayedOpen = $false
+      Screenshot = $null
+      ScreenshotError = $null
+    }
+    ShellItem = [ordered]@{
+      Name = $targetName
+      Candidates = @()
+      SelectedElement = $null
+      SelectionPattern = $null
+      IsSelected = $false
+    }
+    Actions = @()
+    UiaNames = @()
+  }
+  try {
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $dialog = [IntPtr]::Zero
+    while ($dialog -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline) {
+      $dialog = [LocalSendDialogSelect.Driver]::FindDialog($TargetProcessId)
+      if ($dialog -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 100 }
+    }
+    if ($dialog -eq [IntPtr]::Zero) { throw 'No visible process-owned native file dialog appeared before timeout.' }
+    $result.DialogHwnd = '0x' + $dialog.ToInt64().ToString('X')
+    $result.Actions += 'Found process-owned native common dialog'
+    $edit = [LocalSendDialogSelect.Driver]::FindFilenameEdit($dialog)
+    if ($edit -eq [IntPtr]::Zero) { throw 'Could not identify the dialog filename Edit.' }
+
+    # Enter only the parent directory. The target item name/path is never typed.
+    if (-not [LocalSendDialogSelect.Driver]::SetFilenameEdit($edit, $navigationInput)) {
+      throw 'Could not set and read back the parent directory in the filename Edit.'
+    }
+    $result.Navigation.EditReadbackBeforeOpen = [LocalSendDialogSelect.Driver]::ReadText($edit)
+    $result.Actions += 'Entered and verified parent directory path in filename Edit'
+    if (-not [LocalSendDialogSelect.Driver]::PressOk($dialog)) { throw 'Could not activate Open to navigate to the parent directory.' }
+    $result.Actions += 'Activated Open to navigate to parent directory'
+    if (-not [LocalSendDialogSelect.Driver]::DialogOpen($dialog)) { throw 'Dialog closed while navigating to parent; no Shell item was selected.' }
+    $result.Navigation.DialogStayedOpen = $true
+
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($dialog)
+    $items = @()
+    $address = @()
+    do {
+      Start-Sleep -Milliseconds 150
+      if (-not [LocalSendDialogSelect.Driver]::DialogOpen($dialog)) { throw 'Dialog closed before Shell item selection.' }
+      $records = @(Get-DialogElements $root)
+      $address = @($records | Where-Object {
+        $_.Visible -and $_.Name -and
+        ($_.Name -eq $parentName -or $_.Name -eq $parentPath -or $_.Name -like "*$parentName*") -and
+        $_.ControlType -notmatch 'ListItem|DataItem|TreeItem' -and
+        ($_.Name -eq $parentPath -or $_.ControlType -match 'Button|ToolBar|SplitButton|Hyperlink' -or (Test-AddressContext $_.Element))
+      })
+      $items = @($records | Where-Object { $_.Visible -and $_.Name -eq $targetName })
+    } while (($address.Count -eq 0 -or $items.Count -eq 0) -and [DateTime]::UtcNow -lt $deadline)
+    $result.Navigation.EditReadbackAfterOpen = [LocalSendDialogSelect.Driver]::ReadText($edit)
+    $result.UiaNames = @($records | Where-Object { $_.Visible -and $_.Name } | Select-Object -First 100 -ExpandProperty Name)
+    $result.Navigation.AddressEvidence = @($address | ForEach-Object {
+      [ordered]@{ name = $_.Name; controlType = $_.ControlType; automationId = $_.AutomationId; bounds = $_.Bounds }
+    })
+    if ($address.Count -eq 0) { throw "Could not verify that the common dialog navigated to parent directory '$parentPath'." }
+    $result.Actions += 'Verified parent directory in visible dialog address controls'
+
+    if ($DialogScreenshotPath) {
+      try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($DialogScreenshotPath))) | Out-Null
+        $windowRect = $root.Current.BoundingRectangle
+        if ($windowRect.IsEmpty -or $windowRect.Width -le 0 -or $windowRect.Height -le 0) { throw 'Dialog has no printable bounds.' }
+        $bitmap = [System.Drawing.Bitmap]::new([int]$windowRect.Width, [int]$windowRect.Height)
+        try {
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          try {
+            $hdc = $graphics.GetHdc()
+            try { $printed = [LocalSendDialogSelect.Driver]::Capture($dialog, $hdc) }
+            finally { $graphics.ReleaseHdc($hdc) }
+          } finally { $graphics.Dispose() }
+          if (-not $printed) { throw 'PrintWindow returned false for the navigated dialog.' }
+          $bitmap.Save($DialogScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $result.Navigation.Screenshot = $DialogScreenshotPath
+        } finally { $bitmap.Dispose() }
+      } catch { $result.Navigation.ScreenshotError = $_.Exception.Message }
+    }
+
+    if ($items.Count -eq 0) { throw "The target '$targetName' is not a visible Shell item in the verified parent directory." }
+    $selected = $null
+    $selectedPattern = $null
+    foreach ($candidate in $items) {
+      $result.ShellItem.Candidates += [ordered]@{
+        name = $candidate.Name; controlType = $candidate.ControlType
+        automationId = $candidate.AutomationId; bounds = $candidate.Bounds
+      }
+      try {
+        $pattern = $candidate.Element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        if ($pattern) { $selected = $candidate; $selectedPattern = $pattern; break }
+      } catch { }
+    }
+    if (-not $selectedPattern) { throw "The visible target '$targetName' has no SelectionItemPattern; refusing to use the filename Edit." }
+    $selectedPattern.Select()
+    $result.ShellItem.SelectionPattern = 'SelectionItemPattern.Select'
+    $result.ShellItem.IsSelected = [bool] $selectedPattern.Current.IsSelected
+    $result.ShellItem.SelectedElement = [ordered]@{
+      name = $selected.Name; controlType = $selected.ControlType
+      automationId = $selected.AutomationId; bounds = $selected.Bounds
+    }
+    if (-not $result.ShellItem.IsSelected) { throw 'UI Automation did not report the exact Shell item selected.' }
+    $result.Actions += 'Selected exact visible Shell item through SelectionItemPattern'
+    if (-not [LocalSendDialogSelect.Driver]::PressOk($dialog)) { throw 'Could not activate Open/Select after Shell item selection.' }
+    $result.Actions += 'Activated Open/Select after selecting Shell item'
+    while ([LocalSendDialogSelect.Driver]::DialogOpen($dialog) -and [DateTime]::UtcNow -lt $deadline) {
+      Start-Sleep -Milliseconds 100
+    }
+    if ([LocalSendDialogSelect.Driver]::DialogOpen($dialog)) { throw 'Dialog remained open after Shell item selection.' }
+    $result.Success = $true
+  } catch {
+    $result.Error = $_.Exception.ToString()
+  }
+  return [pscustomobject] $result
+}
+
 try {
   if (-not [System.IO.Path]::IsPathRooted($Path)) { throw "Path must be absolute: $Path" }
   if (-not (Test-Path -LiteralPath $Path -PathType $(if ($Mode -eq 'Folder') { 'Container' } else { 'Leaf' }))) {
     throw "Target $Mode does not exist: $Path"
   }
   Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
-  $result = [LocalSendDialogSelect.Driver]::Run($TargetProcessId, $Path, $Mode, $TimeoutSeconds)
+  $result = if ($SelectionMethod -eq 'ShellItem') {
+    Invoke-ShellItem
+  } else {
+    [LocalSendDialogSelect.Driver]::Run($TargetProcessId, $Path, $Mode, $TimeoutSeconds)
+  }
   ConvertTo-Json -InputObject $result -Depth 8 -Compress
   if (-not $result.Success) { exit 1 }
 } catch {
-  ConvertTo-Json -InputObject @{ Success = $false; Error = $_.Exception.ToString(); TargetProcessId = $TargetProcessId; Path = $Path; Mode = $Mode } -Depth 4 -Compress
+  ConvertTo-Json -InputObject @{ Success = $false; Error = $_.Exception.ToString(); TargetProcessId = $TargetProcessId; Path = $Path; Mode = $Mode; SelectionMethod = $SelectionMethod } -Depth 4 -Compress
   exit 1
 }

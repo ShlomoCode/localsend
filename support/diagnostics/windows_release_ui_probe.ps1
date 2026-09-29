@@ -3,7 +3,8 @@ param(
   [string] $OutputDirectory = $env:LS_RELEASE_UI_OUTPUT,
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
-  [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto'
+  [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
+  [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,7 @@ $windowScreenshotPath = Join-Path $OutputDirectory 'app-window.png'
 $sendScreenshotPath = Join-Path $OutputDirectory 'app-window-send.png'
 $afterFileScreenshotPath = Join-Path $OutputDirectory 'app-window-after-file.png'
 $afterFolderScreenshotPath = Join-Path $OutputDirectory 'app-window-after-folder.png'
+$dialogScreenshotPath = Join-Path $OutputDirectory 'native-dialog-parent.png'
 $afterSelectionScreenshotPath = if ($SelectionMode -eq 'Folder') { $afterFolderScreenshotPath } else { $afterFileScreenshotPath }
 $reportPath = Join-Path $OutputDirectory 'release-ui-report.json'
 $firewallRuleName = $null
@@ -39,6 +41,7 @@ if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {
 $report = [ordered]@{
   release = 'v1.18.2'
   selectionMode = $SelectionMode
+  selectionMethod = $SelectionMethod
   assetArchitecture = $AssetArchitecture
   expectedExecution = $expectedExecution
   assetName = $assetName
@@ -523,6 +526,7 @@ namespace LocalSendReleaseUiProbe {
     $driverStderr = Join-Path $OutputDirectory 'file-dialog-driver.stderr.txt'
     $report.fileSelection = [ordered]@{
       mode = $SelectionMode
+      selectionMethod = $SelectionMethod
       selectedPath = $selectionPath
       fixture = [ordered]@{
         path = $fixturePath
@@ -543,7 +547,7 @@ namespace LocalSendReleaseUiProbe {
       outcome = 'unclassified; inspect screenshot and driver result for added selection or No Permission'
     }
 
-    $driverArguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -TargetProcessId {1} -Path "{2}" -Mode {3} -TimeoutSeconds 15' -f $driverScript, $appWindow.Pid, $selectionPath, $SelectionMode
+    $driverArguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -TargetProcessId {1} -Path "{2}" -Mode {3} -SelectionMethod {4} -DialogScreenshotPath "{5}" -TimeoutSeconds 15' -f $driverScript, $appWindow.Pid, $selectionPath, $SelectionMode, $SelectionMethod, $dialogScreenshotPath
     $driverProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $driverArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $driverStdout -RedirectStandardError $driverStderr
     Start-Sleep -Milliseconds 500
     $report.fileSelection.selectionButtonClick = [LocalSendReleaseUiProbe.Windows]::ClickClient($appHwnd, $buttonX, 85)

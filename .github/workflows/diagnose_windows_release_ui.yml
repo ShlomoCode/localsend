@@ -1,8 +1,6 @@
 name: Diagnose released Windows UI
 
 on:
-  push:
-    branches: [codex/diagnose-windows-timestamps]
   workflow_dispatch:
 
 permissions:
@@ -41,12 +39,12 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
-      - name: Launch official v1.18.2 ${{ matrix.asset_architecture }} release and select ${{ matrix.selection_mode }} on ${{ matrix.runner }}
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }}
+      - name: Select ${{ matrix.selection_mode }} through Shell item in v1.18.2 ${{ matrix.asset_architecture }} on ${{ matrix.runner }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }} -SelectionMethod ShellItem
       - name: Print ${{ matrix.asset_architecture }} ${{ matrix.selection_mode }} evidence when artifact download is unavailable
         if: always()
         run: |
-          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} RUNNER=${{ matrix.runner }}'
+          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=ShellItem RUNNER=${{ matrix.runner }}'
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
@@ -65,7 +63,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: release-ui-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}
+          name: shell-item-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png
@@ -73,4 +71,5 @@ jobs:
             release-ui-output/app-window-send.png
             release-ui-output/app-window-after-file.png
             release-ui-output/app-window-after-folder.png
+            release-ui-output/native-dialog-parent.png
           if-no-files-found: error
