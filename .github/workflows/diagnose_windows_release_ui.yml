@@ -256,8 +256,14 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
+      - name: Prepare MP4 encoder
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress
+          }
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { throw 'ffmpeg is unavailable after installation.' }
       - name: Record exact date change, Explorer, and LocalSend selection
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode File -AssetArchitecture x86-64 -PackageKind Installer -RunnerLabel windows-11-vs2026-arm -SelectionMethod SendInputShellItem -FixtureMethod IssuePowerShell -RecordDemo
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode File -AssetArchitecture x86-64 -PackageKind Installer -RunnerLabel windows-11-vs2026-arm -SelectionMethod ShellItem -FixtureMethod IssuePowerShell -RecordDemo
       - name: Show report
         if: always()
         run: |
@@ -270,7 +276,7 @@ jobs:
         with:
           name: windows-11-arm-issue-3366-screen-recording
           path: |
-            release-ui-output/recording.gif
+            release-ui-output/recording.mp4
             release-ui-output/recording.*.txt
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png

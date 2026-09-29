@@ -545,7 +545,7 @@ namespace LocalSendReleaseUiProbe {
       $recordProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $recordArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $recordStdout -RedirectStandardError $recordStderr
       Start-Sleep -Seconds 2
       if ($recordProcess.HasExited) { throw "Screen recorder exited early: $([IO.File]::ReadAllText($recordStderr))" }
-      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; gif = (Join-Path $OutputDirectory 'recording.gif'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; frames = 0; error = $null }
+      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; frames = 0; error = $null }
     }
     $issueParsedDate = $null
     $issueParseCulture = $null
@@ -764,9 +764,9 @@ namespace LocalSendReleaseUiProbe {
       $frames = @(Get-ChildItem -LiteralPath $recordFramesDirectory -Filter 'frame-*.jpg' | Sort-Object Name | ForEach-Object FullName)
       $report.recording.frames = $frames.Count
       if ($frames.Count -eq 0) { throw "Recorder produced no frames: $([IO.File]::ReadAllText($recordStderr))" }
-      & magick -delay 25 -loop 0 @frames -layers Optimize $report.recording.gif
-      if ($LASTEXITCODE -ne 0) { throw "ImageMagick exited with code $LASTEXITCODE" }
-      if (-not (Test-Path -LiteralPath $report.recording.gif -PathType Leaf)) { throw 'ImageMagick did not create recording.gif.' }
+      & ffmpeg -hide_banner -loglevel error -y -framerate 4 -i (Join-Path $recordFramesDirectory 'frame-%04d.jpg') -c:v libx264 -preset ultrafast -crf 24 -pix_fmt yuv420p -movflags +faststart $report.recording.video
+      if ($LASTEXITCODE -ne 0) { throw "FFmpeg exited with code $LASTEXITCODE" }
+      if (-not (Test-Path -LiteralPath $report.recording.video -PathType Leaf)) { throw 'FFmpeg did not create recording.mp4.' }
     } catch {
       $report.errors += "Screen recording: $($_.Exception.Message)"
       if ($report.recording) { $report.recording.error = $_.Exception.Message }
