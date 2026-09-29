@@ -630,6 +630,7 @@ function Invoke-ShellItem {
       Candidates = @()
       SelectedElement = $null
       SelectionPattern = $null
+      NativeFolderField = $null
       WasSelectedBefore = $null
       MouseClick = $null
       MouseClickRetry = $null
@@ -808,6 +809,18 @@ function Invoke-ShellItem {
         } while (-not $result.ShellItem.IsSelected -and [DateTime]::UtcNow -lt $selectionDeadline)
       }
       $result.ShellItem.SelectionPattern = "SelectionItemPattern.Current.IsSelected after $($click.InputMethod) click"
+      if (-not $result.ShellItem.IsSelected -and $useSendInput -and $Mode -eq 'Folder') {
+        # On this native folder dialog, UIA can report IsSelected=false even
+        # while the clicked row is highlighted and the Folder field names it.
+        $folderEdit = [LocalSendDialogSelect.Driver]::FindFilenameEdit($dialog)
+        if ($folderEdit -ne [IntPtr]::Zero) {
+          $result.ShellItem.NativeFolderField = [LocalSendDialogSelect.Driver]::ReadText($folderEdit)
+          if ([string]::Equals($result.ShellItem.NativeFolderField, $targetName, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $result.ShellItem.IsSelected = $true
+            $result.ShellItem.SelectionPattern = 'clicked visible Shell row and verified exact native Folder field'
+          }
+        }
+      }
     } else {
       $selectedPattern.Select()
       $result.ShellItem.SelectionPattern = 'SelectionItemPattern.Select'
