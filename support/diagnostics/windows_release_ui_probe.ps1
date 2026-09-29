@@ -16,7 +16,9 @@ $releaseUrl = 'https://github.com/localsend/localsend/releases/download/v1.18.2/
 $archivePath = Join-Path $OutputDirectory 'LocalSend-1.18.2-windows-arm-64.zip'
 $extractPath = Join-Path $OutputDirectory 'release'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
+$windowScreenshotPath = Join-Path $OutputDirectory 'app-window.png'
 $reportPath = Join-Path $OutputDirectory 'release-ui-report.json'
+$firewallRuleName = $null
 $report = [ordered]@{
   release = 'v1.18.2'
   assetUrl = $releaseUrl
@@ -38,6 +40,9 @@ $report = [ordered]@{
   activation = @()
   foreground = $null
   screenshot = $null
+  windowScreenshot = $null
+  appUiTree = @()
+  firewallRule = $null
   errors = @()
 }
 
@@ -67,6 +72,17 @@ try {
     bytes = $exe.Length
     version = $exe.VersionInfo.FileVersion
     sha256 = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash
+  }
+
+  $firewallRuleName = 'LocalSendDiagnosticBlock-' + [Guid]::NewGuid().ToString('N')
+  New-NetFirewallRule -Name $firewallRuleName -DisplayName $firewallRuleName -Direction Inbound -Program $exe.FullName -Action Block -Profile Any -Enabled True -ErrorAction Stop | Out-Null
+  $report.firewallRule = [ordered]@{
+    name = $firewallRuleName
+    program = $exe.FullName
+    direction = 'Inbound'
+    action = 'Block'
+    installed = $true
+    removed = $false
   }
 
   $source = @'
@@ -99,6 +115,7 @@ namespace LocalSendReleaseUiProbe {
     [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
@@ -114,7 +131,7 @@ namespace LocalSendReleaseUiProbe {
         RECT rect;
         GetWindowRect(hwnd, out rect);
         found.Add(new WindowInfo {
-          Pid = pid, Hwnd = "0x" + hwnd.ToInt64().ToString("X"), ClassName = cls.ToString(),
+          Pid = (int)owner, Hwnd = "0x" + hwnd.ToInt64().ToString("X"), ClassName = cls.ToString(),
           Title = title.ToString(), Visible = IsWindowVisible(hwnd),
           Left = rect.Left, Top = rect.Top, Width = rect.Right - rect.Left, Height = rect.Bottom - rect.Top
         });
@@ -137,6 +154,7 @@ namespace LocalSendReleaseUiProbe {
       bool up = PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_ESCAPE), IntPtr.Zero);
       return down && up;
     }
+    public static bool Capture(IntPtr hwnd, IntPtr hdc) { return PrintWindow(hwnd, hdc, 2) || PrintWindow(hwnd, hdc, 0); }
     public static WindowInfo Foreground() {
       IntPtr foreground = GetForegroundWindow();
       if (foreground == IntPtr.Zero) return null;
@@ -177,12 +195,13 @@ namespace LocalSendReleaseUiProbe {
   }
 
   $report.topLevelBefore = @([LocalSendReleaseUiProbe.Windows]::All())
+  Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName UIAutomationClient
   Add-Type -AssemblyName UIAutomationTypes
   foreach ($window in @($report.topLevelBefore | Where-Object {
     $_.Visible -and $_.Title -match '^(Windows Security|Windows Security Alert|Windows Defender Firewall)$'
   })) {
-    $entry = [ordered]@{ hwnd = $window.Hwnd; title = $window.Title; names = @(); matchedFirewall = $false; action = 'none'; closed = $false; error = $null }
+    $entry = [ordered]@{ hwnd = $window.Hwnd; title = $window.Title; className = $window.ClassName; names = @(); matchedFirewall = $false; action = 'none'; closed = $false; error = $null }
     try {
       $hwnd = [IntPtr]::new([Convert]::ToInt64($window.Hwnd.Substring(2), 16))
       $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
@@ -260,6 +279,68 @@ namespace LocalSendReleaseUiProbe {
 
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
+  if ($target.Count -gt 0) {
+    try {
+      $appElement = [System.Windows.Automation.AutomationElement]::FromHandle($appHwnd)
+      $appElements = $appElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+      )
+      foreach ($element in $appElements) {
+        if ($report.appUiTree.Count -ge 150) { break }
+        try {
+          $report.appUiTree += [ordered]@{
+            name = [string] $element.Current.Name
+            controlType = [string] $element.Current.ControlType.ProgrammaticName
+            automationId = [string] $element.Current.AutomationId
+          }
+        } catch { }
+      }
+    } catch {
+      $report.errors += "LocalSend UI Automation tree: $($_.Exception.Message)"
+    }
+
+    try {
+      $windowBitmap = [System.Drawing.Bitmap]::new($appWindow.Width, $appWindow.Height)
+      try {
+        $windowGraphics = [System.Drawing.Graphics]::FromImage($windowBitmap)
+        try {
+          $hdc = $windowGraphics.GetHdc()
+          try {
+            $printed = [LocalSendReleaseUiProbe.Windows]::Capture($appHwnd, $hdc)
+          } finally {
+            $windowGraphics.ReleaseHdc($hdc)
+          }
+        } finally {
+          $windowGraphics.Dispose()
+        }
+        if ($printed) {
+          $windowBitmap.Save($windowScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $windowColors = [System.Collections.Generic.HashSet[int]]::new()
+          for ($y = 0; $y -lt $appWindow.Height; $y += [Math]::Max(1, [int]($appWindow.Height / 10))) {
+            for ($x = 0; $x -lt $appWindow.Width; $x += [Math]::Max(1, [int]($appWindow.Width / 10))) {
+              [void] $windowColors.Add($windowBitmap.GetPixel($x, $y).ToArgb())
+            }
+          }
+          $report.windowScreenshot = [ordered]@{
+            path = $windowScreenshotPath
+            bytes = (Get-Item -LiteralPath $windowScreenshotPath).Length
+            hwnd = $appWindow.Hwnd
+            width = $appWindow.Width
+            height = $appWindow.Height
+            sampledDistinctColors = $windowColors.Count
+          }
+        } else {
+          $report.errors += 'PrintWindow returned false for the LocalSend window.'
+        }
+      } finally {
+        $windowBitmap.Dispose()
+      }
+    } catch {
+      $report.errors += "LocalSend PrintWindow capture: $($_.Exception.Message)"
+    }
+  }
+
   $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
   if ($bounds.Width -le 0 -or $bounds.Height -le 0) { throw "Invalid virtual screen bounds: $bounds" }
   $bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
@@ -293,14 +374,28 @@ namespace LocalSendReleaseUiProbe {
   $appPids = @($report.processes | ForEach-Object { [int] $_.pid })
   if ($visible -and $report.foreground -and $report.foreground.Pid -in $appPids) {
     $report.status = 'captured-foreground-app'
+  } elseif ($report.windowScreenshot -and $report.windowScreenshot.sampledDistinctColors -gt 1) {
+    $report.status = 'captured-app-window'
+  } elseif (@($report.appUiTree | Where-Object { -not [string]::IsNullOrWhiteSpace($_.name) }).Count -gt 0) {
+    $report.status = 'captured-app-ui-tree'
   } else {
-    $report.errors += 'LocalSend was not the foreground window at capture; inspect topLevelAfter and screenshot for firewall or OOBE overlays.'
+    $report.errors += 'LocalSend was not foreground and PrintWindow did not capture a varied app image; inspect topLevelAfter, appUiTree, and screenshot.'
   }
 } catch {
   $report.errors += $_.Exception.ToString()
 } finally {
+  if ($firewallRuleName) {
+    try {
+      $rule = Get-NetFirewallRule -Name $firewallRuleName -ErrorAction SilentlyContinue
+      if ($rule) { Remove-NetFirewallRule -Name $firewallRuleName -ErrorAction Stop }
+      if ($report.firewallRule) { $report.firewallRule.removed = $true }
+    } catch {
+      $report.errors += "Could not remove temporary firewall rule ${firewallRuleName}: $($_.Exception.Message)"
+      $report.status = 'inconclusive'
+    }
+  }
   $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
   [System.IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $report -Depth 10), [System.Text.UTF8Encoding]::new($false))
   Write-Host "Release UI report: $reportPath"
-  if ($report.status -ne 'captured-foreground-app') { exit 1 }
+  if ($report.status -notin @('captured-foreground-app', 'captured-app-window', 'captured-app-ui-tree')) { exit 1 }
 }
