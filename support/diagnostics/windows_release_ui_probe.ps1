@@ -6,7 +6,8 @@ param(
   [ValidateSet('Zip', 'Installer')][string] $PackageKind = 'Zip',
   [ValidateSet('windows-11-arm', 'windows-11-vs2026-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
   [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem', 'SendInputShellItem')][string] $SelectionMethod = 'PathEntry',
-  [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
+  [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi',
+  [string] $FixtureTimestampUtc = '1979-12-31T23:59:58Z'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,11 @@ $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 
 if ($PackageKind -eq 'Installer' -and $AssetArchitecture -ne 'x86-64') {
   throw 'The v1.18.2 installer is only available for x86-64.'
+}
+$utcStyles = [System.Globalization.DateTimeStyles]([System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal)
+$expectedTime = [DateTime]::ParseExact($FixtureTimestampUtc, "yyyy-MM-ddTHH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture, $utcStyles)
+if ($FixtureMethod -eq 'IssuePowerShell' -and $FixtureTimestampUtc -ne '1979-12-31T23:59:58Z') {
+  throw 'IssuePowerShell reproduces the exact command from issue #3366 and requires its reported timestamp.'
 }
 $assetName = if ($PackageKind -eq 'Installer') { 'LocalSend-1.18.2-windows-x86-64.exe' } else { "LocalSend-1.18.2-windows-$AssetArchitecture.zip" }
 $releaseUrl = "https://github.com/localsend/localsend/releases/download/v1.18.2/$assetName"
@@ -51,6 +57,7 @@ $report = [ordered]@{
   selectionMode = $SelectionMode
   selectionMethod = $SelectionMethod
   fixtureMethod = $FixtureMethod
+  fixtureTimestampUtc = $expectedTime.ToString('o')
   assetArchitecture = $AssetArchitecture
   expectedExecution = $expectedExecution
   assetName = $assetName
@@ -523,7 +530,6 @@ namespace LocalSendReleaseUiProbe {
     [System.IO.Directory]::CreateDirectory($fixtureDirectory) | Out-Null
     $fixturePath = Join-Path $fixtureDirectory 'fixture-1979-12-31.txt'
     [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
-    $expectedTime = [DateTime]::Parse('1979-12-31T23:59:58Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
     $issueParsedDate = $null
     $issueParseCulture = $null
     if ($FixtureMethod -eq 'IssuePowerShell') {

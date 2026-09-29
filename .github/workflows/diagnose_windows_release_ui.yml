@@ -2,12 +2,18 @@ name: Diagnose released Windows UI
 
 on:
   workflow_dispatch:
+    inputs:
+      boundary_sweep:
+        description: Test timestamps before the reported 1979 boundary on the official release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   released_windows_ui:
+    if: ${{ !inputs.boundary_sweep }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -176,5 +182,61 @@ jobs:
             release-ui-output/app-window-after-folder.png
             release-ui-output/native-dialog-parent.png
             release-ui-output/installer.log
+            release-ui-output/file-dialog-driver.*.txt
+          if-no-files-found: error
+
+  timestamp_boundary:
+    if: ${{ inputs.boundary_sweep }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-vs2026-arm
+            selection_mode: File
+            timestamp: '1969-12-31T23:59:58Z'
+            case_id: 1969
+          - runner: windows-11-vs2026-arm
+            selection_mode: Folder
+            timestamp: '1969-12-31T23:59:58Z'
+            case_id: 1969
+          - runner: windows-11-vs2026-arm
+            selection_mode: File
+            timestamp: '1601-01-02T00:00:00Z'
+            case_id: 1601
+          - runner: windows-11-vs2026-arm
+            selection_mode: Folder
+            timestamp: '1601-01-02T00:00:00Z'
+            case_id: 1601
+          - runner: windows-2025
+            selection_mode: File
+            timestamp: '1969-12-31T23:59:58Z'
+            case_id: 1969
+          - runner: windows-2025
+            selection_mode: File
+            timestamp: '1601-01-02T00:00:00Z'
+            case_id: 1601
+    defaults:
+      run:
+        shell: powershell
+    env:
+      LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select ${{ matrix.selection_mode }} with ${{ matrix.timestamp }} mtime on ${{ matrix.runner }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture x86-64 -PackageKind Installer -RunnerLabel ${{ matrix.runner }} -SelectionMethod SendInputShellItem -FixtureMethod UtcApi -FixtureTimestampUtc '${{ matrix.timestamp }}'
+      - name: Preserve timestamp boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: timestamp-${{ matrix.runner }}-${{ matrix.selection_mode }}-${{ matrix.case_id }}
+          path: |
+            release-ui-output/release-ui-report.json
+            release-ui-output/desktop.png
+            release-ui-output/app-window-send.png
+            release-ui-output/app-window-after-file.png
+            release-ui-output/app-window-after-folder.png
+            release-ui-output/native-dialog-parent.png
             release-ui-output/file-dialog-driver.*.txt
           if-no-files-found: error
