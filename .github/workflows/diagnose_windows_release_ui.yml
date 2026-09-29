@@ -74,19 +74,44 @@ jobs:
             selection_mode: Folder
             fixture_method: IssuePowerShell
             selection_method: MouseShellItem
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: File
+            fixture_method: IssuePowerShell
+            selection_method: MouseShellItem
+            package_kind: Installer
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: Folder
+            fixture_method: IssuePowerShell
+            selection_method: MouseShellItem
+            package_kind: Installer
+          - runner: windows-2025
+            asset_architecture: x86-64
+            selection_mode: File
+            fixture_method: IssuePowerShell
+            selection_method: MouseShellItem
+            package_kind: Installer
+          - runner: windows-2025
+            asset_architecture: x86-64
+            selection_mode: Folder
+            fixture_method: IssuePowerShell
+            selection_method: MouseShellItem
+            package_kind: Installer
     defaults:
       run:
         shell: powershell
     env:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
+      LS_PACKAGE_KIND: ${{ matrix.package_kind || 'Zip' }}
     steps:
       - uses: actions/checkout@v6
-      - name: Select ${{ matrix.selection_mode }} via ${{ matrix.selection_method }} in v1.18.2 ${{ matrix.asset_architecture }} on ${{ matrix.runner }} (${{ matrix.fixture_method }})
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }} -SelectionMethod ${{ matrix.selection_method }} -FixtureMethod ${{ matrix.fixture_method }}
+      - name: Select ${{ matrix.selection_mode }} via ${{ matrix.selection_method }} in v1.18.2 ${{ matrix.asset_architecture }} ${{ matrix.package_kind || 'Zip' }} on ${{ matrix.runner }} (${{ matrix.fixture_method }})
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -PackageKind $env:LS_PACKAGE_KIND -RunnerLabel ${{ matrix.runner }} -SelectionMethod ${{ matrix.selection_method }} -FixtureMethod ${{ matrix.fixture_method }}
       - name: Print ${{ matrix.asset_architecture }} ${{ matrix.selection_mode }} evidence when artifact download is unavailable
         if: always()
         run: |
-          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=${{ matrix.selection_method }} FIXTURE_METHOD=${{ matrix.fixture_method }} RUNNER=${{ matrix.runner }}'
+          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} PACKAGE_KIND=${{ matrix.package_kind || 'Zip' }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=${{ matrix.selection_method }} FIXTURE_METHOD=${{ matrix.fixture_method }} RUNNER=${{ matrix.runner }}'
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
@@ -105,7 +130,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: shell-item-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}-${{ matrix.fixture_method }}-${{ matrix.selection_method }}
+          name: shell-item-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.package_kind || 'Zip' }}-${{ matrix.selection_mode }}-${{ matrix.fixture_method }}-${{ matrix.selection_method }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png
@@ -114,4 +139,6 @@ jobs:
             release-ui-output/app-window-after-file.png
             release-ui-output/app-window-after-folder.png
             release-ui-output/native-dialog-parent.png
+            release-ui-output/installer.log
+            release-ui-output/file-dialog-driver.*.txt
           if-no-files-found: error
