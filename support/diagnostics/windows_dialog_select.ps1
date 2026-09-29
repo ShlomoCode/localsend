@@ -53,8 +53,13 @@ namespace LocalSendDialogSelect {
     public string InputMethod;
     public string ForegroundHwnd;
     public string ForegroundHwndAfterClick;
+    public int ForegroundOwnerProcessId;
+    public string ForegroundProcessName;
+    public string ForegroundClass;
+    public string ForegroundTitle;
     public string ScreenHitHwnd;
     public int ScreenHitOwnerProcessId;
+    public string ScreenHitProcessName;
     public bool CursorVerified;
     public uint SentInputCount;
     public string TargetHwnd;
@@ -126,6 +131,10 @@ namespace LocalSendDialogSelect {
     private static extern IntPtr SendMessageTimeoutPtr(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
 
     private static string Hex(IntPtr hwnd) { return "0x" + hwnd.ToInt64().ToString("X"); }
+    private static string ProcessName(uint processId) {
+      try { return Process.GetProcessById((int)processId).ProcessName; }
+      catch { return null; }
+    }
     private static string Class(IntPtr hwnd) {
       StringBuilder value = new StringBuilder(128);
       GetClassName(hwnd, value, value.Capacity);
@@ -214,6 +223,12 @@ namespace LocalSendDialogSelect {
           foreground = GetForegroundWindow();
         }
         click.ForegroundHwnd = Hex(foreground);
+        uint foregroundOwner;
+        GetWindowThreadProcessId(foreground, out foregroundOwner);
+        click.ForegroundOwnerProcessId = (int)foregroundOwner;
+        click.ForegroundProcessName = ProcessName(foregroundOwner);
+        click.ForegroundClass = Class(foreground);
+        click.ForegroundTitle = Text(foreground);
         // A user can activate a background dialog by clicking its visible
         // item. Do not require foreground ownership when the screen hit test
         // below proves that the item itself is exposed to pointer input.
@@ -232,6 +247,7 @@ namespace LocalSendDialogSelect {
         GetWindowThreadProcessId(screenHit, out screenOwner);
         click.ScreenHitHwnd = Hex(screenHit);
         click.ScreenHitOwnerProcessId = (int)screenOwner;
+        click.ScreenHitProcessName = ProcessName(screenOwner);
         if (screenOwner != processId) {
           click.Error = "System hit test at the cursor is not owned by the target process.";
           return click;
