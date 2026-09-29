@@ -63,6 +63,7 @@ namespace LocalSendDialogSelect {
     public string ScreenHitProcessName;
     public bool CursorVerified;
     public bool RaisedDialogTopmost;
+    public RunnerOverlayInfo RunnerWslPrompt;
     public uint SentInputCount;
     public string TargetHwnd;
     public string TargetClass;
@@ -239,6 +240,33 @@ namespace LocalSendDialogSelect {
       if (info.Closed) SetForegroundWindow(dialog);
       return info;
     }
+    private static RunnerOverlayInfo DismissRunnerWslPrompt(IntPtr hit, IntPtr dialog) {
+      IntPtr window = hit;
+      for (int depth = 0; depth < 10 && window != IntPtr.Zero; depth++) {
+        uint owner;
+        GetWindowThreadProcessId(window, out owner);
+        string title = Text(window);
+        if (ProcessName(owner) == "wsl" && Class(window) == "ConsoleWindowClass" &&
+            title.EndsWith("\\wsl.exe", StringComparison.OrdinalIgnoreCase)) {
+          RunnerOverlayInfo info = new RunnerOverlayInfo {
+            Detected = true, Hwnd = Hex(window), ProcessId = (int)owner,
+            ProcessName = "wsl", ClassName = Class(window), Title = title
+          };
+          info.ClosePosted = PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE
+          Thread.Sleep(300);
+          if (!Closed(window)) {
+            ShowWindow(window, 0); // SW_HIDE on the disposable runner only.
+            info.Hidden = !IsWindowVisible(window);
+          }
+          info.Closed = Closed(window);
+          if (!info.Closed) info.Error = "Identified runner WSL update prompt remained visible.";
+          if (info.Closed) SetForegroundWindow(dialog);
+          return info;
+        }
+        window = GetParent(window);
+      }
+      return null;
+    }
     public static MouseClickInfo ClickVisibleShellItem(IntPtr dialog, int processId, int screenX, int screenY, bool useSendInput, bool recoverRunnerObstruction) {
       MouseClickInfo click = new MouseClickInfo {
         ScreenX = screenX, ScreenY = screenY,
@@ -305,6 +333,17 @@ namespace LocalSendDialogSelect {
         click.ScreenHitHwnd = Hex(screenHit);
         click.ScreenHitOwnerProcessId = (int)screenOwner;
         click.ScreenHitProcessName = ProcessName(screenOwner);
+        if (screenOwner != processId && recoverRunnerObstruction) {
+          click.RunnerWslPrompt = DismissRunnerWslPrompt(screenHit, dialog);
+          if (click.RunnerWslPrompt != null && click.RunnerWslPrompt.Closed) {
+            Thread.Sleep(150);
+            screenHit = WindowFromPoint(cursor);
+            GetWindowThreadProcessId(screenHit, out screenOwner);
+            click.ScreenHitHwnd = Hex(screenHit);
+            click.ScreenHitOwnerProcessId = (int)screenOwner;
+            click.ScreenHitProcessName = ProcessName(screenOwner);
+          }
+        }
         if (screenOwner != processId && recoverRunnerObstruction) {
           // The disposable hosted runner can put its own first-run/WSL windows
           // over the picker between navigation and the real input click.
