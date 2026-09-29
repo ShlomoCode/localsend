@@ -1,8 +1,6 @@
 name: Diagnose full Windows file selection
 
 on:
-  push:
-    branches: [codex/diagnose-windows-timestamps]
   workflow_dispatch:
 
 permissions:

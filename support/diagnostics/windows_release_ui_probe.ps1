@@ -32,6 +32,11 @@ $report = [ordered]@{
   launchedPid = $null
   processes = @()
   windows = @()
+  topLevelBefore = @()
+  topLevelAfter = @()
+  firewall = @()
+  activation = @()
+  foreground = $null
   screenshot = $null
   errors = @()
 }
@@ -89,14 +94,20 @@ namespace LocalSendReleaseUiProbe {
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
-    public static WindowInfo[] ForProcess(int pid) {
+    private static WindowInfo[] Enumerate(int pid) {
       List<WindowInfo> found = new List<WindowInfo>();
       EnumWindows((hwnd, data) => {
         uint owner;
         GetWindowThreadProcessId(hwnd, out owner);
-        if (owner != pid) return true;
+        if (pid >= 0 && owner != pid) return true;
         StringBuilder cls = new StringBuilder(256), title = new StringBuilder(1024);
         GetClassName(hwnd, cls, cls.Capacity);
         GetWindowText(hwnd, title, title.Capacity);
@@ -110,6 +121,27 @@ namespace LocalSendReleaseUiProbe {
         return true;
       }, IntPtr.Zero);
       return found.ToArray();
+    }
+    public static WindowInfo[] ForProcess(int pid) { return Enumerate(pid); }
+    public static WindowInfo[] All() { return Enumerate(-1); }
+    public static bool Exists(IntPtr hwnd) { return IsWindow(hwnd) && IsWindowVisible(hwnd); }
+    public static bool Activate(IntPtr hwnd) {
+      ShowWindow(hwnd, 9); // SW_RESTORE
+      BringWindowToTop(hwnd);
+      return SetForegroundWindow(hwnd);
+    }
+    public static bool Escape(IntPtr hwnd) {
+      const uint WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101;
+      const int VK_ESCAPE = 0x1B;
+      bool down = PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_ESCAPE), IntPtr.Zero);
+      bool up = PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_ESCAPE), IntPtr.Zero);
+      return down && up;
+    }
+    public static WindowInfo Foreground() {
+      IntPtr foreground = GetForegroundWindow();
+      if (foreground == IntPtr.Zero) return null;
+      foreach (WindowInfo window in All()) if (window.Hwnd == "0x" + foreground.ToInt64().ToString("X")) return window;
+      return null;
     }
   }
 }
@@ -144,6 +176,88 @@ namespace LocalSendReleaseUiProbe {
     })
   }
 
+  $report.topLevelBefore = @([LocalSendReleaseUiProbe.Windows]::All())
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+  foreach ($window in @($report.topLevelBefore | Where-Object {
+    $_.Visible -and $_.Title -match '^(Windows Security|Windows Security Alert|Windows Defender Firewall)$'
+  })) {
+    $entry = [ordered]@{ hwnd = $window.Hwnd; title = $window.Title; names = @(); matchedFirewall = $false; action = 'none'; closed = $false; error = $null }
+    try {
+      $hwnd = [IntPtr]::new([Convert]::ToInt64($window.Hwnd.Substring(2), 16))
+      $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+      $elements = $root.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+      )
+      $cancel = $null
+      foreach ($element in $elements) {
+        try {
+          $name = [string] $element.Current.Name
+          if (-not [string]::IsNullOrWhiteSpace($name)) { $entry.names += $name }
+          if ($name -eq 'Cancel' -and $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button) {
+            $cancel = $element
+          }
+        } catch { }
+      }
+      $entry.names = @($entry.names | Select-Object -Unique | Select-Object -First 100)
+      $entry.matchedFirewall = $window.Title -match 'Firewall' -or
+        @($entry.names | Where-Object { $_ -match '(?i)firewall|blocked some features' }).Count -gt 0
+      if ($entry.matchedFirewall) {
+        if ($cancel) {
+          try {
+            $pattern = $cancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $pattern.Invoke()
+            $entry.action = 'Invoked this firewall prompt Cancel button through UI Automation'
+          } catch {
+            $entry.action = "Cancel invocation failed: $($_.Exception.Message); posting Escape to this firewall prompt HWND"
+            if (-not [LocalSendReleaseUiProbe.Windows]::Escape($hwnd)) { throw 'Could not post Escape to firewall prompt HWND.' }
+          }
+        } else {
+          $entry.action = 'Posted Escape to this firewall prompt HWND'
+          if (-not [LocalSendReleaseUiProbe.Windows]::Escape($hwnd)) { throw 'Could not post Escape to firewall prompt HWND.' }
+        }
+        for ($attempt = 0; $attempt -lt 30 -and [LocalSendReleaseUiProbe.Windows]::Exists($hwnd); $attempt++) {
+          Start-Sleep -Milliseconds 100
+        }
+        $entry.closed = -not [LocalSendReleaseUiProbe.Windows]::Exists($hwnd)
+        if (-not $entry.closed -and $cancel) {
+          $entry.action += '; posted Escape to this firewall prompt HWND'
+          [void] [LocalSendReleaseUiProbe.Windows]::Escape($hwnd)
+          Start-Sleep -Milliseconds 500
+          $entry.closed = -not [LocalSendReleaseUiProbe.Windows]::Exists($hwnd)
+        }
+        if (-not $entry.closed) { $entry.error = 'Firewall prompt remained visible after Cancel/Escape.' }
+      }
+    } catch {
+      $entry.error = $_.Exception.ToString()
+    }
+    $report.firewall += $entry
+  }
+
+  $target = @($report.windows | Where-Object { $_.Visible -and $_.Width -gt 0 -and $_.Height -gt 0 } |
+    Sort-Object -Property @{ Expression = { $_.Width * $_.Height }; Descending = $true } | Select-Object -First 1)
+  if ($target.Count -gt 0) {
+    $appWindow = $target[0]
+    $appHwnd = [IntPtr]::new([Convert]::ToInt64($appWindow.Hwnd.Substring(2), 16))
+    $nativeResult = [LocalSendReleaseUiProbe.Windows]::Activate($appHwnd)
+    $report.activation += [ordered]@{ method = 'ShowWindow/BringWindowToTop/SetForegroundWindow'; hwnd = $appWindow.Hwnd; returned = $nativeResult }
+    Start-Sleep -Milliseconds 500
+    $foreground = [LocalSendReleaseUiProbe.Windows]::Foreground()
+    if (-not $foreground -or $foreground.Pid -ne $appWindow.Pid) {
+      try {
+        $shell = New-Object -ComObject WScript.Shell
+        $appActivateResult = $shell.AppActivate([int] $appWindow.Pid)
+        $report.activation += [ordered]@{ method = 'WScript.Shell.AppActivate'; pid = $appWindow.Pid; returned = $appActivateResult }
+      } catch {
+        $report.activation += [ordered]@{ method = 'WScript.Shell.AppActivate'; pid = $appWindow.Pid; error = $_.Exception.Message }
+      }
+    }
+  }
+  Start-Sleep -Seconds 2
+  $report.topLevelAfter = @([LocalSendReleaseUiProbe.Windows]::All())
+  $report.foreground = [LocalSendReleaseUiProbe.Windows]::Foreground()
+
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
   $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -176,10 +290,11 @@ namespace LocalSendReleaseUiProbe {
     $bitmap.Dispose()
   }
 
-  if ($visible) {
-    $report.status = 'captured-visible-app'
+  $appPids = @($report.processes | ForEach-Object { [int] $_.pid })
+  if ($visible -and $report.foreground -and $report.foreground.Pid -in $appPids) {
+    $report.status = 'captured-foreground-app'
   } else {
-    $report.errors += 'No visible LocalSend window appeared within 30 seconds; screenshot may show a locked or noninteractive desktop.'
+    $report.errors += 'LocalSend was not the foreground window at capture; inspect topLevelAfter and screenshot for firewall or OOBE overlays.'
   }
 } catch {
   $report.errors += $_.Exception.ToString()
@@ -187,5 +302,5 @@ namespace LocalSendReleaseUiProbe {
   $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
   [System.IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $report -Depth 10), [System.Text.UTF8Encoding]::new($false))
   Write-Host "Release UI report: $reportPath"
-  if ($report.status -ne 'captured-visible-app') { exit 1 }
+  if ($report.status -ne 'captured-foreground-app') { exit 1 }
 }
