@@ -17,6 +17,7 @@ $archivePath = Join-Path $OutputDirectory 'LocalSend-1.18.2-windows-arm-64.zip'
 $extractPath = Join-Path $OutputDirectory 'release'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
 $windowScreenshotPath = Join-Path $OutputDirectory 'app-window.png'
+$sendScreenshotPath = Join-Path $OutputDirectory 'app-window-send.png'
 $reportPath = Join-Path $OutputDirectory 'release-ui-report.json'
 $firewallRuleName = $null
 $report = [ordered]@{
@@ -41,6 +42,7 @@ $report = [ordered]@{
   foreground = $null
   screenshot = $null
   windowScreenshot = $null
+  sendTab = $null
   appUiTree = @()
   firewallRule = $null
   errors = @()
@@ -103,8 +105,17 @@ namespace LocalSendReleaseUiProbe {
     public int Width;
     public int Height;
   }
+  public class ClickInfo {
+    public bool Posted;
+    public string Error;
+    public string TargetHwnd;
+    public string TargetClass;
+    public int ClientX;
+    public int ClientY;
+  }
   public static class Windows {
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     private delegate bool EnumProc(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr data);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
@@ -116,6 +127,9 @@ namespace LocalSendReleaseUiProbe {
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT point, uint flags);
+    [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr from, IntPtr to, ref POINT point, uint count);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
@@ -155,6 +169,43 @@ namespace LocalSendReleaseUiProbe {
       return down && up;
     }
     public static bool Capture(IntPtr hwnd, IntPtr hdc) { return PrintWindow(hwnd, hdc, 2) || PrintWindow(hwnd, hdc, 0); }
+    public static ClickInfo ClickClient(IntPtr app, int x, int y) {
+      ClickInfo info = new ClickInfo { ClientX = x, ClientY = y };
+      RECT client;
+      if (!Exists(app) || !GetClientRect(app, out client) || x < 0 || y < 0 || x >= client.Right || y >= client.Bottom) {
+        info.Error = "Click point is outside the visible LocalSend client area.";
+        return info;
+      }
+      POINT point = new POINT { X = x, Y = y };
+      IntPtr target = app;
+      // Flutter may host its view in a child HWND; send the mouse messages there.
+      for (int depth = 0; depth < 4; depth++) {
+        IntPtr child = ChildWindowFromPointEx(target, point, 1); // CWP_SKIPINVISIBLE
+        if (child == IntPtr.Zero || child == target) break;
+        MapWindowPoints(target, child, ref point, 1);
+        target = child;
+      }
+      uint appPid, targetPid;
+      GetWindowThreadProcessId(app, out appPid);
+      GetWindowThreadProcessId(target, out targetPid);
+      if (appPid != targetPid) {
+        info.Error = "The hit-tested child HWND is owned by a different process.";
+        return info;
+      }
+      info.TargetHwnd = "0x" + target.ToInt64().ToString("X");
+      StringBuilder cls = new StringBuilder(256);
+      GetClassName(target, cls, cls.Capacity);
+      info.TargetClass = cls.ToString();
+      info.ClientX = point.X;
+      info.ClientY = point.Y;
+      IntPtr packed = new IntPtr((point.Y << 16) | (point.X & 0xFFFF));
+      bool move = PostMessage(target, 0x0200, IntPtr.Zero, packed); // WM_MOUSEMOVE
+      bool down = PostMessage(target, 0x0201, new IntPtr(1), packed); // WM_LBUTTONDOWN, MK_LBUTTON
+      bool up = PostMessage(target, 0x0202, IntPtr.Zero, packed); // WM_LBUTTONUP
+      info.Posted = move && down && up;
+      if (!info.Posted) info.Error = "Could not post the three mouse messages to the LocalSend HWND.";
+      return info;
+    }
     public static WindowInfo Foreground() {
       IntPtr foreground = GetForegroundWindow();
       if (foreground == IntPtr.Zero) return null;
@@ -339,6 +390,72 @@ namespace LocalSendReleaseUiProbe {
     } catch {
       $report.errors += "LocalSend PrintWindow capture: $($_.Exception.Message)"
     }
+
+    $report.sendTab = [ordered]@{
+      requestedClientX = 200
+      requestedClientY = 442
+      action = 'WM_MOUSEMOVE / WM_LBUTTONDOWN / WM_LBUTTONUP to LocalSend HWND'
+      click = $null
+      screenshot = $null
+      beforeSha256 = $null
+      afterSha256 = $null
+      imageChanged = $false
+      uiNamesAfter = @()
+      error = $null
+    }
+    $click = [LocalSendReleaseUiProbe.Windows]::ClickClient($appHwnd, 200, 442)
+    $report.sendTab.click = $click
+    if ($click.Posted) {
+      Start-Sleep -Seconds 2
+      try {
+        $sendBitmap = [System.Drawing.Bitmap]::new($appWindow.Width, $appWindow.Height)
+        try {
+          $sendGraphics = [System.Drawing.Graphics]::FromImage($sendBitmap)
+          try {
+            $sendHdc = $sendGraphics.GetHdc()
+            try {
+              $sendPrinted = [LocalSendReleaseUiProbe.Windows]::Capture($appHwnd, $sendHdc)
+            } finally {
+              $sendGraphics.ReleaseHdc($sendHdc)
+            }
+          } finally {
+            $sendGraphics.Dispose()
+          }
+          if (-not $sendPrinted) { throw 'PrintWindow returned false after clicking Send.' }
+          $sendBitmap.Save($sendScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $report.sendTab.screenshot = [ordered]@{
+            path = $sendScreenshotPath
+            bytes = (Get-Item -LiteralPath $sendScreenshotPath).Length
+            hwnd = $appWindow.Hwnd
+            width = $appWindow.Width
+            height = $appWindow.Height
+          }
+        } finally {
+          $sendBitmap.Dispose()
+        }
+        if ($report.windowScreenshot) {
+          $report.sendTab.beforeSha256 = (Get-FileHash -LiteralPath $windowScreenshotPath -Algorithm SHA256).Hash
+          $report.sendTab.afterSha256 = (Get-FileHash -LiteralPath $sendScreenshotPath -Algorithm SHA256).Hash
+          $report.sendTab.imageChanged = $report.sendTab.beforeSha256 -ne $report.sendTab.afterSha256
+          if (-not $report.sendTab.imageChanged) { $report.sendTab.error = 'The LocalSend window image did not change after clicking Send.' }
+        }
+        try {
+          $afterRoot = [System.Windows.Automation.AutomationElement]::FromHandle($appHwnd)
+          $afterElements = $afterRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+          foreach ($element in $afterElements) {
+            if ($report.sendTab.uiNamesAfter.Count -ge 100) { break }
+            try {
+              $name = [string] $element.Current.Name
+              if (-not [string]::IsNullOrWhiteSpace($name)) { $report.sendTab.uiNamesAfter += $name }
+            } catch { }
+          }
+        } catch { }
+      } catch {
+        $report.sendTab.error = $_.Exception.ToString()
+      }
+    } else {
+      $report.sendTab.error = $click.Error
+    }
   }
 
   $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -380,6 +497,10 @@ namespace LocalSendReleaseUiProbe {
     $report.status = 'captured-app-ui-tree'
   } else {
     $report.errors += 'LocalSend was not foreground and PrintWindow did not capture a varied app image; inspect topLevelAfter, appUiTree, and screenshot.'
+  }
+  if (-not $report.sendTab -or -not $report.sendTab.imageChanged) {
+    $report.status = 'inconclusive'
+    $report.errors += 'Send tab selection was not verified by a changed LocalSend window image.'
   }
 } catch {
   $report.errors += $_.Exception.ToString()

@@ -30,4 +30,5 @@ jobs:
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png
             release-ui-output/app-window.png
+            release-ui-output/app-window-send.png
           if-no-files-found: error
