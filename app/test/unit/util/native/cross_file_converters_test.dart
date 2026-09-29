@@ -7,73 +7,76 @@ import 'package:localsend_isolates/rust/frb_generated.dart';
 import 'package:test/test.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
+const _exportedFileModifiedAt = '2026-09-29T00:00:00Z';
+
 void main() {
   setUpAll(() {
     RustLib.initMock(api: _MockRustLibApi());
   });
 
-  setUp(() {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-  });
+  group('CrossFileConverters.convertAssetEntity on iOS', () {
+    late Directory temporaryDirectory;
+    late File exportedPhoto;
 
-  tearDown(() {
-    debugDefaultTargetPlatformOverride = null;
-  });
+    setUp(() async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      temporaryDirectory = await Directory.systemTemp.createTemp('cross-file-converters-test-');
+      exportedPhoto = File('${temporaryDirectory.path}/photo.jpg');
+      await exportedPhoto.writeAsBytes([1, 2, 3]);
+    });
 
-  test('uses the iOS asset modification date instead of the exported file date', () async {
-    final directory = await Directory.systemTemp.createTemp('cross-file-converters-test-');
-    addTearDown(() => directory.delete(recursive: true));
-    final exportedFile = File('${directory.path}/photo.jpg');
-    await exportedFile.writeAsBytes([1, 2, 3]);
+    tearDown(() async {
+      debugDefaultTargetPlatformOverride = null;
+      await temporaryDirectory.delete(recursive: true);
+    });
 
-    final modified = DateTime.utc(2020, 8, 15, 10, 20, 30);
-    final asset = _FakeAssetEntity(
-      exportedFile: exportedFile,
-      createDateSecond: DateTime.utc(2019, 1, 2).millisecondsSinceEpoch ~/ 1000,
-      modifiedDateSecond: modified.millisecondsSinceEpoch ~/ 1000,
-    );
+    test('prefers the asset modification date over the exported file date', () async {
+      final assetModifiedAt = DateTime.utc(2020, 8, 15, 10, 20, 30);
+      final asset = _FakeAssetEntity(
+        exportedFile: exportedPhoto,
+        createdAt: DateTime.utc(2019, 1, 2),
+        modifiedAt: assetModifiedAt,
+      );
 
-    final converted = await CrossFileConverters.convertAssetEntity(asset);
+      final result = await CrossFileConverters.convertAssetEntity(asset);
 
-    expect(converted.lastModified, modified.toIso8601String());
-  });
+      expect(result.lastModified, assetModifiedAt.toIso8601String());
+    });
 
-  test('uses the iOS asset creation date when no modification date is available', () async {
-    final directory = await Directory.systemTemp.createTemp('cross-file-converters-test-');
-    addTearDown(() => directory.delete(recursive: true));
-    final exportedFile = File('${directory.path}/photo.jpg');
-    await exportedFile.writeAsBytes([1, 2, 3]);
+    test('falls back to the asset creation date when the modification date is unavailable', () async {
+      final assetCreatedAt = DateTime.utc(2019, 1, 2, 3, 4, 5);
+      final asset = _FakeAssetEntity(
+        exportedFile: exportedPhoto,
+        createdAt: assetCreatedAt,
+      );
 
-    final created = DateTime.utc(2019, 1, 2, 3, 4, 5);
-    final asset = _FakeAssetEntity(
-      exportedFile: exportedFile,
-      createDateSecond: created.millisecondsSinceEpoch ~/ 1000,
-      modifiedDateSecond: 0,
-    );
+      final result = await CrossFileConverters.convertAssetEntity(asset);
 
-    final converted = await CrossFileConverters.convertAssetEntity(asset);
-
-    expect(converted.lastModified, created.toIso8601String());
+      expect(result.lastModified, assetCreatedAt.toIso8601String());
+    });
   });
 }
 
 class _FakeAssetEntity extends AssetEntity {
-  final File exportedFile;
+  final File _exportedFile;
 
   _FakeAssetEntity({
-    required this.exportedFile,
-    required super.createDateSecond,
-    required super.modifiedDateSecond,
-  }) : super(
+    required File exportedFile,
+    required DateTime createdAt,
+    DateTime? modifiedAt,
+  }) : _exportedFile = exportedFile,
+       super(
          id: 'photo-id',
          typeInt: 1,
          width: 1,
          height: 1,
          title: 'photo.jpg',
+         createDateSecond: _unixSeconds(createdAt),
+         modifiedDateSecond: modifiedAt == null ? 0 : _unixSeconds(modifiedAt),
        );
 
   @override
-  Future<File?> get originFile async => exportedFile;
+  Future<File?> get originFile async => _exportedFile;
 
   @override
   Future<String> get titleAsync async => title!;
@@ -83,7 +86,7 @@ class _MockRustLibApi implements RustLibApi {
   @override
   Future<FileMetadata?> crateApiMetadataReadFileMetadata({required String path}) async {
     return const FileMetadata(
-      modified: '2026-09-29T00:00:00Z',
+      modified: _exportedFileModifiedAt,
       accessed: null,
     );
   }
@@ -91,3 +94,5 @@ class _MockRustLibApi implements RustLibApi {
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError('Not mocked: ${invocation.memberName}');
 }
+
+int _unixSeconds(DateTime dateTime) => dateTime.millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
