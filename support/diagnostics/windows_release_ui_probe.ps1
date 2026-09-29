@@ -9,7 +9,9 @@ param(
   [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry',
   [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi',
   [string] $FixtureTimestampUtc = '1979-12-31T23:59:58Z',
-  [string] $FixtureFileName = 'fixture-old-timestamp.txt'
+  [string] $FixtureFileName = 'fixture-old-timestamp.txt',
+  [string] $ExecutablePath,
+  [string] $SourceRevision
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,8 +23,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 
-$assetName = "LocalSend-$ReleaseVersion-windows-$AssetArchitecture.zip"
-$releaseUrl = "https://github.com/localsend/localsend/releases/download/v$ReleaseVersion/$assetName"
+$assetName = if ($ExecutablePath) { [System.IO.Path]::GetFileName($ExecutablePath) } else { "LocalSend-$ReleaseVersion-windows-$AssetArchitecture.zip" }
+$releaseUrl = if ($ExecutablePath) { 'local-build' } else { "https://github.com/localsend/localsend/releases/download/v$ReleaseVersion/$assetName" }
 $archivePath = Join-Path $OutputDirectory $assetName
 $extractPath = Join-Path $OutputDirectory 'release'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
@@ -44,7 +46,7 @@ if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {
   throw 'The windows-2025 runner case requires the x86-64 release asset.'
 }
 $report = [ordered]@{
-  release = "v$ReleaseVersion"
+  release = if ($SourceRevision) { $SourceRevision } else { "v$ReleaseVersion" }
   entryMethod = $EntryMethod
   selectionMode = $SelectionMode
   selectionMethod = $SelectionMethod
@@ -118,26 +120,32 @@ try {
     fileSystem = $volume.FileSystem
     verified = $fixtureVerified
   }
-  Invoke-WebRequest -Uri $releaseUrl -OutFile $archivePath -MaximumRedirection 10
-  $archive = Get-Item -LiteralPath $archivePath
-  if ($archive.Length -lt 1000000) { throw "Downloaded archive is unexpectedly small: $($archive.Length) bytes" }
-  $report.archive = [ordered]@{
-    path = $archivePath
-    bytes = $archive.Length
-    sha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
-  }
+  if ($ExecutablePath) {
+    $exe = Get-Item -LiteralPath ([System.IO.Path]::GetFullPath($ExecutablePath))
+    $extractPath = $exe.DirectoryName
+    $report.archive = [ordered]@{ source = 'local-build'; revision = $SourceRevision }
+  } else {
+    Invoke-WebRequest -Uri $releaseUrl -OutFile $archivePath -MaximumRedirection 10
+    $archive = Get-Item -LiteralPath $archivePath
+    if ($archive.Length -lt 1000000) { throw "Downloaded archive is unexpectedly small: $($archive.Length) bytes" }
+    $report.archive = [ordered]@{
+      path = $archivePath
+      bytes = $archive.Length
+      sha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    }
 
-  [System.IO.Directory]::CreateDirectory($extractPath) | Out-Null
-  Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
-  $candidates = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'localsend_app.exe')
-  if ($candidates.Count -eq 0) {
-    $candidates = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'LocalSend.exe')
+    [System.IO.Directory]::CreateDirectory($extractPath) | Out-Null
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+    $candidates = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'localsend_app.exe')
+    if ($candidates.Count -eq 0) {
+      $candidates = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'LocalSend.exe')
+    }
+    if ($candidates.Count -ne 1) {
+      $exeList = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter '*.exe' | ForEach-Object FullName)
+      throw "Expected one LocalSend application executable, found $($candidates.Count). Executables: $($exeList -join ', ')"
+    }
+    $exe = $candidates[0]
   }
-  if ($candidates.Count -ne 1) {
-    $exeList = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter '*.exe' | ForEach-Object FullName)
-    throw "Expected one LocalSend application executable, found $($candidates.Count). Executables: $($exeList -join ', ')"
-  }
-  $exe = $candidates[0]
   $exeStream = [System.IO.File]::OpenRead($exe.FullName)
   try {
     $reader = [System.IO.BinaryReader]::new($exeStream)

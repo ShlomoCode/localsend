@@ -1,0 +1,94 @@
+name: Bisect issue 2906 fix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify_boundary:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: before-ff2995c9
+            revision: bbb308ce0e65ad6d1ec9211affd08a2d9e046d25
+          - label: ff2995c9
+            revision: ff2995c9523c5fae407f7d444d0986b2c6ae568e
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\bisect-output
+    steps:
+      - name: Checkout diagnostic harness
+        uses: actions/checkout@v6
+
+      - name: Checkout LocalSend at ${{ matrix.label }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.revision }}
+          path: source
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+
+      - name: Prepare Windows build
+        run: |
+          flutter config --enable-windows-desktop
+          rustup toolchain install 1.93.1 --profile minimal
+          New-Item -ItemType File -Force source/app/windows/localsend_msix_helper.msix | Out-Null
+
+      - name: Resolve dependencies
+        run: |
+          Push-Location source/app
+          flutter pub get
+          Pop-Location
+          Push-Location source/packages/localsend_isolates/rust_builder/cargokit/build_tool
+          flutter pub get
+          Pop-Location
+
+      - name: Build LocalSend at ${{ matrix.label }}
+        working-directory: source/app
+        run: flutter build windows --release
+
+      - name: Drive the real picker with a 1927 NTFS file
+        run: |
+          $releaseDirectory = Join-Path $env:GITHUB_WORKSPACE 'source\app\build\windows\x64\runner\Release'
+          [System.IO.File]::WriteAllText((Join-Path $releaseDirectory 'settings.json'), '{}')
+          .\support\diagnostics\windows_release_ui_probe.ps1 `
+            -OutputDirectory $env:LS_RELEASE_UI_OUTPUT `
+            -ExecutablePath (Join-Path $releaseDirectory 'localsend_app.exe') `
+            -SourceRevision '${{ matrix.label }}' `
+            -SelectionMode File `
+            -AssetArchitecture x86-64 `
+            -RunnerLabel windows-2025 `
+            -EntryMethod Picker `
+            -SelectionMethod ShellItem `
+            -FixtureMethod UtcApi `
+            -FixtureTimestampUtc '1927-10-15T12:34:56Z' `
+            -FixtureFileName 'fixture-1927-10-15.txt'
+
+      - name: Print diagnostic report
+        if: always()
+        run: |
+          if (Test-Path -LiteralPath 'bisect-output/release-ui-report.json') {
+            Get-Content -LiteralPath 'bisect-output/release-ui-report.json' -Raw
+          }
+
+      - name: Preserve boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: issue-2906-${{ matrix.label }}
+          path: |
+            bisect-output/release-ui-report.json
+            bisect-output/app-window-after-file.png
+            bisect-output/native-dialog-parent.png
+          if-no-files-found: error
