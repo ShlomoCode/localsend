@@ -510,8 +510,16 @@ namespace LocalSendReleaseUiProbe {
     [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
     $expectedTime = [DateTime]::Parse('1979-12-31T23:59:58Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
     $issueParsedDate = $null
+    $issueParseCulture = $null
     if ($FixtureMethod -eq 'IssuePowerShell') {
-      $issueParsedDate = Get-Date '31-12-1979 23:59:58Z'
+      $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+      try {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-GB')
+        $issueParseCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture.Name
+        $issueParsedDate = Get-Date '31-12-1979 23:59:58Z'
+      } finally {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+      }
       (Get-Item -LiteralPath $fixturePath).LastWriteTime = $issueParsedDate
     } else {
       [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
@@ -540,6 +548,7 @@ namespace LocalSendReleaseUiProbe {
         path = $fixturePath
         directory = $fixtureDirectory
         method = $FixtureMethod
+        issueParseCulture = $issueParseCulture
         issueCommandParsedLocal = if ($issueParsedDate) { $issueParsedDate.ToString('o') } else { $null }
         expectedLastWriteTimeUtc = $expectedTime.ToString('o')
         actualLastWriteTimeUtc = $actualTime.ToString('o')
