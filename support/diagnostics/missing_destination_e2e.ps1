@@ -240,7 +240,7 @@ try {
       destinationCreated = Test-Path -LiteralPath $destination -PathType Container
       fileExists = $fileExists
       hashMatches = $hashMatches
-      transferSucceeded = (-not $send.timedOut) -and $send.exitCode -eq 0 -and $hashMatches
+      transferSucceeded = (-not $send.timedOut) -and $send.exitCode -eq 0 -and $hashMatches -and $receiverAlive
       screenshot = Capture-Desktop -CaseName "$caseName-after-send"
     }
     $report.missingDestinationRuns += $entry

@@ -212,7 +212,7 @@ for iteration in 1 2; do
   destination_created=false
   [[ -d "$destination" ]] && destination_created=true
   transfer_succeeded=false
-  [[ "$sender_status" == 0 && "$received_hash" == "$fixture_hash" ]] && transfer_succeeded=true
+  [[ "$sender_status" == 0 && "$received_hash" == "$fixture_hash" && "$receiver_alive" == true ]] && transfer_succeeded=true
   {
     echo "missing_${iteration}_sender_status=$sender_status"
     echo "missing_${iteration}_receiver_alive=$receiver_alive"
