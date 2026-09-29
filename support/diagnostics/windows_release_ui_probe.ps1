@@ -582,6 +582,9 @@ namespace LocalSendReleaseUiProbe {
     }
 
     $driverArguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -TargetProcessId {1} -Path "{2}" -Mode {3} -SelectionMethod {4} -DialogScreenshotPath "{5}" -TimeoutSeconds 15' -f $driverScript, $appWindow.Pid, $selectionPath, $SelectionMode, $SelectionMethod, $dialogScreenshotPath
+    if ($SelectionMethod -eq 'SendInputShellItem' -and $RunnerLabel -in @('windows-11-arm', 'windows-11-vs2026-arm')) {
+      $driverArguments += ' -DismissRunnerPrivacyOverlay'
+    }
     $driverProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $driverArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $driverStdout -RedirectStandardError $driverStderr
     Start-Sleep -Milliseconds 500
     $report.fileSelection.selectionButtonClick = [LocalSendReleaseUiProbe.Windows]::ClickClient($appHwnd, $buttonX, 85)

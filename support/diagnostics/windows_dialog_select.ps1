@@ -5,6 +5,7 @@ param(
   [Parameter(Mandatory = $true)][string] $Path,
   [Parameter(Mandatory = $true)][ValidateSet('File', 'Folder')][string] $Mode,
   [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem', 'SendInputShellItem')][string] $SelectionMethod = 'PathEntry',
+  [switch] $DismissRunnerPrivacyOverlay,
   [string] $DialogScreenshotPath,
   [ValidateRange(1, 120)][int] $TimeoutSeconds = 15
 )
@@ -72,6 +73,20 @@ namespace LocalSendDialogSelect {
     public List<string> HitTest = new List<string>();
   }
 
+  public class RunnerOverlayInfo {
+    public bool Detected;
+    public string Hwnd;
+    public int ProcessId;
+    public string ProcessName;
+    public string ClassName;
+    public string Title;
+    public bool ClosePosted;
+    public bool Hidden;
+    public bool ProcessStopped;
+    public bool Closed;
+    public string Error;
+  }
+
   public static class Driver {
     private const uint WM_SETTEXT = 0x000C;
     private const uint WM_GETTEXT = 0x000D;
@@ -106,6 +121,7 @@ namespace LocalSendDialogSelect {
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr hwnd, ref POINT point);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
@@ -182,6 +198,42 @@ namespace LocalSendDialogSelect {
       return score;
     }
     public static bool DialogOpen(IntPtr hwnd) { return !Closed(hwnd); }
+    public static RunnerOverlayInfo DismissRunnerPrivacyOverlay(IntPtr dialog) {
+      RunnerOverlayInfo info = new RunnerOverlayInfo();
+      IntPtr foreground = GetForegroundWindow();
+      uint owner;
+      GetWindowThreadProcessId(foreground, out owner);
+      string name = ProcessName(owner);
+      string className = Class(foreground);
+      string title = Text(foreground);
+      info.Hwnd = Hex(foreground);
+      info.ProcessId = (int)owner;
+      info.ProcessName = name;
+      info.ClassName = className;
+      info.Title = title;
+      if (foreground == dialog || name != "WWAHost" || className != "Windows.UI.Core.CoreWindow" || title != "Microsoft account") {
+        return info;
+      }
+      info.Detected = true;
+      info.ClosePosted = PostMessage(foreground, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE
+      Thread.Sleep(500);
+      if (!Closed(foreground)) {
+        ShowWindow(foreground, 0); // SW_HIDE, only on this disposable runner.
+        info.Hidden = !IsWindowVisible(foreground);
+        Thread.Sleep(300);
+      }
+      if (!Closed(foreground)) {
+        try {
+          Process.GetProcessById((int)owner).Kill();
+          info.ProcessStopped = true;
+          Thread.Sleep(500);
+        } catch (Exception ex) { info.Error = "Could not stop the identified runner privacy host: " + ex.Message; }
+      }
+      info.Closed = Closed(foreground);
+      if (!info.Closed && info.Error == null) info.Error = "Identified runner privacy window remained visible.";
+      if (info.Closed) SetForegroundWindow(dialog);
+      return info;
+    }
     public static MouseClickInfo ClickVisibleShellItem(IntPtr dialog, int processId, int screenX, int screenY, bool useSendInput) {
       MouseClickInfo click = new MouseClickInfo {
         ScreenX = screenX, ScreenY = screenY,
@@ -525,6 +577,7 @@ function Invoke-ShellItem {
       ConfirmationClick = $null
       IsSelected = $false
     }
+    RunnerPrivacyOverlay = $null
     Actions = @()
     UiaNames = @()
   }
@@ -669,6 +722,12 @@ function Invoke-ShellItem {
       $screenX = [int] [Math]::Floor($bounds.left + ($bounds.width / 2))
       $screenY = [int] [Math]::Floor($bounds.top + ($bounds.height / 2))
       $useSendInput = $SelectionMethod -eq 'SendInputShellItem'
+      if ($useSendInput -and $DismissRunnerPrivacyOverlay) {
+        $overlay = [LocalSendDialogSelect.Driver]::DismissRunnerPrivacyOverlay($dialog)
+        $result.RunnerPrivacyOverlay = $overlay
+        if ($overlay.Error) { throw "Could not dismiss the identified runner privacy overlay: $($overlay.Error)" }
+        if ($overlay.Detected) { $result.Actions += 'Dismissed the identified WWAHost Microsoft account privacy overlay on the disposable runner' }
+      }
       $click = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $useSendInput)
       $result.ShellItem.MouseClick = $click
       if (-not $click.Posted) { throw "Could not click the visible Shell item using $($click.InputMethod): $($click.Error)" }
