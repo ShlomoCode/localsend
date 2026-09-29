@@ -164,6 +164,8 @@ foreach ($item in $manifest) {
     $stat = New-Object NativeTimestampProbe+Stat64
     $statCode = [NativeTimestampProbe]::WStat64($item.path, [ref]$stat)
     if ($statCode -eq 0) {
+        # On Windows, _wstat64 can succeed for pre-1970 files while reporting -1 for mtime.
+        # Only its return code and file size are required for this probe.
         $operations.wstat64 = Check-Size $stat.Size $item.size
         $operations.wstat64.modificationTimeSeconds = $stat.ModificationTime
         if ($operations.wstat64.status -eq 'fail') { $unexpectedFailures++ }

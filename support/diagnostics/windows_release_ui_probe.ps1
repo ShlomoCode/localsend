@@ -4,7 +4,7 @@ param(
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
   [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
-  [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry',
+  [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem')][string] $SelectionMethod = 'PathEntry',
   [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
 )
 
