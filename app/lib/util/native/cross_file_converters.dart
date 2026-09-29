@@ -16,7 +16,7 @@ class CrossFileConverters {
   static Future<CrossFile> convertAssetEntity(AssetEntity asset) async {
     final file = (await asset.originFile)!;
     final metadata = await readFileMetadata(path: file.path);
-    final assetLastModified = defaultTargetPlatform == TargetPlatform.iOS ? _assetLastModified(asset) : null;
+    final assetDate = defaultTargetPlatform == TargetPlatform.iOS ? _preferredAssetDate(asset) : null;
     return CrossFile(
       name: await asset.titleAsync,
       fileType: asset.type == AssetType.video ? FileType.video : FileType.image,
@@ -25,7 +25,7 @@ class CrossFileConverters {
       asset: asset,
       path: file.path,
       bytes: null,
-      lastModified: assetLastModified ?? metadata?.modified,
+      lastModified: assetDate ?? metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
   }
@@ -108,15 +108,17 @@ class CrossFileConverters {
   }
 }
 
-String? _assetLastModified(AssetEntity asset) {
-  final seconds = switch (asset.modifiedDateSecond) {
-    final seconds? when seconds > 0 => seconds,
-    _ => switch (asset.createDateSecond) {
-      final seconds? when seconds > 0 => seconds,
-      _ => null,
-    },
-  };
-  return seconds == null ? null : DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true).toIso8601String();
+String? _preferredAssetDate(AssetEntity asset) {
+  final modified = _assetDateFromSeconds(asset.modifiedDateSecond);
+  final created = _assetDateFromSeconds(asset.createDateSecond);
+  return modified ?? created;
+}
+
+String? _assetDateFromSeconds(int? seconds) {
+  if (seconds == null || seconds <= 0) {
+    return null;
+  }
+  return DateTime.fromMillisecondsSinceEpoch(seconds * Duration.millisecondsPerSecond, isUtc: true).toIso8601String();
 }
 
 extension CompareFile on CrossFile {
