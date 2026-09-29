@@ -138,6 +138,16 @@ hdiutil detach "$mount_dir"
 app_executable="$(find "$app_dir/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print -quit)"
 [[ -x "$app_executable" && -x "$cli_executable" ]]
 
+# The sandboxed app cannot rewrite resources inside its signed bundle. Portable
+# mode still gives us deterministic settings if the in-bundle file is a symlink
+# to the app's writable sandbox container.
+portable_settings_dir="$HOME/Library/Containers/org.localsend.localsendApp/Data/Documents"
+portable_settings="$portable_settings_dir/localsend-e2e-settings-$version.json"
+mkdir -p "$portable_settings_dir"
+rm -f "$portable_settings" "$(dirname "$app_executable")/settings.json"
+touch "$portable_settings"
+ln -s "$portable_settings" "$(dirname "$app_executable")/settings.json"
+
 fixture="$output_dir/flat-file-16MiB.bin"
 mkfile -n 16m "$fixture"
 fixture_hash="$(sha256 "$fixture")"
