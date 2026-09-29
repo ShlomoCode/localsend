@@ -17,21 +17,35 @@ jobs:
           - runner: windows-11-arm
             asset_architecture: arm-64
             selection_mode: File
+            fixture_method: UtcApi
           - runner: windows-11-arm
             asset_architecture: arm-64
             selection_mode: Folder
+            fixture_method: UtcApi
           - runner: windows-11-arm
             asset_architecture: x86-64
             selection_mode: File
+            fixture_method: UtcApi
           - runner: windows-11-arm
             asset_architecture: x86-64
             selection_mode: Folder
+            fixture_method: UtcApi
           - runner: windows-2025
             asset_architecture: x86-64
             selection_mode: File
+            fixture_method: UtcApi
           - runner: windows-2025
             asset_architecture: x86-64
             selection_mode: Folder
+            fixture_method: UtcApi
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: File
+            fixture_method: IssuePowerShell
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: Folder
+            fixture_method: IssuePowerShell
     defaults:
       run:
         shell: powershell
@@ -39,12 +53,12 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
-      - name: Select ${{ matrix.selection_mode }} through Shell item in v1.18.2 ${{ matrix.asset_architecture }} on ${{ matrix.runner }}
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }} -SelectionMethod ShellItem
+      - name: Select ${{ matrix.selection_mode }} through Shell item in v1.18.2 ${{ matrix.asset_architecture }} on ${{ matrix.runner }} (${{ matrix.fixture_method }})
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }} -SelectionMethod ShellItem -FixtureMethod ${{ matrix.fixture_method }}
       - name: Print ${{ matrix.asset_architecture }} ${{ matrix.selection_mode }} evidence when artifact download is unavailable
         if: always()
         run: |
-          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=ShellItem RUNNER=${{ matrix.runner }}'
+          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=ShellItem FIXTURE_METHOD=${{ matrix.fixture_method }} RUNNER=${{ matrix.runner }}'
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
@@ -63,7 +77,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: shell-item-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}
+          name: shell-item-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}-${{ matrix.fixture_method }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png

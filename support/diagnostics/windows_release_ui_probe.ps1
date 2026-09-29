@@ -4,7 +4,8 @@ param(
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
   [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
-  [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry'
+  [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry',
+  [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,7 @@ $report = [ordered]@{
   release = 'v1.18.2'
   selectionMode = $SelectionMode
   selectionMethod = $SelectionMethod
+  fixtureMethod = $FixtureMethod
   assetArchitecture = $AssetArchitecture
   expectedExecution = $expectedExecution
   assetName = $assetName
@@ -507,7 +509,13 @@ namespace LocalSendReleaseUiProbe {
     $fixturePath = Join-Path $fixtureDirectory 'fixture-1979-12-31.txt'
     [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
     $expectedTime = [DateTime]::Parse('1979-12-31T23:59:58Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-    [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
+    $issueParsedDate = $null
+    if ($FixtureMethod -eq 'IssuePowerShell') {
+      $issueParsedDate = Get-Date '31-12-1979 23:59:58Z'
+      (Get-Item -LiteralPath $fixturePath).LastWriteTime = $issueParsedDate
+    } else {
+      [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
+    }
     $actualTime = [System.IO.File]::GetLastWriteTimeUtc($fixturePath)
     $fixtureVerified = $actualTime.Ticks -eq $expectedTime.Ticks
     if (-not $fixtureVerified) { throw "Fixture LastWriteTimeUtc mismatch: expected $expectedTime, got $actualTime" }
@@ -531,6 +539,8 @@ namespace LocalSendReleaseUiProbe {
       fixture = [ordered]@{
         path = $fixturePath
         directory = $fixtureDirectory
+        method = $FixtureMethod
+        issueCommandParsedLocal = if ($issueParsedDate) { $issueParsedDate.ToString('o') } else { $null }
         expectedLastWriteTimeUtc = $expectedTime.ToString('o')
         actualLastWriteTimeUtc = $actualTime.ToString('o')
         size = (Get-Item -LiteralPath $fixturePath).Length
