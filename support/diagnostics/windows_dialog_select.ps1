@@ -62,6 +62,7 @@ namespace LocalSendDialogSelect {
     public int ScreenHitOwnerProcessId;
     public string ScreenHitProcessName;
     public bool CursorVerified;
+    public bool RaisedDialogTopmost;
     public uint SentInputCount;
     public string TargetHwnd;
     public string TargetClass;
@@ -97,6 +98,9 @@ namespace LocalSendDialogSelect {
     private const uint WM_LBUTTONUP = 0x0202;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_SHOWWINDOW = 0x0040;
     private const int CWP_SKIPINVISIBLE = 0x0001;
     private const uint SMTO_ABORTIFHUNG = 0x0002;
     private const int IDC_FILENAME = 0x047C; // cmb13, the common-dialog filename combo.
@@ -127,6 +131,7 @@ namespace LocalSendDialogSelect {
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT point);
@@ -234,7 +239,7 @@ namespace LocalSendDialogSelect {
       if (info.Closed) SetForegroundWindow(dialog);
       return info;
     }
-    public static MouseClickInfo ClickVisibleShellItem(IntPtr dialog, int processId, int screenX, int screenY, bool useSendInput) {
+    public static MouseClickInfo ClickVisibleShellItem(IntPtr dialog, int processId, int screenX, int screenY, bool useSendInput, bool recoverRunnerObstruction) {
       MouseClickInfo click = new MouseClickInfo {
         ScreenX = screenX, ScreenY = screenY,
         InputMethod = useSendInput ? "SendInput" : "PostMessage"
@@ -300,6 +305,21 @@ namespace LocalSendDialogSelect {
         click.ScreenHitHwnd = Hex(screenHit);
         click.ScreenHitOwnerProcessId = (int)screenOwner;
         click.ScreenHitProcessName = ProcessName(screenOwner);
+        if (screenOwner != processId && recoverRunnerObstruction) {
+          // The disposable hosted runner can put its own first-run/WSL windows
+          // over the picker between navigation and the real input click.
+          click.RaisedDialogTopmost = SetWindowPos(dialog, new IntPtr(-1), 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+          if (click.RaisedDialogTopmost) {
+            SetForegroundWindow(dialog);
+            Thread.Sleep(150);
+            screenHit = WindowFromPoint(cursor);
+            GetWindowThreadProcessId(screenHit, out screenOwner);
+            click.ScreenHitHwnd = Hex(screenHit);
+            click.ScreenHitOwnerProcessId = (int)screenOwner;
+            click.ScreenHitProcessName = ProcessName(screenOwner);
+          }
+        }
         if (screenOwner != processId) {
           click.Error = "System hit test at the cursor is not owned by the target process.";
           return click;
@@ -324,7 +344,7 @@ namespace LocalSendDialogSelect {
       }
       return click;
     }
-    public static MouseClickInfo ClickOkViaSendInput(IntPtr dialog, int processId) {
+    public static MouseClickInfo ClickOkViaSendInput(IntPtr dialog, int processId, bool recoverRunnerObstruction) {
       IntPtr button = IntPtr.Zero;
       EnumChildWindows(dialog, (hwnd, data) => {
         if (GetDlgCtrlID(hwnd) == IDOK && Class(hwnd) == "Button" && IsWindowVisible(hwnd)) { button = hwnd; return false; }
@@ -336,7 +356,7 @@ namespace LocalSendDialogSelect {
         return new MouseClickInfo { Error = "Open/Select button has no visible screen bounds." };
       }
       return ClickVisibleShellItem(dialog, processId, rect.Left + (rect.Right - rect.Left) / 2,
-        rect.Top + (rect.Bottom - rect.Top) / 2, true);
+        rect.Top + (rect.Bottom - rect.Top) / 2, true, recoverRunnerObstruction);
     }
     public static bool Capture(IntPtr hwnd, IntPtr hdc) { return PrintWindow(hwnd, hdc, 2) || PrintWindow(hwnd, hdc, 0); }
     public static string ReadText(IntPtr hwnd) { return Text(hwnd); }
@@ -728,7 +748,7 @@ function Invoke-ShellItem {
         if ($overlay.Error) { throw "Could not dismiss the identified runner privacy overlay: $($overlay.Error)" }
         if ($overlay.Detected) { $result.Actions += 'Dismissed the identified WWAHost Microsoft account privacy overlay on the disposable runner' }
       }
-      $click = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $useSendInput)
+      $click = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $useSendInput, [bool] $DismissRunnerPrivacyOverlay)
       $result.ShellItem.MouseClick = $click
       if (-not $click.Posted) { throw "Could not click the visible Shell item using $($click.InputMethod): $($click.Error)" }
       $result.Actions += "Clicked visible Shell item using $($click.InputMethod) via $($click.TargetClass) $($click.TargetHwnd)"
@@ -739,7 +759,7 @@ function Invoke-ShellItem {
       } while (-not $result.ShellItem.IsSelected -and [DateTime]::UtcNow -lt $selectionDeadline)
       if (-not $result.ShellItem.IsSelected -and $useSendInput) {
         # The first click on a background dialog may only activate it.
-        $retryClick = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $true)
+        $retryClick = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $true, [bool] $DismissRunnerPrivacyOverlay)
         $result.ShellItem.MouseClickRetry = $retryClick
         if (-not $retryClick.Posted) { throw "Could not retry the visible Shell item using SendInput: $($retryClick.Error)" }
         $selectionDeadline = [DateTime]::UtcNow.AddSeconds(3)
@@ -758,7 +778,7 @@ function Invoke-ShellItem {
     if (-not $result.ShellItem.IsSelected) { throw 'UI Automation did not report the exact Shell item selected.' }
     if ($SelectionMethod -in @('MouseShellItem', 'SendInputShellItem')) { $result.Actions += 'Verified exact Shell item selected through UI Automation after mouse click' }
     if ($SelectionMethod -eq 'SendInputShellItem') {
-      $confirmationClick = [LocalSendDialogSelect.Driver]::ClickOkViaSendInput($dialog, $TargetProcessId)
+      $confirmationClick = [LocalSendDialogSelect.Driver]::ClickOkViaSendInput($dialog, $TargetProcessId, [bool] $DismissRunnerPrivacyOverlay)
       $result.ShellItem.ConfirmationClick = $confirmationClick
       if (-not $confirmationClick.Posted) { throw "Could not click Open/Select using SendInput: $($confirmationClick.Error)" }
       $result.Actions += 'Clicked Open/Select using SendInput'
