@@ -112,10 +112,10 @@
         if (response.status === 200) {
           i18n = JSON.parse(response.responseText);
           if (i18n.upload) {
-            document.getElementById('upload-button').textContent = i18n.upload;
+            document.getElementById('upload-button').innerText = i18n.upload;
           }
           if (i18n.dropHint) {
-            document.getElementById('drop-hint').textContent = i18n.dropHint;
+            document.getElementById('drop-hint').innerText = i18n.dropHint;
           }
           then();
         }
