@@ -1,6 +1,8 @@
 name: Bisect issue 2906 fix
 
 on:
+  push:
+    branches: [codex/reproduce-2906-windows]
   workflow_dispatch:
 
 permissions:
