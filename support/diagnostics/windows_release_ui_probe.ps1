@@ -558,6 +558,8 @@ namespace LocalSendReleaseUiProbe {
       })
       if ($remainingOverlays.Count -gt 0) { throw 'Runner first-run overlay reappeared before recording.' }
       if (@(Get-Process -Name WWAHost -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Runner privacy host restarted before recording.' }
+      [System.Windows.Forms.SendKeys]::SendWait('{ESC}') # Close Start if the shell opened it during first-run cleanup.
+      Start-Sleep -Milliseconds 500
       $recordScript = Join-Path $PSScriptRoot 'windows_record_desktop.ps1'
       $recordStdout = Join-Path $OutputDirectory 'recording.stdout.txt'
       $recordStderr = Join-Path $OutputDirectory 'recording.stderr.txt'
@@ -565,7 +567,7 @@ namespace LocalSendReleaseUiProbe {
       $recordProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $recordArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $recordStdout -RedirectStandardError $recordStderr
       Start-Sleep -Seconds 2
       if ($recordProcess.HasExited) { throw "Screen recorder exited early: $([IO.File]::ReadAllText($recordStderr))" }
-      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; runnerPrivacyHostsStopped = $runnerPrivacyHosts; runnerOverlaysDismissed = $runnerOverlays; frames = 0; error = $null }
+      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; consoleWindow = $null; explorerWindow = $null; runnerPrivacyHostsStopped = $runnerPrivacyHosts; runnerOverlaysDismissed = $runnerOverlays; frames = 0; error = $null }
     }
     $issueParsedDate = $null
     $issueParseCulture = $null
@@ -581,7 +583,18 @@ namespace LocalSendReleaseUiProbe {
       if ($RecordDemo) {
         $showScript = Join-Path $PSScriptRoot 'windows_show_timestamp.ps1'
         $showArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Path "{1}"' -f $showScript, $fixturePath
-        $showProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $showArguments -PassThru -Wait -WindowStyle Normal
+        $showProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $showArguments -PassThru -WindowStyle Normal
+        $showWindow = $null
+        for ($attempt = 0; $attempt -lt 15 -and -not $showWindow; $attempt++) {
+          Start-Sleep -Milliseconds 200
+          $showWindow = @([LocalSendReleaseUiProbe.Windows]::All() | Where-Object { $_.Visible -and $_.Title -eq 'Issue #3366: set the file timestamp' } | Select-Object -First 1)
+          if ($showWindow.Count -eq 0) { $showWindow = $null }
+        }
+        if (-not $showWindow) { throw 'Visible timestamp PowerShell window was not found.' }
+        $report.recording.consoleWindow = $showWindow[0]
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        [void][LocalSendReleaseUiProbe.Windows]::Activate([IntPtr]::new([Convert]::ToInt64($showWindow[0].Hwnd.Substring(2), 16)))
+        if (-not $showProcess.WaitForExit(15000)) { $showProcess.Kill(); throw 'Visible timestamp PowerShell window did not exit.' }
         $report.recording.consoleExitCode = $showProcess.ExitCode
         if ($showProcess.ExitCode -ne 0) { throw "Visible timestamp command failed with exit code $($showProcess.ExitCode)." }
       } else {

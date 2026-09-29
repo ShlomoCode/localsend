@@ -11,4 +11,4 @@ Write-Host "`$file = '$Path'"
 $date = Get-Date '31-12-1979 23:59:58Z'
 (Get-Item -LiteralPath $Path).LastWriteTime = $date
 Get-Item -LiteralPath $Path | Select-Object Name, LastWriteTime, LastWriteTimeUtc | Format-List
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 8
