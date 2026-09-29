@@ -26,9 +26,13 @@ jobs:
         run: |
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
+          $afterFileImage = 'release-ui-output/app-window-after-file.png'
           if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Raw }
           if (Test-Path -LiteralPath $image) {
             Write-Output ('APP_WINDOW_SEND_PNG_BASE64=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($image)))
+          }
+          if (Test-Path -LiteralPath $afterFileImage) {
+            Write-Output ('APP_WINDOW_AFTER_FILE_PNG_BASE64=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($afterFileImage)))
           }
       - name: Preserve release process log and screenshot
         if: always()
@@ -40,4 +44,5 @@ jobs:
             release-ui-output/desktop.png
             release-ui-output/app-window.png
             release-ui-output/app-window-send.png
+            release-ui-output/app-window-after-file.png
           if-no-files-found: error

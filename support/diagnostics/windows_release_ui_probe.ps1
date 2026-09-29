@@ -18,6 +18,7 @@ $extractPath = Join-Path $OutputDirectory 'release'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
 $windowScreenshotPath = Join-Path $OutputDirectory 'app-window.png'
 $sendScreenshotPath = Join-Path $OutputDirectory 'app-window-send.png'
+$afterFileScreenshotPath = Join-Path $OutputDirectory 'app-window-after-file.png'
 $reportPath = Join-Path $OutputDirectory 'release-ui-report.json'
 $firewallRuleName = $null
 $report = [ordered]@{
@@ -43,6 +44,7 @@ $report = [ordered]@{
   screenshot = $null
   windowScreenshot = $null
   sendTab = $null
+  fileSelection = $null
   appUiTree = @()
   firewallRule = $null
   errors = @()
@@ -456,6 +458,108 @@ namespace LocalSendReleaseUiProbe {
     } else {
       $report.sendTab.error = $click.Error
     }
+
+    $fixturePath = Join-Path $OutputDirectory 'fixture-1979-12-31.txt'
+    [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
+    $expectedTime = [DateTime]::Parse('1979-12-31T23:59:58Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
+    $actualTime = [System.IO.File]::GetLastWriteTimeUtc($fixturePath)
+    $fixtureVerified = $actualTime.Ticks -eq $expectedTime.Ticks
+    if (-not $fixtureVerified) { throw "Fixture LastWriteTimeUtc mismatch: expected $expectedTime, got $actualTime" }
+    $driveLetter = [System.IO.Path]::GetPathRoot($fixturePath).Substring(0, 1)
+    $volume = Get-Volume -DriveLetter $driveLetter
+    if ($volume.FileSystem -ne 'NTFS') { throw "Fixture volume is $($volume.FileSystem), expected NTFS." }
+
+    $driverScript = Join-Path $PSScriptRoot 'windows_dialog_select.ps1'
+    if (-not (Test-Path -LiteralPath $driverScript -PathType Leaf)) { throw "Missing dialog driver: $driverScript" }
+    $driverStdout = Join-Path $OutputDirectory 'file-dialog-driver.stdout.txt'
+    $driverStderr = Join-Path $OutputDirectory 'file-dialog-driver.stderr.txt'
+    $report.fileSelection = [ordered]@{
+      fixture = [ordered]@{
+        path = $fixturePath
+        expectedLastWriteTimeUtc = $expectedTime.ToString('o')
+        actualLastWriteTimeUtc = $actualTime.ToString('o')
+        size = (Get-Item -LiteralPath $fixturePath).Length
+        fileSystem = $volume.FileSystem
+        verified = $fixtureVerified
+      }
+      fileButtonClientX = 80
+      fileButtonClientY = 85
+      fileButtonClick = $null
+      driver = $null
+      screenshot = $null
+      topLevelAfter = @()
+      uiNamesAfter = @()
+      outcome = 'unclassified; inspect screenshot and driver result for added file or No Permission'
+    }
+
+    $driverArguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -TargetProcessId {1} -Path "{2}" -Mode File -TimeoutSeconds 15' -f $driverScript, $appWindow.Pid, $fixturePath
+    $driverProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $driverArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $driverStdout -RedirectStandardError $driverStderr
+    Start-Sleep -Milliseconds 500
+    $report.fileSelection.fileButtonClick = [LocalSendReleaseUiProbe.Windows]::ClickClient($appHwnd, 80, 85)
+    $driverTimedOut = -not $driverProcess.WaitForExit(22000)
+    if ($driverTimedOut) {
+      $driverProcess.Kill()
+      $driverProcess.WaitForExit()
+    }
+    $driverText = [System.IO.File]::ReadAllText($driverStdout)
+    $driverError = [System.IO.File]::ReadAllText($driverStderr)
+    $driverJson = $null
+    try { $driverJson = ConvertFrom-Json -InputObject $driverText } catch { }
+    $report.fileSelection.driver = [ordered]@{
+      pid = $driverProcess.Id
+      exitCode = $driverProcess.ExitCode
+      timedOut = $driverTimedOut
+      stdout = $driverText
+      stderr = $driverError
+      result = $driverJson
+    }
+    Start-Sleep -Seconds 2
+    $report.fileSelection.topLevelAfter = @([LocalSendReleaseUiProbe.Windows]::All())
+    try {
+      $fileBitmap = [System.Drawing.Bitmap]::new($appWindow.Width, $appWindow.Height)
+      try {
+        $fileGraphics = [System.Drawing.Graphics]::FromImage($fileBitmap)
+        try {
+          $fileHdc = $fileGraphics.GetHdc()
+          try {
+            $filePrinted = [LocalSendReleaseUiProbe.Windows]::Capture($appHwnd, $fileHdc)
+          } finally {
+            $fileGraphics.ReleaseHdc($fileHdc)
+          }
+        } finally {
+          $fileGraphics.Dispose()
+        }
+        if (-not $filePrinted) { throw 'PrintWindow returned false after clicking File.' }
+        $fileBitmap.Save($afterFileScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        $report.fileSelection.screenshot = [ordered]@{
+          path = $afterFileScreenshotPath
+          bytes = (Get-Item -LiteralPath $afterFileScreenshotPath).Length
+          sha256 = (Get-FileHash -LiteralPath $afterFileScreenshotPath -Algorithm SHA256).Hash
+          sendTabSha256 = if (Test-Path -LiteralPath $sendScreenshotPath) { (Get-FileHash -LiteralPath $sendScreenshotPath -Algorithm SHA256).Hash } else { $null }
+        }
+      } finally {
+        $fileBitmap.Dispose()
+      }
+    } catch {
+      $report.errors += "LocalSend after-File PrintWindow capture: $($_.Exception.Message)"
+    }
+    try {
+      $afterFileRoot = [System.Windows.Automation.AutomationElement]::FromHandle($appHwnd)
+      $afterFileElements = $afterFileRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+      foreach ($element in $afterFileElements) {
+        if ($report.fileSelection.uiNamesAfter.Count -ge 100) { break }
+        try {
+          $name = [string] $element.Current.Name
+          if (-not [string]::IsNullOrWhiteSpace($name)) { $report.fileSelection.uiNamesAfter += $name }
+        } catch { }
+      }
+    } catch { }
+    if (@($report.fileSelection.uiNamesAfter | Where-Object { $_ -match '(?i)no permission' }).Count -gt 0) {
+      $report.fileSelection.outcome = 'No Permission text found in LocalSend UI Automation tree'
+    } elseif (@($report.fileSelection.uiNamesAfter | Where-Object { $_ -like '*fixture-1979-12-31.txt*' }).Count -gt 0) {
+      $report.fileSelection.outcome = 'fixture filename found in LocalSend UI Automation tree'
+    }
   }
 
   $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -502,6 +606,14 @@ namespace LocalSendReleaseUiProbe {
     $report.status = 'inconclusive'
     $report.errors += 'Send tab selection was not verified by a changed LocalSend window image.'
   }
+  if (-not $report.fileSelection -or -not $report.fileSelection.fileButtonClick.Posted -or
+      $report.fileSelection.driver.timedOut -or $report.fileSelection.driver.exitCode -ne 0 -or
+      -not $report.fileSelection.screenshot) {
+    $report.status = 'inconclusive'
+    $report.errors += 'File selection was not fully driven and captured; inspect fileSelection.driver and app-window-after-file.png.'
+  } elseif ($report.status -ne 'inconclusive') {
+    $report.status = 'file-dialog-observed'
+  }
 } catch {
   $report.errors += $_.Exception.ToString()
 } finally {
@@ -518,5 +630,5 @@ namespace LocalSendReleaseUiProbe {
   $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
   [System.IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $report -Depth 10), [System.Text.UTF8Encoding]::new($false))
   Write-Host "Release UI report: $reportPath"
-  if ($report.status -notin @('captured-foreground-app', 'captured-app-window', 'captured-app-ui-tree')) { exit 1 }
+  if ($report.status -ne 'file-dialog-observed') { exit 1 }
 }
