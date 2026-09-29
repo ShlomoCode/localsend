@@ -408,6 +408,7 @@ function Invoke-ShellItem {
       EditReadbackAfterOpen = $null
       AddressEvidence = @()
       DialogStayedOpen = $false
+      UiaEnumerationRetries = 0
       Screenshot = $null
       ScreenshotError = $null
     }
@@ -473,13 +474,26 @@ function Invoke-ShellItem {
     if (-not [LocalSendDialogSelect.Driver]::DialogOpen($dialog)) { throw 'Dialog closed while navigating to parent; no Shell item was selected.' }
     $result.Navigation.DialogStayedOpen = $true
 
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($dialog)
+    $root = $null
+    $records = @()
     $items = @()
     $address = @()
     do {
       Start-Sleep -Milliseconds 150
       if (-not [LocalSendDialogSelect.Driver]::DialogOpen($dialog)) { throw 'Dialog closed before Shell item selection.' }
-      $records = @(Get-DialogElements $root)
+      try {
+        # Explorer replaces the Shell view while changing directories. An old
+        # UIA element can disappear between FromHandle and FindAll, so reacquire
+        # the dialog and retry until the existing selection deadline.
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($dialog)
+        $records = @(Get-DialogElements $root)
+      } catch {
+        $result.Navigation.UiaEnumerationRetries++
+        if ([DateTime]::UtcNow -ge $deadline) {
+          throw "Could not enumerate the navigated dialog before timeout: $($_.Exception.Message)"
+        }
+        continue
+      }
       $address = @($records | Where-Object {
         $_.Visible -and $_.Name -and
         ($_.Name -eq $parentName -or $_.Name -eq $parentPath -or $_.Name -like "*$parentName*") -and
