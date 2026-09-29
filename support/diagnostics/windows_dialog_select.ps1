@@ -64,6 +64,7 @@ namespace LocalSendDialogSelect {
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
@@ -139,6 +140,46 @@ namespace LocalSendDialogSelect {
       IntPtr response;
       IntPtr sent = SendMessageTimeout(edit, WM_SETTEXT, IntPtr.Zero, value, SMTO_ABORTIFHUNG, 2000, out response);
       return sent != IntPtr.Zero && response != IntPtr.Zero && String.Equals(Text(edit), value, StringComparison.OrdinalIgnoreCase);
+    }
+    public static string AddressToolbarText(IntPtr dialog) {
+      string text = null;
+      EnumChildWindows(dialog, (hwnd, data) => {
+        if (GetDlgCtrlID(hwnd) == 1001 && Class(hwnd) == "ToolbarWindow32") { text = Text(hwnd); return false; }
+        return true;
+      }, IntPtr.Zero);
+      return text;
+    }
+    public static bool FocusAddressBar(IntPtr dialog) {
+      // Alt+D is the native common-dialog address-bar accelerator, posted only
+      // to the owning dialog HWND. It converts the breadcrumb into an Edit.
+      bool alt = PostMessage(dialog, 0x0104, new IntPtr(0x12), new IntPtr(0x20000001)); // WM_SYSKEYDOWN VK_MENU
+      bool d = PostMessage(dialog, 0x0104, new IntPtr(0x44), new IntPtr(0x20000001)); // WM_SYSKEYDOWN D
+      bool dUp = PostMessage(dialog, 0x0105, new IntPtr(0x44), IntPtr.Zero); // WM_SYSKEYUP D
+      bool altUp = PostMessage(dialog, 0x0105, new IntPtr(0x12), IntPtr.Zero); // WM_SYSKEYUP VK_MENU
+      return alt && d && dUp && altUp;
+    }
+    public static IntPtr FindAddressEdit(IntPtr dialog) {
+      IntPtr found = IntPtr.Zero;
+      EnumChildWindows(dialog, (hwnd, data) => {
+        if (Class(hwnd) != "Edit" || !IsWindowVisible(hwnd)) return true;
+        IntPtr ancestor = GetParent(hwnd);
+        while (ancestor != IntPtr.Zero && ancestor != dialog) {
+          string ancestorClass = Class(ancestor);
+          if ((GetDlgCtrlID(ancestor) == 1001 && ancestorClass == "ToolbarWindow32") ||
+              ancestorClass.IndexOf("Breadcrumb", StringComparison.OrdinalIgnoreCase) >= 0 ||
+              ancestorClass.IndexOf("Address", StringComparison.OrdinalIgnoreCase) >= 0) {
+            found = hwnd; return false;
+          }
+          ancestor = GetParent(ancestor);
+        }
+        return true;
+      }, IntPtr.Zero);
+      return found;
+    }
+    public static bool SubmitAddress(IntPtr edit) {
+      bool down = PostMessage(edit, 0x0100, new IntPtr(0x0D), IntPtr.Zero); // WM_KEYDOWN VK_RETURN
+      bool up = PostMessage(edit, 0x0101, new IntPtr(0x0D), IntPtr.Zero); // WM_KEYUP VK_RETURN
+      return down && up;
     }
     public static bool PressOk(IntPtr dialog) {
       IntPtr button = IntPtr.Zero;
@@ -269,6 +310,22 @@ function Invoke-ShellItem {
   $targetName = [System.IO.Path]::GetFileName($targetPath)
   $parentName = [System.IO.Path]::GetFileName($parentPath.TrimEnd([char[]]@('\', '/')))
   $navigationInput = $parentPath.TrimEnd([char[]]@('\', '/')) + '\'
+  $acceptedItemNames = @($targetName)
+  $stemEvidence = $null
+  if ($Mode -eq 'File') {
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($targetName)
+    if ($stem -ne $targetName) {
+      $sameStemFiles = @(Get-ChildItem -LiteralPath $parentPath -File | Where-Object { $_.BaseName -eq $stem })
+      $uniqueExactFile = $sameStemFiles.Count -eq 1 -and
+        [string]::Equals($sameStemFiles[0].FullName, $targetPath, [System.StringComparison]::OrdinalIgnoreCase)
+      $stemEvidence = [ordered]@{
+        stem = $stem
+        filesWithStem = @($sameStemFiles | ForEach-Object FullName)
+        uniqueExactTarget = $uniqueExactFile
+      }
+      if ($uniqueExactFile) { $acceptedItemNames += $stem }
+    }
+  }
   $result = [ordered]@{
     Success = $false
     Error = $null
@@ -279,7 +336,11 @@ function Invoke-ShellItem {
     DialogHwnd = $null
     Navigation = [ordered]@{
       ParentDirectory = $parentPath
+      Method = if ($Mode -eq 'Folder') { 'native address-bar Alt+D and Enter' } else { 'filename Edit with parent directory only' }
       Input = $navigationInput
+      AddressToolbarBefore = $null
+      AddressToolbarAfter = $null
+      AddressEditHwnd = $null
       EditReadbackBeforeOpen = $null
       EditReadbackAfterOpen = $null
       AddressEvidence = @()
@@ -289,6 +350,9 @@ function Invoke-ShellItem {
     }
     ShellItem = [ordered]@{
       Name = $targetName
+      AcceptedVisibleNames = $acceptedItemNames
+      HiddenExtensionEvidence = $stemEvidence
+      MatchedBy = $null
       Candidates = @()
       SelectedElement = $null
       SelectionPattern = $null
@@ -312,14 +376,35 @@ function Invoke-ShellItem {
     $edit = [LocalSendDialogSelect.Driver]::FindFilenameEdit($dialog)
     if ($edit -eq [IntPtr]::Zero) { throw 'Could not identify the dialog filename Edit.' }
 
-    # Enter only the parent directory. The target item name/path is never typed.
-    if (-not [LocalSendDialogSelect.Driver]::SetFilenameEdit($edit, $navigationInput)) {
-      throw 'Could not set and read back the parent directory in the filename Edit.'
+    # Enter only the parent directory. A folder picker treats filename Edit + OK
+    # as a completed selection, so its address bar must perform navigation.
+    if ($Mode -eq 'Folder') {
+      $result.Navigation.AddressToolbarBefore = [LocalSendDialogSelect.Driver]::AddressToolbarText($dialog)
+      if (-not [LocalSendDialogSelect.Driver]::FocusAddressBar($dialog)) { throw 'Could not post Alt+D to the native dialog address bar.' }
+      $addressEdit = [IntPtr]::Zero
+      $addressDeadline = [DateTime]::UtcNow.AddSeconds(3)
+      while ($addressEdit -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $addressDeadline) {
+        $addressEdit = [LocalSendDialogSelect.Driver]::FindAddressEdit($dialog)
+        if ($addressEdit -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 100 }
+      }
+      if ($addressEdit -eq [IntPtr]::Zero) { throw 'Alt+D did not expose a native address-bar Edit; refusing filename Edit navigation in Folder mode.' }
+      $result.Navigation.AddressEditHwnd = '0x' + $addressEdit.ToInt64().ToString('X')
+      if (-not [LocalSendDialogSelect.Driver]::SetFilenameEdit($addressEdit, $parentPath)) {
+        throw 'Could not set and read back the parent directory in the address-bar Edit.'
+      }
+      $result.Navigation.EditReadbackBeforeOpen = [LocalSendDialogSelect.Driver]::ReadText($addressEdit)
+      $result.Actions += 'Entered and verified parent directory in native address-bar Edit'
+      if (-not [LocalSendDialogSelect.Driver]::SubmitAddress($addressEdit)) { throw 'Could not submit parent directory from address bar.' }
+      $result.Actions += 'Submitted parent directory from address bar using targeted Enter'
+    } else {
+      if (-not [LocalSendDialogSelect.Driver]::SetFilenameEdit($edit, $navigationInput)) {
+        throw 'Could not set and read back the parent directory in the filename Edit.'
+      }
+      $result.Navigation.EditReadbackBeforeOpen = [LocalSendDialogSelect.Driver]::ReadText($edit)
+      $result.Actions += 'Entered and verified parent directory path in filename Edit'
+      if (-not [LocalSendDialogSelect.Driver]::PressOk($dialog)) { throw 'Could not activate Open to navigate to the parent directory.' }
+      $result.Actions += 'Activated Open to navigate to parent directory'
     }
-    $result.Navigation.EditReadbackBeforeOpen = [LocalSendDialogSelect.Driver]::ReadText($edit)
-    $result.Actions += 'Entered and verified parent directory path in filename Edit'
-    if (-not [LocalSendDialogSelect.Driver]::PressOk($dialog)) { throw 'Could not activate Open to navigate to the parent directory.' }
-    $result.Actions += 'Activated Open to navigate to parent directory'
     if (-not [LocalSendDialogSelect.Driver]::DialogOpen($dialog)) { throw 'Dialog closed while navigating to parent; no Shell item was selected.' }
     $result.Navigation.DialogStayedOpen = $true
 
@@ -336,14 +421,17 @@ function Invoke-ShellItem {
         $_.ControlType -notmatch 'ListItem|DataItem|TreeItem' -and
         ($_.Name -eq $parentPath -or $_.ControlType -match 'Button|ToolBar|SplitButton|Hyperlink' -or (Test-AddressContext $_.Element))
       })
-      $items = @($records | Where-Object { $_.Visible -and $_.Name -eq $targetName })
-    } while (($address.Count -eq 0 -or $items.Count -eq 0) -and [DateTime]::UtcNow -lt $deadline)
-    $result.Navigation.EditReadbackAfterOpen = [LocalSendDialogSelect.Driver]::ReadText($edit)
+      $result.Navigation.AddressToolbarAfter = [LocalSendDialogSelect.Driver]::AddressToolbarText($dialog)
+      $nativeAddressVerified = $result.Navigation.AddressToolbarAfter -and
+        $result.Navigation.AddressToolbarAfter.IndexOf($parentName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+      $items = @($records | Where-Object { $_.Visible -and $_.Name -in $acceptedItemNames })
+    } while ((($address.Count -eq 0 -and -not $nativeAddressVerified) -or $items.Count -eq 0) -and [DateTime]::UtcNow -lt $deadline)
+    if ($Mode -eq 'File') { $result.Navigation.EditReadbackAfterOpen = [LocalSendDialogSelect.Driver]::ReadText($edit) }
     $result.UiaNames = @($records | Where-Object { $_.Visible -and $_.Name } | Select-Object -First 100 -ExpandProperty Name)
     $result.Navigation.AddressEvidence = @($address | ForEach-Object {
       [ordered]@{ name = $_.Name; controlType = $_.ControlType; automationId = $_.AutomationId; bounds = $_.Bounds }
     })
-    if ($address.Count -eq 0) { throw "Could not verify that the common dialog navigated to parent directory '$parentPath'." }
+    if ($address.Count -eq 0 -and -not $nativeAddressVerified) { throw "Could not verify that the common dialog navigated to parent directory '$parentPath'." }
     $result.Actions += 'Verified parent directory in visible dialog address controls'
 
     if ($DialogScreenshotPath) {
@@ -381,6 +469,7 @@ function Invoke-ShellItem {
       } catch { }
     }
     if (-not $selectedPattern) { throw "The visible target '$targetName' has no SelectionItemPattern; refusing to use the filename Edit." }
+    $result.ShellItem.MatchedBy = if ($selected.Name -eq $targetName) { 'exact filename' } else { 'extension-hidden stem with unique filesystem match' }
     $selectedPattern.Select()
     $result.ShellItem.SelectionPattern = 'SelectionItemPattern.Select'
     $result.ShellItem.IsSelected = [bool] $selectedPattern.Current.IsSelected

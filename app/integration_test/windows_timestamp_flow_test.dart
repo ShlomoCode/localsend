@@ -263,6 +263,7 @@ Future<Process> _startAutomation({
   required String mode,
   required String target,
 }) async {
+  final selectionMethod = Platform.environment['LS_SELECTION_METHOD'] ?? 'PathEntry';
   return Process.start('powershell.exe', [
     '-NoProfile',
     '-STA',
@@ -276,6 +277,8 @@ Future<Process> _startAutomation({
     target,
     '-Mode',
     mode,
+    '-SelectionMethod',
+    selectionMethod,
     '-TimeoutSeconds',
     '15',
   ]);
