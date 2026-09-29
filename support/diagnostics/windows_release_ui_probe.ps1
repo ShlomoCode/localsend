@@ -1,8 +1,9 @@
-# Launch the official portable LocalSend release on a Windows desktop and capture its UI.
+# Launch the official LocalSend release on a Windows desktop and capture its UI.
 param(
   [string] $OutputDirectory = $env:LS_RELEASE_UI_OUTPUT,
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
+  [ValidateSet('Zip', 'Installer')][string] $PackageKind = 'Zip',
   [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
   [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem')][string] $SelectionMethod = 'PathEntry',
   [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
@@ -17,10 +18,14 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 
-$assetName = "LocalSend-1.18.2-windows-$AssetArchitecture.zip"
+if ($PackageKind -eq 'Installer' -and $AssetArchitecture -ne 'x86-64') {
+  throw 'The v1.18.2 installer is only available for x86-64.'
+}
+$assetName = if ($PackageKind -eq 'Installer') { 'LocalSend-1.18.2-windows-x86-64.exe' } else { "LocalSend-1.18.2-windows-$AssetArchitecture.zip" }
 $releaseUrl = "https://github.com/localsend/localsend/releases/download/v1.18.2/$assetName"
 $archivePath = Join-Path $OutputDirectory $assetName
 $extractPath = Join-Path $OutputDirectory 'release'
+$installerLogPath = Join-Path $OutputDirectory 'installer.log'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
 $windowScreenshotPath = Join-Path $OutputDirectory 'app-window.png'
 $sendScreenshotPath = Join-Path $OutputDirectory 'app-window-send.png'
@@ -41,6 +46,7 @@ if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {
 }
 $report = [ordered]@{
   release = 'v1.18.2'
+  packageKind = $PackageKind
   selectionMode = $SelectionMode
   selectionMethod = $SelectionMethod
   fixtureMethod = $FixtureMethod
@@ -59,6 +65,7 @@ $report = [ordered]@{
   startedUtc = [DateTime]::UtcNow.ToString('o')
   status = 'inconclusive'
   archive = $null
+  installer = $null
   executable = $null
   launchedPid = $null
   processes = @()
@@ -89,7 +96,14 @@ try {
   }
 
   [System.IO.Directory]::CreateDirectory($extractPath) | Out-Null
-  Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+  if ($PackageKind -eq 'Installer') {
+    $installerArguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$extractPath`"", "/LOG=`"$installerLogPath`"")
+    $installation = Start-Process -FilePath $archivePath -ArgumentList $installerArguments -PassThru -Wait
+    $report.installer = [ordered]@{ exitCode = $installation.ExitCode; logPath = $installerLogPath }
+    if ($installation.ExitCode -ne 0) { throw "Official installer failed with exit code $($installation.ExitCode)." }
+  } else {
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+  }
   $candidates = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'localsend_app.exe')
   if ($candidates.Count -eq 0) {
     $candidates = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'LocalSend.exe')

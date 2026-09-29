@@ -1,0 +1,49 @@
+name: Diagnose installed Windows release UI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installed_windows_ui:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            selection_mode: File
+          - runner: windows-11-arm
+            selection_mode: Folder
+          - runner: windows-2025
+            selection_mode: File
+          - runner: windows-2025
+            selection_mode: Folder
+    defaults:
+      run:
+        shell: powershell
+    env:
+      LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install official v1.18.2 and select dated ${{ matrix.selection_mode }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture x86-64 -PackageKind Installer -RunnerLabel ${{ matrix.runner }} -SelectionMethod MouseShellItem -FixtureMethod IssuePowerShell
+      - name: Print diagnostic report
+        if: always()
+        run: |
+          $report = 'release-ui-output/release-ui-report.json'
+          if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Raw }
+      - name: Preserve installation and selection evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: installer-${{ matrix.runner }}-${{ matrix.selection_mode }}
+          path: |
+            release-ui-output/release-ui-report.json
+            release-ui-output/installer.log
+            release-ui-output/*.png
+            release-ui-output/file-dialog-driver.*.txt
+          if-no-files-found: warn
