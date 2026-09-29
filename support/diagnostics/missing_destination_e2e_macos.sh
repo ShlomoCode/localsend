@@ -143,8 +143,11 @@ app_executable="$(find "$app_dir/Contents/MacOS" -maxdepth 1 -type f -perm -111 
 # to the app's writable sandbox container.
 portable_settings_dir="$HOME/Library/Containers/org.localsend.localsendApp/Data/Documents"
 portable_settings="$portable_settings_dir/localsend-e2e-settings-$version.json"
+receiver_destination_root="$portable_settings_dir/receive-e2e-$version"
 mkdir -p "$portable_settings_dir"
 rm -f "$portable_settings" "$(dirname "$app_executable")/settings.json"
+rm -rf "$receiver_destination_root"
+mkdir -p "$receiver_destination_root"
 touch "$portable_settings"
 ln -s "$portable_settings" "$(dirname "$app_executable")/settings.json"
 
@@ -166,7 +169,7 @@ fixture_hash="$(sha256 "$fixture")"
   echo "fixture_sha256=$fixture_hash"
 } >"$report"
 
-control_destination="$output_dir/control-destination"
+control_destination="$receiver_destination_root/control-destination"
 mkdir -p "$control_destination"
 write_settings "$(dirname "$app_executable")" "$control_destination"
 start_receiver control
@@ -192,7 +195,7 @@ fi
 matching_missing_runs=0
 for iteration in 1 2; do
   case_name="missing-$iteration"
-  destination="$output_dir/deleted-destination-$iteration"
+  destination="$receiver_destination_root/deleted-destination-$iteration"
   mkdir -p "$destination"
   write_settings "$(dirname "$app_executable")" "$destination"
   start_receiver "$case_name"
