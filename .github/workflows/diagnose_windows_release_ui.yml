@@ -163,6 +163,7 @@ jobs:
             release-ui-output/app-window-after-file.png
             release-ui-output/app-window-after-folder.png
             release-ui-output/native-dialog-parent.png
+            release-ui-output/desktop-preparation.json
             release-ui-output/installer.log
             release-ui-output/file-dialog-driver.*.txt
           if-no-files-found: error

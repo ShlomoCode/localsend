@@ -74,6 +74,7 @@ $report = [ordered]@{
   topLevelAfter = @()
   firewall = @()
   activation = @()
+  desktopPreparation = $null
   foreground = $null
   screenshot = $null
   windowScreenshot = $null
@@ -552,6 +553,11 @@ namespace LocalSendReleaseUiProbe {
 
     $driverScript = Join-Path $PSScriptRoot 'windows_dialog_select.ps1'
     if (-not (Test-Path -LiteralPath $driverScript -PathType Leaf)) { throw "Missing dialog driver: $driverScript" }
+    if ($SelectionMethod -eq 'SendInputShellItem' -and $RunnerLabel -eq 'windows-11-arm') {
+      $preparationReport = Join-Path $OutputDirectory 'desktop-preparation.json'
+      & (Join-Path $PSScriptRoot 'windows_desktop_ready.ps1') -ReportPath $preparationReport
+      $report.desktopPreparation = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($preparationReport))
+    }
     $driverStdout = Join-Path $OutputDirectory 'file-dialog-driver.stdout.txt'
     $driverStderr = Join-Path $OutputDirectory 'file-dialog-driver.stderr.txt'
     $report.fileSelection = [ordered]@{
