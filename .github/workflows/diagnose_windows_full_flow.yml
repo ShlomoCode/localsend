@@ -45,7 +45,7 @@ jobs:
       LS_DIAGNOSTIC_OUTPUT: ${{ github.workspace }}/diagnostic-output
       LS_RUST_LIBRARY: ${{ github.workspace }}/target/debug/rust_lib_localsend_app.dll
       LS_DIALOG_DRIVER: ${{ github.workspace }}/support/diagnostics/windows_dialog_select.ps1
-      LS_SELECTION_METHOD: ShellItem
+      LS_SELECTION_METHOD: MouseShellItem
 
     steps:
       - uses: actions/checkout@v6
