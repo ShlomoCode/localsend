@@ -1,4 +1,4 @@
-name: Diagnose released Windows ARM UI
+name: Diagnose released Windows UI on ARM
 
 on:
   push:
@@ -16,6 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         selection_mode: [File, Folder]
+        asset_architecture: [arm-64, x86-64]
     defaults:
       run:
         shell: powershell
@@ -23,11 +24,12 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
-      - name: Launch official v1.18.2 ARM64 release and select ${{ matrix.selection_mode }}
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }}
-      - name: Print Send-tab evidence when artifact download is unavailable
+      - name: Launch official v1.18.2 ${{ matrix.asset_architecture }} release and select ${{ matrix.selection_mode }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }}
+      - name: Print ${{ matrix.asset_architecture }} ${{ matrix.selection_mode }} evidence when artifact download is unavailable
         if: always()
         run: |
+          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} RUNNER=windows-11-arm'
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
@@ -46,7 +48,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: windows11-arm-v1.18.2-release-ui-${{ matrix.selection_mode }}
+          name: windows11-arm-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png

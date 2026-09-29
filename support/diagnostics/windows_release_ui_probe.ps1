@@ -1,7 +1,8 @@
 # Launch the official portable LocalSend release on a Windows desktop and capture its UI.
 param(
   [string] $OutputDirectory = $env:LS_RELEASE_UI_OUTPUT,
-  [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File'
+  [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
+  [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,8 +14,9 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 
-$releaseUrl = 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-arm-64.zip'
-$archivePath = Join-Path $OutputDirectory 'LocalSend-1.18.2-windows-arm-64.zip'
+$assetName = "LocalSend-1.18.2-windows-$AssetArchitecture.zip"
+$releaseUrl = "https://github.com/localsend/localsend/releases/download/v1.18.2/$assetName"
+$archivePath = Join-Path $OutputDirectory $assetName
 $extractPath = Join-Path $OutputDirectory 'release'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
 $windowScreenshotPath = Join-Path $OutputDirectory 'app-window.png'
@@ -27,10 +29,14 @@ $firewallRuleName = $null
 $report = [ordered]@{
   release = 'v1.18.2'
   selectionMode = $SelectionMode
+  assetArchitecture = $AssetArchitecture
+  expectedExecution = if ($AssetArchitecture -eq 'x86-64') { 'x64 emulation on Windows 11 ARM' } else { 'native ARM64 on Windows 11 ARM' }
+  assetName = $assetName
   assetUrl = $releaseUrl
   runner = $env:RUNNER_NAME
   os = [System.Environment]::OSVersion.VersionString
   processArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+  osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
   sessionName = $env:SESSIONNAME
   user = [System.Environment]::UserName
   startedUtc = [DateTime]::UtcNow.ToString('o')
@@ -75,10 +81,27 @@ try {
     throw "Expected one LocalSend application executable, found $($candidates.Count). Executables: $($exeList -join ', ')"
   }
   $exe = $candidates[0]
+  $exeStream = [System.IO.File]::OpenRead($exe.FullName)
+  try {
+    $reader = [System.IO.BinaryReader]::new($exeStream)
+    [void] $exeStream.Seek(0x3C, [System.IO.SeekOrigin]::Begin)
+    $peOffset = $reader.ReadInt32()
+    [void] $exeStream.Seek($peOffset, [System.IO.SeekOrigin]::Begin)
+    if ($reader.ReadUInt32() -ne 0x00004550) { throw "Invalid PE signature in $($exe.FullName)" }
+    $machine = $reader.ReadUInt16()
+  } finally {
+    $exeStream.Dispose()
+  }
+  $expectedMachine = if ($AssetArchitecture -eq 'arm-64') { 0xAA64 } else { 0x8664 }
+  if ($machine -ne $expectedMachine) {
+    throw ('Unexpected PE machine 0x{0:X4} for {1}; expected 0x{2:X4}.' -f $machine, $assetName, $expectedMachine)
+  }
   $report.executable = [ordered]@{
     path = $exe.FullName
     bytes = $exe.Length
     version = $exe.VersionInfo.FileVersion
+    peMachine = ('0x{0:X4}' -f $machine)
+    architecture = $AssetArchitecture
     sha256 = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash
   }
 
