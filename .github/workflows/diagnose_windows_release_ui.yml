@@ -122,6 +122,18 @@ jobs:
             fixture_method: IssuePowerShell
             selection_method: SendInputShellItem
             package_kind: Installer
+          - runner: windows-11-vs2026-arm
+            asset_architecture: x86-64
+            selection_mode: File
+            fixture_method: IssuePowerShell
+            selection_method: SendInputShellItem
+            package_kind: Installer
+          - runner: windows-11-vs2026-arm
+            asset_architecture: x86-64
+            selection_mode: Folder
+            fixture_method: IssuePowerShell
+            selection_method: SendInputShellItem
+            package_kind: Installer
     defaults:
       run:
         shell: powershell
@@ -163,7 +175,6 @@ jobs:
             release-ui-output/app-window-after-file.png
             release-ui-output/app-window-after-folder.png
             release-ui-output/native-dialog-parent.png
-            release-ui-output/desktop-preparation.json
             release-ui-output/installer.log
             release-ui-output/file-dialog-driver.*.txt
           if-no-files-found: error

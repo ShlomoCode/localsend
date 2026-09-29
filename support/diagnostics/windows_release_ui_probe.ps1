@@ -4,7 +4,7 @@ param(
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
   [ValidateSet('Zip', 'Installer')][string] $PackageKind = 'Zip',
-  [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
+  [ValidateSet('windows-11-arm', 'windows-11-vs2026-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
   [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem', 'SendInputShellItem')][string] $SelectionMethod = 'PathEntry',
   [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
 )
@@ -38,6 +38,7 @@ $firewallRuleName = $null
 $osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 $expectedExecution = switch ($RunnerLabel) {
   'windows-11-arm' { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on Windows 11 ARM' } else { 'x64 emulation on Windows 11 ARM' } }
+  'windows-11-vs2026-arm' { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on Windows 11 ARM with VS2026' } else { 'x64 emulation on Windows 11 ARM with VS2026' } }
   'windows-2025' { 'native x64 on Windows Server 2025' }
   default { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on ARM64 host' } elseif ($osArchitecture -eq 'Arm64') { 'x64 emulation on ARM64 host' } else { 'native x64 on x64 host' } }
 }
@@ -74,7 +75,6 @@ $report = [ordered]@{
   topLevelAfter = @()
   firewall = @()
   activation = @()
-  desktopPreparation = $null
   foreground = $null
   screenshot = $null
   windowScreenshot = $null
@@ -553,11 +553,6 @@ namespace LocalSendReleaseUiProbe {
 
     $driverScript = Join-Path $PSScriptRoot 'windows_dialog_select.ps1'
     if (-not (Test-Path -LiteralPath $driverScript -PathType Leaf)) { throw "Missing dialog driver: $driverScript" }
-    if ($SelectionMethod -eq 'SendInputShellItem' -and $RunnerLabel -eq 'windows-11-arm') {
-      $preparationReport = Join-Path $OutputDirectory 'desktop-preparation.json'
-      & (Join-Path $PSScriptRoot 'windows_desktop_ready.ps1') -ReportPath $preparationReport
-      $report.desktopPreparation = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($preparationReport))
-    }
     $driverStdout = Join-Path $OutputDirectory 'file-dialog-driver.stdout.txt'
     $driverStderr = Join-Path $OutputDirectory 'file-dialog-driver.stderr.txt'
     $report.fileSelection = [ordered]@{
