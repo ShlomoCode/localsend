@@ -1,4 +1,4 @@
-name: Diagnose released Windows UI
+name: Reproduce issue 2906 on Windows
 
 on:
   workflow_dispatch:
@@ -14,38 +14,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-11-arm
-            asset_architecture: arm-64
-            selection_mode: File
-            fixture_method: UtcApi
-          - runner: windows-11-arm
-            asset_architecture: arm-64
-            selection_mode: Folder
-            fixture_method: UtcApi
-          - runner: windows-11-arm
+          - runner: windows-2025
             asset_architecture: x86-64
             selection_mode: File
-            fixture_method: UtcApi
-          - runner: windows-11-arm
-            asset_architecture: x86-64
-            selection_mode: Folder
+            release_version: 1.17.0
+            entry_method: Picker
             fixture_method: UtcApi
           - runner: windows-2025
             asset_architecture: x86-64
             selection_mode: File
+            release_version: 1.17.0
+            entry_method: SendTo
             fixture_method: UtcApi
           - runner: windows-2025
             asset_architecture: x86-64
-            selection_mode: Folder
+            selection_mode: File
+            release_version: 1.18.2
+            entry_method: Picker
             fixture_method: UtcApi
-          - runner: windows-11-arm
+          - runner: windows-2025
             asset_architecture: x86-64
             selection_mode: File
-            fixture_method: IssuePowerShell
-          - runner: windows-11-arm
-            asset_architecture: x86-64
-            selection_mode: Folder
-            fixture_method: IssuePowerShell
+            release_version: 1.18.2
+            entry_method: SendTo
+            fixture_method: UtcApi
     defaults:
       run:
         shell: powershell
@@ -53,12 +45,12 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
-      - name: Select ${{ matrix.selection_mode }} through Shell item in v1.18.2 ${{ matrix.asset_architecture }} on ${{ matrix.runner }} (${{ matrix.fixture_method }})
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }} -SelectionMethod ShellItem -FixtureMethod ${{ matrix.fixture_method }}
-      - name: Print ${{ matrix.asset_architecture }} ${{ matrix.selection_mode }} evidence when artifact download is unavailable
+      - name: Exercise issue 2906 via ${{ matrix.entry_method }} on LocalSend ${{ matrix.release_version }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }} -ReleaseVersion ${{ matrix.release_version }} -EntryMethod ${{ matrix.entry_method }} -SelectionMethod ShellItem -FixtureMethod ${{ matrix.fixture_method }} -FixtureTimestampUtc '1927-10-15T12:34:56Z' -FixtureFileName 'fixture-1927-10-15.txt'
+      - name: Print ${{ matrix.release_version }} ${{ matrix.entry_method }} evidence when artifact download is unavailable
         if: always()
         run: |
-          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=ShellItem FIXTURE_METHOD=${{ matrix.fixture_method }} RUNNER=${{ matrix.runner }}'
+          Write-Output 'ISSUE=2906 RELEASE=${{ matrix.release_version }} ENTRY_METHOD=${{ matrix.entry_method }} ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} SELECTION_METHOD=ShellItem FIXTURE_METHOD=${{ matrix.fixture_method }} FIXTURE_TIMESTAMP_UTC=1927-10-15T12:34:56Z RUNNER=${{ matrix.runner }}'
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
@@ -77,7 +69,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: shell-item-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}-${{ matrix.fixture_method }}
+          name: issue-2906-${{ matrix.runner }}-v${{ matrix.release_version }}-${{ matrix.entry_method }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png

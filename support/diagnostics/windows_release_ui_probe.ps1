@@ -4,8 +4,12 @@ param(
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
   [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
+  [string] $ReleaseVersion = '1.18.2',
+  [ValidateSet('Picker', 'SendTo')][string] $EntryMethod = 'Picker',
   [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry',
-  [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
+  [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi',
+  [string] $FixtureTimestampUtc = '1979-12-31T23:59:58Z',
+  [string] $FixtureFileName = 'fixture-old-timestamp.txt'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,8 +21,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 
-$assetName = "LocalSend-1.18.2-windows-$AssetArchitecture.zip"
-$releaseUrl = "https://github.com/localsend/localsend/releases/download/v1.18.2/$assetName"
+$assetName = "LocalSend-$ReleaseVersion-windows-$AssetArchitecture.zip"
+$releaseUrl = "https://github.com/localsend/localsend/releases/download/v$ReleaseVersion/$assetName"
 $archivePath = Join-Path $OutputDirectory $assetName
 $extractPath = Join-Path $OutputDirectory 'release'
 $screenshotPath = Join-Path $OutputDirectory 'desktop.png'
@@ -40,7 +44,8 @@ if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {
   throw 'The windows-2025 runner case requires the x86-64 release asset.'
 }
 $report = [ordered]@{
-  release = 'v1.18.2'
+  release = "v$ReleaseVersion"
+  entryMethod = $EntryMethod
   selectionMode = $SelectionMode
   selectionMethod = $SelectionMethod
   fixtureMethod = $FixtureMethod
@@ -72,6 +77,7 @@ $report = [ordered]@{
   windowScreenshot = $null
   sendTab = $null
   fileSelection = $null
+  fixture = $null
   appUiTree = @()
   firewallRule = $null
   errors = @()
@@ -79,6 +85,39 @@ $report = [ordered]@{
 
 try {
   $report.osCaption = (Get-CimInstance Win32_OperatingSystem).Caption
+  $fixtureDirectory = if ($SelectionMode -eq 'Folder') { Join-Path $OutputDirectory 'folder-containing-old-file' } else { $OutputDirectory }
+  [System.IO.Directory]::CreateDirectory($fixtureDirectory) | Out-Null
+  $fixturePath = Join-Path $fixtureDirectory $FixtureFileName
+  [System.IO.File]::WriteAllText($fixturePath, "LocalSend $FixtureTimestampUtc timestamp diagnostic", [System.Text.UTF8Encoding]::new($false))
+  $expectedTime = [DateTime]::Parse($FixtureTimestampUtc, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+  $issueParsedDate = $null
+  if ($FixtureMethod -eq 'IssuePowerShell') {
+    $issueParsedDate = Get-Date $FixtureTimestampUtc
+    (Get-Item -LiteralPath $fixturePath).LastWriteTime = $issueParsedDate
+  } else {
+    [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
+  }
+  $actualTime = [System.IO.File]::GetLastWriteTimeUtc($fixturePath)
+  $fixtureVerified = $actualTime.Ticks -eq $expectedTime.Ticks
+  if (-not $fixtureVerified) { throw "Fixture LastWriteTimeUtc mismatch: expected $expectedTime, got $actualTime" }
+  $driveLetter = [System.IO.Path]::GetPathRoot($fixturePath).Substring(0, 1)
+  $volume = Get-Volume -DriveLetter $driveLetter
+  if ($volume.FileSystem -ne 'NTFS') { throw "Fixture volume is $($volume.FileSystem), expected NTFS." }
+  if ($SelectionMode -eq 'Folder' -and @(Get-ChildItem -LiteralPath $fixtureDirectory -Force).Count -ne 1) {
+    throw "Folder fixture must contain exactly one old file: $fixtureDirectory"
+  }
+  $selectionPath = if ($SelectionMode -eq 'Folder') { $fixtureDirectory } else { $fixturePath }
+  $report.fixture = [ordered]@{
+    path = $fixturePath
+    directory = $fixtureDirectory
+    method = $FixtureMethod
+    issueCommandParsedLocal = if ($issueParsedDate) { $issueParsedDate.ToString('o') } else { $null }
+    expectedLastWriteTimeUtc = $expectedTime.ToString('o')
+    actualLastWriteTimeUtc = $actualTime.ToString('o')
+    size = (Get-Item -LiteralPath $fixturePath).Length
+    fileSystem = $volume.FileSystem
+    verified = $fixtureVerified
+  }
   Invoke-WebRequest -Uri $releaseUrl -OutFile $archivePath -MaximumRedirection 10
   $archive = Get-Item -LiteralPath $archivePath
   if ($archive.Length -lt 1000000) { throw "Downloaded archive is unexpectedly small: $($archive.Length) bytes" }
@@ -264,7 +303,11 @@ namespace LocalSendReleaseUiProbe {
 '@
   Add-Type -TypeDefinition $source -Language CSharp
 
-  $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
+  if ($EntryMethod -eq 'SendTo') {
+    $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList @('"' + $selectionPath + '"') -PassThru
+  } else {
+    $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
+  }
   $report.launchedPid = $started.Id
   $deadline = [DateTime]::UtcNow.AddSeconds(30)
   $visible = $false
@@ -504,30 +547,9 @@ namespace LocalSendReleaseUiProbe {
       $report.sendTab.error = $click.Error
     }
 
-    $fixtureDirectory = if ($SelectionMode -eq 'Folder') { Join-Path $OutputDirectory 'folder-containing-old-file' } else { $OutputDirectory }
-    [System.IO.Directory]::CreateDirectory($fixtureDirectory) | Out-Null
-    $fixturePath = Join-Path $fixtureDirectory 'fixture-1979-12-31.txt'
-    [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
-    $expectedTime = [DateTime]::Parse('1979-12-31T23:59:58Z', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-    $issueParsedDate = $null
-    if ($FixtureMethod -eq 'IssuePowerShell') {
-      $issueParsedDate = Get-Date '31-12-1979 23:59:58Z'
-      (Get-Item -LiteralPath $fixturePath).LastWriteTime = $issueParsedDate
-    } else {
-      [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
-    }
-    $actualTime = [System.IO.File]::GetLastWriteTimeUtc($fixturePath)
-    $fixtureVerified = $actualTime.Ticks -eq $expectedTime.Ticks
-    if (-not $fixtureVerified) { throw "Fixture LastWriteTimeUtc mismatch: expected $expectedTime, got $actualTime" }
-    $driveLetter = [System.IO.Path]::GetPathRoot($fixturePath).Substring(0, 1)
-    $volume = Get-Volume -DriveLetter $driveLetter
-    if ($volume.FileSystem -ne 'NTFS') { throw "Fixture volume is $($volume.FileSystem), expected NTFS." }
-    if ($SelectionMode -eq 'Folder' -and @(Get-ChildItem -LiteralPath $fixtureDirectory -Force).Count -ne 1) {
-      throw "Folder fixture must contain exactly one old file: $fixtureDirectory"
-    }
-    $selectionPath = if ($SelectionMode -eq 'Folder') { $fixtureDirectory } else { $fixturePath }
     $buttonX = if ($SelectionMode -eq 'Folder') { 200 } else { 80 }
 
+    if ($EntryMethod -eq 'Picker') {
     $driverScript = Join-Path $PSScriptRoot 'windows_dialog_select.ps1'
     if (-not (Test-Path -LiteralPath $driverScript -PathType Leaf)) { throw "Missing dialog driver: $driverScript" }
     $driverStdout = Join-Path $OutputDirectory 'file-dialog-driver.stdout.txt'
@@ -536,17 +558,7 @@ namespace LocalSendReleaseUiProbe {
       mode = $SelectionMode
       selectionMethod = $SelectionMethod
       selectedPath = $selectionPath
-      fixture = [ordered]@{
-        path = $fixturePath
-        directory = $fixtureDirectory
-        method = $FixtureMethod
-        issueCommandParsedLocal = if ($issueParsedDate) { $issueParsedDate.ToString('o') } else { $null }
-        expectedLastWriteTimeUtc = $expectedTime.ToString('o')
-        actualLastWriteTimeUtc = $actualTime.ToString('o')
-        size = (Get-Item -LiteralPath $fixturePath).Length
-        fileSystem = $volume.FileSystem
-        verified = $fixtureVerified
-      }
+      fixture = $report.fixture
       selectionButtonClientX = $buttonX
       selectionButtonClientY = 85
       selectionButtonClick = $null
@@ -625,8 +637,34 @@ namespace LocalSendReleaseUiProbe {
     } catch { }
     if (@($report.fileSelection.uiNamesAfter | Where-Object { $_ -match '(?i)no permission' }).Count -gt 0) {
       $report.fileSelection.outcome = 'No Permission text found in LocalSend UI Automation tree'
-    } elseif (@($report.fileSelection.uiNamesAfter | Where-Object { $_ -like '*fixture-1979-12-31.txt*' }).Count -gt 0) {
+    } elseif (@($report.fileSelection.uiNamesAfter | Where-Object { $_ -like "*$FixtureFileName*" }).Count -gt 0) {
       $report.fileSelection.outcome = 'fixture filename found in LocalSend UI Automation tree'
+    }
+    } else {
+      $sourceScreenshot = if (Test-Path -LiteralPath $sendScreenshotPath) { $sendScreenshotPath } else { $windowScreenshotPath }
+      if (-not (Test-Path -LiteralPath $sourceScreenshot -PathType Leaf)) {
+        throw 'No LocalSend window screenshot exists for the SendTo launch.'
+      }
+      Copy-Item -LiteralPath $sourceScreenshot -Destination $afterSelectionScreenshotPath -Force
+      $report.fileSelection = [ordered]@{
+        mode = $SelectionMode
+        selectionMethod = 'SendToCommandLine'
+        selectedPath = $selectionPath
+        fixture = $report.fixture
+        selectionButtonClientX = $null
+        selectionButtonClientY = $null
+        selectionButtonClick = [ordered]@{ Posted = $true; Error = $null }
+        driver = [ordered]@{ timedOut = $false; reportedSuccess = $true; result = 'LocalSend launched with the exact fixture path as its sole argument' }
+        screenshot = [ordered]@{
+          path = $afterSelectionScreenshotPath
+          bytes = (Get-Item -LiteralPath $afterSelectionScreenshotPath).Length
+          sha256 = (Get-FileHash -LiteralPath $afterSelectionScreenshotPath -Algorithm SHA256).Hash
+          sendTabSha256 = if (Test-Path -LiteralPath $sendScreenshotPath) { (Get-FileHash -LiteralPath $sendScreenshotPath -Algorithm SHA256).Hash } else { $null }
+        }
+        topLevelAfter = @([LocalSendReleaseUiProbe.Windows]::All())
+        uiNamesAfter = @($report.appUiTree | ForEach-Object name | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        outcome = 'SendTo command-line launch captured; inspect screenshot for Files: 1 or No Permission'
+      }
     }
   }
 
@@ -670,7 +708,7 @@ namespace LocalSendReleaseUiProbe {
   } else {
     $report.errors += 'LocalSend was not foreground and PrintWindow did not capture a varied app image; inspect topLevelAfter, appUiTree, and screenshot.'
   }
-  if (-not $report.sendTab -or -not $report.sendTab.imageChanged) {
+  if ($EntryMethod -eq 'Picker' -and (-not $report.sendTab -or -not $report.sendTab.imageChanged)) {
     $report.status = 'inconclusive'
     $report.errors += 'Send tab selection was not verified by a changed LocalSend window image.'
   }
@@ -680,7 +718,7 @@ namespace LocalSendReleaseUiProbe {
     $report.status = 'inconclusive'
     $report.errors += "${SelectionMode} selection was not fully driven and captured; inspect fileSelection.driver and the after-selection screenshot."
   } elseif ($report.status -ne 'inconclusive') {
-    $report.status = 'selection-dialog-observed'
+    $report.status = if ($EntryMethod -eq 'Picker') { 'selection-dialog-observed' } else { 'sendto-launch-observed' }
   }
 } catch {
   $report.errors += $_.Exception.ToString()
@@ -698,5 +736,5 @@ namespace LocalSendReleaseUiProbe {
   $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
   [System.IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $report -Depth 10), [System.Text.UTF8Encoding]::new($false))
   Write-Host "Release UI report: $reportPath"
-  if ($report.status -ne 'selection-dialog-observed') { exit 1 }
+  if ($report.status -notin @('selection-dialog-observed', 'sendto-launch-observed')) { exit 1 }
 }
