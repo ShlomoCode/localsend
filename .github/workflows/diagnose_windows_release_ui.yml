@@ -1,4 +1,4 @@
-name: Diagnose released Windows UI on ARM
+name: Diagnose released Windows UI
 
 on:
   push:
@@ -10,13 +10,30 @@ permissions:
 
 jobs:
   released_windows_ui:
-    runs-on: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        selection_mode: [File, Folder]
-        asset_architecture: [arm-64, x86-64]
+        include:
+          - runner: windows-11-arm
+            asset_architecture: arm-64
+            selection_mode: File
+          - runner: windows-11-arm
+            asset_architecture: arm-64
+            selection_mode: Folder
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: File
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: Folder
+          - runner: windows-2025
+            asset_architecture: x86-64
+            selection_mode: File
+          - runner: windows-2025
+            asset_architecture: x86-64
+            selection_mode: Folder
     defaults:
       run:
         shell: powershell
@@ -24,12 +41,12 @@ jobs:
       LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
     steps:
       - uses: actions/checkout@v6
-      - name: Launch official v1.18.2 ${{ matrix.asset_architecture }} release and select ${{ matrix.selection_mode }}
-        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }}
+      - name: Launch official v1.18.2 ${{ matrix.asset_architecture }} release and select ${{ matrix.selection_mode }} on ${{ matrix.runner }}
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode ${{ matrix.selection_mode }} -AssetArchitecture ${{ matrix.asset_architecture }} -RunnerLabel ${{ matrix.runner }}
       - name: Print ${{ matrix.asset_architecture }} ${{ matrix.selection_mode }} evidence when artifact download is unavailable
         if: always()
         run: |
-          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} RUNNER=windows-11-arm'
+          Write-Output 'ASSET_ARCHITECTURE=${{ matrix.asset_architecture }} SELECTION_MODE=${{ matrix.selection_mode }} RUNNER=${{ matrix.runner }}'
           $report = 'release-ui-output/release-ui-report.json'
           $image = 'release-ui-output/app-window-send.png'
           $afterFileImage = 'release-ui-output/app-window-after-file.png'
@@ -48,7 +65,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: windows11-arm-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}
+          name: release-ui-${{ matrix.runner }}-v1.18.2-${{ matrix.asset_architecture }}-${{ matrix.selection_mode }}
           path: |
             release-ui-output/release-ui-report.json
             release-ui-output/desktop.png

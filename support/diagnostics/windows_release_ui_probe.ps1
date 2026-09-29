@@ -2,7 +2,8 @@
 param(
   [string] $OutputDirectory = $env:LS_RELEASE_UI_OUTPUT,
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
-  [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64'
+  [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
+  [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,17 +27,28 @@ $afterFolderScreenshotPath = Join-Path $OutputDirectory 'app-window-after-folder
 $afterSelectionScreenshotPath = if ($SelectionMode -eq 'Folder') { $afterFolderScreenshotPath } else { $afterFileScreenshotPath }
 $reportPath = Join-Path $OutputDirectory 'release-ui-report.json'
 $firewallRuleName = $null
+$osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$expectedExecution = switch ($RunnerLabel) {
+  'windows-11-arm' { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on Windows 11 ARM' } else { 'x64 emulation on Windows 11 ARM' } }
+  'windows-2025' { 'native x64 on Windows Server 2025' }
+  default { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on ARM64 host' } elseif ($osArchitecture -eq 'Arm64') { 'x64 emulation on ARM64 host' } else { 'native x64 on x64 host' } }
+}
+if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {
+  throw 'The windows-2025 runner case requires the x86-64 release asset.'
+}
 $report = [ordered]@{
   release = 'v1.18.2'
   selectionMode = $SelectionMode
   assetArchitecture = $AssetArchitecture
-  expectedExecution = if ($AssetArchitecture -eq 'x86-64') { 'x64 emulation on Windows 11 ARM' } else { 'native ARM64 on Windows 11 ARM' }
+  expectedExecution = $expectedExecution
   assetName = $assetName
   assetUrl = $releaseUrl
   runner = $env:RUNNER_NAME
+  runnerLabel = $RunnerLabel
   os = [System.Environment]::OSVersion.VersionString
+  osCaption = $null
   processArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
-  osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+  osArchitecture = $osArchitecture
   sessionName = $env:SESSIONNAME
   user = [System.Environment]::UserName
   startedUtc = [DateTime]::UtcNow.ToString('o')
@@ -61,6 +73,7 @@ $report = [ordered]@{
 }
 
 try {
+  $report.osCaption = (Get-CimInstance Win32_OperatingSystem).Caption
   Invoke-WebRequest -Uri $releaseUrl -OutFile $archivePath -MaximumRedirection 10
   $archive = Get-Item -LiteralPath $archivePath
   if ($archive.Length -lt 1000000) { throw "Downloaded archive is unexpectedly small: $($archive.Length) bytes" }
