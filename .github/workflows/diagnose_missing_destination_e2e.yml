@@ -1,0 +1,84 @@
+name: Diagnose missing download destination E2E
+
+on:
+  push:
+    branches: [codex/diagnose-missing-download-e2e]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows_release_matrix:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 1.17.0
+            expected: failure
+          - version: 1.18.2
+            expected: success
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LS_MISSING_DESTINATION_OUTPUT: ${{ github.workspace }}\missing-destination-output
+      LS_CLI_PATH: ${{ github.workspace }}\target\debug\localsend-cli.exe
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: missing-destination-windows
+      - name: Build the pinned headless protocol sender
+        run: cargo build --locked --package localsend-cli
+      - name: Exercise official Windows v${{ matrix.version }} release
+        run: ./support/diagnostics/missing_destination_e2e.ps1 -Version '${{ matrix.version }}' -ExpectedMissingOutcome '${{ matrix.expected }}'
+      - name: Print evidence
+        if: always()
+        run: |
+          if (Test-Path "$env:LS_MISSING_DESTINATION_OUTPUT/report.json") {
+            Get-Content "$env:LS_MISSING_DESTINATION_OUTPUT/report.json" -Raw
+          }
+      - name: Preserve Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: missing-destination-windows-v${{ matrix.version }}
+          path: missing-destination-output/
+          if-no-files-found: error
+
+  macos_release_matrix:
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 1.17.0
+            expected: failure
+          - version: 1.18.2
+            expected: success
+    env:
+      LS_MISSING_DESTINATION_OUTPUT: ${{ github.workspace }}/missing-destination-output
+      LS_CLI_PATH: ${{ github.workspace }}/target/debug/localsend-cli
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: missing-destination-macos
+      - name: Build the pinned headless protocol sender
+        run: cargo build --locked --package localsend-cli
+      - name: Exercise official macOS v${{ matrix.version }} release
+        run: bash ./support/diagnostics/missing_destination_e2e_macos.sh '${{ matrix.version }}' '${{ matrix.expected }}'
+      - name: Print evidence
+        if: always()
+        run: test ! -f "$LS_MISSING_DESTINATION_OUTPUT/report.txt" || cat "$LS_MISSING_DESTINATION_OUTPUT/report.txt"
+      - name: Preserve macOS evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: missing-destination-macos-v${{ matrix.version }}
+          path: missing-destination-output/
+          if-no-files-found: error
