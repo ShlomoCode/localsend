@@ -236,6 +236,7 @@ namespace LocalSendReleaseUiProbe {
       return SetForegroundWindow(hwnd);
     }
     public static bool Close(IntPtr hwnd) { return PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero); }
+    public static bool Hide(IntPtr hwnd) { ShowWindow(hwnd, 0); return !IsWindowVisible(hwnd); }
     public static bool Escape(IntPtr hwnd) {
       const uint WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101;
       const int VK_ESCAPE = 0x1B;
@@ -538,6 +539,20 @@ namespace LocalSendReleaseUiProbe {
     [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
     if ($RecordDemo) {
       if ($FixtureMethod -ne 'IssuePowerShell' -or $SelectionMode -ne 'File') { throw 'RecordDemo requires IssuePowerShell and File mode.' }
+      $runnerOverlays = @([LocalSendReleaseUiProbe.Windows]::All() | Where-Object {
+        $_.Visible -and $_.Title -eq 'Microsoft account' -and $_.ClassName -in @('Shell_OOBEProxy', 'Windows.UI.Core.CoreWindow')
+      })
+      foreach ($overlay in $runnerOverlays) {
+        $overlayHwnd = [IntPtr]::new([Convert]::ToInt64($overlay.Hwnd.Substring(2), 16))
+        [void][LocalSendReleaseUiProbe.Windows]::Close($overlayHwnd)
+        Start-Sleep -Milliseconds 500
+        if ([LocalSendReleaseUiProbe.Windows]::Exists($overlayHwnd)) { [void][LocalSendReleaseUiProbe.Windows]::Hide($overlayHwnd) }
+        if ([LocalSendReleaseUiProbe.Windows]::Exists($overlayHwnd)) { throw "Runner first-run overlay remained visible: $($overlay.Hwnd)" }
+      }
+      $remainingOverlays = @([LocalSendReleaseUiProbe.Windows]::All() | Where-Object {
+        $_.Visible -and $_.Title -eq 'Microsoft account' -and $_.ClassName -in @('Shell_OOBEProxy', 'Windows.UI.Core.CoreWindow')
+      })
+      if ($remainingOverlays.Count -gt 0) { throw 'Runner first-run overlay reappeared before recording.' }
       $recordScript = Join-Path $PSScriptRoot 'windows_record_desktop.ps1'
       $recordStdout = Join-Path $OutputDirectory 'recording.stdout.txt'
       $recordStderr = Join-Path $OutputDirectory 'recording.stderr.txt'
@@ -545,7 +560,7 @@ namespace LocalSendReleaseUiProbe {
       $recordProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $recordArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $recordStdout -RedirectStandardError $recordStderr
       Start-Sleep -Seconds 2
       if ($recordProcess.HasExited) { throw "Screen recorder exited early: $([IO.File]::ReadAllText($recordStderr))" }
-      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; frames = 0; error = $null }
+      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; video = (Join-Path $OutputDirectory 'recording.mp4'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; runnerOverlaysDismissed = $runnerOverlays; frames = 0; error = $null }
     }
     $issueParsedDate = $null
     $issueParseCulture = $null
