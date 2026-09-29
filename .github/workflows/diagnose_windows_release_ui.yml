@@ -98,6 +98,30 @@ jobs:
             fixture_method: IssuePowerShell
             selection_method: MouseShellItem
             package_kind: Installer
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: File
+            fixture_method: IssuePowerShell
+            selection_method: SendInputShellItem
+            package_kind: Installer
+          - runner: windows-11-arm
+            asset_architecture: x86-64
+            selection_mode: Folder
+            fixture_method: IssuePowerShell
+            selection_method: SendInputShellItem
+            package_kind: Installer
+          - runner: windows-2025
+            asset_architecture: x86-64
+            selection_mode: File
+            fixture_method: IssuePowerShell
+            selection_method: SendInputShellItem
+            package_kind: Installer
+          - runner: windows-2025
+            asset_architecture: x86-64
+            selection_mode: Folder
+            fixture_method: IssuePowerShell
+            selection_method: SendInputShellItem
+            package_kind: Installer
     defaults:
       run:
         shell: powershell

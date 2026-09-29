@@ -5,7 +5,7 @@ param(
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
   [ValidateSet('Zip', 'Installer')][string] $PackageKind = 'Zip',
   [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
-  [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem')][string] $SelectionMethod = 'PathEntry',
+  [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem', 'SendInputShellItem')][string] $SelectionMethod = 'PathEntry',
   [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi'
 )
 

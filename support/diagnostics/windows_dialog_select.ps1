@@ -4,7 +4,7 @@ param(
   [Parameter(Mandatory = $true)][int] $TargetProcessId,
   [Parameter(Mandatory = $true)][string] $Path,
   [Parameter(Mandatory = $true)][ValidateSet('File', 'Folder')][string] $Mode,
-  [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem')][string] $SelectionMethod = 'PathEntry',
+  [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem', 'SendInputShellItem')][string] $SelectionMethod = 'PathEntry',
   [string] $DialogScreenshotPath,
   [ValidateRange(1, 120)][int] $TimeoutSeconds = 15
 )
@@ -50,6 +50,12 @@ namespace LocalSendDialogSelect {
   public class MouseClickInfo {
     public bool Posted;
     public string Error;
+    public string InputMethod;
+    public string ForegroundHwnd;
+    public string ScreenHitHwnd;
+    public int ScreenHitOwnerProcessId;
+    public bool CursorVerified;
+    public uint SentInputCount;
     public string TargetHwnd;
     public string TargetClass;
     public int OwnerProcessId;
@@ -68,6 +74,8 @@ namespace LocalSendDialogSelect {
     private const uint WM_MOUSEMOVE = 0x0200;
     private const uint WM_LBUTTONDOWN = 0x0201;
     private const uint WM_LBUTTONUP = 0x0202;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const int CWP_SKIPINVISIBLE = 0x0001;
     private const uint SMTO_ABORTIFHUNG = 0x0002;
     private const int IDC_FILENAME = 0x047C; // cmb13, the common-dialog filename combo.
@@ -77,6 +85,15 @@ namespace LocalSendDialogSelect {
 
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X; public int Y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct MOUSEINPUT {
+      public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public UIntPtr dwExtraInfo;
+    }
+    [StructLayout(LayoutKind.Explicit)] private struct INPUTUNION {
+      [FieldOffset(0)] public MOUSEINPUT mi;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct INPUT {
+      public uint type; public INPUTUNION U;
+    }
 
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr data);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr data);
@@ -85,6 +102,13 @@ namespace LocalSendDialogSelect {
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr hwnd, ref POINT point);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT point);
+    [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
     [DllImport("user32.dll")] private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT point, uint flags);
     [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr from, IntPtr to, ref POINT point, uint count);
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
@@ -148,8 +172,11 @@ namespace LocalSendDialogSelect {
       return score;
     }
     public static bool DialogOpen(IntPtr hwnd) { return !Closed(hwnd); }
-    public static MouseClickInfo ClickVisibleShellItem(IntPtr dialog, int processId, int screenX, int screenY) {
-      MouseClickInfo click = new MouseClickInfo { ScreenX = screenX, ScreenY = screenY };
+    public static MouseClickInfo ClickVisibleShellItem(IntPtr dialog, int processId, int screenX, int screenY, bool useSendInput) {
+      MouseClickInfo click = new MouseClickInfo {
+        ScreenX = screenX, ScreenY = screenY,
+        InputMethod = useSendInput ? "SendInput" : "PostMessage"
+      };
       if (Closed(dialog)) { click.Error = "Dialog is closed before Shell-item mouse click."; return click; }
       POINT point = new POINT { X = screenX, Y = screenY };
       if (!ScreenToClient(dialog, ref point)) { click.Error = "Could not map Shell-item screen coordinates into dialog client area."; return click; }
@@ -179,13 +206,64 @@ namespace LocalSendDialogSelect {
         click.Error = "Hit-tested child coordinates cannot be encoded in a mouse message.";
         return click;
       }
-      IntPtr lParam = new IntPtr((point.Y << 16) | point.X);
-      bool move = PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, lParam);
-      bool down = PostMessage(target, WM_LBUTTONDOWN, new IntPtr(1), lParam);
-      bool up = PostMessage(target, WM_LBUTTONUP, IntPtr.Zero, lParam);
-      click.Posted = move && down && up;
-      if (!click.Posted) click.Error = "Could not post the complete mouse click to the dialog-owned child HWND.";
+      if (useSendInput) {
+        IntPtr foreground = GetForegroundWindow();
+        if (foreground != dialog) {
+          SetForegroundWindow(dialog);
+          foreground = GetForegroundWindow();
+        }
+        click.ForegroundHwnd = Hex(foreground);
+        if (foreground != dialog) { click.Error = "Native dialog is not the foreground input window."; return click; }
+        if (!SetCursorPos(screenX, screenY)) {
+          click.Error = "Could not move the system cursor to the visible dialog item: " + Marshal.GetLastWin32Error();
+          return click;
+        }
+        POINT cursor;
+        if (!GetCursorPos(out cursor) || cursor.X != screenX || cursor.Y != screenY) {
+          click.Error = "System cursor did not reach the visible dialog item.";
+          return click;
+        }
+        click.CursorVerified = true;
+        IntPtr screenHit = WindowFromPoint(cursor);
+        uint screenOwner;
+        GetWindowThreadProcessId(screenHit, out screenOwner);
+        click.ScreenHitHwnd = Hex(screenHit);
+        click.ScreenHitOwnerProcessId = (int)screenOwner;
+        if (screenOwner != processId) {
+          click.Error = "System hit test at the cursor is not owned by the target process.";
+          return click;
+        }
+        Thread.Sleep(50);
+        INPUT[] inputs = new INPUT[] {
+          new INPUT { type = 0, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } },
+          new INPUT { type = 0, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } } }
+        };
+        click.SentInputCount = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+        click.Posted = click.SentInputCount == (uint)inputs.Length;
+        if (!click.Posted) click.Error = "SendInput did not enqueue both click events: " + Marshal.GetLastWin32Error();
+      } else {
+        IntPtr lParam = new IntPtr((point.Y << 16) | point.X);
+        bool move = PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, lParam);
+        bool down = PostMessage(target, WM_LBUTTONDOWN, new IntPtr(1), lParam);
+        bool up = PostMessage(target, WM_LBUTTONUP, IntPtr.Zero, lParam);
+        click.Posted = move && down && up;
+        if (!click.Posted) click.Error = "Could not post the complete mouse click to the dialog-owned child HWND.";
+      }
       return click;
+    }
+    public static MouseClickInfo ClickOkViaSendInput(IntPtr dialog, int processId) {
+      IntPtr button = IntPtr.Zero;
+      EnumChildWindows(dialog, (hwnd, data) => {
+        if (GetDlgCtrlID(hwnd) == IDOK && Class(hwnd) == "Button" && IsWindowVisible(hwnd)) { button = hwnd; return false; }
+        return true;
+      }, IntPtr.Zero);
+      if (button == IntPtr.Zero) return new MouseClickInfo { Error = "Could not find the visible Open/Select button." };
+      RECT rect;
+      if (!GetWindowRect(button, out rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top) {
+        return new MouseClickInfo { Error = "Open/Select button has no visible screen bounds." };
+      }
+      return ClickVisibleShellItem(dialog, processId, rect.Left + (rect.Right - rect.Left) / 2,
+        rect.Top + (rect.Bottom - rect.Top) / 2, true);
     }
     public static bool Capture(IntPtr hwnd, IntPtr hdc) { return PrintWindow(hwnd, hdc, 2) || PrintWindow(hwnd, hdc, 0); }
     public static string ReadText(IntPtr hwnd) { return Text(hwnd); }
@@ -422,6 +500,7 @@ function Invoke-ShellItem {
       SelectionPattern = $null
       WasSelectedBefore = $null
       MouseClick = $null
+      ConfirmationClick = $null
       IsSelected = $false
     }
     Actions = @()
@@ -543,18 +622,18 @@ function Invoke-ShellItem {
         name = $candidate.Name; controlType = $candidate.ControlType
         automationId = $candidate.AutomationId; bounds = $candidate.Bounds
       }
-      if ($SelectionMethod -eq 'MouseShellItem' -and $candidate.ControlType -notmatch 'ListItem|DataItem') { continue }
+      if ($SelectionMethod -in @('MouseShellItem', 'SendInputShellItem') -and $candidate.ControlType -notmatch 'ListItem|DataItem') { continue }
       try {
         $pattern = $candidate.Element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
         if ($pattern) {
           $matchingRows++
           if (-not $selectedPattern) { $selected = $candidate; $selectedPattern = $pattern }
-          if ($SelectionMethod -ne 'MouseShellItem') { break }
+          if ($SelectionMethod -notin @('MouseShellItem', 'SendInputShellItem')) { break }
         }
       } catch { }
     }
     if (-not $selectedPattern) { throw "The visible target '$targetName' has no SelectionItemPattern; refusing to use the filename Edit." }
-    if ($SelectionMethod -eq 'MouseShellItem' -and $matchingRows -ne 1) {
+    if ($SelectionMethod -in @('MouseShellItem', 'SendInputShellItem') -and $matchingRows -ne 1) {
       throw "Expected one visible Shell list row for '$targetName'; found $matchingRows selectable rows."
     }
     $result.ShellItem.MatchedBy = if ($selected.Name -eq $targetName) { 'exact filename' } else { 'extension-hidden stem with unique filesystem match' }
@@ -562,21 +641,22 @@ function Invoke-ShellItem {
       name = $selected.Name; controlType = $selected.ControlType
       automationId = $selected.AutomationId; bounds = $selected.Bounds
     }
-    if ($SelectionMethod -eq 'MouseShellItem') {
+    if ($SelectionMethod -in @('MouseShellItem', 'SendInputShellItem')) {
       $result.ShellItem.WasSelectedBefore = [bool] $selectedPattern.Current.IsSelected
       $bounds = $selected.Bounds
       $screenX = [int] [Math]::Floor($bounds.left + ($bounds.width / 2))
       $screenY = [int] [Math]::Floor($bounds.top + ($bounds.height / 2))
-      $click = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY)
+      $useSendInput = $SelectionMethod -eq 'SendInputShellItem'
+      $click = [LocalSendDialogSelect.Driver]::ClickVisibleShellItem($dialog, $TargetProcessId, $screenX, $screenY, $useSendInput)
       $result.ShellItem.MouseClick = $click
-      if (-not $click.Posted) { throw "Could not click the visible Shell item with dialog-owned mouse messages: $($click.Error)" }
-      $result.Actions += "Posted native mouse move/down/up to visible Shell item via $($click.TargetClass) $($click.TargetHwnd)"
+      if (-not $click.Posted) { throw "Could not click the visible Shell item using $($click.InputMethod): $($click.Error)" }
+      $result.Actions += "Clicked visible Shell item using $($click.InputMethod) via $($click.TargetClass) $($click.TargetHwnd)"
       $selectionDeadline = [DateTime]::UtcNow.AddSeconds(3)
       do {
         Start-Sleep -Milliseconds 100
         $result.ShellItem.IsSelected = [bool] $selectedPattern.Current.IsSelected
       } while (-not $result.ShellItem.IsSelected -and [DateTime]::UtcNow -lt $selectionDeadline)
-      $result.ShellItem.SelectionPattern = 'SelectionItemPattern.Current.IsSelected after native mouse click'
+      $result.ShellItem.SelectionPattern = "SelectionItemPattern.Current.IsSelected after $($click.InputMethod) click"
     } else {
       $selectedPattern.Select()
       $result.ShellItem.SelectionPattern = 'SelectionItemPattern.Select'
@@ -584,9 +664,16 @@ function Invoke-ShellItem {
       $result.Actions += 'Selected exact visible Shell item through SelectionItemPattern'
     }
     if (-not $result.ShellItem.IsSelected) { throw 'UI Automation did not report the exact Shell item selected.' }
-    if ($SelectionMethod -eq 'MouseShellItem') { $result.Actions += 'Verified exact Shell item selected through UI Automation after native mouse click' }
-    if (-not [LocalSendDialogSelect.Driver]::PressOk($dialog)) { throw 'Could not activate Open/Select after Shell item selection.' }
-    $result.Actions += 'Activated Open/Select after selecting Shell item'
+    if ($SelectionMethod -in @('MouseShellItem', 'SendInputShellItem')) { $result.Actions += 'Verified exact Shell item selected through UI Automation after mouse click' }
+    if ($SelectionMethod -eq 'SendInputShellItem') {
+      $confirmationClick = [LocalSendDialogSelect.Driver]::ClickOkViaSendInput($dialog, $TargetProcessId)
+      $result.ShellItem.ConfirmationClick = $confirmationClick
+      if (-not $confirmationClick.Posted) { throw "Could not click Open/Select using SendInput: $($confirmationClick.Error)" }
+      $result.Actions += 'Clicked Open/Select using SendInput'
+    } else {
+      if (-not [LocalSendDialogSelect.Driver]::PressOk($dialog)) { throw 'Could not activate Open/Select after Shell item selection.' }
+      $result.Actions += 'Activated Open/Select after selecting Shell item'
+    }
     while ([LocalSendDialogSelect.Driver]::DialogOpen($dialog) -and [DateTime]::UtcNow -lt $deadline) {
       Start-Sleep -Milliseconds 100
     }
@@ -604,7 +691,7 @@ try {
     throw "Target $Mode does not exist: $Path"
   }
   Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
-  $result = if ($SelectionMethod -in @('ShellItem', 'MouseShellItem')) {
+  $result = if ($SelectionMethod -in @('ShellItem', 'MouseShellItem', 'SendInputShellItem')) {
     Invoke-ShellItem
   } else {
     [LocalSendDialogSelect.Driver]::Run($TargetProcessId, $Path, $Mode, $TimeoutSeconds)
