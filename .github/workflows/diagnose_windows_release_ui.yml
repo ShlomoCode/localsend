@@ -21,6 +21,15 @@ jobs:
       - uses: actions/checkout@v6
       - name: Launch official v1.18.2 ARM64 release and capture desktop
         run: .\support\diagnostics\windows_release_ui_probe.ps1
+      - name: Print Send-tab evidence when artifact download is unavailable
+        if: always()
+        run: |
+          $report = 'release-ui-output/release-ui-report.json'
+          $image = 'release-ui-output/app-window-send.png'
+          if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Raw }
+          if (Test-Path -LiteralPath $image) {
+            Write-Output ('APP_WINDOW_SEND_PNG_BASE64=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($image)))
+          }
       - name: Preserve release process log and screenshot
         if: always()
         uses: actions/upload-artifact@v6
