@@ -7,7 +7,8 @@ param(
   [ValidateSet('windows-11-arm', 'windows-11-vs2026-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
   [ValidateSet('PathEntry', 'ShellItem', 'MouseShellItem', 'SendInputShellItem')][string] $SelectionMethod = 'PathEntry',
   [ValidateSet('UtcApi', 'IssuePowerShell')][string] $FixtureMethod = 'UtcApi',
-  [string] $FixtureTimestampUtc = '1979-12-31T23:59:58Z'
+  [string] $FixtureTimestampUtc = '1979-12-31T23:59:58Z',
+  [switch] $RecordDemo
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +41,9 @@ $afterFolderScreenshotPath = Join-Path $OutputDirectory 'app-window-after-folder
 $dialogScreenshotPath = Join-Path $OutputDirectory 'native-dialog-parent.png'
 $afterSelectionScreenshotPath = if ($SelectionMode -eq 'Folder') { $afterFolderScreenshotPath } else { $afterFileScreenshotPath }
 $reportPath = Join-Path $OutputDirectory 'release-ui-report.json'
+$recordStopFile = Join-Path $OutputDirectory 'recording.stop'
+$recordFramesDirectory = Join-Path $OutputDirectory 'recording-frames'
+$recordProcess = $null
 $firewallRuleName = $null
 $osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 $expectedExecution = switch ($RunnerLabel) {
@@ -90,6 +94,7 @@ $report = [ordered]@{
   appUiTree = @()
   firewallRule = $null
   errors = @()
+  recording = $null
 }
 
 try {
@@ -230,6 +235,7 @@ namespace LocalSendReleaseUiProbe {
       BringWindowToTop(hwnd);
       return SetForegroundWindow(hwnd);
     }
+    public static bool Close(IntPtr hwnd) { return PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero); }
     public static bool Escape(IntPtr hwnd) {
       const uint WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101;
       const int VK_ESCAPE = 0x1B;
@@ -530,6 +536,17 @@ namespace LocalSendReleaseUiProbe {
     [System.IO.Directory]::CreateDirectory($fixtureDirectory) | Out-Null
     $fixturePath = Join-Path $fixtureDirectory 'fixture-1979-12-31.txt'
     [System.IO.File]::WriteAllText($fixturePath, 'LocalSend 1979 timestamp picker diagnostic', [System.Text.UTF8Encoding]::new($false))
+    if ($RecordDemo) {
+      if ($FixtureMethod -ne 'IssuePowerShell' -or $SelectionMode -ne 'File') { throw 'RecordDemo requires IssuePowerShell and File mode.' }
+      $recordScript = Join-Path $PSScriptRoot 'windows_record_desktop.ps1'
+      $recordStdout = Join-Path $OutputDirectory 'recording.stdout.txt'
+      $recordStderr = Join-Path $OutputDirectory 'recording.stderr.txt'
+      $recordArguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -FramesDirectory "{1}" -StopFile "{2}"' -f $recordScript, $recordFramesDirectory, $recordStopFile
+      $recordProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $recordArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $recordStdout -RedirectStandardError $recordStderr
+      Start-Sleep -Seconds 2
+      if ($recordProcess.HasExited) { throw "Screen recorder exited early: $([IO.File]::ReadAllText($recordStderr))" }
+      $report.recording = [ordered]@{ framesDirectory = $recordFramesDirectory; gif = (Join-Path $OutputDirectory 'recording.gif'); processId = $recordProcess.Id; consoleExitCode = $null; explorerWindow = $null; frames = 0; error = $null }
+    }
     $issueParsedDate = $null
     $issueParseCulture = $null
     if ($FixtureMethod -eq 'IssuePowerShell') {
@@ -541,7 +558,15 @@ namespace LocalSendReleaseUiProbe {
       } finally {
         [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
       }
-      (Get-Item -LiteralPath $fixturePath).LastWriteTime = $issueParsedDate
+      if ($RecordDemo) {
+        $showScript = Join-Path $PSScriptRoot 'windows_show_timestamp.ps1'
+        $showArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Path "{1}"' -f $showScript, $fixturePath
+        $showProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $showArguments -PassThru -Wait -WindowStyle Normal
+        $report.recording.consoleExitCode = $showProcess.ExitCode
+        if ($showProcess.ExitCode -ne 0) { throw "Visible timestamp command failed with exit code $($showProcess.ExitCode)." }
+      } else {
+        (Get-Item -LiteralPath $fixturePath).LastWriteTime = $issueParsedDate
+      }
     } else {
       [System.IO.File]::SetLastWriteTimeUtc($fixturePath, $expectedTime)
     }
@@ -556,6 +581,19 @@ namespace LocalSendReleaseUiProbe {
     }
     $selectionPath = if ($SelectionMode -eq 'Folder') { $fixtureDirectory } else { $fixturePath }
     $buttonX = if ($SelectionMode -eq 'Folder') { 200 } else { 80 }
+    if ($RecordDemo) {
+      Start-Process -FilePath explorer.exe -ArgumentList ('/select,"{0}"' -f $fixturePath)
+      Start-Sleep -Seconds 4
+      $explorerWindow = @([LocalSendReleaseUiProbe.Windows]::All() | Where-Object { $_.Visible -and $_.ClassName -eq 'CabinetWClass' } | Select-Object -Last 1)
+      if ($explorerWindow.Count -ne 1) { throw 'Explorer did not show a file window for the fixture.' }
+      $report.recording.explorerWindow = $explorerWindow[0]
+      [System.Windows.Forms.SendKeys]::SendWait('^+6') # Details view shows the Date modified column.
+      Start-Sleep -Seconds 4
+      [void][LocalSendReleaseUiProbe.Windows]::Close([IntPtr]::new([Convert]::ToInt64($explorerWindow[0].Hwnd.Substring(2), 16)))
+      Start-Sleep -Seconds 1
+      [void][LocalSendReleaseUiProbe.Windows]::Activate($appHwnd)
+      Start-Sleep -Seconds 2
+    }
 
     $driverScript = Join-Path $PSScriptRoot 'windows_dialog_select.ps1'
     if (-not (Test-Path -LiteralPath $driverScript -PathType Leaf)) { throw "Missing dialog driver: $driverScript" }
@@ -715,9 +753,26 @@ namespace LocalSendReleaseUiProbe {
   } elseif ($report.status -ne 'inconclusive') {
     $report.status = 'selection-dialog-observed'
   }
+  if ($RecordDemo) { Start-Sleep -Seconds 5 }
 } catch {
   $report.errors += $_.Exception.ToString()
 } finally {
+  if ($recordProcess) {
+    try {
+      [IO.File]::WriteAllText($recordStopFile, 'stop')
+      if (-not $recordProcess.WaitForExit(10000)) { $recordProcess.Kill(); $recordProcess.WaitForExit() }
+      $frames = @(Get-ChildItem -LiteralPath $recordFramesDirectory -Filter 'frame-*.jpg' | Sort-Object Name | ForEach-Object FullName)
+      $report.recording.frames = $frames.Count
+      if ($frames.Count -eq 0) { throw "Recorder produced no frames: $([IO.File]::ReadAllText($recordStderr))" }
+      & magick -delay 25 -loop 0 @frames -layers Optimize $report.recording.gif
+      if ($LASTEXITCODE -ne 0) { throw "ImageMagick exited with code $LASTEXITCODE" }
+      if (-not (Test-Path -LiteralPath $report.recording.gif -PathType Leaf)) { throw 'ImageMagick did not create recording.gif.' }
+    } catch {
+      $report.errors += "Screen recording: $($_.Exception.Message)"
+      if ($report.recording) { $report.recording.error = $_.Exception.Message }
+      $report.status = 'inconclusive'
+    }
+  }
   if ($firewallRuleName) {
     try {
       $rule = Get-NetFirewallRule -Name $firewallRuleName -ErrorAction SilentlyContinue

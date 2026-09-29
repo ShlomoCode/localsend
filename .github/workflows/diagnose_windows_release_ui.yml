@@ -7,13 +7,17 @@ on:
         description: Test timestamps before the reported 1979 boundary on the official release
         type: boolean
         default: false
+      record_video:
+        description: Record timestamp command, Explorer, and LocalSend selection on Windows 11 ARM
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   released_windows_ui:
-    if: ${{ !inputs.boundary_sweep }}
+    if: ${{ !inputs.boundary_sweep && !inputs.record_video }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -186,7 +190,7 @@ jobs:
           if-no-files-found: error
 
   timestamp_boundary:
-    if: ${{ inputs.boundary_sweep }}
+    if: ${{ inputs.boundary_sweep && !inputs.record_video }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -237,6 +241,41 @@ jobs:
             release-ui-output/app-window-send.png
             release-ui-output/app-window-after-file.png
             release-ui-output/app-window-after-folder.png
+            release-ui-output/native-dialog-parent.png
+            release-ui-output/file-dialog-driver.*.txt
+          if-no-files-found: error
+
+  recorded_windows_ui:
+    if: ${{ inputs.record_video }}
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    env:
+      LS_RELEASE_UI_OUTPUT: ${{ github.workspace }}\release-ui-output
+    steps:
+      - uses: actions/checkout@v6
+      - name: Record exact date change, Explorer, and LocalSend selection
+        run: .\support\diagnostics\windows_release_ui_probe.ps1 -SelectionMode File -AssetArchitecture x86-64 -PackageKind Installer -RunnerLabel windows-11-vs2026-arm -SelectionMethod SendInputShellItem -FixtureMethod IssuePowerShell -RecordDemo
+      - name: Show report
+        if: always()
+        run: |
+          if (Test-Path -LiteralPath release-ui-output/release-ui-report.json) {
+            Get-Content -LiteralPath release-ui-output/release-ui-report.json -Raw
+          }
+      - name: Preserve screen recording and UI evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-11-arm-issue-3366-screen-recording
+          path: |
+            release-ui-output/recording.gif
+            release-ui-output/recording.*.txt
+            release-ui-output/release-ui-report.json
+            release-ui-output/desktop.png
+            release-ui-output/app-window-send.png
+            release-ui-output/app-window-after-file.png
             release-ui-output/native-dialog-parent.png
             release-ui-output/file-dialog-driver.*.txt
           if-no-files-found: error
