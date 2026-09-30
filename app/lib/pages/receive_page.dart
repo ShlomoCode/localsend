@@ -88,7 +88,9 @@ class _ReceivePageState extends State<ReceivePage> with Refena {
         unawaited(TaskbarHelper.clearProgressBar());
       },
       builder: (context, vm) {
-        return PopScope(
+        final pendingFileRequest = vm.status == SessionStatus.waiting && vm.message == null;
+        final canAccept = pendingFileRequest && context.watch(selectedReceivingFilesProvider).isNotEmpty;
+        final page = PopScope(
           onPopInvokedWithResult: (didPop, result) {
             if (didPop) {
               vm.onDecline();
@@ -273,6 +275,25 @@ class _ReceivePageState extends State<ReceivePage> with Refena {
               ),
             ),
           ),
+        );
+
+        return Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (!node.hasPrimaryFocus || event is! KeyDownEvent) {
+              return KeyEventResult.ignored;
+            }
+            if (canAccept && (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+              vm.onAccept();
+              return KeyEventResult.handled;
+            }
+            if (pendingFileRequest && event.logicalKey == LogicalKeyboardKey.escape) {
+              unawaited(Navigator.of(context).maybePop());
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: page,
         );
       },
     );

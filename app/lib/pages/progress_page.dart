@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/state/server/receive_session_state.dart';
@@ -253,7 +253,7 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
 
     final finishedCount = transferNotifier.getStatuses(widget.sessionId).where((s) => s == FileStatus.finished).length;
 
-    return PopScope(
+    final page = PopScope(
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) {
           // Already popped.
@@ -557,6 +557,21 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
           ],
         ),
       ),
+    );
+
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (!node.hasPrimaryFocus || event is! KeyDownEvent || status == SessionStatus.sending) {
+          return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+          _exit(closeSession: true);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: page,
     );
   }
 }
