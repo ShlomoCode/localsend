@@ -1,6 +1,6 @@
 ## Unreleased
 
-- fix(android): avoid display flashes when opening/closing the app on Android TV (@ShlomoCode)
+- fix(android): avoid display flashes when opening/closing the app on some Android TVs (@ShlomoCode)
 - fix(macos): file sharing via Share Extension doesn't work in DMG builds (@ShlomoCode, @vdmkotai)
 - fix: show the real error when a file cannot be read while sending, instead of transferring it as an empty file (@leopalmieri-spec)
 
