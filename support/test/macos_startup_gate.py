@@ -125,7 +125,7 @@ def overlay(runner: Path) -> None:
 #endif
     }
 
-    private func finishApplicationDidFinishLaunching(_ notification: Notification, capturedLoginItem: Bool?) {""",
+    @MainActor private func finishApplicationDidFinishLaunching(_ notification: Notification, capturedLoginItem: Bool?) {""",
         "launch wrapper",
     )
     delegate = delegate[:start] + launch + delegate[end:]
