@@ -187,7 +187,8 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
   await updateSystemOverlayStyle(context);
 
   if (checkPlatform([TargetPlatform.android])) {
-    // On TVs, requesting a high refresh rate can trigger HDMI resync and blank the display when entering or leaving the app.
+    // On some TVs, requesting a high refresh rate can trigger HDMI resync and blank the display when entering or leaving the app.
+    // https://github.com/localsend/localsend/issues/3452
     if (!ref.read(tvProvider)) {
       try {
         await FlutterDisplayMode.setHighRefreshRate();
