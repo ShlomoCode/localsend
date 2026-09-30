@@ -31,7 +31,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
-	<string>MainMenu</string>
+	<string>$(MAIN_NIB_NAME)</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
     <key>LSApplicationCategoryType</key>
