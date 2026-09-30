@@ -187,10 +187,12 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
   await updateSystemOverlayStyle(context);
 
   if (checkPlatform([TargetPlatform.android])) {
-    try {
-      await FlutterDisplayMode.setHighRefreshRate();
-    } catch (e) {
-      _logger.warning('Setting high refresh rate failed', e);
+    if (!ref.read(tvProvider)) {
+      try {
+        await FlutterDisplayMode.setHighRefreshRate();
+      } catch (e) {
+        _logger.warning('Setting high refresh rate failed', e);
+      }
     }
 
     // Android 17+ blocks multicast discovery and LAN connections until this permission is granted,
