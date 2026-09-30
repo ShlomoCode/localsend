@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,25 +27,25 @@ void main() {
 
     var requestObserved = false;
     Object? requestError;
-    unawaited(
-      _gate
-          .invokeMethod<bool>('waitForLoginItemRequest')
-          .then((value) {
-            requestObserved = value == true;
-          })
-          .catchError((Object error) {
-            requestError = error;
-          }),
-    );
-
-    // Run production startup against the real macOS Runner and plugin registry.
-    unawaited(app.main(<String>[]));
-
+    late final Future<void> startup;
     String? errorText;
     try {
-      await _pumpUntil(tester, () {
-        errorText = _renderedErrorText();
-        return requestObserved || errorText != null;
+      await tester.runAsync(() async {
+        final request = _gate
+            .invokeMethod<bool>('waitForLoginItemRequest')
+            .then((value) {
+              requestObserved = value == true;
+            })
+            .catchError((Object error) {
+              requestError = error;
+            });
+
+        // Run production startup against the real macOS Runner and plugin registry.
+        startup = app.main(<String>[]);
+
+        // `app.main` installs the widget tree only after initialization finishes.
+        // Pumping before release can wait for a frame that needs this native reply.
+        await Future.any<void>([request, startup]).timeout(_startupTimeout);
       });
     } finally {
       // Release even on timeout, so the native launch callback can finish.
@@ -55,6 +53,10 @@ void main() {
         await _gate.invokeMethod<void>('release').timeout(const Duration(seconds: 15));
       });
     }
+
+    await tester.runAsync(() async {
+      await startup.timeout(_startupTimeout);
+    });
 
     await _pumpUntil(tester, () {
       errorText = _renderedErrorText();
