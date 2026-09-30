@@ -10,6 +10,9 @@ on:
     paths:
       - .github/workflows/macos_startup_regression.yml
       - app/integration_test/macos_startup_test.dart
+      - app/lib/main.dart
+      - app/lib/config/init.dart
+      - app/lib/util/native/macos_channel.dart
       - app/macos/Runner/**
       - support/test/**
 
