@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -292,7 +293,15 @@ Future<void> _pickText(BuildContext context, Ref ref) async {
 Future<void> _pickClipboard(BuildContext context, Ref ref) async {
   final data = await Clipboard.getData(Clipboard.kTextPlain);
   if (data?.text != null) {
-    ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: data!.text!));
+    final text = data!.text!;
+    if (!kIsWeb && checkPlatformIsDesktop() && await File(text).exists()) {
+      final files = await Pasteboard.files();
+      if (files.contains(text)) {
+        await _addClipboardFiles(ref, files);
+        return;
+      }
+    }
+    ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: text));
     return;
   }
 
@@ -330,30 +339,7 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
 
   final List<String> files = await Pasteboard.files();
   if (files.isNotEmpty) {
-    await ref
-        .redux(selectedSendingFilesProvider)
-        .dispatchAsync(
-          AddFilesAction(
-            files: files.map((e) => XFile(e)).toList(),
-            converter: (file) async {
-              if (!file.path.startsWith('content://')) {
-                return CrossFileConverters.convertXFile(file);
-              }
-              // handle content uri
-              return CrossFile(
-                name: file.name,
-                fileType: file.name.guessFileType(),
-                size: await _uriContent.getContentLength(Uri.parse(file.path)) ?? -1,
-                path: file.path,
-                thumbnail: null,
-                asset: null,
-                bytes: null,
-                lastModified: null,
-                lastAccessed: null,
-              );
-            },
-          ),
-        );
+    await _addClipboardFiles(ref, files);
     return;
   }
 
@@ -366,6 +352,33 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
       content: Text(t.general.noItemInClipboard),
     ),
   );
+}
+
+Future<void> _addClipboardFiles(Ref ref, List<String> files) async {
+  await ref
+      .redux(selectedSendingFilesProvider)
+      .dispatchAsync(
+        AddFilesAction(
+          files: files.map((e) => XFile(e)).toList(),
+          converter: (file) async {
+            if (!file.path.startsWith('content://')) {
+              return CrossFileConverters.convertXFile(file);
+            }
+            // handle content uri
+            return CrossFile(
+              name: file.name,
+              fileType: file.name.guessFileType(),
+              size: await _uriContent.getContentLength(Uri.parse(file.path)) ?? -1,
+              path: file.path,
+              thumbnail: null,
+              asset: null,
+              bytes: null,
+              lastModified: null,
+              lastAccessed: null,
+            );
+          },
+        ),
+      );
 }
 
 Future<void> _pickApp(BuildContext context) async {
