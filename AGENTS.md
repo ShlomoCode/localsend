@@ -79,6 +79,10 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 `packages/core` gates almost everything behind Cargo features (`crypto`, `http`, `multicast`, `webrtc`, `webrtc-signaling`, `full`), and `default = []`. **Always build and test it with `--features full`.** A bare `cargo check`/`cargo build` fails because modules are declared unconditionally while their dependencies are optional — that is pre-existing and expected, not a regression.
 
+## Code comments
+
+Wrap variable and function names mentioned in code comments in backticks.
+
 ## Architecture
 
 ### State management
