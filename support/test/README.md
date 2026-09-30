@@ -1,21 +1,13 @@
 # macOS startup regression
 
-The `macOS startup regression` workflow builds and runs the real macOS Runner with a Flutter integration-test entrypoint. The test calls production `main`, then checks that `HomePage` appears instead of the initialization error screen.
+The startup regression runs production `main` in the macOS `harness` flavor. This flavor uses the real Runner target and native plugin registry, with a timing gate in its native launch code. The gate holds launch completion until Dart requests `isLaunchedAsLoginItem`. The integration test then releases the gate and checks that `HomePage` appears instead of the initialization error screen.
 
-The same test runs on `codex/test-macos-startup-main` and `codex/test-macos-startup-fixed`. The former contains the unfixed startup path and should fail with `MissingPluginException` for `isLaunchedAsLoginItem`; the latter contains the fix and should pass.
-
-To make the race reproducible, `macos_startup_gate.py` modifies only the disposable build checkout. It holds the native launch-completion work until Dart reaches the login-item request or displays an error. A separate control channel releases the hold. The production `main-delegate-channel`, native plugins, and responses remain real. The launch Apple event is read in the original macOS callback before deferring the remaining work.
-
-The test writes preferences for an existing installation through the real preferences plugin. This avoids the first-launch reduce-motion query and targets the reported login-item query.
-
-The workflow uses the pinned Flutter SDK, an Apple Silicon macOS 15 runner with Xcode 26.3, and an unsigned Debug build. Flutter disables sandboxing in this CI configuration. It does not verify App Store packaging, a signed DMG, or an actual login-item launch.
-
-Apply the timing overlay only in a disposable checkout:
+From the repository root on macOS, with Xcode, FVM, and the pinned Flutter and Rust toolchains available, run:
 
 ```sh
-python3 support/test/macos_startup_gate.py app/macos/Runner
-cd app
-fvm flutter test integration_test/macos_startup_test.dart -d macos --reporter expanded
+fvm dart run support/test/macos_harness.dart
 ```
 
-Local execution also needs compatible Xcode signing settings. The workflow configures an unsigned build in its disposable checkout and uploads the full startup log on success or failure.
+The command resolves the app and Cargokit build tool dependencies, runs the integration test with `--flavor harness`, and writes `artifacts/macos-startup.log`. The GitHub workflow runs the same command and uploads that log on success or failure. The harness has its own bundle ID and preferences, uses an unsigned build targeting macOS 12, and tests real startup scheduling. It does not exercise an actual OS login-item session, signing, or packaging.
+
+The test writes an existing-installation version and an available port through the real preferences plugin. It starts production `main` while native launch completion is held, waits for the real login-item request or startup completion, and releases the hold even if that wait fails. The expected regression on the unfixed startup path is `MissingPluginException` for `isLaunchedAsLoginItem` on `main-delegate-channel`; the fixed path reaches `HomePage` after observing the request.

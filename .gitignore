@@ -3,6 +3,9 @@
 # Pub workspace resolution output
 /.dart_tool/
 
+# Integration test diagnostics
+/artifacts/
+
 # Rust workspace build output
 /target/
 

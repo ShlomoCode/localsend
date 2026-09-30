@@ -34,12 +34,16 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
+        finishNativeStartup(notification, launchedAsLoginItem: LaunchAtLogin.wasLaunchedAtLogin)
+    }
+
+    @MainActor func finishNativeStartup(_ notification: Notification, launchedAsLoginItem: Bool) {
         NSApplication.shared.servicesProvider = self
         
         let localsendBrandColor = NSColor(red: 0, green: 0.392, blue: 0.353, alpha: 0.8) // #00645a
         DockProgress.style = .squircle(color: localsendBrandColor)
         
-        isLaunchedAsLoginItem = LaunchAtLogin.wasLaunchedAtLogin
+        isLaunchedAsLoginItem = launchedAsLoginItem
         for result in pendingLoginItemResults {
             result(isLaunchedAsLoginItem)
         }
@@ -142,7 +146,7 @@ class AppDelegate: FlutterAppDelegate {
     }
     
     // START: handle opened files
-    @MainActor private func handleFlutterCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    @MainActor func handleFlutterCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "methodChannelInitialized":
             /// Any call to the channel is dropped until methodChannelInitialized is called from Flutter
