@@ -48,9 +48,14 @@ class DiscoveryService {
   }
 
   Future<void> _runListener(StreamController<Device> devices) async {
+    Object advertisedState(SyncState state) => (state.alias, state.port, state.protocol, state.download);
+
     // Announcements are only answered while the server runs: the answer would
     // advertise an HTTP port that nobody listens on otherwise.
     _ref.stream(syncProvider).listen((event) {
+      if (advertisedState(event.prev) != advertisedState(event.next)) {
+        restartListener();
+      }
       if (event.prev.serverRunning != event.next.serverRunning) {
         unawaited(_discovery?.setAnswerAnnouncements(answer: event.next.serverRunning));
       }
@@ -90,8 +95,17 @@ class DiscoveryService {
         _logger.warning('Discovery runs without multicast (group: ${syncState.multicastGroup}, port: ${syncState.port}): $multicastError');
       }
 
-      if (!_ref.read(syncProvider).serverRunning) {
-        await discovery.setAnswerAnnouncements(answer: false);
+      // Sync updates cannot reach this handle until it is published below.
+      bool serverRunning;
+      do {
+        serverRunning = _ref.read(syncProvider).serverRunning;
+        await discovery.setAnswerAnnouncements(answer: serverRunning);
+      } while (serverRunning != _ref.read(syncProvider).serverRunning);
+
+      // A sync update can arrive while startDiscovery is still in flight.
+      if (advertisedState(syncState) != advertisedState(_ref.read(syncProvider))) {
+        await discovery.stop();
+        continue;
       }
 
       _discovery = discovery;
