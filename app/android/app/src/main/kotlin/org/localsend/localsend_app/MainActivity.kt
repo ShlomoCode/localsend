@@ -81,15 +81,18 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "pickDirectory" -> {
-                    startPicker(result) { openDirectoryPicker(onlyPath = false) }
+                    pendingResult = result
+                    openDirectoryPicker(onlyPath = false)
                 }
 
                 "pickFiles" -> {
-                    startPicker(result) { openFilePicker() }
+                    pendingResult = result
+                    openFilePicker()
                 }
 
                 "pickDirectoryPath" -> {
-                    startPicker(result) { openDirectoryPicker(onlyPath = true) }
+                    pendingResult = result
+                    openDirectoryPicker(onlyPath = true)
                 }
 
                 "createDirectory" -> handleCreateDirectory(call, result)
@@ -126,16 +129,9 @@ class MainActivity : FlutterActivity() {
                 "requestLocalNetworkPermission" -> {
                     if (hasLocalNetworkPermission()) {
                         result.success(true)
-                    } else if (pendingPermissionResult != null) {
-                        result.error("BUSY", "A local network permission request is already pending", null)
                     } else {
                         pendingPermissionResult = result
-                        try {
-                            requestPermissions(arrayOf(PERMISSION_ACCESS_LOCAL_NETWORK), REQUEST_CODE_LOCAL_NETWORK)
-                        } catch (e: RuntimeException) {
-                            pendingPermissionResult = null
-                            throw e
-                        }
+                        requestPermissions(arrayOf(PERMISSION_ACCESS_LOCAL_NETWORK), REQUEST_CODE_LOCAL_NETWORK)
                     }
                 }
 
@@ -155,9 +151,8 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CODE_LOCAL_NETWORK) {
-            val result = pendingPermissionResult
+            pendingPermissionResult?.success(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
             pendingPermissionResult = null
-            result?.success(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
         }
     }
 
@@ -303,20 +298,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startPicker(result: MethodChannel.Result, openPicker: () -> Unit) {
-        if (pendingResult != null) {
-            result.error("BUSY", "A directory or file picker is already pending", null)
-            return
-        }
-        pendingResult = result
-        try {
-            openPicker()
-        } catch (e: RuntimeException) {
-            pendingResult = null
-            throw e
-        }
-    }
-
     private fun openDirectoryPicker(onlyPath: Boolean) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
@@ -341,95 +322,93 @@ class MainActivity : FlutterActivity() {
     @Override
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode !in setOf(REQUEST_CODE_PICK_DIRECTORY, REQUEST_CODE_PICK_DIRECTORY_PATH, REQUEST_CODE_PICK_FILE)) {
+        if (resultCode == Activity.RESULT_CANCELED) {
+            pendingResult?.error("CANCELED", "Canceled", null)
+            pendingResult = null
             return
         }
-        val result = pendingResult ?: return
-        pendingResult = null
-        try {
-            if (resultCode == Activity.RESULT_CANCELED) {
-                result.error("CANCELED", "Canceled", null)
-                return
+
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            pendingResult?.error("Error $resultCode", "Failed to access directory or file", null)
+            pendingResult = null
+            return
+        }
+
+        when (requestCode) {
+            REQUEST_CODE_PICK_DIRECTORY -> {
+                val uri: Uri? = data.data
+                val takeFlags: Int =
+                    data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                if (uri != null) {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+
+                    val files = mutableListOf<FileInfo>()
+                    listFiles(uri, files)
+                    val resultData = PickDirectoryResult(uri.toString(), files)
+                    pendingResult?.success(resultData.toMap())
+                    pendingResult = null
+                } else {
+                    pendingResult?.error("Error", "Failed to access directory", null)
+                    pendingResult = null
+                }
             }
 
-            if (resultCode != Activity.RESULT_OK || data == null) {
-                result.error("Error $resultCode", "Failed to access directory or file", null)
-                return
+            REQUEST_CODE_PICK_DIRECTORY_PATH -> {
+                val uri: Uri? = data.data
+                val takeFlags: Int =
+                    data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                if (uri != null) {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    pendingResult?.success(uri.toString())
+                    pendingResult = null
+                } else {
+                    pendingResult?.error("Error", "Failed to access directory", null)
+                    pendingResult = null
+                }
             }
 
-            when (requestCode) {
-                REQUEST_CODE_PICK_DIRECTORY -> {
-                    val uri: Uri? = data.data
-                    val takeFlags: Int =
-                        data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                    if (uri != null) {
-                        contentResolver.takePersistableUriPermission(uri, takeFlags)
+            REQUEST_CODE_PICK_FILE -> {
+                val uriList: List<Uri> = when {
+                    data.clipData != null -> {
+                        val clipData = data.clipData
+                        val uris = mutableListOf<Uri>()
+                        for (i in 0 until clipData!!.itemCount) {
+                            uris.add(clipData.getItemAt(i).uri)
+                        }
+                        uris
+                    }
 
-                        val files = mutableListOf<FileInfo>()
-                        listFiles(uri, files)
-                        val resultData = PickDirectoryResult(uri.toString(), files)
-                        result.success(resultData.toMap())
-                    } else {
-                        result.error("Error", "Failed to access directory", null)
+                    data.data != null -> listOf(data.data!!)
+                    else -> {
+                        pendingResult?.error("Error", "Failed to access file", null)
+                        return
                     }
                 }
 
-                REQUEST_CODE_PICK_DIRECTORY_PATH -> {
-                    val uri: Uri? = data.data
-                    val takeFlags: Int =
-                        data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                    if (uri != null) {
-                        contentResolver.takePersistableUriPermission(uri, takeFlags)
-                        result.success(uri.toString())
-                    } else {
-                        result.error("Error", "Failed to access directory", null)
+                val takeFlags: Int =
+                    data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+
+                val resultList = mutableListOf<FileInfo>()
+                for (uri in uriList) {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    val documentFile = FastDocumentFile.fromDocumentUri(this, uri)
+                    if (documentFile == null) {
+                        pendingResult?.error("Error", "Failed to access file", null)
+                        return
                     }
-                }
-
-                REQUEST_CODE_PICK_FILE -> {
-                    val uriList: List<Uri> = when {
-                        data.clipData != null -> {
-                            val clipData = data.clipData
-                            val uris = mutableListOf<Uri>()
-                            for (i in 0 until clipData!!.itemCount) {
-                                uris.add(clipData.getItemAt(i).uri)
-                            }
-                            uris
-                        }
-
-                        data.data != null -> listOf(data.data!!)
-                        else -> {
-                            result.error("Error", "Failed to access file", null)
-                            return
-                        }
-                    }
-
-                    val takeFlags: Int =
-                        data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-
-                    val resultList = mutableListOf<FileInfo>()
-                    for (uri in uriList) {
-                        contentResolver.takePersistableUriPermission(uri, takeFlags)
-                        val documentFile = FastDocumentFile.fromDocumentUri(this, uri)
-                        if (documentFile == null) {
-                            result.error("Error", "Failed to access file", null)
-                            return
-                        }
-                        resultList.add(
-                            FileInfo(
-                                name = documentFile.name,
-                                size = documentFile.size,
-                                uri = uri.toString(),
-                                lastModified = documentFile.lastModified?.toRfc3339(),
-                            )
+                    resultList.add(
+                        FileInfo(
+                            name = documentFile.name,
+                            size = documentFile.size,
+                            uri = uri.toString(),
+                            lastModified = documentFile.lastModified?.toRfc3339(),
                         )
-                    }
-
-                    result.success(resultList.map { it.toMap() })
+                    )
                 }
+
+                pendingResult?.success(resultList.map { it.toMap() })
+                pendingResult = null
             }
-        } catch (e: Exception) {
-            result.error("PICK_FAILED", e.message ?: "Failed to access directory or file", null)
         }
     }
 
