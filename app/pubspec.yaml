@@ -77,7 +77,11 @@ dev_dependencies:
   dart_mappable_builder: 4.8.0
   flutter_gen_runner: 5.15.0
   flutter_lints: 6.0.0
+  flutter_test:
+    sdk: flutter
   freezed: 3.2.5
+  integration_test:
+    sdk: flutter
   mockito: any
   refena_inspector: 2.1.1
   slang_build_runner: 4.19.0

@@ -1,0 +1,74 @@
+name: macOS startup regression
+
+on:
+  push:
+    branches:
+      - codex/test-macos-startup-main
+      - codex/test-macos-startup-fixed
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/macos_startup_regression.yml
+      - app/integration_test/macos_startup_test.dart
+      - app/macos/Runner/**
+      - support/test/**
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install FVM
+        run: brew install leoafarias/fvm/fvm
+      - uses: actions/cache@v5
+        with:
+          path: ~/fvm
+          key: flutter-macos-arm64-${{ hashFiles('.fvmrc') }}
+      - name: Install pinned Flutter
+        run: fvm install
+      - name: Install pinned Rust
+        run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/localsend_isolates/rust -> target
+          shared-key: macos-startup
+      - name: Resolve dependencies
+        run: |
+          cd app
+          fvm flutter pub get
+          cd ../packages/localsend_isolates/rust_builder/cargokit/build_tool
+          fvm flutter pub get
+      - name: Prepare native startup scheduling gate
+        run: python3 support/test/macos_startup_gate.py app/macos/Runner
+      - name: Configure unsigned test build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          project = Path('app/macos/Runner.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          text = text.replace('buildSettings = {', 'buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;')
+          text = re.sub(r'MACOSX_DEPLOYMENT_TARGET = [^;]+;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;', text)
+          project.write_text(text)
+
+          podfile = Path('app/macos/Podfile')
+          podfile.write_text(podfile.read_text().replace("config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '11.0'", "config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '12.0'"))
+          PY
+      - name: Run real macOS startup regression
+        working-directory: app
+        run: |
+          mkdir -p ../artifacts
+          set -o pipefail
+          fvm flutter test integration_test/macos_startup_test.dart -d macos --reporter expanded 2>&1 | tee ../artifacts/macos-startup.log
+      - name: Upload startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-startup-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: ignore
