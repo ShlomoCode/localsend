@@ -8,7 +8,7 @@ To make the race reproducible, `macos_startup_gate.py` modifies only the disposa
 
 The test writes preferences for an existing installation through the real preferences plugin. This avoids the first-launch reduce-motion query and targets the reported login-item query.
 
-The workflow uses the pinned Flutter SDK, an Apple Silicon macOS runner, and an unsigned Debug build. Flutter disables sandboxing in this CI configuration. It does not verify App Store packaging, a signed DMG, or an actual login-item launch.
+The workflow uses the pinned Flutter SDK, an Apple Silicon macOS 15 runner with Xcode 26.3, and an unsigned Debug build. Flutter disables sandboxing in this CI configuration. It does not verify App Store packaging, a signed DMG, or an actual login-item launch.
 
 Apply the timing overlay only in a disposable checkout:
 

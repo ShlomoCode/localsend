@@ -114,7 +114,7 @@ def overlay(runner: Path) -> None:
         LAUNCH_SIGNATURE,
         """    override func applicationDidFinishLaunching(_ notification: Notification) {
 #if DEBUG
-        // Read the Apple event during the original callback, before Dart runs.
+        // Read the Apple event during the original callback, before deferring startup work.
         let capturedLoginItem = LaunchAtLogin.wasLaunchedAtLogin
         StartupTimingGate.shared.hold { [weak self] in
             self?.finishApplicationDidFinishLaunching(notification, capturedLoginItem: capturedLoginItem)
