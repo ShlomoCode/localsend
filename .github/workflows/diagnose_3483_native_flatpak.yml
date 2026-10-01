@@ -1,0 +1,71 @@
+name: LocalSend 3483 native x64 Flatpak transition
+
+on:
+  push:
+    branches:
+      - codex/3483-native-flatpak-repro
+    paths:
+      - .github/workflows/diagnose_3483_native_flatpak.yml
+      - evidence/ci-native-x86/**
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak-runtime-transition:
+    name: Signed Flatpak old-to-current cohort / X11
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install bounded X11 and Flatpak test tools
+        timeout-minutes: 4
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            flatpak xvfb xauth openbox dbus-x11 xdotool x11-utils x11-xserver-utils \
+            scrot tesseract-ocr mesa-utils libgl1-mesa-dev libx11-dev gcc
+
+      - name: Static-check the public diagnostic harness
+        run: |
+          python3 -m py_compile evidence/ci-native-x86/run.py
+          gcc -Wall -Wextra -Werror -fsyntax-only evidence/ci-native-x86/glx-probe.c
+
+      - name: Run exact signed refs under X11
+        timeout-minutes: 14
+        env:
+          LANG: en_US.UTF-8
+          LC_ALL: C.UTF-8
+          XDG_SESSION_TYPE: x11
+          XDG_CURRENT_DESKTOP: Openbox
+          XDG_SESSION_DESKTOP: openbox
+          CI3483_ARTIFACT_DIR: ${{ runner.temp }}/localsend-3483-public-artifacts
+          CI3483_RAW_DIR: ${{ runner.temp }}/localsend-3483-private-raw
+          CI3483_GL_PROBE_SOURCE: ${{ github.workspace }}/evidence/ci-native-x86/glx-probe.c
+        run: |
+          mkdir -p "$CI3483_ARTIFACT_DIR" "$CI3483_RAW_DIR" "$RUNNER_TEMP/localsend-3483-gl-probe"
+          gcc -O2 -Wall -Wextra -Werror "$CI3483_GL_PROBE_SOURCE" \
+            -o "$RUNNER_TEMP/localsend-3483-gl-probe/glx-probe" -lGL -lX11
+          xvfb-run -a -s '-screen 0 1280x800x24 +extension GLX -nolisten tcp' \
+            dbus-run-session -- bash -c '
+              set -euo pipefail
+              openbox --sm-disable >"$CI3483_RAW_DIR/openbox.log" 2>&1 &
+              for attempt in $(seq 1 50); do
+                if xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q window; then break; fi
+                sleep 0.2
+              done
+              xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q window
+              python3 evidence/ci-native-x86/run.py \
+                --gl-probe "$RUNNER_TEMP/localsend-3483-gl-probe/glx-probe"
+            '
+
+      - name: Publish sanitized visual and metadata evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: localsend-3483-native-x64-flatpak-evidence
+          path: ${{ runner.temp }}/localsend-3483-public-artifacts
+          if-no-files-found: warn
+          retention-days: 7
