@@ -5,7 +5,8 @@ if [[ ${1:-} != --desktop ]]; then
   variant=${1:?baseline, fixed, or release label required}
   bundle=${LS_BUNDLE_OVERRIDE:-/tmp/ls-$variant}
   test -x "$bundle/localsend_app"
-  for desktop in openbox cinnamon; do
+  read -ra desktop_names <<< "${LS_DESKTOPS:-openbox cinnamon}"
+  for desktop in "${desktop_names[@]}"; do
     dbus-run-session -- bash "$0" --desktop "$variant" "$bundle" "$desktop"
   done
   exit
@@ -129,6 +130,14 @@ run_case() {
     fi
     sleep 5
     snapshot after "$case_name"
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+      echo "INFRA_FAILURE $case_name show trigger terminated app" | tee -a "$evidence/verdict.txt"
+      return 1
+    fi
+    if ! grep -q 'Map State: IsViewable' "$evidence/$case_name-after.txt"; then
+      echo "INFRA_FAILURE $case_name show trigger did not show main window" | tee -a "$evidence/verdict.txt"
+      return 1
+    fi
     if grep -q TCP_CONNECT=FAILED "$evidence/$case_name-before.txt" && grep -q TCP_CONNECT=OK "$evidence/$case_name-after.txt"; then
       echo "REPRODUCED $variant $desktop $case_name: no TCP until same process window shown" | tee -a "$evidence/verdict.txt"
     else
