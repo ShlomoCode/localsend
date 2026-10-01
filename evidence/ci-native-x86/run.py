@@ -160,6 +160,7 @@ def ensure_remote() -> dict[str, Any]:
     REMOTE_DIAGNOSTICS.clear()
     REMOTE_DIAGNOSTICS.update({
         "remote_found": False,
+        "remote_config_found": False,
         "url_matches": False,
         "gpg_verify": False,
         "gpg_verify_key_present": False,
@@ -168,29 +169,26 @@ def ensure_remote() -> dict[str, Any]:
         "collection_id_present": False,
         "disabled_gpg_option_present": False,
     })
-    # Use a dedicated system remote so an image's preconfigured Flathub alias
-    # cannot redirect or otherwise alter this signed-ref test.
-    info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name"],
-               timeout=30).stdout or ""
-    remote_names = {line.strip() for line in info.splitlines() if line.strip()}
-    remote_created = REMOTE not in remote_names
+    # Use the system OSTree config as the source of truth; formatted `remotes`
+    # output is presentation data and can vary with its requested columns.
+    config_path = "/var/lib/flatpak/repo/config"
+    group = f'remote "{REMOTE}"'
+    config = configparser.ConfigParser(interpolation=None)
+    # A fresh Flatpak installation creates the repository during remote-add.
+    REMOTE_DIAGNOSTICS["repo_config_present_before_add"] = bool(config.read(config_path))
+    remote_created = not config.has_section(group)
+    REMOTE_DIAGNOSTICS["remote_config_found"] = not remote_created
     if remote_created:
+        # Dedicated name avoids inheriting any image-provided Flathub config.
         run(["sudo", "flatpak", "remote-add", "--system", "--if-not-exists", "--from", REMOTE,
              REMOTE_REPO_FILE], timeout=90)
-    if remote_created:
-        # Refresh after creating our uniquely named remote.
-        info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name"],
-                   timeout=30).stdout or ""
-        remote_names = {line.strip() for line in info.splitlines() if line.strip()}
-    if REMOTE not in remote_names:
+        config = configparser.ConfigParser(interpolation=None)
+        if not config.read(config_path):
+            raise ProbeFailure("remote_check", "system_remote_config_unavailable_after_add")
+        REMOTE_DIAGNOSTICS["remote_config_found"] = config.has_section(group)
+    if not config.has_section(group):
         raise ProbeFailure("remote_check", "flathub_remote_unavailable")
     REMOTE_DIAGNOSTICS["remote_found"] = True
-    config = configparser.ConfigParser(interpolation=None)
-    if not config.read("/var/lib/flatpak/repo/config"):
-        raise ProbeFailure("remote_check", "system_remote_config_unavailable")
-    group = f'remote "{REMOTE}"'
-    if not config.has_section(group):
-        raise ProbeFailure("remote_check", "flathub_system_remote_missing")
     remote_url = config.get(group, "url", fallback="").strip().rstrip("/")
     REMOTE_DIAGNOSTICS["url_matches"] = remote_url == REMOTE_URL.rstrip("/")
     # OSTree defaults gpg-verify to true and gpg-verify-summary to false when
