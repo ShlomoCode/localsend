@@ -1,8 +1,6 @@
 name: Diagnose hidden startup
 
 on:
-  push:
-    branches: [codex/diagnose-hidden-startup]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +17,7 @@ jobs:
       - name: Install Linux build and desktop dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev libgl1-mesa-dri libegl1 libgles2 xvfb openbox cinnamon muffin dbus-x11 xdotool x11-utils iproute2 curl openssl python3 scrot
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev libgl1-mesa-dri libegl1 libgles2 xvfb openbox cinnamon muffin dbus-x11 xdotool x11-utils iproute2 curl openssl python3 scrot
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.41.9'
@@ -35,12 +33,20 @@ jobs:
           rustup toolchain install --profile minimal
           rustc --version > /tmp/ls-evidence/rust-version.txt
       - name: Probe the reported release on x86_64
+        continue-on-error: true
         run: |
           mkdir -p /tmp/ls-reported-1.17
           curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o /tmp/localsend-1.17.tar.gz
           sha256sum /tmp/localsend-1.17.tar.gz > /tmp/ls-evidence/reported-release-sha256.txt
           tar -xzf /tmp/localsend-1.17.tar.gz -C /tmp/ls-reported-1.17
           LS_BUNDLE_OVERRIDE=/tmp/ls-reported-1.17 bash .github/diagnostics/hidden-startup/runtime-probe.sh reported-1.17
+      - name: Preserve release probe
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: reported-release-evidence
+          path: /tmp/ls-evidence
+          retention-days: 7
       - name: Instrument exact baseline
         run: python3 .github/diagnostics/hidden-startup/instrument.py
       - name: Build baseline
@@ -49,8 +55,22 @@ jobs:
           flutter pub get
           flutter build linux --release --no-pub
           cp -a build/linux/x64/release/bundle /tmp/ls-baseline
+      - name: Preserve diagnostic baseline binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: diagnostic-baseline-bundle
+          path: /tmp/ls-baseline
+          retention-days: 7
       - name: Run instrumented baseline
+        continue-on-error: true
         run: bash .github/diagnostics/hidden-startup/runtime-probe.sh baseline
+      - name: Preserve baseline probe
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: baseline-evidence
+          path: /tmp/ls-evidence
+          retention-days: 7
       - name: Apply minimal PR fix
         run: |
           python3 - <<'PY'
@@ -77,7 +97,14 @@ jobs:
         run: |
           flutter build linux --release --no-pub
           cp -a build/linux/x64/release/bundle /tmp/ls-fixed
+      - name: Preserve diagnostic fixed binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: diagnostic-fixed-bundle
+          path: /tmp/ls-fixed
+          retention-days: 7
       - name: Run instrumented fix
+        continue-on-error: true
         run: bash .github/diagnostics/hidden-startup/runtime-probe.sh fixed
       - name: Preserve diagnostic evidence
         if: always()

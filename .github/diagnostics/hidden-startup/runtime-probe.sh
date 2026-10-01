@@ -17,7 +17,7 @@ desktop=$4
 evidence=/tmp/ls-evidence/$variant-$desktop
 runtime=$(mktemp -d /tmp/ls-runtime-XXXXXX)
 mkdir -p "$evidence" "$runtime/profile" "$runtime/data" "$runtime/cache"
-export DISPLAY=:91 GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1
+export DISPLAY=:91 GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=x11
 export XDG_CONFIG_HOME="$runtime/profile" XDG_DATA_HOME="$runtime/data" XDG_CACHE_HOME="$runtime/cache"
 export XDG_RUNTIME_DIR="$runtime/xdg-runtime"
 mkdir "$XDG_RUNTIME_DIR"
@@ -59,9 +59,9 @@ snapshot() {
     echo "PID=$app_pid"
     if kill -0 "$app_pid" 2>/dev/null; then echo APP_ALIVE=yes; else echo APP_ALIVE=no; fi
     echo VISIBLE_WINDOW_IDS
-    xdotool search --onlyvisible --pid "$app_pid" --name LocalSend 2>/dev/null || true
+    xdotool search --all --onlyvisible --pid "$app_pid" --name '^LocalSend$' 2>/dev/null || true
     echo ALL_NAMED_WINDOWS
-    for window in $(xdotool search --pid "$app_pid" --name LocalSend 2>/dev/null || true); do
+    for window in $(xdotool search --all --pid "$app_pid" --name '^LocalSend$' 2>/dev/null || true); do
       xwininfo -id "$window" | grep -E 'Window id|Map State|Width|Height'
     done
     echo PORT_53317
@@ -103,7 +103,7 @@ run_case() {
     return 1
   fi
   if [[ $hidden == yes ]]; then
-    window=$(xdotool search --pid "$app_pid" --name '^LocalSend$' 2>/dev/null | head -1 || true)
+    window=$(xdotool search --all --pid "$app_pid" --name '^LocalSend$' 2>/dev/null | head -1 || true)
     if [[ -z $window ]]; then
       echo "INFRA_FAILURE $case_name no main window found" | tee -a "$evidence/verdict.txt"
       return 1
