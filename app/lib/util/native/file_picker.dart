@@ -292,20 +292,20 @@ Future<void> _pickText(BuildContext context, Ref ref) async {
 
 Future<void> _pickClipboard(BuildContext context, Ref ref) async {
   final data = await Clipboard.getData(Clipboard.kTextPlain);
+  List<String>? clipboardFiles;
   if (data?.text != null) {
     final text = data!.text!;
     if (!kIsWeb && checkPlatformIsDesktop() && await File(text).exists()) {
-      final files = await Pasteboard.files();
-      if (files.contains(text)) {
-        await _addClipboardFiles(ref, files);
-        return;
-      }
+      // File managers may also expose a copied file as text: https://github.com/localsend/localsend/issues/3499
+      clipboardFiles = await Pasteboard.files();
     }
-    ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: text));
-    return;
+    if (clipboardFiles?.isNotEmpty != true) {
+      ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: text));
+      return;
+    }
   }
 
-  final image = await Pasteboard.image;
+  final image = clipboardFiles == null ? await Pasteboard.image : null;
   if (image != null) {
     // Adding temporary variable because Dart analyzer somehow doesn't properly downcast Uint8List? to Uint8List
     Uint8List currImage = image;
@@ -337,9 +337,32 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
     return;
   }
 
-  final List<String> files = await Pasteboard.files();
+  final List<String> files = clipboardFiles ?? await Pasteboard.files();
   if (files.isNotEmpty) {
-    await _addClipboardFiles(ref, files);
+    await ref
+        .redux(selectedSendingFilesProvider)
+        .dispatchAsync(
+          AddFilesAction(
+            files: files.map((e) => XFile(e)).toList(),
+            converter: (file) async {
+              if (!file.path.startsWith('content://')) {
+                return CrossFileConverters.convertXFile(file);
+              }
+              // handle content uri
+              return CrossFile(
+                name: file.name,
+                fileType: file.name.guessFileType(),
+                size: await _uriContent.getContentLength(Uri.parse(file.path)) ?? -1,
+                path: file.path,
+                thumbnail: null,
+                asset: null,
+                bytes: null,
+                lastModified: null,
+                lastAccessed: null,
+              );
+            },
+          ),
+        );
     return;
   }
 
@@ -352,33 +375,6 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
       content: Text(t.general.noItemInClipboard),
     ),
   );
-}
-
-Future<void> _addClipboardFiles(Ref ref, List<String> files) async {
-  await ref
-      .redux(selectedSendingFilesProvider)
-      .dispatchAsync(
-        AddFilesAction(
-          files: files.map((e) => XFile(e)).toList(),
-          converter: (file) async {
-            if (!file.path.startsWith('content://')) {
-              return CrossFileConverters.convertXFile(file);
-            }
-            // handle content uri
-            return CrossFile(
-              name: file.name,
-              fileType: file.name.guessFileType(),
-              size: await _uriContent.getContentLength(Uri.parse(file.path)) ?? -1,
-              path: file.path,
-              thumbnail: null,
-              asset: null,
-              bytes: null,
-              lastModified: null,
-              lastAccessed: null,
-            );
-          },
-        ),
-      );
 }
 
 Future<void> _pickApp(BuildContext context) async {

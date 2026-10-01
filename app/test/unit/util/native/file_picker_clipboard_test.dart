@@ -35,6 +35,7 @@ void main() {
     });
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('pasteboard'), (call) async {
       if (call.method == 'files') return clipboardFiles;
+      if (call.method == 'image') return Uint8List.fromList([0x89, 0x50]);
       return null;
     });
     addTearDown(() {
