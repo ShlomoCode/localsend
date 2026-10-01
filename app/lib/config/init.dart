@@ -113,6 +113,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
 
     // initialize size and position
     await WindowManager.instance.ensureInitialized();
+    await windowManager.setAlwaysOnTop(persistenceService.getAlwaysOnTop());
     await WindowDimensionsController(persistenceService).initDimensionsConfiguration();
     if (args.contains(startHiddenFlag)) {
       // keep this app hidden

@@ -89,6 +89,14 @@ class SettingsTab extends StatelessWidget {
                   onTap: () => vm.onTapLanguage(context),
                 ),
                 if (checkPlatformIsDesktop()) ...[
+                  _BooleanEntry(
+                    label: t.settingsTab.general.alwaysOnTop,
+                    value: vm.settings.alwaysOnTop,
+                    onChanged: (b) async {
+                      await ref.notifier(settingsProvider).setAlwaysOnTop(b);
+                    },
+                  ),
+
                   /// Wayland does window position handling, so there's no need for it. See [https://github.com/localsend/localsend/issues/544]
                   if (vm.advanced && checkPlatformIsNotWaylandDesktop())
                     _BooleanEntry(
