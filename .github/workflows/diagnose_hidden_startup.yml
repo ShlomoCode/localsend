@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install desktop runtime
         run: |
-          sudo apt-get update -qq
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=1 update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libgtk-3-dev libayatana-appindicator3-1 libsecret-1-0 libgl1-mesa-dri libegl1 libgles2 xvfb openbox cinnamon muffin dbus-x11 xdotool x11-utils iproute2 curl openssl python3 scrot
       - uses: actions/download-artifact@v7
         with:
@@ -35,7 +35,7 @@ jobs:
           chmod +x /tmp/ls-baseline/localsend_app /tmp/ls-fixed/localsend_app
           gcc -shared -fPIC .github/diagnostics/hidden-startup/show-window.c $(pkg-config --cflags --libs gtk+-3.0) -o /tmp/ls-show-window.so
           printf 'Source artifacts from run 36904366477, baseline e768240d1ad95f0f162b852b5ff37bec71cde1ef\n' > /tmp/ls-evidence/source.txt
-          sha256sum /tmp/ls-baseline/localsend_app /tmp/ls-fixed/localsend_app /tmp/ls-baseline/data/app.so /tmp/ls-fixed/data/app.so > /tmp/ls-evidence/binary-sha256.txt
+          sha256sum /tmp/ls-baseline/localsend_app /tmp/ls-fixed/localsend_app /tmp/ls-baseline/lib/libapp.so /tmp/ls-fixed/lib/libapp.so > /tmp/ls-evidence/binary-sha256.txt
       - name: Current baseline startup and real file transfer
         continue-on-error: true
         env:
@@ -56,86 +56,3 @@ jobs:
           path: /tmp/ls-evidence
           retention-days: 7
 
-  legacy:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/checkout@v6
-        with:
-          repository: localsend/localsend
-          ref: v1.17.0
-          path: legacy
-      - name: Install build and desktop dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev libgl1-mesa-dri libegl1 libgles2 xvfb openbox cinnamon muffin dbus-x11 xdotool x11-utils iproute2 curl openssl python3 scrot
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.24.5'
-          channel: stable
-          cache: true
-      - name: Instrument the reported source version
-        working-directory: legacy
-        run: |
-          mkdir -p /tmp/ls-evidence
-          git rev-parse HEAD > /tmp/ls-evidence/legacy-commit.txt
-          flutter --version > /tmp/ls-evidence/flutter-version.txt
-          python3 ../.github/diagnostics/hidden-startup/legacy-instrument.py
-      - name: Build legacy baseline
-        working-directory: legacy/app
-        run: |
-          flutter pub get
-          flutter build linux --release --no-pub
-          cp -a build/linux/x64/release/bundle /tmp/ls-legacy-baseline
-      - name: Probe instrumented legacy baseline
-        continue-on-error: true
-        env:
-          LS_BUNDLE_OVERRIDE: /tmp/ls-legacy-baseline
-        run: bash .github/diagnostics/hidden-startup/runtime-probe.sh legacy-baseline
-      - name: Preserve legacy baseline evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: legacy-baseline-evidence
-          path: /tmp/ls-evidence
-          retention-days: 7
-      - name: Apply the same minimal fix to legacy source
-        working-directory: legacy
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('app/lib/config/init.dart')
-          text = p.read_text()
-          target = '  ProcessSignal.sigusr2.watch().listen'
-          assert text.count(target) == 1
-          fix = '''  if (checkPlatformIsDesktop()) {
-              // Hidden desktop windows may not build HomePage, so postInit may not run.
-              try {
-                await container.notifier(serverProvider).startServerFromSettings();
-              } catch (e, st) {
-                _logger.warning('Starting receive server during initialization failed', e, st);
-              }
-            }
-
-          '''
-          p.write_text(text.replace(target, fix + target))
-          PY
-          git diff > /tmp/ls-evidence/legacy-instrumentation-and-fix.diff
-      - name: Build legacy fix
-        working-directory: legacy/app
-        run: |
-          flutter build linux --release --no-pub
-          cp -a build/linux/x64/release/bundle /tmp/ls-legacy-fixed
-      - name: Probe instrumented legacy fix
-        continue-on-error: true
-        env:
-          LS_BUNDLE_OVERRIDE: /tmp/ls-legacy-fixed
-        run: bash .github/diagnostics/hidden-startup/runtime-probe.sh legacy-fixed
-      - name: Preserve legacy evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: legacy-gtk-evidence
-          path: /tmp/ls-evidence
-          retention-days: 7
