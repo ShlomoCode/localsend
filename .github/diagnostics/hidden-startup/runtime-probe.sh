@@ -17,7 +17,7 @@ desktop=$4
 evidence=/tmp/ls-evidence/$variant-$desktop
 runtime=$(mktemp -d /tmp/ls-runtime-XXXXXX)
 mkdir -p "$evidence" "$runtime/profile" "$runtime/data" "$runtime/cache"
-export DISPLAY=:91 GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=x11
+export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=x11
 export XDG_CONFIG_HOME="$runtime/profile" XDG_DATA_HOME="$runtime/data" XDG_CACHE_HOME="$runtime/cache"
 export XDG_RUNTIME_DIR="$runtime/xdg-runtime"
 mkdir "$XDG_RUNTIME_DIR"
@@ -25,14 +25,20 @@ chmod 700 "$XDG_RUNTIME_DIR"
 app_pid= desktop_pid= xvfb_pid=
 cleanup() {
   for process in "$app_pid" "$desktop_pid" "$xvfb_pid"; do
-    if [[ -n $process ]]; then kill "$process" 2>/dev/null || true; fi
+    if [[ -n $process ]]; then
+      kill "$process" 2>/dev/null || true
+      wait "$process" 2>/dev/null || true
+    fi
   done
 }
 trap cleanup EXIT
-Xvfb "$DISPLAY" -screen 0 1280x800x24 +extension GLX >"$evidence/xvfb.log" 2>&1 &
+Xvfb -displayfd 3 -screen 0 1280x800x24 +extension GLX 3>"$runtime/display-number" >"$evidence/xvfb.log" 2>&1 &
 xvfb_pid=$!
 for _ in $(seq 1 20); do
-  if xdpyinfo >/dev/null 2>&1; then break; fi
+  if [[ -s $runtime/display-number ]]; then
+    export DISPLAY=":$(cat "$runtime/display-number")"
+    if xdpyinfo >/dev/null 2>&1; then break; fi
+  fi
   sleep 1
 done
 xdpyinfo >"$evidence/display.txt"
@@ -80,7 +86,7 @@ PY
       echo HTTPS_INFO=FAILED
     fi
     echo LIFECYCLE_MARKERS_SO_FAR
-    grep -E '\[LS-REPRO\]|Starting server|Server started|Started server' "$evidence/$case_name-app.log" || true
+    grep -E '\[LS-REPRO\]|\[HIDDEN-TRACE\]|Starting server|Server started|Started server' "$evidence/$case_name-app.log" || true
   } | tee "$evidence/$case_name-$phase.txt"
   scrot "$evidence/$case_name-$phase.png" || true
 }
@@ -94,7 +100,11 @@ run_case() {
   fi
   launch_args=(-v)
   if [[ $hidden == yes ]]; then launch_args+=(--hidden); fi
-  "$bundle/localsend_app" "${launch_args[@]}" >"$evidence/$case_name-app.log" 2>&1 &
+  if [[ -n ${LS_SHOW_SHIM:-} ]]; then
+    LD_PRELOAD="$LS_SHOW_SHIM" "$bundle/localsend_app" "${launch_args[@]}" >"$evidence/$case_name-app.log" 2>&1 &
+  else
+    "$bundle/localsend_app" "${launch_args[@]}" >"$evidence/$case_name-app.log" 2>&1 &
+  fi
   app_pid=$!
   sleep 15
   snapshot before "$case_name"
@@ -109,8 +119,14 @@ run_case() {
       return 1
     fi
     echo "SHOW_SAME_PROCESS pid=$app_pid window=$window" | tee "$evidence/$case_name-show.txt"
-    xdotool windowmap "$window"
-    xdotool windowactivate --sync "$window" || true
+    if [[ $variant == legacy-* ]]; then
+      kill -USR2 "$app_pid"
+    elif [[ -n ${LS_SHOW_SHIM:-} ]]; then
+      kill -USR1 "$app_pid"
+    else
+      echo "INFRA_FAILURE no GTK show trigger supplied" | tee -a "$evidence/verdict.txt"
+      return 1
+    fi
     sleep 5
     snapshot after "$case_name"
     if grep -q TCP_CONNECT=FAILED "$evidence/$case_name-before.txt" && grep -q TCP_CONNECT=OK "$evidence/$case_name-after.txt"; then
@@ -136,3 +152,34 @@ run_case hidden-warm yes
 export XDG_CONFIG_HOME="$runtime/fresh-profile" XDG_DATA_HOME="$runtime/fresh-data" XDG_CACHE_HOME="$runtime/fresh-cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 run_case hidden-fresh yes
+
+# Independent file-transfer check with the existing auto-accept setting enabled.
+if [[ -n ${LS_TRANSFER_SCRIPT:-} && $variant != legacy-* ]]; then
+  case_name=transfer-hidden
+  mkdir -p "$runtime/received"
+  python3 - "$bundle/settings.json" "$runtime/received" <<'PY'
+import json, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({
+    'flutter.ls_version': 3,
+    'flutter.ls_quick_save': 'on',
+    'flutter.ls_destination': sys.argv[2],
+    'flutter.ls_save_to_gallery': False,
+    'flutter.ls_https': True,
+}))
+PY
+  LD_PRELOAD="${LS_SHOW_SHIM:-}" "$bundle/localsend_app" --hidden -v >"$evidence/$case_name-app.log" 2>&1 &
+  app_pid=$!
+  sleep 15
+  snapshot before "$case_name"
+  if python3 "$LS_TRANSFER_SCRIPT" --cert "$runtime/client.crt" --key "$runtime/client.key" --destination "$runtime/received" --evidence "$evidence" --label "$variant-$desktop"; then
+    echo "E2E_PASSED $variant $desktop" | tee -a "$evidence/verdict.txt"
+  else
+    echo "E2E_FAILED $variant $desktop" | tee -a "$evidence/verdict.txt"
+  fi
+  snapshot after "$case_name"
+  kill "$app_pid" 2>/dev/null || true
+  wait "$app_pid" 2>/dev/null || true
+  app_pid=
+  rm -f "$bundle/settings.json"
+fi
