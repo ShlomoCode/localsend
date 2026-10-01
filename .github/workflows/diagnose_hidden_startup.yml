@@ -34,6 +34,10 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev libgl1-mesa-dri libegl1 libgles2 xvfb openbox dbus-x11 xdotool x11-utils iproute2 curl openssl python3 scrot gcc
           gcc -shared -fPIC diagnostics/.github/diagnostics/hidden-startup/show-window.c -o /tmp/ls-show-window.so $(pkg-config --cflags --libs gtk+-3.0)
+          gcc -shared -fPIC diagnostics/.github/diagnostics/hidden-startup/revert-view-realize.c -o /tmp/ls-revert-view-realize.so $(pkg-config --cflags --libs gtk+-3.0) -ldl
+          mkdir -p /tmp/ls-evidence
+          cp diagnostics/.github/diagnostics/hidden-startup/revert-view-realize.c /tmp/ls-evidence/revert-view-realize.c
+          sha256sum diagnostics/.github/diagnostics/hidden-startup/revert-view-realize.c /tmp/ls-revert-view-realize.so > /tmp/ls-evidence/revert-view-realize.sha256
       - name: Apply common compatibility and selected native patch
         env:
           NATIVE_PORT: ${{ matrix.native_port }}
@@ -62,8 +66,11 @@ jobs:
         working-directory: historical/app
         env:
           EXPECTED_FLUTTER: ${{ matrix.flutter }}
+          PUB_CACHE: /tmp/ls-pristine-pub-cache
         run: |
           set -o pipefail
+          test ! -e "$PUB_CACHE"
+          mkdir -p "$PUB_CACHE"
           flutter --version | tee /tmp/ls-evidence/flutter-version.txt
           flutter --version --machine > /tmp/ls-evidence/flutter-version.json
           test "$(python3 -c 'import json; print(json.load(open("/tmp/ls-evidence/flutter-version.json"))["frameworkVersion"])')" = "$EXPECTED_FLUTTER"
@@ -85,6 +92,8 @@ jobs:
           flutter build linux --release --no-pub 2>&1 | tee /tmp/ls-evidence/build.log
           sha256sum build/linux/x64/release/bundle/localsend_app > /tmp/ls-evidence/binary.sha256
           cp -a build/linux/x64/release/bundle /tmp/ls-historical-bundle
+          tar -C /tmp -czf /tmp/ls-historical-bundle.tar.gz ls-historical-bundle
+          sha256sum /tmp/ls-historical-bundle.tar.gz > /tmp/ls-evidence/bundle-archive.sha256
       - name: Probe normal, warm hidden and fresh hidden startup
         continue-on-error: true
         env:
@@ -93,6 +102,23 @@ jobs:
           LS_SHOW_SHIM: /tmp/ls-show-window.so
           VARIANT: sdk${{ matrix.flutter }}-native${{ matrix.native_port }}
         run: bash diagnostics/.github/diagnostics/hidden-startup/runtime-probe.sh "$VARIANT"
+      - name: Reverse Flutter FlView realization in the same bundle
+        if: ${{ matrix.flutter == '3.35.6' && matrix.native_port == true }}
+        continue-on-error: true
+        env:
+          LS_DESKTOPS: openbox
+          LS_BUNDLE_OVERRIDE: /tmp/ls-historical-bundle
+          LS_SHOW_SHIM: /tmp/ls-revert-view-realize.so /tmp/ls-show-window.so
+          LS_REVERT_VIEW_REALIZE: '1'
+        run: bash diagnostics/.github/diagnostics/hidden-startup/runtime-probe.sh reverted-flview-realize-sdk35
+      - name: Preserve reusable bundle
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: hidden-startup-bundle-sdk${{ matrix.flutter }}-native${{ matrix.native_port }}
+          path: /tmp/ls-historical-bundle.tar.gz
+          if-no-files-found: error
+          retention-days: 7
       - name: Preserve this matrix cell's evidence
         if: always()
         uses: actions/upload-artifact@v6
