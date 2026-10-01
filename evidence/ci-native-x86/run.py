@@ -25,8 +25,9 @@ APP_ID = "org.localsend.localsend_app"
 APP_COMMIT = "31f3f559da9fc85ec88a82923e3d7287a873240573cbb9d6bd54bf4a26ad1ccd"
 OLD_PLATFORM_COMMIT = "bd44a6230581917d04f89812a4c21090c304d390edb73995af1c2f9fd8abf4e8"
 CURRENT_PLATFORM_COMMIT = "d27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf"
-REMOTE = "flathub"
+REMOTE = "flathub-3483"
 REMOTE_URL = "https://dl.flathub.org/repo/"
+REMOTE_REPO_FILE = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 REFS = [
     ("runtime/org.freedesktop.Platform/x86_64/25.08",
      "bd44a6230581917d04f89812a4c21090c304d390edb73995af1c2f9fd8abf4e8",
@@ -47,6 +48,7 @@ REFS = [
 SETTINGS_LABELS = ("general", "theme", "color", "language")
 COMMAND_LOG: Path | None = None
 REMOTE_DIAGNOSTICS: dict[str, Any] = {}
+COMMAND_FAILURE: dict[str, Any] = {}
 
 
 class ProbeFailure(RuntimeError):
@@ -58,6 +60,7 @@ class ProbeFailure(RuntimeError):
 
 def run(args: list[str], *, timeout: int = 120, check: bool = True,
         capture: bool = True) -> subprocess.CompletedProcess[str]:
+    global COMMAND_FAILURE
     try:
         result = subprocess.run(args, text=True, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
                                 stderr=subprocess.STDOUT if capture else subprocess.DEVNULL,
@@ -71,6 +74,23 @@ def run(args: list[str], *, timeout: int = 120, check: bool = True,
         with COMMAND_LOG.open("a", encoding="utf-8") as log:
             log.write(f"\n$ {shlex.join(args)}\n{result.stdout or ''}\n")
     if check and result.returncode:
+        command = args[1:] if args and args[0] == "sudo" else args
+        tool = command[0] if command else "unknown"
+        operation = command[1] if len(command) > 1 else "unknown"
+        output = result.stdout or ""
+        failure = {
+            "tool": "flatpak" if tool == "flatpak" else "other",
+            "operation": operation if operation in {"install", "update", "remote-add", "remote-modify", "run"} else "other",
+            "exit_code": result.returncode,
+            "category": "unsupported_option" if re.search(r"(?:unknown|unrecognized|invalid) option", output, re.I)
+            else "permission" if re.search(r"permission denied|not authorized|authentication required", output, re.I)
+            else "network" if re.search(r"network|resolve host|connection timed out|could not connect", output, re.I)
+            else "nonzero_exit",
+        }
+        option_match = re.search(r"(?:unknown|unrecognized|invalid) option\s*['\"]?(--[a-z0-9-]+)", output, re.I)
+        if option_match:
+            failure["unsupported_option"] = option_match.group(1).lower()
+        COMMAND_FAILURE = failure
         raise ProbeFailure("command_failed", "bounded_command_nonzero_exit")
     return result
 
@@ -148,27 +168,31 @@ def ensure_remote() -> dict[str, Any]:
         "collection_id_present": False,
         "disabled_gpg_option_present": False,
     })
-    info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name,url,options"],
+    # Use a dedicated system remote so an image's preconfigured Flathub alias
+    # cannot redirect or otherwise alter this signed-ref test.
+    info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name"],
                timeout=30).stdout or ""
-    rows = [line.split("\t") for line in info.splitlines() if line.strip()]
-    row = next((r for r in rows if r and r[0] == REMOTE), None)
-    if row is None:
+    remote_names = {line.strip() for line in info.splitlines() if line.strip()}
+    remote_created = REMOTE not in remote_names
+    if remote_created:
         run(["sudo", "flatpak", "remote-add", "--system", "--if-not-exists", "--from", REMOTE,
-             "https://dl.flathub.org/repo/flathub.flatpakrepo"], timeout=90)
-        info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name,url,options"],
+             REMOTE_REPO_FILE], timeout=90)
+    if remote_created:
+        # Refresh after creating our uniquely named remote.
+        info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name"],
                    timeout=30).stdout or ""
-        rows = [line.split("\t") for line in info.splitlines() if line.strip()]
-        row = next((r for r in rows if r and r[0] == REMOTE), None)
-    if row is None or len(row) < 3:
+        remote_names = {line.strip() for line in info.splitlines() if line.strip()}
+    if REMOTE not in remote_names:
         raise ProbeFailure("remote_check", "flathub_remote_unavailable")
     REMOTE_DIAGNOSTICS["remote_found"] = True
-    REMOTE_DIAGNOSTICS["url_matches"] = row[1].rstrip("/") == REMOTE_URL.rstrip("/")
     config = configparser.ConfigParser(interpolation=None)
     if not config.read("/var/lib/flatpak/repo/config"):
         raise ProbeFailure("remote_check", "system_remote_config_unavailable")
     group = f'remote "{REMOTE}"'
     if not config.has_section(group):
         raise ProbeFailure("remote_check", "flathub_system_remote_missing")
+    remote_url = config.get(group, "url", fallback="").strip().rstrip("/")
+    REMOTE_DIAGNOSTICS["url_matches"] = remote_url == REMOTE_URL.rstrip("/")
     # OSTree defaults gpg-verify to true and gpg-verify-summary to false when
     # the option is absent; mirror those effective defaults in the guard.
     gpg_verify_present = config.has_option(group, "gpg-verify")
@@ -176,22 +200,30 @@ def ensure_remote() -> dict[str, Any]:
     gpg_verify = config.getboolean(group, "gpg-verify", fallback=True)
     gpg_summary = config.getboolean(group, "gpg-verify-summary", fallback=False)
     collection_id = config.get(group, "collection-id", fallback="")
-    options = {part for part in re.split(r"[,\s]+", row[2].lower()) if part}
+    options = {
+        key for key in ("gpg-verify", "gpg-verify-summary")
+        if config.has_option(group, key) and not config.getboolean(group, key)
+    }
     REMOTE_DIAGNOSTICS.update({
         "gpg_verify": gpg_verify,
         "gpg_verify_key_present": gpg_verify_present,
         "gpg_verify_summary": gpg_summary,
         "gpg_summary_key_present": gpg_summary_present,
         "collection_id_present": bool(collection_id),
-        "disabled_gpg_option_present": bool({"no-gpg-verify", "no-gpg-verify-summary"} & options),
+        "disabled_gpg_option_present": "gpg-verify" in options,
     })
     # Require signed commits from the official remote. Summary verification
     # may be explicitly enabled or use OSTree's documented default; neither
     # mode requires changing the official .flatpakrepo configuration.
-    if not REMOTE_DIAGNOSTICS["url_matches"] or not gpg_verify \
-            or REMOTE_DIAGNOSTICS["disabled_gpg_option_present"]:
+    if not remote_policy_matches(REMOTE_DIAGNOSTICS):
         raise ProbeFailure("remote_check", "flathub_remote_policy_mismatch")
-    return {"name": row[0], "url": REMOTE_URL, **REMOTE_DIAGNOSTICS}
+    return {"name": REMOTE, "url": REMOTE_URL, **REMOTE_DIAGNOSTICS}
+
+
+def remote_policy_matches(diagnostics: dict[str, Any]) -> bool:
+    """Require the canonical remote URL and effective commit GPG verification."""
+    return bool(diagnostics.get("url_matches") and diagnostics.get("gpg_verify")
+                and not diagnostics.get("disabled_gpg_option_present"))
 
 
 def ref_commit(ref: str) -> str:
@@ -203,8 +235,11 @@ def ref_commit(ref: str) -> str:
 
 
 def install_exact(ref: str, commit: str) -> None:
-    run(["sudo", "flatpak", "install", "--system", "--noninteractive", f"--commit={commit}",
-         "--no-related", REMOTE, ref], timeout=180)
+    # Flatpak 1.14.6 supports --commit on update, not install. Resolve/install
+    # the ref from the dedicated signed remote, then pin the requested commit.
+    run(["sudo", "flatpak", "install", "--system", "--noninteractive", "--no-related", REMOTE, ref],
+        timeout=180)
+    update_exact(ref, commit)
 
 
 def update_exact(ref: str, commit: str) -> None:
@@ -551,6 +586,8 @@ def main() -> int:
         summary["status"] = "harness_or_baseline_failed"
         if REMOTE_DIAGNOSTICS:
             summary["remote_diagnostics"] = dict(REMOTE_DIAGNOSTICS)
+        if COMMAND_FAILURE:
+            summary["command_failure"] = dict(COMMAND_FAILURE)
     except Exception as exc:  # noqa: BLE001 - keep traceback and host paths private.
         summary["failure_stage"] = "unexpected_harness_error"
         summary["failure_category"] = type(exc).__name__
@@ -559,10 +596,14 @@ def main() -> int:
         summary["status"] = "harness_or_baseline_failed"
         if REMOTE_DIAGNOSTICS:
             summary["remote_diagnostics"] = dict(REMOTE_DIAGNOSTICS)
+        if COMMAND_FAILURE:
+            summary["command_failure"] = dict(COMMAND_FAILURE)
     finally:
         run(["flatpak", "kill", APP_ID], timeout=10, check=False)
         if summary.get("app_commit_before") and summary.get("app_commit_before") != APP_COMMIT:
             summary["app_commit_guard"] = "unexpected"
+        if COMMAND_FAILURE:
+            summary["command_failure"] = dict(COMMAND_FAILURE)
         write_json(summary_path, summary)
     print(json.dumps({"status": summary["status"], "failure_stage": summary.get("failure_stage")}))
     return 0 if summary["status"] in {"passed", "passed_fresh_cache_only"} else 1

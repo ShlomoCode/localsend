@@ -31,6 +31,12 @@ virtual GPU does not establish physical Intel/NVIDIA GPU fidelity. The GLX
 probe reports the runtime's GLX renderer; it does not identify Flutter's
 renderer choice.
 
+The harness adds a test-specific system remote from Flathub's official HTTPS
+`.flatpakrepo` configuration, including its public signing key, so an image's preconfigured Flathub alias cannot affect
+remote selection. It installs each ref normally, then pins the requested
+historical commit with `flatpak update --commit`; Flatpak 1.14.6 does not support
+`--commit` on `flatpak install`.
+
 ## Components
 
 - `.github/workflows/diagnose_3483_native_flatpak.yml` configures the bounded runner.
