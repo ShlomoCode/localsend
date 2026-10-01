@@ -8,6 +8,35 @@ LocalSend disallows AI generated contributions unless:
 
 This file provides guidance to LLMs when working with code in this repository.
 
+## Agent workflow
+
+These instructions apply to Codex and Claude Code. `CLAUDE.md` imports this file so shared guidance has one source of truth.
+
+### Execution and scope
+
+- Carry an authorized change through implementation and relevant validation. Make routine, reversible decisions from the request and repository conventions; state assumptions that affect the result.
+- Ask for clarification when different interpretations materially change the outcome or a wrong assumption could cause harm. Continue independent work while awaiting an answer. For actions requiring approval, prepare the concrete result first and pause before the action.
+- Follow explicit user instructions over repository and skill guidelines, subject to higher-priority system and tool restrictions. If an instruction blocks requested work, identify the exact file and rule and explain the remaining blocker.
+- Keep edits focused on the requested behavior. Prefer targeted edits for small changes; report unrelated findings separately. Preserve existing user changes.
+- After context compaction, continue from completed work. Preserve the objective, constraints, decisions, changed files, validation results, and outstanding work in the handoff summary.
+
+### Tools and delegation
+
+- Batch independent reads and searches when the tools support it. Keep dependent operations and mutations in order, and inspect the results before choosing the next step.
+- Delegate substantial independent research, exploration, or review when it saves time or context. Give each agent a bounded question, relevant context, and a completion criterion; assign file ownership for edits and tell agents to preserve others' changes.
+- Use the least expensive available model that can reliably complete the delegated task. Keep the selected main model unless the user requests a change; model availability comes from the running harness.
+
+### Validation and communication
+
+- Choose checks for the affected behavior and complete required project checks. Each new or changed test should catch a meaningful regression; documentation-only changes normally need diff and link checks.
+- Once relevant checks pass, broaden or repeat testing only for a new change, failure, or unresolved concern. Report any checks that could not run and why.
+- During long tasks, give brief updates when findings or decisions change. Finish with the outcome, relevant validation, and remaining blockers in the user's preferred language. Use concise, plain language.
+
+### Updating these instructions
+
+Reviewed on 2026-10-02 against the [OpenAI GPT-6 migration and prompting guide](https://developers.openai.com/api/docs/guides/latest-model) and [Anthropic Claude Fable 5.1 prompting guide](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1).
+For a future model upgrade, check the current OpenAI guide and [Anthropic migration guides](https://platform.claude.com/docs/en/about-claude/models/migration-guide), then revise only instructions relevant to repository work. Keep model IDs, reasoning settings, and API parameters in the agent's runtime configuration.
+
 ## Repository layout
 
 This is a multi-language monorepo: a Flutter app on top of a Rust protocol implementation.
