@@ -76,11 +76,20 @@ jobs:
 
       - name: Build AppImage
         uses: AppImageCrafters/build-appimage@57c3bc6963f870ce3be103117de5b5e33ffbaeb6
+        env:
+          APP_VERSION: ${{ needs.build.outputs.version }}
         with:
           recipe: ./AppImageBuilder.yml
 
-      - name: Upload AppImage file
+      - name: Verify AppImage update files
+        run: |
+          test -f "LocalSend-${{ needs.build.outputs.version }}-linux-arm-64.AppImage"
+          test -f "LocalSend-${{ needs.build.outputs.version }}-linux-arm-64.AppImage.zsync"
+
+      - name: Upload AppImage files
         uses: actions/upload-artifact@v6
         with:
           name: appimage-arm-64-result
-          path: ./*.AppImage
+          path: |
+            ./LocalSend-${{ needs.build.outputs.version }}-linux-arm-64.AppImage
+            ./LocalSend-${{ needs.build.outputs.version }}-linux-arm-64.AppImage.zsync
