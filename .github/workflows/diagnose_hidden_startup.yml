@@ -66,7 +66,9 @@ jobs:
           fi
           cp pubspec.lock /tmp/ls-evidence/old-sdk-pubspec.lock
           git diff -- pubspec.lock > /tmp/ls-evidence/old-sdk-lock-diff.patch
+          (cd .. && python3 ../diagnostics/.github/diagnostics/hidden-startup/theme-sdk-compat.py --phase old --evidence-dir /tmp/ls-evidence)
           git -C .. diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch-before-sdk-switch.patch
+          git -C .. diff --check
           flutter build linux --release --no-pub 2>&1 | tee /tmp/ls-evidence/old-sdk-build.log
           cp -a build/linux/x64/release/bundle /tmp/ls-historical-old-sdk
           sha256sum /tmp/ls-historical-old-sdk/localsend_app > /tmp/ls-evidence/old-sdk-binary.sha256
@@ -101,6 +103,7 @@ jobs:
           cp pubspec.lock /tmp/ls-evidence/new-sdk-pubspec.lock
           git diff -- pubspec.lock > /tmp/ls-evidence/new-sdk-lock-diff.patch
           diff -u /tmp/ls-evidence/old-sdk-pubspec.lock /tmp/ls-evidence/new-sdk-pubspec.lock > /tmp/ls-evidence/sdk-lock-diff.patch || test "$?" -eq 1
+          (cd .. && python3 ../diagnostics/.github/diagnostics/hidden-startup/theme-sdk-compat.py --phase new --evidence-dir /tmp/ls-evidence)
           git -C .. diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch-after-sdk-switch.patch
           cmp /tmp/ls-evidence/source-patch-before-sdk-switch.patch /tmp/ls-evidence/source-patch-after-sdk-switch.patch
           flutter build linux --release --no-pub 2>&1 | tee /tmp/ls-evidence/new-sdk-build.log
