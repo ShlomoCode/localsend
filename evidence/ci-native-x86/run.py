@@ -46,6 +46,7 @@ REFS = [
 ]
 SETTINGS_LABELS = ("general", "theme", "color", "language")
 COMMAND_LOG: Path | None = None
+REMOTE_DIAGNOSTICS: dict[str, Any] = {}
 
 
 class ProbeFailure(RuntimeError):
@@ -136,6 +137,17 @@ def mesa_cache_summary(profile: Path) -> dict[str, int]:
 
 
 def ensure_remote() -> dict[str, Any]:
+    REMOTE_DIAGNOSTICS.clear()
+    REMOTE_DIAGNOSTICS.update({
+        "remote_found": False,
+        "url_matches": False,
+        "gpg_verify": False,
+        "gpg_verify_key_present": False,
+        "gpg_verify_summary": False,
+        "gpg_summary_key_present": False,
+        "collection_id_present": False,
+        "disabled_gpg_option_present": False,
+    })
     info = run(["flatpak", "remotes", "--system", "--show-details", "--columns=name,url,options"],
                timeout=30).stdout or ""
     rows = [line.split("\t") for line in info.splitlines() if line.strip()]
@@ -149,19 +161,37 @@ def ensure_remote() -> dict[str, Any]:
         row = next((r for r in rows if r and r[0] == REMOTE), None)
     if row is None or len(row) < 3:
         raise ProbeFailure("remote_check", "flathub_remote_unavailable")
+    REMOTE_DIAGNOSTICS["remote_found"] = True
+    REMOTE_DIAGNOSTICS["url_matches"] = row[1].rstrip("/") == REMOTE_URL.rstrip("/")
     config = configparser.ConfigParser(interpolation=None)
     if not config.read("/var/lib/flatpak/repo/config"):
         raise ProbeFailure("remote_check", "system_remote_config_unavailable")
     group = f'remote "{REMOTE}"'
     if not config.has_section(group):
         raise ProbeFailure("remote_check", "flathub_system_remote_missing")
-    gpg_verify = config.getboolean(group, "gpg-verify", fallback=False)
+    # OSTree defaults gpg-verify to true and gpg-verify-summary to false when
+    # the option is absent; mirror those effective defaults in the guard.
+    gpg_verify_present = config.has_option(group, "gpg-verify")
+    gpg_summary_present = config.has_option(group, "gpg-verify-summary")
+    gpg_verify = config.getboolean(group, "gpg-verify", fallback=True)
     gpg_summary = config.getboolean(group, "gpg-verify-summary", fallback=False)
+    collection_id = config.get(group, "collection-id", fallback="")
     options = {part for part in re.split(r"[,\s]+", row[2].lower()) if part}
-    if row[1].rstrip("/") != REMOTE_URL.rstrip("/") or not gpg_verify or not gpg_summary \
-            or "no-gpg-verify" in options or "no-gpg-verify-summary" in options:
-        raise ProbeFailure("remote_check", "flathub_remote_signature_or_url_mismatch")
-    return {"name": row[0], "url": REMOTE_URL, "gpg_verify": True, "gpg_verify_summary": gpg_summary}
+    REMOTE_DIAGNOSTICS.update({
+        "gpg_verify": gpg_verify,
+        "gpg_verify_key_present": gpg_verify_present,
+        "gpg_verify_summary": gpg_summary,
+        "gpg_summary_key_present": gpg_summary_present,
+        "collection_id_present": bool(collection_id),
+        "disabled_gpg_option_present": bool({"no-gpg-verify", "no-gpg-verify-summary"} & options),
+    })
+    # Require signed commits from the official remote. Summary verification
+    # may be explicitly enabled or use OSTree's documented default; neither
+    # mode requires changing the official .flatpakrepo configuration.
+    if not REMOTE_DIAGNOSTICS["url_matches"] or not gpg_verify \
+            or REMOTE_DIAGNOSTICS["disabled_gpg_option_present"]:
+        raise ProbeFailure("remote_check", "flathub_remote_policy_mismatch")
+    return {"name": row[0], "url": REMOTE_URL, **REMOTE_DIAGNOSTICS}
 
 
 def ref_commit(ref: str) -> str:
@@ -519,12 +549,16 @@ def main() -> int:
         summary["old_baseline_ui_passed"] = "old_baseline" in summary
         summary["old_baseline_passed"] = bool(summary.get("old_baseline_validated"))
         summary["status"] = "harness_or_baseline_failed"
+        if REMOTE_DIAGNOSTICS:
+            summary["remote_diagnostics"] = dict(REMOTE_DIAGNOSTICS)
     except Exception as exc:  # noqa: BLE001 - keep traceback and host paths private.
         summary["failure_stage"] = "unexpected_harness_error"
         summary["failure_category"] = type(exc).__name__
         summary["old_baseline_ui_passed"] = "old_baseline" in summary
         summary["old_baseline_passed"] = bool(summary.get("old_baseline_validated"))
         summary["status"] = "harness_or_baseline_failed"
+        if REMOTE_DIAGNOSTICS:
+            summary["remote_diagnostics"] = dict(REMOTE_DIAGNOSTICS)
     finally:
         run(["flatpak", "kill", APP_ID], timeout=10, check=False)
         if summary.get("app_commit_before") and summary.get("app_commit_before") != APP_COMMIT:
