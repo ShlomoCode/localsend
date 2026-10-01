@@ -295,7 +295,7 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
   List<String>? clipboardFiles;
   if (data?.text != null) {
     final text = data!.text!;
-    if (!kIsWeb && checkPlatformIsDesktop() && await File(text).exists().onError((_, _) => false)) {
+    if (!kIsWeb && checkPlatformIsDesktop() && await File(text).exists()) {
       // Some file managers put a file and its path text on the clipboard; use the file: https://github.com/localsend/localsend/issues/3499
       clipboardFiles = await Pasteboard.files();
     }
