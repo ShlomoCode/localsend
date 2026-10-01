@@ -1,4 +1,4 @@
-name: Diagnose hidden startup SDK boundary
+name: Diagnose hidden startup SDK and native boundaries
 
 on:
   workflow_dispatch:
@@ -7,9 +7,15 @@ permissions:
   contents: read
 
 jobs:
-  sdk-boundary:
+  historical-boundary:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter: ['3.32.8', '3.35.6']
+        native_port: [false, true]
+    name: Flutter ${{ matrix.flutter }} / native port ${{ matrix.native_port }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,98 +34,69 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev libgl1-mesa-dri libegl1 libgles2 xvfb openbox dbus-x11 xdotool x11-utils iproute2 curl openssl python3 scrot gcc
           gcc -shared -fPIC diagnostics/.github/diagnostics/hidden-startup/show-window.c -o /tmp/ls-show-window.so $(pkg-config --cflags --libs gtk+-3.0)
-      - name: Apply one minimal compatibility and native startup patch
+      - name: Apply common compatibility and selected native patch
+        env:
+          NATIVE_PORT: ${{ matrix.native_port }}
         run: |
           mkdir -p /tmp/ls-evidence
           git -C historical rev-parse HEAD > /tmp/ls-evidence/source-commit.txt
           git -C historical describe --tags --exact-match > /tmp/ls-evidence/source-tag.txt
           test "$(cat /tmp/ls-evidence/source-tag.txt)" = v1.17.0
+          printf '%s\n' "$NATIVE_PORT" > /tmp/ls-evidence/native-port.txt
           cp historical/app/pubspec.lock /tmp/ls-evidence/source-pubspec.lock
           cd historical
           python3 ../diagnostics/.github/diagnostics/hidden-startup/legacy-sdk-compat.py
           git diff -- app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/compiler-compat.patch
           python3 ../diagnostics/.github/diagnostics/hidden-startup/legacy-instrument.py
-          python3 ../diagnostics/.github/diagnostics/hidden-startup/native-2929.py
-          git diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch-before-sdk-switch.patch
+          if test "$NATIVE_PORT" = true; then
+            python3 ../diagnostics/.github/diagnostics/hidden-startup/native-2929.py
+          fi
+          git diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch.patch
           git diff --check
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.35.6'
+          flutter-version: ${{ matrix.flutter }}
           channel: stable
           cache: true
-      - name: Build historical source with Flutter 3.35.6
+      - name: Build historical source
         working-directory: historical/app
+        env:
+          EXPECTED_FLUTTER: ${{ matrix.flutter }}
         run: |
           set -o pipefail
-          flutter --version | tee /tmp/ls-evidence/old-sdk-version.txt
-          flutter --version --machine > /tmp/ls-evidence/old-sdk-version.json
-          test "$(python3 -c 'import json; print(json.load(open("/tmp/ls-evidence/old-sdk-version.json"))["frameworkVersion"])')" = 3.35.6
-          if ! flutter pub get > /tmp/ls-evidence/old-sdk-pub-get.log 2>&1; then
-            cat /tmp/ls-evidence/old-sdk-pub-get.log
-            if grep -Eqi 'analyzer|macro|_macros' /tmp/ls-evidence/old-sdk-pub-get.log; then
+          flutter --version | tee /tmp/ls-evidence/flutter-version.txt
+          flutter --version --machine > /tmp/ls-evidence/flutter-version.json
+          test "$(python3 -c 'import json; print(json.load(open("/tmp/ls-evidence/flutter-version.json"))["frameworkVersion"])')" = "$EXPECTED_FLUTTER"
+          if ! flutter pub get > /tmp/ls-evidence/pub-get.log 2>&1; then
+            cat /tmp/ls-evidence/pub-get.log
+            if grep -Eqi 'analyzer|macro|_macros' /tmp/ls-evidence/pub-get.log; then
               (cd .. && python3 ../diagnostics/.github/diagnostics/hidden-startup/legacy-sdk-compat.py --drop-dev)
               git -C .. diff -- app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/compiler-compat-with-dev-fallback.patch
-              flutter pub get 2>&1 | tee /tmp/ls-evidence/old-sdk-pub-get-retry.log
+              flutter pub get 2>&1 | tee /tmp/ls-evidence/pub-get-retry.log
             else
               exit 1
             fi
           fi
-          cp pubspec.lock /tmp/ls-evidence/old-sdk-pubspec.lock
-          git diff -- pubspec.lock > /tmp/ls-evidence/old-sdk-lock-diff.patch
+          cp pubspec.lock /tmp/ls-evidence/resolved-pubspec.lock
+          git diff -- pubspec.lock > /tmp/ls-evidence/lock-diff.patch
           (cd .. && python3 ../diagnostics/.github/diagnostics/hidden-startup/theme-sdk-compat.py --phase old --evidence-dir /tmp/ls-evidence)
-          git -C .. diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch-before-sdk-switch.patch
+          git -C .. diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch.patch
           git -C .. diff --check
-          flutter build linux --release --no-pub 2>&1 | tee /tmp/ls-evidence/old-sdk-build.log
-          cp -a build/linux/x64/release/bundle /tmp/ls-historical-old-sdk
-          sha256sum /tmp/ls-historical-old-sdk/localsend_app > /tmp/ls-evidence/old-sdk-binary.sha256
-      - name: Probe Flutter 3.35.6
+          flutter build linux --release --no-pub 2>&1 | tee /tmp/ls-evidence/build.log
+          sha256sum build/linux/x64/release/bundle/localsend_app > /tmp/ls-evidence/binary.sha256
+          cp -a build/linux/x64/release/bundle /tmp/ls-historical-bundle
+      - name: Probe normal, warm hidden and fresh hidden startup
         continue-on-error: true
         env:
           LS_DESKTOPS: openbox
-          LS_BUNDLE_OVERRIDE: /tmp/ls-historical-old-sdk
+          LS_BUNDLE_OVERRIDE: /tmp/ls-historical-bundle
           LS_SHOW_SHIM: /tmp/ls-show-window.so
-        run: bash diagnostics/.github/diagnostics/hidden-startup/runtime-probe.sh historical-old-sdk
-      - name: Preserve original SDK evidence
+          VARIANT: sdk${{ matrix.flutter }}-native${{ matrix.native_port }}
+        run: bash diagnostics/.github/diagnostics/hidden-startup/runtime-probe.sh "$VARIANT"
+      - name: Preserve this matrix cell's evidence
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: historical-old-sdk-evidence
-          path: /tmp/ls-evidence
-          retention-days: 7
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.38.10'
-          channel: stable
-          cache: true
-      - name: Build identical source with Flutter 3.38.10
-        working-directory: historical/app
-        run: |
-          set -o pipefail
-          flutter --version | tee /tmp/ls-evidence/new-sdk-version.txt
-          flutter --version --machine > /tmp/ls-evidence/new-sdk-version.json
-          test "$(python3 -c 'import json; print(json.load(open("/tmp/ls-evidence/new-sdk-version.json"))["frameworkVersion"])')" = 3.38.10
-          flutter clean
-          flutter pub get 2>&1 | tee /tmp/ls-evidence/new-sdk-pub-get.log
-          cp pubspec.lock /tmp/ls-evidence/new-sdk-pubspec.lock
-          git diff -- pubspec.lock > /tmp/ls-evidence/new-sdk-lock-diff.patch
-          diff -u /tmp/ls-evidence/old-sdk-pubspec.lock /tmp/ls-evidence/new-sdk-pubspec.lock > /tmp/ls-evidence/sdk-lock-diff.patch || test "$?" -eq 1
-          (cd .. && python3 ../diagnostics/.github/diagnostics/hidden-startup/theme-sdk-compat.py --phase new --evidence-dir /tmp/ls-evidence)
-          git -C .. diff -- app/lib common/lib app/linux/my_application.cc app/pubspec.yaml common/pubspec.yaml > /tmp/ls-evidence/source-patch-after-sdk-switch.patch
-          cmp /tmp/ls-evidence/source-patch-before-sdk-switch.patch /tmp/ls-evidence/source-patch-after-sdk-switch.patch
-          flutter build linux --release --no-pub 2>&1 | tee /tmp/ls-evidence/new-sdk-build.log
-          cp -a build/linux/x64/release/bundle /tmp/ls-historical-new-sdk
-          sha256sum /tmp/ls-historical-new-sdk/localsend_app > /tmp/ls-evidence/new-sdk-binary.sha256
-      - name: Probe Flutter 3.38.10
-        continue-on-error: true
-        env:
-          LS_DESKTOPS: openbox
-          LS_BUNDLE_OVERRIDE: /tmp/ls-historical-new-sdk
-          LS_SHOW_SHIM: /tmp/ls-show-window.so
-        run: bash diagnostics/.github/diagnostics/hidden-startup/runtime-probe.sh historical-new-sdk
-      - name: Preserve full comparison evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: historical-sdk-boundary-evidence
+          name: hidden-startup-sdk${{ matrix.flutter }}-native${{ matrix.native_port }}
           path: /tmp/ls-evidence
           retention-days: 7
