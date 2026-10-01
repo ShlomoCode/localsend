@@ -305,8 +305,8 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
     }
   }
 
-  // Normally paste text, then images, then files. If text is an existing path and files
-  // are available, skip the image representation and add the files below.
+  // Paste text first, then images, then files. If the text names an existing file and
+  // the clipboard contains files, paste those files instead of text or an image.
   final image = clipboardFiles == null ? await Pasteboard.image : null;
   if (image != null) {
     // Adding temporary variable because Dart analyzer somehow doesn't properly downcast Uint8List? to Uint8List
