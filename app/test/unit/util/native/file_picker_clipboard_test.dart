@@ -22,15 +22,16 @@ void main() {
 
   setUpAll(() => RustLib.initMock(api: _MockRustLibApi()));
 
-  testWidgets('pasting a copied file path adds the file', (tester) async {
+  testWidgets('pastes a file only when its path exists and the clipboard contains files', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     final directory = Directory.systemTemp.createTempSync('clipboard_file_test');
     addTearDown(() => directory.deleteSync(recursive: true));
     final file = File('${directory.path}/copied.txt')..writeAsStringSync('content');
     final clipboardFiles = [file.path];
+    var clipboardText = file.path;
 
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.getData') return {'text': file.path};
+      if (call.method == 'Clipboard.getData') return {'text': clipboardText};
       return null;
     });
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('pasteboard'), (call) async {
@@ -73,6 +74,14 @@ void main() {
     expect(selectedAfterTextPaste, hasLength(2));
     expect(selectedAfterTextPaste.last.path, isNull);
     expect(utf8.decode(selectedAfterTextPaste.last.bytes!), file.path);
+
+    clipboardText = 'ordinary text';
+    clipboardFiles.add(file.path);
+    await tester.runAsync(() => container.global.dispatchAsync(PickFileAction(option: FilePickerOption.clipboard, context: context)));
+    final selectedAfterOrdinaryTextPaste = container.read(selectedSendingFilesProvider);
+    expect(selectedAfterOrdinaryTextPaste, hasLength(3));
+    expect(selectedAfterOrdinaryTextPaste.last.path, isNull);
+    expect(utf8.decode(selectedAfterOrdinaryTextPaste.last.bytes!), clipboardText);
     debugDefaultTargetPlatformOverride = null;
   });
 }
