@@ -352,6 +352,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RsDeviceLog> dco_decode_list_rs_device_log(dynamic raw);
 
   @protected
+  List<RsHttpEndpoint> dco_decode_list_rs_http_endpoint(dynamic raw);
+
+  @protected
   LsHttpClientVersion dco_decode_ls_http_client_version(dynamic raw);
 
   @protected
@@ -447,6 +450,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RsHttpClientError dco_decode_rs_http_client_error(dynamic raw);
+
+  @protected
+  RsHttpEndpoint dco_decode_rs_http_endpoint(dynamic raw);
 
   @protected
   RsServerEvent dco_decode_rs_server_event(dynamic raw);
@@ -816,6 +822,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RsDeviceLog> sse_decode_list_rs_device_log(SseDeserializer deserializer);
 
   @protected
+  List<RsHttpEndpoint> sse_decode_list_rs_http_endpoint(SseDeserializer deserializer);
+
+  @protected
   LsHttpClientVersion sse_decode_ls_http_client_version(SseDeserializer deserializer);
 
   @protected
@@ -913,6 +922,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RsHttpClientError sse_decode_rs_http_client_error(SseDeserializer deserializer);
+
+  @protected
+  RsHttpEndpoint sse_decode_rs_http_endpoint(SseDeserializer deserializer);
 
   @protected
   RsServerEvent sse_decode_rs_server_event(SseDeserializer deserializer);
@@ -1327,6 +1339,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_rs_device_log(List<RsDeviceLog> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_rs_http_endpoint(List<RsHttpEndpoint> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ls_http_client_version(LsHttpClientVersion self, SseSerializer serializer);
 
   @protected
@@ -1425,6 +1440,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_rs_http_client_error(RsHttpClientError self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rs_http_endpoint(RsHttpEndpoint self, SseSerializer serializer);
 
   @protected
   void sse_encode_rs_server_event(RsServerEvent self, SseSerializer serializer);

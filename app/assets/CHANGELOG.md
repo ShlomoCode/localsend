@@ -1,5 +1,6 @@
 ## Unreleased
 
+- fix: try another known address when a device's preferred encrypted connection is unavailable (@ShlomoCode)
 - fix(macos): file sharing via Share Extension doesn't work in DMG builds (@ShlomoCode, @vdmkotai)
 - fix: show the real error when a file cannot be read while sending, instead of transferring it as an empty file (@leopalmieri-spec)
 
