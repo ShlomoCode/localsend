@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:localsend_isolates/util/sleep.dart';
 
 /// A slideshow of widgets using [AnimatedOpacity] as transition.
 class OpacitySlideshow extends StatefulWidget {
@@ -24,6 +23,7 @@ class OpacitySlideshow extends StatefulWidget {
 
 class _OpacitySlideshowState extends State<OpacitySlideshow> {
   Timer? _timer;
+  Timer? _switchTimer;
   int _index = 0;
   double _opacity = 1;
 
@@ -35,8 +35,9 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
 
   @override
   void dispose() {
-    super.dispose();
     _timer?.cancel();
+    _switchTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -44,26 +45,31 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.running && !widget.running) {
       _timer?.cancel();
+      _switchTimer?.cancel();
+      _opacity = 1;
     } else if (!oldWidget.running && widget.running) {
       _startTimer();
     }
   }
 
   void _startTimer() {
-    if (widget.children.length <= 1) {
+    if (!widget.running || widget.children.length <= 1) {
       return;
     }
 
-    _timer = Timer.periodic(Duration(milliseconds: widget.durationMillis), (_) async {
-      if (!mounted) return;
+    _timer = Timer.periodic(Duration(milliseconds: widget.durationMillis), (_) {
+      // Let a pending fade finish before starting another one.
+      if (_switchTimer?.isActive ?? false) {
+        return;
+      }
       setState(() {
         _opacity = 0;
       });
-      await sleepAsync(widget.switchDurationMillis);
-      if (!mounted) return;
-      setState(() {
-        _index = (_index + 1) % widget.children.length;
-        _opacity = 1;
+      _switchTimer = Timer(Duration(milliseconds: widget.switchDurationMillis), () {
+        setState(() {
+          _index = (_index + 1) % widget.children.length;
+          _opacity = 1;
+        });
       });
     });
   }
