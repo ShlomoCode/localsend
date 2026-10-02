@@ -12,6 +12,7 @@ import 'package:localsend_app/pages/send_page.dart';
 import 'package:localsend_app/provider/device_info_provider.dart';
 import 'package:localsend_app/provider/file_transfer_provider.dart';
 import 'package:localsend_app/provider/http_provider.dart';
+import 'package:localsend_app/provider/network/nearby_devices_provider.dart';
 import 'package:localsend_app/provider/selection/selected_sending_files_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/widget/dialogs/pin_dialog.dart';
@@ -254,14 +255,82 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     String? pin;
     final prepareUploadCancelToken = rust_cancel.createCancellationToken();
     _prepareUploadCancelTokens[sessionId] = prepareUploadCancelToken;
+    var selectedTarget = target;
     try {
+      // Discovery may have learned more addresses since the user picked this
+      // device. Try the current channels first, then retain the clicked
+      // snapshot (including its original address) as fallback candidates.
+      final endpoints = <rust_http.RsHttpEndpoint>[];
+      final seenEndpoints = <(String, int, rust_model.ProtocolType)>{};
+      void addEndpoint(String host, int port, bool https) {
+        if (https != target.https || host.isEmpty || port < 1 || port > 65535) {
+          return;
+        }
+        final protocol = https ? rust_model.ProtocolType.https : rust_model.ProtocolType.http;
+        if (seenEndpoints.add((host, port, protocol))) {
+          endpoints.add(rust_http.RsHttpEndpoint(host: host, port: port, protocol: protocol));
+        }
+      }
+
+      final latestDevice = ref.read(nearbyDevicesProvider).devices[target.fingerprint];
+      for (final channel in latestDevice?.channels.whereType<HttpChannel>() ?? <HttpChannel>[]) {
+        addEndpoint(channel.host, channel.port, channel.https);
+      }
+      for (final channel in target.channels.whereType<HttpChannel>()) {
+        addEndpoint(channel.host, channel.port, channel.https);
+      }
+      if (target.ip != null) {
+        addEndpoint(target.ip!, target.port, target.https);
+      }
+
+      // Legacy HTTP peers may accept uploads without implementing /info.
+      // Keep their direct path; HTTPS probes can verify a pinned certificate
+      // even when an older peer returns 404 for /info.
+      if (target.https && endpoints.length >= 2) {
+        try {
+          final selected = await client.selectEndpoint(
+            candidates: endpoints,
+            protocol: target.getProtocolType(),
+            expectedFingerprint: target.fingerprint,
+            cancelToken: prepareUploadCancelToken,
+          );
+          if (state[sessionId]?.status != SessionStatus.waiting) {
+            return;
+          }
+          selectedTarget = target.copyWith(
+            ip: selected.host,
+            port: selected.port,
+            https: selected.protocol == rust_model.ProtocolType.https,
+          );
+          state = state.updateSession(
+            sessionId: sessionId,
+            state: (s) => s?.copyWith(target: selectedTarget),
+          );
+        } catch (e) {
+          if (state[sessionId]?.status != SessionStatus.waiting) {
+            return;
+          }
+          state = state.updateSession(
+            sessionId: sessionId,
+            state: (s) => s?.copyWith(
+              status: SessionStatus.finishedWithErrors,
+              errorMessage: e.humanErrorMessage,
+            ),
+          );
+          return;
+        }
+      }
+
       do {
+        if (state[sessionId]?.status != SessionStatus.waiting) {
+          return;
+        }
         invalidPin = false;
         try {
           response = await client.prepareUpload(
-            protocol: target.getProtocolType(),
-            ip: target.ip!,
-            port: target.port,
+            protocol: selectedTarget.getProtocolType(),
+            ip: selectedTarget.ip!,
+            port: selectedTarget.port,
             payload: requestDto,
             // The peer is already verified during the TLS handshake by the
             // fingerprint the client is pinned to.
@@ -270,12 +339,18 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
             cancelToken: prepareUploadCancelToken,
           );
         } on rust_http.RsHttpClientError_StatusCode catch (e) {
+          if (state[sessionId]?.status != SessionStatus.waiting) {
+            return;
+          }
           switch (e.status) {
             case 401:
               invalidPin = true;
 
               // wait until animation is finished
               await sleepAsync(500);
+              if (state[sessionId]?.status != SessionStatus.waiting) {
+                return;
+              }
 
               pin = await showDialog<String>(
                 context: Routerino.context, // ignore: use_build_context_synchronously
@@ -284,6 +359,9 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
                   showInvalidPin: !pinFirstAttempt,
                 ),
               );
+              if (state[sessionId]?.status != SessionStatus.waiting) {
+                return;
+              }
 
               pinFirstAttempt = false;
 
@@ -332,6 +410,9 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
               return;
           }
         } catch (e) {
+          if (state[sessionId]?.status != SessionStatus.waiting) {
+            return;
+          }
           state = state.updateSession(
             sessionId: sessionId,
             state: (s) => s?.copyWith(
@@ -344,6 +425,10 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
       } while (invalidPin);
     } finally {
       _prepareUploadCancelTokens.remove(sessionId);
+    }
+
+    if (state[sessionId]?.status != SessionStatus.waiting) {
+      return;
     }
 
     if (response == null) {

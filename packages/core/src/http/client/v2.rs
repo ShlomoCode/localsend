@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 /// HTTP client for LocalSend Protocol v2.2.
 pub struct LsHttpClientV2 {
     client: reqwest::Client,
+    pub(super) expected_fingerprint: Option<String>,
 }
 
 impl LsHttpClientV2 {
@@ -35,8 +36,12 @@ impl LsHttpClientV2 {
         expected_fingerprint: Option<String>,
         timeout: Option<std::time::Duration>,
     ) -> Result<Self, ClientError> {
+        let pinned_fingerprint = expected_fingerprint
+            .as_ref()
+            .map(|value| value.to_ascii_uppercase());
         Ok(Self {
             client: super::create_reqwest_client(private_key, cert, expected_fingerprint, timeout)?,
+            expected_fingerprint: pinned_fingerprint,
         })
     }
 
@@ -56,7 +61,10 @@ impl LsHttpClientV2 {
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
 
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            expected_fingerprint: None,
+        })
     }
 
     /// Registers with another device for discovery.
@@ -322,6 +330,19 @@ impl LsHttpClientV2 {
         ip: &str,
         port: u16,
     ) -> Result<InfoResponseDtoV2, ClientError> {
+        self.probe_info(protocol, ip, port, false)
+            .await
+            .map(|(info, _)| info.expect("404 is rejected by info"))
+    }
+
+    /// Reads device info and the authenticated TLS certificate identity, if present.
+    pub(super) async fn probe_info(
+        &self,
+        protocol: ProtocolType,
+        ip: &str,
+        port: u16,
+        accept_not_found: bool,
+    ) -> Result<(Option<InfoResponseDtoV2>, Option<String>), ClientError> {
         let url = TargetUrl {
             version: ApiVersion::V2,
             protocol: protocol.as_str(),
@@ -334,13 +355,23 @@ impl LsHttpClientV2 {
 
         let res = self.client.get(&url).send().await?;
 
-        if res.status() != StatusCode::OK {
+        if res.status() != StatusCode::OK
+            && !(accept_not_found && res.status() == StatusCode::NOT_FOUND)
+        {
             return res.into_error().await;
         }
 
+        let cert_fingerprint = if protocol == ProtocolType::Https {
+            Some(super::cert_fingerprint_from_res(&res)?)
+        } else {
+            None
+        };
+        if res.status() == StatusCode::NOT_FOUND {
+            return Ok((None, cert_fingerprint));
+        }
         let body = res.json::<InfoResponseDtoV2>().await?;
 
-        Ok(body)
+        Ok((Some(body), cert_fingerprint))
     }
 
     /// Prepares to download files from a sender (Download API).

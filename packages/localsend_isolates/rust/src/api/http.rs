@@ -8,7 +8,6 @@ pub use localsend::http::dto::{
     RegisterDto, RegisterResponseDto,
 };
 use localsend::model::discovery::ProtocolType;
-use localsend::reqwest;
 use localsend::util::error::ErrorChain;
 
 pub struct RsHttpClient {
@@ -42,6 +41,42 @@ pub fn create_client(
 }
 
 impl RsHttpClient {
+    /// Selects a reachable endpoint before any upload session is prepared.
+    ///
+    /// All probes use this client's certificate pin and the requested protocol;
+    /// a failed HTTPS candidate never falls back to HTTP.
+    pub async fn select_endpoint(
+        &self,
+        candidates: Vec<RsHttpEndpoint>,
+        protocol: ProtocolType,
+        expected_fingerprint: String,
+        cancel_token: &RsCancellationToken,
+    ) -> Result<RsHttpEndpoint, RsHttpClientError> {
+        let selected = self
+            .inner
+            .select_endpoint(
+                candidates
+                    .into_iter()
+                    .map(|candidate| localsend::http::client::HttpEndpoint {
+                        host: candidate.host,
+                        port: candidate.port,
+                        protocol: candidate.protocol,
+                    })
+                    .collect(),
+                protocol,
+                expected_fingerprint,
+                cancel_token.inner.clone(),
+            )
+            .await
+            .map_err(RsHttpClientError::from)?;
+
+        Ok(RsHttpEndpoint {
+            host: selected.host,
+            port: selected.port,
+            protocol: selected.protocol,
+        })
+    }
+
     pub async fn register(
         &self,
         protocol: ProtocolType,
@@ -256,4 +291,11 @@ pub struct _PrepareUploadResult {
 pub struct ResultWithPublicKeyRegisterResponseDto {
     pub public_key: Option<String>,
     pub body: RegisterResponseDto,
+}
+
+/// One address of a peer's HTTP listener, including an IPv6 scope when needed.
+pub struct RsHttpEndpoint {
+    pub host: String,
+    pub port: u16,
+    pub protocol: ProtocolType,
 }
