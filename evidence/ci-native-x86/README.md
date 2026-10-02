@@ -44,6 +44,9 @@ historical commit with `flatpak update --commit`; Flatpak 1.14.6 does not suppor
   transition, and conditional fresh-cache control.
 - `glx-probe.c` records GLX vendor, renderer, and version inside the Flatpak
   runtime. It is runtime-level metadata, not Flutter's renderer selection.
+- `xres-window-pid.c` queries the XRes PID for a window client only when a
+  LocalSend-classed window lacks `_NET_WM_PID`. The PID must still match the
+  verified Flatpak app host or namespace PID; unsupported XRes fails closed.
 
 The workflow runs only after its files are present on the dedicated branch and
 that branch is pushed. A successful Xvfb/Openbox result is not proof that the

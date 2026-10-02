@@ -26,12 +26,13 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             flatpak xvfb xauth openbox dbus-x11 xdotool x11-utils x11-xserver-utils \
-            scrot tesseract-ocr mesa-utils libgl1-mesa-dev libx11-dev gcc
+            scrot tesseract-ocr mesa-utils libgl1-mesa-dev libx11-dev libxres-dev gcc
 
       - name: Static-check the public diagnostic harness
         run: |
           python3 -m py_compile evidence/ci-native-x86/run.py
           gcc -Wall -Wextra -Werror -fsyntax-only evidence/ci-native-x86/glx-probe.c
+          gcc -Wall -Wextra -Werror -fsyntax-only evidence/ci-native-x86/xres-window-pid.c
 
       - name: Run exact signed refs under X11
         timeout-minutes: 14
@@ -48,6 +49,8 @@ jobs:
           mkdir -p "$CI3483_ARTIFACT_DIR" "$CI3483_RAW_DIR" "$RUNNER_TEMP/localsend-3483-gl-probe"
           gcc -O2 -Wall -Wextra -Werror "$CI3483_GL_PROBE_SOURCE" \
             -o "$RUNNER_TEMP/localsend-3483-gl-probe/glx-probe" -lGL -lX11
+          gcc -O2 -Wall -Wextra -Werror evidence/ci-native-x86/xres-window-pid.c \
+            -o "$RUNNER_TEMP/localsend-3483-gl-probe/xres-window-pid" -lXRes -lX11
           xvfb-run -a -s '-screen 0 1280x800x24 +extension GLX -nolisten tcp' \
             dbus-run-session -- bash -c '
               set -euo pipefail
@@ -58,7 +61,8 @@ jobs:
               done
               xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q window
               python3 evidence/ci-native-x86/run.py \
-                --gl-probe "$RUNNER_TEMP/localsend-3483-gl-probe/glx-probe"
+                --gl-probe "$RUNNER_TEMP/localsend-3483-gl-probe/glx-probe" \
+                --xres-pid-helper "$RUNNER_TEMP/localsend-3483-gl-probe/xres-window-pid"
             '
 
       - name: Publish sanitized visual and metadata evidence

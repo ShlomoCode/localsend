@@ -340,7 +340,30 @@ def wait_app_process(expected_runtime_commit: str) -> dict[str, Any]:
     raise ProbeFailure("app_launch", "verified_app_child_process_not_found")
 
 
-def window_for(app_process: dict[str, Any]) -> tuple[str, int]:
+def xres_client_pid(wid: str, helper: Path) -> int | None:
+    try:
+        result = run([str(helper), wid], timeout=5, check=False)
+    except ProbeFailure:
+        return None
+    output = (result.stdout or "").strip()
+    return int(output) if result.returncode == 0 and re.fullmatch(r"[1-9][0-9]*", output) else None
+
+
+def verified_window_pid(app_process: dict[str, Any], pid_output: str, class_output: str,
+                        xres_pid: int | None = None) -> tuple[int, str] | None:
+    if "localsend" not in class_output.lower():
+        return None
+    match = re.search(r"_NET_WM_PID\(CARDINAL\)\s*=\s*(\d+)\b", pid_output)
+    source = "_NET_WM_PID"
+    pid = int(match.group(1)) if match else xres_pid
+    if match is None:
+        source = "XRes"
+    if pid is not None and pid in app_process["allowed_window_pids"]:
+        return pid, source
+    return None
+
+
+def window_for(app_process: dict[str, Any], xres_helper: Path) -> tuple[str, int, str]:
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         ids = run(["xdotool", "search", "--onlyvisible", "--name", ".*"], timeout=10, check=False).stdout or ""
@@ -350,14 +373,17 @@ def window_for(app_process: dict[str, Any]) -> tuple[str, int]:
             p = run(["xprop", "-id", wid.strip(), "_NET_WM_PID"], timeout=5, check=False).stdout or ""
             cls = run(["xprop", "-id", wid.strip(), "WM_CLASS"], timeout=5, check=False).stdout or ""
             match = re.search(r"_NET_WM_PID\(CARDINAL\)\s*=\s*(\d+)\b", p)
-            if match and int(match.group(1)) in app_process["allowed_window_pids"] \
-                    and "localsend" in cls.lower():
-                return wid.strip(), int(match.group(1))
+            xres_pid = None
+            if match is None and "localsend" in cls.lower():
+                xres_pid = xres_client_pid(wid.strip(), xres_helper)
+            verified = verified_window_pid(app_process, p, cls, xres_pid)
+            if verified is not None:
+                return wid.strip(), verified[0], verified[1]
         time.sleep(0.5)
     raise ProbeFailure("window_match", "visible_window_pid_namespace_and_class_not_matched")
 
 
-def visible_window_diagnostics(app_process: dict[str, Any]) -> list[dict[str, Any]]:
+def visible_window_diagnostics(app_process: dict[str, Any], xres_helper: Path) -> list[dict[str, Any]]:
     """Return bounded, sanitized facts about visible X11 windows."""
     ids = run(["xdotool", "search", "--onlyvisible", "--name", ".*"], timeout=10, check=False).stdout or ""
     windows: list[dict[str, Any]] = []
@@ -375,10 +401,13 @@ def visible_window_diagnostics(app_process: dict[str, Any]) -> list[dict[str, An
         name_text = name_output.partition("=")[2].lower()
         class_matches = "localsend" in class_text
         name_matches = "localsend" in name_text
+        xres_pid = xres_client_pid(wid_text, xres_helper) if wm_pid is None and class_matches else None
+        identity_pid = wm_pid if wm_pid is not None else xres_pid
         item: dict[str, Any] = {
             "wid": wid,
             "net_wm_pid": wm_pid,
-            "pid_matches_verified_app": wm_pid in app_process["allowed_window_pids"] if wm_pid is not None else False,
+            "xres_client_pid": xres_pid,
+            "pid_matches_verified_app": identity_pid in app_process["allowed_window_pids"] if identity_pid is not None else False,
             "class_contains_localsend": class_matches,
             "title_contains_localsend": name_matches,
         }
@@ -445,8 +474,9 @@ def screenshot_and_ocr(path: Path) -> str:
     return re.sub(r"[^a-z]+", " ", (result.stdout or "").lower())
 
 
-def capture_state(name: str, app_process: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
-    wid, window_pid = window_for(app_process)
+def capture_state(name: str, app_process: dict[str, Any], artifact_dir: Path,
+                  xres_helper: Path) -> dict[str, Any]:
+    wid, window_pid, window_pid_source = window_for(app_process, xres_helper)
     run(["xdotool", "windowmap", wid], timeout=10)
     run(["xdotool", "windowsize", wid, "400", "538"], timeout=10)
     run(["xdotool", "windowraise", wid, "windowactivate", "--sync", wid], timeout=10, check=False)
@@ -493,6 +523,7 @@ def capture_state(name: str, app_process: dict[str, Any], artifact_dir: Path) ->
                                 "app_host_pid": app_process["app_pid"],
                                 "app_nspids": app_process["nspids"],
                                 "window_pid": window_pid,
+                                "window_pid_source": window_pid_source,
                                 "instance_id_matches_marker": True},
             "matched_window": True,
             "client_geometry": {"width": geometry["width"], "height": geometry["height"]},
@@ -500,7 +531,7 @@ def capture_state(name: str, app_process: dict[str, Any], artifact_dir: Path) ->
 
 
 def launch_capture(label: str, artifact_dir: Path, raw_dir: Path,
-                   expected_runtime_commit: str) -> dict[str, Any]:
+                   expected_runtime_commit: str, xres_helper: Path) -> dict[str, Any]:
     run(["sudo", "-n", "true"], timeout=5)
     log_path = raw_dir / f"{label}-app.log"
     process: subprocess.Popen[str] | None = None
@@ -514,7 +545,7 @@ def launch_capture(label: str, artifact_dir: Path, raw_dir: Path,
         app_process = wait_app_process(expected_runtime_commit)
         # The window PID must map to this app's verified Flatpak sandbox process,
         # not merely the wrapper PID returned by `flatpak ps`'s `pid` column.
-        state = capture_state(f"{label}-settings", app_process, artifact_dir)
+        state = capture_state(f"{label}-settings", app_process, artifact_dir, xres_helper)
         run(["flatpak", "kill", APP_ID], timeout=15, check=False)
         process.wait(timeout=15)
         return {"process": app_process, "window": state}
@@ -529,7 +560,7 @@ def launch_capture(label: str, artifact_dir: Path, raw_dir: Path,
             except ProbeFailure:
                 screenshot_name = ""
             try:
-                visible_windows = visible_window_diagnostics(app_process)
+                visible_windows = visible_window_diagnostics(app_process, xres_helper)
             except ProbeFailure:
                 visible_windows = []
             exc.context["window_diagnostics"] = {
@@ -560,6 +591,7 @@ def gl_info(probe: Path) -> dict[str, str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gl-probe", type=Path, required=True)
+    parser.add_argument("--xres-pid-helper", type=Path, required=True)
     args = parser.parse_args()
     artifact_dir = Path(os.environ["CI3483_ARTIFACT_DIR"])
     raw_dir = Path(os.environ["CI3483_RAW_DIR"])
@@ -608,7 +640,8 @@ def main() -> int:
         summary["renderer_old"] = gl_info(args.gl_probe)
         if profile.exists():
             shutil.rmtree(profile)
-        old_state = launch_capture("old-baseline", artifact_dir, raw_dir, OLD_PLATFORM_COMMIT)
+        old_state = launch_capture("old-baseline", artifact_dir, raw_dir, OLD_PLATFORM_COMMIT,
+                                   args.xres_pid_helper)
         summary["old_baseline"] = old_state
         summary["old_profile_summary"] = profile_summary(profile)
         mesa_cache = mesa_cache_summary(profile)
@@ -634,7 +667,8 @@ def main() -> int:
             raise ProbeFailure("app_pin", "app_commit_changed_during_runtime_update")
         try:
             summary["same_cache_first_launch"] = launch_capture(
-                "current-same-cache", artifact_dir, raw_dir, CURRENT_PLATFORM_COMMIT)
+                "current-same-cache", artifact_dir, raw_dir, CURRENT_PLATFORM_COMMIT,
+                args.xres_pid_helper)
             summary["same_profile_summary_after"] = profile_summary(profile)
             summary["status"] = "passed"
         except ProbeFailure as first_error:
@@ -654,7 +688,8 @@ def main() -> int:
             summary["same_cache_first_launch"]["failed_profile_preserved_privately"] = True
             try:
                 summary["fresh_cache_control"] = launch_capture(
-                    "current-fresh-cache", artifact_dir, raw_dir, CURRENT_PLATFORM_COMMIT)
+                    "current-fresh-cache", artifact_dir, raw_dir, CURRENT_PLATFORM_COMMIT,
+                    args.xres_pid_helper)
                 summary["status"] = "passed_fresh_cache_only"
             except ProbeFailure as fresh_error:
                 summary["fresh_cache_control"] = {"passed": False, "failure_stage": fresh_error.stage,
