@@ -63,7 +63,7 @@ def safe_command_identity(args: list[str]) -> dict[str, str]:
     command = args[1:] if args and args[0] == "sudo" else args
     executable = Path(command[0]).name if command else "unknown"
     known_operations = {
-        "xdotool": {"search", "mousemove", "getmouselocation", "click", "windowmap", "windowsize",
+        "xdotool": {"search", "mousemove", "getmouselocation", "getdisplaygeometry", "click", "windowmap", "windowsize",
                     "windowraise", "windowactivate", "getwindowgeometry"},
         "xprop": {"query"},
         "flatpak": {"run", "kill", "ps", "info", "install", "update", "remote-add"},
@@ -530,21 +530,53 @@ def click_settings_gear(wid: str, geometry: dict[str, int], *, target_x: int = 3
     # LocalSend restores its persisted/default size during startup, so verify
     # the client size again immediately before using the fixed gear coordinate.
     geometry = stabilize_window_geometry(wid)
-    expected = (geometry["x"] + target_x, geometry["y"] + target_y)
-    # Verify the pointer location directly instead of relying on the
-    # movement-event synchronization in mousemove --sync.
+    if not (0 <= target_x < geometry["width"] and 0 <= target_y < geometry["height"]):
+        raise ProbeFailure("pointer_position", "settings_target_outside_window",
+                           {"target_in_window": {"x": target_x, "y": target_y},
+                            "window_size": {"width": geometry["width"], "height": geometry["height"]}})
+
+    def pointer_location() -> dict[str, int]:
+        result = run(["xdotool", "getmouselocation", "--shell"], timeout=5, check=False).stdout or ""
+        return {key.lower(): int(value) for key, value in re.findall(r"^(X|Y|SCREEN)=(-?\d+)$", result, re.MULTILINE)}
+
+    def wait_for_stable_pointer(expected: tuple[int, int, int] | None, timeout: float) -> dict[str, int]:
+        deadline = time.monotonic() + timeout
+        prior: tuple[int | None, int | None, int | None] | None = None
+        stable_since: float | None = None
+        latest: dict[str, int] = {}
+        while time.monotonic() < deadline:
+            latest = pointer_location()
+            observed = (latest.get("x"), latest.get("y"), latest.get("screen"))
+            expected_matches = expected is None or observed == expected
+            if (expected_matches and observed[0] is not None and observed[1] is not None
+                    and observed == prior and stable_since is not None
+                    and time.monotonic() - stable_since >= 0.05):
+                return latest
+            if observed != prior:
+                stable_since = time.monotonic()
+                prior = observed
+            time.sleep(0.025)
+        raise ProbeFailure("pointer_position", "pointer_position_not_verified",
+                           {"expected_pointer": {"x": expected[0], "y": expected[1], "screen": expected[2]} if expected else None,
+                            "observed_pointer": {"x": latest.get("x"), "y": latest.get("y"), "screen": latest.get("screen")}})
+
+    # Derive the screen origin using xdotool's own --window coordinate mapping.
+    # This avoids mixing client coordinates with decorated-frame coordinates.
+    run(["xdotool", "mousemove", "--window", wid, "0", "0"], timeout=5)
+    origin = wait_for_stable_pointer(None, position_timeout)
+    origin_xy = (origin["x"], origin["y"])
+    origin_screen = origin.get("screen", 0)
+    display = run(["xdotool", "getdisplaygeometry", "--screen", str(origin_screen), "--shell"], timeout=5).stdout or ""
+    display_size = {key.lower(): int(value) for key, value in re.findall(r"^(WIDTH|HEIGHT)=(\d+)$", display, re.MULTILINE)}
+    expected = (origin_xy[0] + target_x, origin_xy[1] + target_y, origin_screen)
+    if ("width" not in display_size or "height" not in display_size or origin_xy[0] < 0 or origin_xy[1] < 0
+            or expected[0] >= display_size["width"] or expected[1] >= display_size["height"]):
+        raise ProbeFailure("pointer_position", "settings_target_outside_display",
+                           {"expected_pointer": {"x": expected[0], "y": expected[1], "screen": expected[2]},
+                            "display_size": display_size})
+
     run(["xdotool", "mousemove", "--window", wid, str(target_x), str(target_y)], timeout=5)
-    deadline = time.monotonic() + position_timeout
-    while True:
-        location = run(["xdotool", "getmouselocation", "--shell"], timeout=5, check=False).stdout or ""
-        values = {key.lower(): int(value) for key, value in re.findall(r"^(X|Y)=(-?\d+)$", location, re.MULTILINE)}
-        if (values.get("x"), values.get("y")) == expected:
-            break
-        if time.monotonic() >= deadline:
-            raise ProbeFailure("pointer_position", "settings_target_position_not_verified",
-                               {"expected_pointer": {"x": expected[0], "y": expected[1]},
-                                "observed_pointer": {"x": values.get("x"), "y": values.get("y")}})
-        time.sleep(0.05)
+    wait_for_stable_pointer(expected, position_timeout)
     run(["xdotool", "click", "1"], timeout=5)
 
 
