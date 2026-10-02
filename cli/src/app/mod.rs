@@ -190,6 +190,7 @@ fn spawn_staged_discovery(
                 port,
                 ProtocolType::Https,
                 Duration::from_secs(1),
+                false,
             )
             .await;
         if let Err(err) = result {

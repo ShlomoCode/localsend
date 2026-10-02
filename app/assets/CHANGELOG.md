@@ -1,5 +1,6 @@
 ## Unreleased
 
+- fix: scan the selected networks on refresh even when a known device has already responded (@ShlomoCode)
 - fix(macos): file sharing via Share Extension doesn't work in DMG builds (@ShlomoCode, @vdmkotai)
 - fix: show the real error when a file cannot be read while sending, instead of transferring it as an empty file (@leopalmieri-spec)
 

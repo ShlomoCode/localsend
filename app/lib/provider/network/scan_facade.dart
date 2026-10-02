@@ -8,8 +8,12 @@ import 'package:refena_flutter/refena_flutter.dart';
 
 /// Discovers devices in stages, cheapest first: multicast announcement and
 /// favorite probes right away, http-based discovery on the subnets only when
-/// nothing was confirmed within 1 second.
+/// nothing was confirmed within 1 second, unless explicitly requested.
 class StartSmartScan extends AsyncGlobalAction {
+  final bool forceSubnetScan;
+
+  StartSmartScan({this.forceSubnetScan = false});
+
   /// Maximum number of interfaces to scan.
   /// If there are more interfaces, the first ones will be used or the user needs to select one.
   static const maxInterfaces = 3;
@@ -29,6 +33,7 @@ class StartSmartScan extends AsyncGlobalAction {
             port: settings.port,
             https: settings.https,
             grace: const Duration(seconds: 1),
+            forceSubnetScan: forceSubnetScan,
           ),
         );
   }

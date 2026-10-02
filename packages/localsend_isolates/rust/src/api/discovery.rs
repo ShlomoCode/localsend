@@ -324,7 +324,7 @@ impl RsDiscovery {
     /// back to scanning the `/24` subnets of the local interface addresses
     /// [interface_ips], for networks that do not carry multicast. The
     /// fallback only runs when nothing was confirmed until [grace_ms] after
-    /// the channels have been probed.
+    /// the channels have been probed, unless [force_subnet_scan] is true.
     ///
     /// The found devices are emitted on [RsDiscovery::listen] as they answer;
     /// returns once every stage has finished, including the whole
@@ -336,6 +336,7 @@ impl RsDiscovery {
         port: u16,
         protocol: ProtocolType,
         grace_ms: u64,
+        force_subnet_scan: bool,
     ) -> anyhow::Result<()> {
         let channels = channels
             .into_iter()
@@ -361,6 +362,7 @@ impl RsDiscovery {
                 port,
                 protocol,
                 Duration::from_millis(grace_ms),
+                force_subnet_scan,
             )
             .await?;
         Ok(())

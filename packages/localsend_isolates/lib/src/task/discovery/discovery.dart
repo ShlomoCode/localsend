@@ -167,7 +167,7 @@ class DiscoveryService {
   /// Discovers devices in stages, cheapest first: announces this device and
   /// probes the known addresses of the favorites, then falls back to scanning
   /// the subnets of [networkInterfaces] when nothing was confirmed within the
-  /// grace period.
+  /// grace period, or always when [forceSubnetScan] is true.
   /// Found devices arrive on the [startListener] stream; this method returns
   /// once every stage has finished, including the whole announcement burst.
   Future<void> discoverStaged({
@@ -176,6 +176,7 @@ class DiscoveryService {
     required int port,
     required bool https,
     required Duration grace,
+    required bool forceSubnetScan,
   }) async {
     final discovery = _discovery;
     if (discovery == null) {
@@ -192,6 +193,7 @@ class DiscoveryService {
       port: port,
       protocol: protocol,
       graceMs: BigInt.from(grace.inMilliseconds),
+      forceSubnetScan: forceSubnetScan,
     );
   }
 

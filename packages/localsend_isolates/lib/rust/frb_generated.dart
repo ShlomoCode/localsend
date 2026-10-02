@@ -127,6 +127,7 @@ abstract class RustLibApi extends BaseApi {
     required int port,
     required ProtocolType protocol,
     required BigInt graceMs,
+    required bool forceSubnetScan,
   });
 
   Stream<RsStoredDevice> crateApiDiscoveryRsDiscoveryListen({required RsDiscovery that});
@@ -654,6 +655,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int port,
     required ProtocolType protocol,
     required BigInt graceMs,
+    required bool forceSubnetScan,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -665,6 +667,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_16(port, serializer);
           sse_encode_protocol_type(protocol, serializer);
           sse_encode_u_64(graceMs, serializer);
+          sse_encode_bool(forceSubnetScan, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10, port: port_);
         },
         codec: SseCodec(
@@ -672,7 +675,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiDiscoveryRsDiscoveryDiscoverStagedConstMeta,
-        argValues: [that, channels, interfaceIps, port, protocol, graceMs],
+        argValues: [that, channels, interfaceIps, port, protocol, graceMs, forceSubnetScan],
         apiImpl: this,
       ),
     );
@@ -680,7 +683,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiDiscoveryRsDiscoveryDiscoverStagedConstMeta => const TaskConstMeta(
     debugName: 'RsDiscovery_discover_staged',
-    argNames: ['that', 'channels', 'interfaceIps', 'port', 'protocol', 'graceMs'],
+    argNames: ['that', 'channels', 'interfaceIps', 'port', 'protocol', 'graceMs', 'forceSubnetScan'],
   );
 
   @override
@@ -6365,7 +6368,7 @@ class RsDiscoveryImpl extends RustOpaque implements RsDiscovery {
   /// back to scanning the `/24` subnets of the local interface addresses
   /// [interface_ips], for networks that do not carry multicast. The
   /// fallback only runs when nothing was confirmed until [grace_ms] after
-  /// the channels have been probed.
+  /// the channels have been probed, unless [force_subnet_scan] is true.
   ///
   /// The found devices are emitted on [RsDiscovery::listen] as they answer;
   /// returns once every stage has finished, including the whole
@@ -6376,6 +6379,7 @@ class RsDiscoveryImpl extends RustOpaque implements RsDiscovery {
     required int port,
     required ProtocolType protocol,
     required BigInt graceMs,
+    required bool forceSubnetScan,
   }) => RustLib.instance.api.crateApiDiscoveryRsDiscoveryDiscoverStaged(
     that: this,
     channels: channels,
@@ -6383,6 +6387,7 @@ class RsDiscoveryImpl extends RustOpaque implements RsDiscovery {
     port: port,
     protocol: protocol,
     graceMs: graceMs,
+    forceSubnetScan: forceSubnetScan,
   );
 
   /// Emits a [RsStoredDevice] for every device confirmation until the
