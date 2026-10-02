@@ -514,7 +514,10 @@ def click_settings_gear(wid: str, geometry: dict[str, int], *, target_x: int = 3
 
 
 def screenshot_and_ocr(path: Path) -> str:
-    run(["scrot", "-u", str(path)], timeout=15)
+    # scrot avoids overwriting an existing path unless explicitly requested.
+    # The render-wait loop intentionally reuses one path, so -o is required to
+    # make each OCR pass inspect the newest frame instead of a stale blank one.
+    run(["scrot", "-o", "-u", str(path)], timeout=15)
     result = run(["tesseract", str(path), "stdout", "--psm", "11"], timeout=8, check=False)
     return re.sub(r"[^a-z]+", " ", (result.stdout or "").lower())
 
