@@ -298,9 +298,11 @@ impl DiscoveryHandle {
     /// falls back to scanning the `/24` subnets of the local interface
     /// addresses `interface_ips`, for networks that do not carry multicast.
     ///
-    /// The fallback only runs when nothing was confirmed until `grace` after
-    /// the known channels have been probed: any confirmation — a new device
-    /// or a known one — proves that the cheap stages work on this network.
+    /// Background discovery only scans when nothing was confirmed until `grace`
+    /// after the known channels have been probed. A confirmation does not prove
+    /// that every reachable device was found.
+    /// `force_subnet_scan` always scans the selected subnets after the grace
+    /// period, for an explicit user-requested refresh.
     ///
     /// The found devices are put into the store (and emitted) as they answer;
     /// returns once every stage has finished, including the whole
@@ -312,13 +314,16 @@ impl DiscoveryHandle {
         port: u16,
         protocol: ProtocolType,
         grace: Duration,
+        force_subnet_scan: bool,
     ) -> Result<(), ClientError> {
         let confirmations = self.state.confirmations.load(Ordering::Relaxed);
         let escalate = async {
             self.discover_known_http_channels(known_channels).await?;
             tokio::time::sleep(grace).await;
 
-            if self.state.confirmations.load(Ordering::Relaxed) == confirmations {
+            if force_subnet_scan
+                || self.state.confirmations.load(Ordering::Relaxed) == confirmations
+            {
                 futures_util::future::try_join_all(
                     interface_ips
                         .into_iter()

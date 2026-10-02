@@ -83,6 +83,7 @@ class IsolateDiscoveryStagedScanAction extends ReduxActionWithResult<IsolateCont
   final int port;
   final bool https;
   final Duration grace;
+  final bool forceSubnetScan;
 
   IsolateDiscoveryStagedScanAction({
     required this.favorites,
@@ -90,6 +91,7 @@ class IsolateDiscoveryStagedScanAction extends ReduxActionWithResult<IsolateCont
     required this.port,
     required this.https,
     required this.grace,
+    required this.forceSubnetScan,
   });
 
   @override
@@ -109,6 +111,7 @@ class IsolateDiscoveryStagedScanAction extends ReduxActionWithResult<IsolateCont
               port: port,
               https: https,
               grace: grace,
+              forceSubnetScan: forceSubnetScan,
             ),
           )
           .toDeviceStream(),
