@@ -12,6 +12,7 @@ enum DockIcon: CaseIterable {
 
 @main
 class AppDelegate: FlutterAppDelegate {
+    private let windowFrameAutosaveName = "LocalSendMainWindow"
     private var statusItem: NSStatusItem?
     private var channel: FlutterMethodChannel?
     private var pendingFilesObservation: Defaults.Observation?
@@ -145,6 +146,38 @@ class AppDelegate: FlutterAppDelegate {
         case "setupStatusBar":
             let i18n = call.arguments as! [String: String]
             setupStatusBarItem(i18n: i18n)
+            result(nil)
+        case "configureWindowFrameAutosave":
+            guard let arguments = call.arguments as? [String: Any],
+                  let enabled = arguments["enabled"] as? Bool,
+                  let migrateLegacyFrame = arguments["migrateLegacyFrame"] as? Bool else {
+                result(FlutterError(code: "INVALID_ARGUMENT", message: "Expected window frame autosave options", details: nil))
+                return
+            }
+            guard let window = mainFlutterWindow else {
+                result(FlutterError(code: "WINDOW_UNAVAILABLE", message: "Main window is unavailable", details: nil))
+                return
+            }
+            if enabled {
+                let restored = window.setFrameUsingName(windowFrameAutosaveName)
+                if !restored && migrateLegacyFrame {
+                    // Let AppKit constrain the old Dart placement on its first native restore.
+                    window.saveFrame(usingName: windowFrameAutosaveName)
+                    _ = window.setFrameUsingName(windowFrameAutosaveName)
+                }
+                guard window.setFrameAutosaveName(windowFrameAutosaveName) else {
+                    result(FlutterError(code: "AUTOSAVE_UNAVAILABLE", message: "Window frame autosave name is unavailable", details: nil))
+                    return
+                }
+                // Enabling autosave alone does not save until the next move or resize.
+                window.saveFrame(usingName: windowFrameAutosaveName)
+            } else {
+                guard window.setFrameAutosaveName("") else {
+                    result(FlutterError(code: "AUTOSAVE_UNAVAILABLE", message: "Could not disable window frame autosave", details: nil))
+                    return
+                }
+                NSWindow.removeFrame(usingName: windowFrameAutosaveName)
+            }
             result(nil)
         case "removeDestinationFolderAccess":
             removeExistingDestinationAccess()

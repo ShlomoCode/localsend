@@ -7,6 +7,13 @@ import 'package:localsend_app/util/native/tray_helper.dart';
 
 const _methodChannel = MethodChannel('main-delegate-channel');
 
+Future<void> configureWindowFrameAutosave({required bool enabled, bool migrateLegacyFrame = false}) async {
+  await _methodChannel.invokeMethod('configureWindowFrameAutosave', {
+    'enabled': enabled,
+    'migrateLegacyFrame': migrateLegacyFrame,
+  });
+}
+
 Future<void> setupStatusBar() async {
   await _methodChannel.invokeMethod('setupStatusBar', {
     'open': t.tray.open,
