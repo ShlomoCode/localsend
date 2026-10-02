@@ -187,7 +187,12 @@ localsend-cli send --to 192.168.27.26 report.pdf
 ```
 
 An alias must uniquely identify a discovered device. An IP address is probed directly
-over HTTPS on LocalSend's default port (`53317`).
+over HTTPS on LocalSend's default port (`53317`), or the port supplied with `--target-port`.
+
+For scripts and agents, the CLI also supports terminal-free discovery and receiving,
+JSON output, and a persistent `serve --stdio` session. See the [CLI automation guide](cli/README.md)
+for commands and the JSON-line protocol, and the [network lab](support/network_lab/README.md)
+for end-to-end tests of real CLI processes in Linux network topologies.
 
 Directories are collected recursively. Their selected root names and nested paths
 are preserved on the receiver. Empty directories are not sent because LocalSend

@@ -88,6 +88,8 @@ jobs:
         run: cargo test --features full
       - name: Test (signaling server)
         run: cargo test --package server
+      - name: Test (CLI, including real subprocess transfers)
+        run: cargo test --package localsend-cli
       - name: Check (plugin crate, CLI)
         run: cargo check --package rust_lib_localsend_app --package localsend-cli
 
