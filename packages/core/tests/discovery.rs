@@ -19,8 +19,11 @@ use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2}
 use localsend::multicast::MulticastDevice;
 use localsend::util::interface::InterfaceFilter;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 
 /// Like the group the protocol uses, but distinct from it (and from the one in
@@ -306,6 +309,82 @@ async fn test_subnet_scan_finds_device_on_loopback() {
         .await
         .expect("The scanned device must be emitted");
     assert_eq!(emitted.alias, "ScanTarget");
+}
+
+/// Two interface addresses on one /24 must share a scan, while a scan to a
+/// different server port remains independent. Count connections rather than
+/// discovery events, which can be dropped when their channel fills.
+#[tokio::test]
+async fn test_concurrent_subnet_scans_share_only_the_same_endpoint() {
+    async fn counting_server() -> (u16, Arc<AtomicUsize>, oneshot::Sender<()>) {
+        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let count = Arc::new(AtomicUsize::new(0));
+        let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+        let count_for_task = count.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    result = listener.accept() => {
+                        let (mut stream, _) = result.unwrap();
+                        count_for_task.fetch_add(1, Ordering::Relaxed);
+                        tokio::spawn(async move {
+                            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+                        });
+                    }
+                    _ = &mut stop_rx => break,
+                }
+            }
+        });
+        (port, count, stop_tx)
+    }
+
+    let multicast_port = NEXT_MULTICAST_PORT.fetch_add(1, Ordering::Relaxed);
+    let Some(instance) = start_instance("Scanner", multicast_port, announce_port()).await else {
+        return skip("no network interface available for multicast");
+    };
+    let (port, count, _stop) = counting_server().await;
+    instance
+        .handle
+        .scan_subnet(Ipv4Addr::new(127, 0, 0, 2), port, ProtocolType::Http)
+        .await
+        .unwrap();
+    let requests_per_scan = count.load(Ordering::Relaxed);
+    assert!(requests_per_scan > 0, "the loopback control must reach the counting server");
+
+    let (first, second) = tokio::join!(
+        instance
+            .handle
+            .scan_subnet(Ipv4Addr::new(127, 0, 0, 2), port, ProtocolType::Http),
+        instance
+            .handle
+            .scan_subnet(Ipv4Addr::new(127, 0, 0, 3), port, ProtocolType::Http),
+    );
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(
+        count.load(Ordering::Relaxed),
+        requests_per_scan * 2,
+        "same /24 and endpoint must have one scan"
+    );
+
+    let (other_port, other_count, _other_stop) = counting_server().await;
+    let (first, second) = tokio::join!(
+        instance
+            .handle
+            .scan_subnet(Ipv4Addr::new(127, 0, 0, 2), port, ProtocolType::Http),
+        instance
+            .handle
+            .scan_subnet(Ipv4Addr::new(127, 0, 0, 2), other_port, ProtocolType::Http),
+    );
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(
+        count.load(Ordering::Relaxed),
+        requests_per_scan * 3,
+        "a different port must still be scanned"
+    );
+    assert_eq!(other_count.load(Ordering::Relaxed), requests_per_scan);
 }
 
 #[tokio::test]
