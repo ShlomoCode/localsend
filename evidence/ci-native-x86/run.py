@@ -499,11 +499,18 @@ def main() -> int:
         summary["app_commit_before"] = ref_commit(app_ref)
         if summary["app_commit_before"] != APP_COMMIT:
             raise ProbeFailure("app_pin", "unexpected_app_commit_before_test")
+        # Installing the app can resolve/update its runtime dependency. Record
+        # the state at that boundary, then pin the whole baseline together.
+        for ref, old_commit, _ in REFS:
+            summary["cohorts"][ref] = {"old_expected": old_commit,
+                                      "before_final_old_pin": ref_commit(ref)}
+        for ref, old_commit, _ in REFS:
+            update_exact(ref, old_commit)
         for ref, old_commit, _ in REFS:
             actual = ref_commit(ref)
+            summary["cohorts"][ref]["old"] = actual
             if actual != old_commit:
                 raise ProbeFailure("old_cohort_pin", "unexpected_old_runtime_commit")
-            summary["cohorts"][ref] = {"old": actual}
         summary["renderer_old"] = gl_info(args.gl_probe)
         if profile.exists():
             shutil.rmtree(profile)
