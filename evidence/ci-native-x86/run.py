@@ -493,8 +493,43 @@ def window_geometry(wid: str) -> dict[str, int]:
     return values
 
 
+def stabilize_window_geometry(wid: str, *, timeout: float = 15.0,
+                              target_width: int = 400, target_height: int = 538,
+                              stable_samples: int = 2, sample_interval: float = 0.25) -> dict[str, int]:
+    deadline = time.monotonic() + timeout
+    geometry: dict[str, int] = {}
+    previous_target_sample_at: float | None = None
+    consecutive_target_samples = 0
+    last_observed: dict[str, int] = {}
+    while time.monotonic() < deadline:
+        geometry = window_geometry(wid)
+        last_observed = geometry
+        now = time.monotonic()
+        if geometry["width"] == target_width and geometry["height"] == target_height:
+            if previous_target_sample_at is not None and now - previous_target_sample_at >= sample_interval:
+                consecutive_target_samples += 1
+            else:
+                consecutive_target_samples = 1
+            previous_target_sample_at = now
+            if consecutive_target_samples >= stable_samples:
+                return geometry
+        else:
+            consecutive_target_samples = 0
+            previous_target_sample_at = None
+            run(["xdotool", "windowsize", wid, str(target_width), str(target_height)], timeout=10)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(sample_interval, remaining))
+    raise ProbeFailure("window_geometry", "window_not_stable_at_400x538",
+                       {"expected_geometry": {"width": target_width, "height": target_height},
+                        "observed_geometry": last_observed})
+
+
 def click_settings_gear(wid: str, geometry: dict[str, int], *, target_x: int = 333,
                         target_y: int = 486, position_timeout: float = 2.0) -> None:
+    # LocalSend restores its persisted/default size during startup, so verify
+    # the client size again immediately before using the fixed gear coordinate.
+    geometry = stabilize_window_geometry(wid)
     expected = (geometry["x"] + target_x, geometry["y"] + target_y)
     # Verify the pointer location directly instead of relying on the
     # movement-event synchronization in mousemove --sync.
@@ -526,17 +561,8 @@ def capture_state(name: str, app_process: dict[str, Any], artifact_dir: Path,
                   xres_helper: Path) -> dict[str, Any]:
     wid, window_pid, window_pid_source = window_for(app_process, xres_helper)
     run(["xdotool", "windowmap", wid], timeout=10)
-    run(["xdotool", "windowsize", wid, "400", "538"], timeout=10)
     run(["xdotool", "windowraise", wid, "windowactivate", "--sync", wid], timeout=10, check=False)
-    geometry_deadline = time.monotonic() + 8
-    geometry = {}
-    while time.monotonic() < geometry_deadline:
-        geometry = window_geometry(wid)
-        if geometry["width"] == 400 and geometry["height"] == 538:
-            break
-        time.sleep(0.25)
-    if geometry.get("width") != 400 or geometry.get("height") != 538:
-        raise ProbeFailure("window_geometry", "window_not_resized_to_400x538")
+    geometry = stabilize_window_geometry(wid)
     home_screenshot = artifact_dir / f"{name}-home.png"
     home_deadline = time.monotonic() + 30
     home_text = ""
