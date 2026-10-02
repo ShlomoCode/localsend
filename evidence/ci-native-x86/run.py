@@ -59,6 +59,30 @@ class ProbeFailure(RuntimeError):
         self.context = context or {}
 
 
+def safe_command_identity(args: list[str]) -> dict[str, str]:
+    command = args[1:] if args and args[0] == "sudo" else args
+    executable = Path(command[0]).name if command else "unknown"
+    known_operations = {
+        "xdotool": {"search", "mousemove", "getmouselocation", "click", "windowmap", "windowsize",
+                    "windowraise", "windowactivate", "getwindowgeometry"},
+        "xprop": {"query"},
+        "flatpak": {"run", "kill", "ps", "info", "install", "update", "remote-add"},
+        "scrot": {"capture_screen"},
+        "tesseract": {"ocr"},
+        "xres-window-pid": {"query_client_pid"},
+    }
+    if executable == "xprop":
+        operation = "query"
+    elif executable in {"scrot", "tesseract", "xres-window-pid"}:
+        operation = {"scrot": "capture_screen", "tesseract": "ocr",
+                     "xres-window-pid": "query_client_pid"}[executable]
+    else:
+        proposed = command[1] if len(command) > 1 else "unknown"
+        operation = proposed if proposed in known_operations.get(executable, set()) else "other"
+    return {"executable": executable if executable in known_operations else "other",
+            "operation": operation}
+
+
 def run(args: list[str], *, timeout: int = 120, check: bool = True,
         capture: bool = True) -> subprocess.CompletedProcess[str]:
     global COMMAND_FAILURE
@@ -70,7 +94,8 @@ def run(args: list[str], *, timeout: int = 120, check: bool = True,
         if COMMAND_LOG is not None:
             with COMMAND_LOG.open("a", encoding="utf-8") as log:
                 log.write(f"\n$ {shlex.join(args)}\n[timeout after {timeout}s]\n")
-        raise ProbeFailure("command_timeout", "bounded_command_timeout") from exc
+        raise ProbeFailure("command_timeout", "bounded_command_timeout",
+                           {"command_timeout": safe_command_identity(args)}) from exc
     if COMMAND_LOG is not None:
         with COMMAND_LOG.open("a", encoding="utf-8") as log:
             log.write(f"\n$ {shlex.join(args)}\n{result.stdout or ''}\n")
@@ -463,9 +488,29 @@ def window_geometry(wid: str) -> dict[str, int]:
     values = {}
     for key, value in re.findall(r"^(X|Y|WIDTH|HEIGHT)=(-?\d+)$", result, re.MULTILINE):
         values[key.lower()] = int(value)
-    if not {"width", "height"}.issubset(values):
+    if not {"x", "y", "width", "height"}.issubset(values):
         raise ProbeFailure("window_geometry", "geometry_unavailable")
     return values
+
+
+def click_settings_gear(wid: str, geometry: dict[str, int], *, target_x: int = 333,
+                        target_y: int = 486, position_timeout: float = 2.0) -> None:
+    expected = (geometry["x"] + target_x, geometry["y"] + target_y)
+    # Verify the pointer location directly instead of relying on the
+    # movement-event synchronization in mousemove --sync.
+    run(["xdotool", "mousemove", "--window", wid, str(target_x), str(target_y)], timeout=5)
+    deadline = time.monotonic() + position_timeout
+    while True:
+        location = run(["xdotool", "getmouselocation", "--shell"], timeout=5, check=False).stdout or ""
+        values = {key.lower(): int(value) for key, value in re.findall(r"^(X|Y)=(-?\d+)$", location, re.MULTILINE)}
+        if (values.get("x"), values.get("y")) == expected:
+            break
+        if time.monotonic() >= deadline:
+            raise ProbeFailure("pointer_position", "settings_target_position_not_verified",
+                               {"expected_pointer": {"x": expected[0], "y": expected[1]},
+                                "observed_pointer": {"x": values.get("x"), "y": values.get("y")}})
+        time.sleep(0.05)
+    run(["xdotool", "click", "1"], timeout=5)
 
 
 def screenshot_and_ocr(path: Path) -> str:
@@ -503,7 +548,7 @@ def capture_state(name: str, app_process: dict[str, Any], artifact_dir: Path,
     # Parent-verified click point for the exact 400x538 client window. Geometry
     # is checked above before using this coordinate.
     if name.endswith("settings"):
-        run(["xdotool", "mousemove", "--sync", "--window", wid, "333", "486", "click", "1"], timeout=10)
+        click_settings_gear(wid, geometry)
         settings_screenshot = artifact_dir / f"{name}-settings.png"
         settings_deadline = time.monotonic() + 30
         normalized = ""
@@ -550,10 +595,11 @@ def launch_capture(label: str, artifact_dir: Path, raw_dir: Path,
         process.wait(timeout=15)
         return {"process": app_process, "window": state}
     except ProbeFailure as exc:
-        if exc.stage == "window_match" and process is not None and app_process is not None:
+        if process is not None and app_process is not None:
             # Capture the full synthetic Xvfb desktop before terminating the
-            # verified app process. No unmatched window is activated/clicked.
-            screenshot = artifact_dir / f"{label}-window-match-failure.png"
+            # verified app process. This applies to failures after discovery;
+            # no unmatched window is activated/clicked.
+            screenshot = artifact_dir / f"{label}-{exc.stage}-failure.png"
             try:
                 shot = run(["scrot", str(screenshot)], timeout=15, check=False)
                 screenshot_name = screenshot.name if shot.returncode == 0 and screenshot.exists() else ""
