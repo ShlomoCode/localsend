@@ -129,12 +129,14 @@ class AddFilesAction<T> extends AsyncReduxAction<SelectedSendingFilesNotifier, L
   @override
   Future<List<CrossFile>> reduce() async {
     final newFiles = <CrossFile>[];
+    // Match CrossFile.isSameFile: null paths compare as empty strings.
+    final selectedPaths = state.map((file) => file.path ?? '').toSet();
     for (final file in files) {
       // we do it sequential because there are bugs
       //  https://github.com/fluttercandies/flutter_photo_manager/issues/589
 
       final crossFile = await converter(file);
-      final isAlreadySelect = state.any((element) => element.isSameFile(otherFile: crossFile));
+      final isAlreadySelect = selectedPaths.contains(crossFile.path ?? '');
       if (!isAlreadySelect) {
         newFiles.add(crossFile);
       }
@@ -156,6 +158,7 @@ class AddDirectoryAction extends AsyncReduxAction<SelectedSendingFilesNotifier, 
   Future<List<CrossFile>> reduce() async {
     _logger.info('Reading files in $directoryPath');
     final newFiles = <CrossFile>[];
+    final selectedPaths = state.map((file) => file.path ?? '').toSet();
     final directoryName = p.basename(directoryPath);
     final sendIgnore = SendIgnore();
     await for (final entity in Directory(directoryPath).list(recursive: true)) {
@@ -189,7 +192,7 @@ class AddDirectoryAction extends AsyncReduxAction<SelectedSendingFilesNotifier, 
           lastAccessed: metadata?.accessed,
         );
 
-        final isAlreadySelect = state.any((element) => element.isSameFile(otherFile: file));
+        final isAlreadySelect = selectedPaths.contains(file.path ?? '');
         if (!isAlreadySelect) {
           newFiles.add(file);
         }
@@ -212,6 +215,7 @@ class AddAndroidDirectoryAction extends AsyncReduxAction<SelectedSendingFilesNot
   @override
   Future<List<CrossFile>> reduce() async {
     final newFiles = <CrossFile>[];
+    final selectedPaths = state.map((file) => file.path ?? '').toSet();
     _logger.info('Reading files in ${result.directoryUri}');
 
     final basePath = ContentUriHelper.getPathFromTreeUri(result.directoryUri);
@@ -251,7 +255,7 @@ class AddAndroidDirectoryAction extends AsyncReduxAction<SelectedSendingFilesNot
         lastAccessed: null,
       );
 
-      final isAlreadySelect = state.any((element) => element.isSameFile(otherFile: crossFile));
+      final isAlreadySelect = selectedPaths.contains(crossFile.path ?? '');
       if (!isAlreadySelect) {
         newFiles.add(crossFile);
       }
