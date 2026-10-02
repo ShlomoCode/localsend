@@ -16,6 +16,8 @@ use localsend::model::discovery::ProtocolType;
 use localsend::model::transfer::FileDto;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -273,6 +275,54 @@ async fn test_transfer_with_matching_fingerprint() {
     let received = server.received.lock().await;
     assert_eq!(received.len(), 1);
     assert_eq!(received[0].1, content);
+}
+
+/// TCP peers that never start TLS must not hold server sockets indefinitely.
+#[tokio::test]
+async fn idle_tls_connections_are_closed() {
+    let server_identity = generate_identity();
+    let sender = generate_identity();
+    let server = start_tls_server(&server_identity).await;
+    let client = client(&sender, Some(&server_identity.fingerprint));
+
+    // A valid authenticated request proves that the listener is serving TLS.
+    client
+        .register(
+            ProtocolType::Https,
+            "127.0.0.1",
+            server.port,
+            sender_info(&sender.fingerprint),
+        )
+        .await
+        .expect("authenticated request should succeed");
+
+    let mut idle_peers = Vec::new();
+    for _ in 0..3 {
+        idle_peers.push(
+            tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+                .await
+                .unwrap(),
+        );
+    }
+
+    for mut peer in idle_peers {
+        let mut byte = [0];
+        let read = tokio::time::timeout(Duration::from_secs(12), peer.read(&mut byte))
+            .await
+            .expect("idle TLS socket was never closed")
+            .expect("socket read failed");
+        assert_eq!(read, 0, "idle TLS socket should close without response");
+    }
+
+    client
+        .register(
+            ProtocolType::Https,
+            "127.0.0.1",
+            server.port,
+            sender_info(&sender.fingerprint),
+        )
+        .await
+        .expect("authenticated request should still succeed after idle peers expire");
 }
 
 /// The peer presents a valid self-signed certificate, but not the one that was
