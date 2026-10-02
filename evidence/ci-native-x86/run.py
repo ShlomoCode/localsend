@@ -52,10 +52,11 @@ COMMAND_FAILURE: dict[str, Any] = {}
 
 
 class ProbeFailure(RuntimeError):
-    def __init__(self, stage: str, detail: str = "check_failed") -> None:
+    def __init__(self, stage: str, detail: str = "check_failed", context: dict[str, Any] | None = None) -> None:
         super().__init__(detail)
         self.stage = stage
         self.detail = detail
+        self.context = context or {}
 
 
 def run(args: list[str], *, timeout: int = 120, check: bool = True,
@@ -330,6 +331,7 @@ def wait_app_process(expected_runtime_commit: str) -> dict[str, Any]:
                     "wrapper_pid": int(wrapper_pid),
                     "sandbox_pid": int(sandbox_pid),
                     "app_pid": pid,
+                    "app_commit": marker["app_commit"],
                     "runtime_commit": marker["runtime_commit"],
                     "allowed_window_pids": sorted(set([pid, *nspids])),
                     "nspids": nspids,
@@ -353,6 +355,78 @@ def window_for(app_process: dict[str, Any]) -> tuple[str, int]:
                 return wid.strip(), int(match.group(1))
         time.sleep(0.5)
     raise ProbeFailure("window_match", "visible_window_pid_namespace_and_class_not_matched")
+
+
+def visible_window_diagnostics(app_process: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return bounded, sanitized facts about visible X11 windows."""
+    ids = run(["xdotool", "search", "--onlyvisible", "--name", ".*"], timeout=10, check=False).stdout or ""
+    windows: list[dict[str, Any]] = []
+    for wid_text in ids.splitlines():
+        wid_text = wid_text.strip()
+        if not wid_text.isdigit():
+            continue
+        wid = int(wid_text)
+        pid_output = run(["xprop", "-id", wid_text, "_NET_WM_PID"], timeout=5, check=False).stdout or ""
+        class_output = run(["xprop", "-id", wid_text, "WM_CLASS"], timeout=5, check=False).stdout or ""
+        name_output = run(["xprop", "-id", wid_text, "_NET_WM_NAME", "WM_NAME"], timeout=5, check=False).stdout or ""
+        pid_match = re.search(r"_NET_WM_PID\(CARDINAL\)\s*=\s*(\d+)\b", pid_output)
+        wm_pid = int(pid_match.group(1)) if pid_match else None
+        class_text = class_output.partition("=")[2].lower()
+        name_text = name_output.partition("=")[2].lower()
+        class_matches = "localsend" in class_text
+        name_matches = "localsend" in name_text
+        item: dict[str, Any] = {
+            "wid": wid,
+            "net_wm_pid": wm_pid,
+            "pid_matches_verified_app": wm_pid in app_process["allowed_window_pids"] if wm_pid is not None else False,
+            "class_contains_localsend": class_matches,
+            "title_contains_localsend": name_matches,
+        }
+        if class_matches or name_matches:
+            # Keep the class only for an app-identifying window; never expose
+            # unrelated window names or classes from the synthetic desktop.
+            item["wm_class"] = class_output.partition("=")[2].strip()[:200]
+        windows.append(item)
+        if len(windows) >= 30:
+            break
+    return windows
+
+
+def app_failure_diagnostics(log_path: Path, process: subprocess.Popen[str], app_process: dict[str, Any]) -> dict[str, Any]:
+    try:
+        with log_path.open("rb") as log:
+            log.seek(0, os.SEEK_END)
+            size = log.tell()
+            log.seek(max(0, size - 131072))
+            recent = log.read().decode("utf-8", errors="replace").lower()
+    except OSError:
+        recent = ""
+    exit_code = process.poll()
+    try:
+        exe_name = Path(f"/proc/{app_process['app_pid']}/exe").resolve().name
+    except OSError:
+        exe_name = ""
+    result: dict[str, Any] = {
+        "instance_id": app_process["instance_id"],
+        "wrapper_pid": app_process["wrapper_pid"],
+        "sandbox_pid": app_process["sandbox_pid"],
+        "app_host_pid": app_process["app_pid"],
+        "app_nspids": app_process["nspids"],
+        "app_commit": app_process["app_commit"],
+        "runtime_commit": app_process["runtime_commit"],
+        "app_host_process_alive": Path(f"/proc/{app_process['app_pid']}").exists(),
+        "flatpak_run_exited": exit_code is not None,
+        "flatpak_run_exit_code": exit_code,
+        "candidate_exe_basename": exe_name if exe_name in {"localsend", "localsend_app"} else "",
+        "stderr_signatures": {
+            "gl_blit_error": bool(re.search(r"gl.?blit|blit.?framebuffer", recent)),
+            "gdk_warning": "gdk-warning" in recent,
+            "cannot_open_display": "cannot open display" in recent or "unable to open display" in recent,
+            "refena_late_initialization": "lateinitializationerror" in recent or "late initialization error" in recent,
+            "source_not_found": "sourcenotfound" in recent or "source not found" in recent,
+        },
+    }
+    return result
 
 
 def window_geometry(wid: str) -> dict[str, int]:
@@ -429,6 +503,8 @@ def launch_capture(label: str, artifact_dir: Path, raw_dir: Path,
                    expected_runtime_commit: str) -> dict[str, Any]:
     run(["sudo", "-n", "true"], timeout=5)
     log_path = raw_dir / f"{label}-app.log"
+    process: subprocess.Popen[str] | None = None
+    app_process: dict[str, Any] | None = None
     try:
         if COMMAND_LOG is not None:
             with COMMAND_LOG.open("a", encoding="utf-8") as log:
@@ -442,7 +518,25 @@ def launch_capture(label: str, artifact_dir: Path, raw_dir: Path,
         run(["flatpak", "kill", APP_ID], timeout=15, check=False)
         process.wait(timeout=15)
         return {"process": app_process, "window": state}
-    except ProbeFailure:
+    except ProbeFailure as exc:
+        if exc.stage == "window_match" and process is not None and app_process is not None:
+            # Capture the full synthetic Xvfb desktop before terminating the
+            # verified app process. No unmatched window is activated/clicked.
+            screenshot = artifact_dir / f"{label}-window-match-failure.png"
+            try:
+                shot = run(["scrot", str(screenshot)], timeout=15, check=False)
+                screenshot_name = screenshot.name if shot.returncode == 0 and screenshot.exists() else ""
+            except ProbeFailure:
+                screenshot_name = ""
+            try:
+                visible_windows = visible_window_diagnostics(app_process)
+            except ProbeFailure:
+                visible_windows = []
+            exc.context["window_diagnostics"] = {
+                "desktop_screenshot": screenshot_name,
+                "verified_app": app_failure_diagnostics(log_path, process, app_process),
+                "visible_windows": visible_windows,
+            }
         run(["flatpak", "kill", APP_ID], timeout=15, check=False)
         raise
     except Exception as exc:  # noqa: BLE001 - public artifacts use only the stage/category.
@@ -545,7 +639,8 @@ def main() -> int:
             summary["status"] = "passed"
         except ProbeFailure as first_error:
             summary["same_cache_first_launch"] = {"passed": False, "failure_stage": first_error.stage,
-                                                  "failure_category": first_error.detail}
+                                                  "failure_category": first_error.detail,
+                                                  "failure_context": first_error.context}
             # Only a material first-launch failure justifies this fresh-cache control.
             run(["flatpak", "kill", APP_ID], timeout=10, check=False)
             failed_profile = raw_dir / "same-cache-failure-profile"
@@ -563,7 +658,8 @@ def main() -> int:
                 summary["status"] = "passed_fresh_cache_only"
             except ProbeFailure as fresh_error:
                 summary["fresh_cache_control"] = {"passed": False, "failure_stage": fresh_error.stage,
-                                                   "failure_category": fresh_error.detail}
+                                                   "failure_category": fresh_error.detail,
+                                                   "failure_context": fresh_error.context}
                 summary["status"] = "current_cohort_failure_with_fresh_cache_control"
                 summary["failure_stage"] = "current_fresh_cache_control"
                 summary["failure_category"] = fresh_error.detail
@@ -589,6 +685,8 @@ def main() -> int:
         summary["old_baseline_ui_passed"] = "old_baseline" in summary
         summary["old_baseline_passed"] = bool(summary.get("old_baseline_validated"))
         summary["status"] = "harness_or_baseline_failed"
+        if exc.context:
+            summary["failure_context"] = exc.context
         if REMOTE_DIAGNOSTICS:
             summary["remote_diagnostics"] = dict(REMOTE_DIAGNOSTICS)
         if COMMAND_FAILURE:
