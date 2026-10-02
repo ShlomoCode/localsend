@@ -132,6 +132,7 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
             .toSet();
 
         _totalBytes = _files.where((f) => _selectedFiles.contains(f.id)).fold(0, (prev, curr) => prev + curr.size);
+        transferNotifier.trackTotals(widget.sessionId, {for (final file in _files) file.id: file.size});
       });
     });
   }
@@ -194,10 +195,8 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
   @override
   Widget build(BuildContext context) {
     final transferNotifier = ref.watch(fileTransferProvider);
-    final currBytes = _files.fold<int>(
-      0,
-      (prev, curr) => prev + ((transferNotifier.getProgress(sessionId: widget.sessionId, fileId: curr.id) * curr.size).round()),
-    );
+    final totals = transferNotifier.getTotals(widget.sessionId);
+    final currBytes = totals.bytes;
 
     // No select: comparing the selected session runs the dart_mappable deep equality
     // over the whole files map on every state change.
@@ -251,7 +250,7 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
       speedInBytes = null;
     }
 
-    final finishedCount = transferNotifier.getStatuses(widget.sessionId).where((s) => s == FileStatus.finished).length;
+    final finishedCount = totals.finishedCount;
 
     return PopScope(
       onPopInvokedWithResult: (didPop, result) {
