@@ -44,22 +44,6 @@ Future<bool> enableAutoStart({required bool startHidden}) async {
   }
 }
 
-/// Repairs entries written while running inside an AppImage's temporary mount.
-Future<void> migrateLinuxAutoStart() async {
-  if (defaultTargetPlatform != TargetPlatform.linux) {
-    return;
-  }
-  final appImage = Platform.environment['APPIMAGE'];
-  if (appImage == null || appImage.isEmpty) {
-    return;
-  }
-  final packageInfo = await PackageInfo.fromPlatform();
-  repairLinuxAutoStartFile(
-    File(_getLinuxFilePath(packageInfo.packageName)),
-    appImage,
-  );
-}
-
 @visibleForTesting
 void writeLinuxAutoStartFile(
   File file, {
@@ -95,38 +79,6 @@ String _desktopExecExecutable(String executable) {
       .replaceAll('\t', r'\t')
       .replaceAll('%', '%%');
   return '"$escaped"';
-}
-
-final _temporaryAppImageExec = RegExp(
-  r'^Exec=(?:"(?:/[^/"\r\n]+)*/(?:\.mount_[^/"\r\n]+|appimage_extracted_[^/"\r\n]+)/localsend_app"|(?:/[^/ \t\r\n]+)*/(?:\.mount_[^/ \t\r\n]+|appimage_extracted_[^/ \t\r\n]+)/localsend_app)(?=[ \t\r]|$)',
-);
-
-@visibleForTesting
-bool repairLinuxAutoStartFile(File file, String appImage) {
-  if (appImage.isEmpty || !file.existsSync()) {
-    return false;
-  }
-
-  final contents = file.readAsStringSync();
-  final lines = contents.split('\n');
-  var inDesktopEntry = false;
-  var changed = false;
-  for (var i = 0; i < lines.length; i++) {
-    final line = lines[i];
-    if (line.startsWith('[')) {
-      inDesktopEntry = line.trimRight() == '[Desktop Entry]';
-    } else if (inDesktopEntry && !changed) {
-      final match = _temporaryAppImageExec.firstMatch(line);
-      if (match != null) {
-        lines[i] = 'Exec=${_desktopExecExecutable(appImage)}${line.substring(match.end)}';
-        changed = true;
-      }
-    }
-  }
-  if (changed) {
-    file.writeAsStringSync(lines.join('\n'));
-  }
-  return changed;
 }
 
 Future<bool> disableAutoStart() async {
