@@ -65,7 +65,8 @@ Future<DeviceInfoResult> getDeviceInfo() async {
   );
 }
 
-/// Returns the device's system name.
+/// Returns the device name, falling back to its model where supported.
+/// May return null if no usable value is available.
 Future<String?> getSystemDeviceName() async {
   if (defaultTargetPlatform == TargetPlatform.android) {
     try {
