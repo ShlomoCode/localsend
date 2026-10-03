@@ -74,7 +74,7 @@ jobs:
           sudo useradd --create-home --shell /bin/bash traytest
           # The hosted image pins its runner's runtime path globally. Let PAM
           # and systemd create the dedicated desktop user's own runtime instead.
-          sudo sed -i '/^XDG_RUNTIME_DIR=/d; /^DBUS_SESSION_BUS_ADDRESS=/d' /etc/environment
+          sudo sed -i '/^XDG_RUNTIME_DIR=/d; /^DBUS_SESSION_BUS_ADDRESS=/d; /^XDG_CONFIG_HOME=/d; /^XDG_CACHE_HOME=/d; /^XDG_DATA_HOME=/d; /^XDG_STATE_HOME=/d' /etc/environment
           sudo loginctl enable-linger traytest
           sudo mkdir -p /opt/pr3354/support/tests /opt/pr3354/evidence /opt/pr3354/snaps
           sudo cp -a support/tests/pr3354-* /opt/pr3354/support/tests/
