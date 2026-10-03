@@ -22,13 +22,21 @@ else
   # packages to model libraries retained across an upgrade, without faking them.
   echo 'deb [check-valid-until=no] https://archive.debian.org/debian buster main' \
     > /etc/apt/sources.list.d/legacy-appindicator.list
+  # Bookworm supplies the transitional pixbuf package retained during upgrades.
+  echo 'deb https://deb.debian.org/debian bookworm main' \
+    > /etc/apt/sources.list.d/bookworm-compat.list
   cat > /etc/apt/preferences.d/legacy-appindicator <<'EOF'
 Package: *
 Pin: release n=buster
 Pin-Priority: 100
+
+Package: *
+Pin: release n=bookworm
+Pin-Priority: 100
 EOF
   apt-get update
-  apt-get install -y --no-install-recommends libappindicator3-1/buster gir1.2-appindicator3-0.1/buster
+  apt-get install -y --no-install-recommends libgtk-3-0t64 libgdk-pixbuf-2.0-0
+  apt-get install -y --no-install-recommends libappindicator3-1=0.4.92-7 gir1.2-appindicator3-0.1=0.4.92-7
 fi
 
 package=/work/reproduction/LocalSend-1.17.0-linux-x86-64.deb
