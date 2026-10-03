@@ -80,6 +80,12 @@ Future<RefenaContainer> preInit(List<String> args) async {
     supportsDynamicColors: dynamicColors != null,
   );
 
+  try {
+    await migrateLinuxAutoStart();
+  } catch (e) {
+    _logger.warning('Repairing Linux auto start failed', e);
+  }
+
   if (persistenceService.isFirstAppStart && !persistenceService.isPortableMode()) {
     await enableContextMenu();
   }
