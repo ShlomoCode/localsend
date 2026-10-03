@@ -1,0 +1,6 @@
+{
+  "uuid": "pr3354-probe@localsend.test",
+  "name": "LocalSend tray test probe",
+  "description": "Read-only inspection of the real GNOME panel and application windows for runner evidence.",
+  "shell-version": ["46"]
+}

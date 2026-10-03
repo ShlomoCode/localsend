@@ -1,0 +1,166 @@
+name: PR 3354 real Snap GNOME desktop
+
+on:
+  push:
+    branches: [codex/pr3354-linux-screenshots]
+  workflow_dispatch:
+    inputs:
+      builds_run:
+        description: 'Reuse pr3354-bundles from this run ID; blank builds the pinned sources'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    if: ${{ !github.event.inputs.builds_run }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            source/target
+            source/app/build/linux
+          key: pr3354-pinned-builds-v1
+      - name: Build pinned before and after
+        run: |
+          set -euo pipefail
+          mkdir bundles
+          git fetch https://github.com/localsend/localsend.git 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c
+          git diff 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c -- app/lib/util/native/tray_helper.dart > bundles/fix.patch
+          git worktree add --detach source 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b
+          cd source/app
+          flutter pub get
+          flutter build linux --release
+          cp -a build/linux/x64/release/bundle ../../bundles/before
+          git apply ../../bundles/fix.patch
+          flutter build linux --release
+          cp -a build/linux/x64/release/bundle ../../bundles/after
+          printf 'Base: 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b\nFix: cc50a2e8395fe9d7de60547475b44a3268ad2d0c\nFlutter: 3.41.9\nBuild OS: Ubuntu 22.04\n' > ../../bundles/sources.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: pr3354-bundles
+          path: bundles/
+
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install full Ubuntu GNOME desktop and Snap runtime
+        run: |
+          sudo systemctl mask gdm3.service
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-desktop-minimal \
+            gnome-shell-extension-appindicator \
+            xserver-xorg-video-dummy xdotool imagemagick wmctrl python3-dbus python3-pil \
+            squashfs-tools snapd libayatana-appindicator3-1
+          sudo systemctl enable --now snapd.socket
+          sudo snap wait system seed.loaded
+          sudo useradd --create-home --shell /bin/bash traytest
+          sudo loginctl enable-linger traytest
+          sudo mkdir -p /opt/pr3354/support/tests /opt/pr3354/evidence /opt/pr3354/snaps
+          sudo cp -a support/tests/pr3354-* /opt/pr3354/support/tests/
+          sudo chown -R "$(id -u):$(id -g)" /opt/pr3354
+          sudo chmod 777 /opt/pr3354/evidence
+          cp /etc/os-release /opt/pr3354/evidence/desktop-os.txt
+          dpkg-query -W gnome-shell gnome-session ubuntu-desktop-minimal gnome-shell-extension-appindicator snapd \
+            > /opt/pr3354/evidence/desktop-packages.txt
+          sudo Xorg :99 -config /opt/pr3354/support/tests/pr3354-xorg.conf \
+            -noreset -nolisten tcp -ac -novtswitch -sharevts -logfile /opt/pr3354/evidence/Xorg.log \
+            > /opt/pr3354/evidence/Xorg-stdout.log 2>&1 &
+          sleep 5
+          sudo systemd-run --unit=pr3354-gnome --uid=traytest --property=PAMName=login \
+            --property=WorkingDirectory=/home/traytest \
+            --setenv=DISPLAY=:99 --setenv=XDG_SESSION_TYPE=x11 --setenv=XDG_SESSION_DESKTOP=ubuntu \
+            --setenv=XDG_CURRENT_DESKTOP=ubuntu:GNOME --setenv=GNOME_SHELL_SESSION_MODE=ubuntu \
+            --setenv=LIBGL_ALWAYS_SOFTWARE=1 --setenv=LANG=C.UTF-8 \
+            /bin/bash /opt/pr3354/support/tests/pr3354-start-gnome.sh
+          bash support/tests/pr3354-desktop-user.sh ready
+      - name: Install and reproduce the reported store revision
+        run: |
+          set -euo pipefail
+          cd /opt/pr3354/snaps
+          snap download localsend --revision=35
+          sha256sum *.snap > ../evidence/store-snap-sha256.txt
+          sudo snap ack localsend_35.assert
+          sudo snap install localsend_35.snap
+          bash "$GITHUB_WORKSPACE/support/tests/pr3354-connect-snap.sh"
+          snap info localsend > ../evidence/store-snap-info.txt
+          snap connections localsend > ../evidence/store-connections.txt
+          bash "$GITHUB_WORKSPACE/support/tests/pr3354-desktop-user.sh" store fallback
+      - name: Wait for the controlled builds
+        env:
+          BUILDS_RUN: ${{ github.event.inputs.builds_run || github.run_id }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 180); do
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILDS_RUN/artifacts" --jq '[.artifacts[] | select(.name == "pr3354-bundles")] | length')
+            if [ "$count" = 1 ]; then exit 0; fi
+            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILDS_RUN/jobs" --jq '.jobs[] | select(.name == "build") | .conclusion')
+            if [ "$state" = failure ] || [ "$state" = cancelled ]; then exit 1; fi
+            sleep 10
+          done
+          echo 'Pinned builds artifact did not become available' >&2
+          exit 1
+      - uses: actions/download-artifact@v6
+        with:
+          name: pr3354-bundles
+          path: downloaded-bundles
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.inputs.builds_run || github.run_id }}
+      - name: Package, install and exercise actual strict Snaps
+        run: |
+          set -euo pipefail
+          sudo cp -a downloaded-bundles /opt/pr3354/bundles
+          sudo chown -R traytest:traytest /opt/pr3354/bundles
+          sudo chmod +x /opt/pr3354/bundles/{before,after}/localsend_app
+          cp /opt/pr3354/bundles/{sources.txt,fix.patch} /opt/pr3354/evidence/
+          bash support/tests/pr3354-desktop-user.sh control logo
+          for case in before after; do
+            bash support/tests/pr3354-snap-package.sh /opt/pr3354/snaps/localsend_35.snap \
+              "/opt/pr3354/bundles/$case" "/opt/pr3354/snaps/$case.snap"
+            sudo snap remove --purge localsend
+            sudo snap install --dangerous "/opt/pr3354/snaps/$case.snap"
+            sha256sum "/opt/pr3354/snaps/$case.snap" > "/opt/pr3354/evidence/$case-snap-sha256.txt"
+            bash support/tests/pr3354-connect-snap.sh
+            snap info localsend > "/opt/pr3354/evidence/$case-snap-info.txt"
+            snap connections localsend > "/opt/pr3354/evidence/$case-connections.txt"
+            cp /snap/localsend/current/meta/snap.yaml "/opt/pr3354/evidence/$case-snap.yaml"
+            bash support/tests/pr3354-desktop-user.sh "$case" "$([ "$case" = before ] && echo fallback || echo logo)"
+            bash support/tests/pr3354-desktop-user.sh "$case-restart" "$([ "$case" = before ] && echo fallback || echo logo)"
+          done
+          bash support/tests/pr3354-desktop-user.sh compose
+      - name: Preserve desktop and confinement diagnostics
+        if: always()
+        run: |
+          sudo journalctl -b -u pr3354-gnome --no-pager > /opt/pr3354/evidence/gnome-session.log || true
+          sudo journalctl -b _UID="$(id -u traytest)" --no-pager > /opt/pr3354/evidence/desktop-user-journal.log || true
+          sudo journalctl -b -k --no-pager > /opt/pr3354/evidence/kernel-apparmor.log || true
+          loginctl list-sessions > /opt/pr3354/evidence/login-sessions.txt
+          ps -eo user,pid,ppid,args > /opt/pr3354/evidence/processes.txt
+          snap debug confinement > /opt/pr3354/evidence/snap-confinement.txt
+          sudo cp -a /opt/pr3354/evidence desktop-evidence
+          sudo chown -R "$(id -u):$(id -g)" desktop-evidence
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: pr3354-real-snap-gnome-evidence
+          path: desktop-evidence/
+          if-no-files-found: error

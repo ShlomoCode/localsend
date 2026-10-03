@@ -1,8 +1,6 @@
 name: PR 3354 Linux tray screenshots
 
 on:
-  push:
-    branches: [codex/pr3354-linux-screenshots]
   workflow_dispatch:
 
 permissions:
