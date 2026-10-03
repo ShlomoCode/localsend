@@ -65,7 +65,7 @@ Future<DeviceInfoResult> getDeviceInfo() async {
   );
 }
 
-/// Returns the platform's system device name for the alias shortcut.
+/// Returns the device's system name.
 Future<String?> getSystemDeviceName() async {
   if (defaultTargetPlatform == TargetPlatform.android) {
     try {
