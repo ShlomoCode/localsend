@@ -136,8 +136,14 @@ def capture_case(name, expected):
             click(actor)
             quit_item = wait_for(lambda: menu_label('Quit LocalSend'), 'visible tray Quit menu item', seconds=20)
             click(quit_item)
-            wait_for(lambda: not Path(f'/proc/{pid}').exists(), 'process exited by tray Quit')
+            def exited():
+                # Reap the launcher before inspecting /proc: an exited child
+                # retains its PID as a zombie until its parent collects it.
+                launcher.poll()
+                return not Path(f'/proc/{pid}').exists() and not local_window() and not indicator()
+            wait_for(exited, 'process exited by tray Quit')
             entry['mouse_menu_quit_exited_process'] = True
+            entry['launcher_exit_code'] = launcher.returncode
         (output / f'{name}-result.json').write_text(json.dumps(entry, indent=2))
     except BaseException:
         try:
