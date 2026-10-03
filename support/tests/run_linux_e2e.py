@@ -40,6 +40,8 @@ def main():
         import pytest
         code = int(pytest.main([
             str(Path(__file__).parent / "linux_e2e"),
+            "--rootdir", str(Path(__file__).parent),
+            "-o", f"cache_dir={output / 'pytest-cache'}",
             "--bundle", str(bundle), "--evidence", str(output),
             "--packaging", args.packaging, "-k", args.filter,
             "--junitxml", str(output / "junit.xml"), "-v", "--tb=short",
