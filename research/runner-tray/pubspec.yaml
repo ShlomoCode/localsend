@@ -1,0 +1,15 @@
+name: tray_identity_research
+description: Isolated locked-plugin tray identity research harness.
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.11.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  path: 1.9.1
+  tray_manager: 0.5.3
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/tray.png

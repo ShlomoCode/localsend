@@ -1,0 +1,104 @@
+name: Research tiny bug shortcuts (2026-10-04)
+
+on:
+  push:
+    branches:
+      - codex/research-shortcuts-20261004-01a0fd29
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  components:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: localsend/localsend
+          ref: 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          path: baseline
+          persist-credentials: false
+      - name: Set up pinned Flutter on remote runner
+        run: |
+          git clone --depth 1 --branch 3.41.9 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Confirm source and toolchain pins
+        run: |
+          flutter --version --machine > flutter-version.json
+          python3 - <<'PY'
+          import json, pathlib
+          assert json.loads(pathlib.Path('flutter-version.json').read_text())['frameworkVersion'] == '3.41.9'
+          source = pathlib.Path('baseline/app/lib/pages/apk_picker_page.dart').read_text()
+          assert "const Text('Select Multiple Apps')" in source
+          assert 'const Spacer(),' in source
+          PY
+      - name: APK header before and after component matrix
+        working-directory: research/runner-ui
+        run: |
+          flutter pub get
+          flutter test header_test.dart --reporter expanded
+      - name: Resolve pinned workspace only on runner
+        working-directory: baseline
+        run: flutter pub get --enforce-lockfile
+      - name: Actual error helper before and after four-arm proposal
+        run: |
+          mkdir -p baseline/packages/localsend_isolates/test
+          cp research/runner-ui/error_message_test.dart baseline/packages/localsend_isolates/test/research_error_message_test.dart
+          cd baseline/packages/localsend_isolates
+          flutter test test/research_error_message_test.dart --reporter expanded
+          python3 ../../../research/runner-ui/prepare_error_test.py ../..
+          flutter test test/research_error_message_test.dart --dart-define=RESEARCH_PATCHED=true --reporter expanded
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: component-observations
+          path: |
+            flutter-version.json
+            research/runner-ui/header-results.json
+            baseline/packages/localsend_isolates/error-results-*.json
+          if-no-files-found: error
+  tray:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Linux test prerequisites on remote runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libayatana-appindicator3-dev xvfb dbus-x11 python3-dbus python3-gi gir1.2-glib-2.0
+      - name: Set up pinned Flutter on remote runner
+        run: |
+          git clone --depth 1 --branch 3.41.9 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Build exact installed tray plugin harness
+        working-directory: research/runner-tray
+        run: |
+          flutter --version --machine > flutter-version.json
+          /usr/bin/python3 -c "import json; assert json.load(open('flutter-version.json'))['frameworkVersion']=='3.41.9'"
+          cp pubspec.yaml research-pubspec.yaml
+          cp lib/main.dart research-main.dart
+          flutter create --no-pub --platforms=linux --project-name=tray_identity_research .
+          cp research-pubspec.yaml pubspec.yaml
+          cp research-main.dart lib/main.dart
+          /usr/bin/python3 prepare_icon.py
+          flutter pub get
+          flutter build linux --release
+      - name: Native identity and real menu callbacks across four launches
+        working-directory: research/runner-tray
+        run: dbus-run-session -- xvfb-run -a /usr/bin/python3 run.py build/linux/x64/release/bundle/tray_identity_research --output observations
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tray-observations
+          path: |
+            research/runner-tray/flutter-version.json
+            research/runner-tray/pubspec.lock
+            research/runner-tray/observations/
+          if-no-files-found: error
