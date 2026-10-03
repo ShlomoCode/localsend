@@ -16,7 +16,7 @@ Future<bool> enableAutoStart({required bool startHidden}) async {
     switch (defaultTargetPlatform) {
       case TargetPlatform.linux:
         final appImage = Platform.environment['APPIMAGE'];
-        writeLinuxAutoStartFile(
+        _writeLinuxAutoStartFile(
           File(_getLinuxFilePath(packageInfo.packageName)),
           appName: packageInfo.appName,
           executable: appImage != null && appImage.isNotEmpty ? appImage : Platform.resolvedExecutable,
@@ -44,8 +44,7 @@ Future<bool> enableAutoStart({required bool startHidden}) async {
   }
 }
 
-@visibleForTesting
-void writeLinuxAutoStartFile(
+void _writeLinuxAutoStartFile(
   File file, {
   required String appName,
   required String executable,
