@@ -54,7 +54,9 @@ def indicator():
         'org.kde.StatusNotifierWatcher', 'RegisteredStatusNotifierItems')
     if len(items) != 1:
         return None
-    service, path = str(items[0]).split('/', 1)
+    # GNOME's watcher separates the bus name and object path with "@/";
+    # other StatusNotifier hosts use "/" directly.
+    service, path = str(items[0]).replace('@/', '/', 1).split('/', 1)
     props = dbus.Interface(bus.get_object(service, '/' + path), 'org.freedesktop.DBus.Properties')
     data = props.GetAll('org.kde.StatusNotifierItem')
     return {'item': str(items[0]), 'icon': str(data['IconName']), 'title': str(data['Title'])}

@@ -6,6 +6,14 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_STATE_HOME="$HOME/.local/state"
+mkdir -p "$XDG_CONFIG_HOME/autostart"
+printf 'yes\n' > "$XDG_CONFIG_HOME/gnome-initial-setup-done"
+cat > "$XDG_CONFIG_HOME/autostart/update-notifier.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Update notifier
+Hidden=true
+EOF
 mkdir -p "$HOME/.local/share/gnome-shell/extensions/pr3354-probe@localsend.test"
 cp /opt/pr3354/support/tests/pr3354-gnome-probe/* "$HOME/.local/share/gnome-shell/extensions/pr3354-probe@localsend.test/"
 systemctl --user import-environment HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE GNOME_SHELL_SESSION_MODE LIBGL_ALWAYS_SOFTWARE
