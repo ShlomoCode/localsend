@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:localsend_isolates/util/sleep.dart';
 
 /// A slideshow of widgets using [AnimatedOpacity] as transition.
 class OpacitySlideshow extends StatefulWidget {
@@ -35,35 +34,31 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
 
   @override
   void dispose() {
-    super.dispose();
     _timer?.cancel();
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(OpacitySlideshow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.running && !widget.running) {
+    if (oldWidget.running != widget.running) {
       _timer?.cancel();
-    } else if (!oldWidget.running && widget.running) {
+      _opacity = 1;
       _startTimer();
     }
   }
 
   void _startTimer() {
-    if (widget.children.length <= 1) {
+    if (!widget.running || widget.children.length <= 1) {
       return;
     }
 
-    _timer = Timer.periodic(Duration(milliseconds: widget.durationMillis), (_) async {
-      if (!mounted) return;
+    _timer = Timer.periodic(Duration(milliseconds: widget.durationMillis), (_) {
+      if (_opacity == 0) {
+        return;
+      }
       setState(() {
         _opacity = 0;
-      });
-      await sleepAsync(widget.switchDurationMillis);
-      if (!mounted) return;
-      setState(() {
-        _index = (_index + 1) % widget.children.length;
-        _opacity = 1;
       });
     });
   }
@@ -73,6 +68,14 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
     return AnimatedOpacity(
       opacity: _opacity,
       duration: Duration(milliseconds: widget.switchDurationMillis),
+      // A zero-duration fade can finish during build.
+      onEnd: () => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !widget.running || _opacity != 0) return;
+        setState(() {
+          _index = (_index + 1) % widget.children.length;
+          _opacity = 1;
+        });
+      }),
       child: widget.children[_index],
     );
   }
