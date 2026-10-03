@@ -2,12 +2,24 @@ name: Linux E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      packaging:
+        description: Application packaging to test
+        type: choice
+        options: [all, native, flatpak]
+        default: all
+      test_filter:
+        description: Optional pytest -k expression; empty runs every Linux test
+        type: string
+        default: ''
 
 jobs:
   linux-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
+      E2E_PACKAGING: ${{ inputs.packaging }}
+      E2E_FILTER: ${{ inputs.test_filter }}
       CXXFLAGS: -Wno-error=deprecated-declarations
     steps:
       - uses: actions/checkout@v6
@@ -57,6 +69,7 @@ jobs:
         run: flutter build linux --release
 
       - name: Package this build as a real LocalSend Flatpak
+        if: inputs.packaging != 'native'
         run: |
           set -euo pipefail
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
@@ -78,7 +91,7 @@ jobs:
             startplasma-x11 > plasma-session.log 2>&1 &
             plasma_pid=$!
             trap "kill $plasma_pid 2>/dev/null || true" EXIT
-            "$E2E_PYTHON" support/tests/run_linux_e2e.py app/build/linux/x64/release/bundle --output linux-e2e-results 2>&1 | tee linux-e2e-summary.log
+            "$E2E_PYTHON" support/tests/run_linux_e2e.py app/build/linux/x64/release/bundle --output linux-e2e-results --packaging "$E2E_PACKAGING" --filter "$E2E_FILTER" 2>&1 | tee linux-e2e-summary.log
           '
 
       - name: Upload test evidence

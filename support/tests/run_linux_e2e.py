@@ -27,6 +27,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path, help="app/build/linux/<arch>/release/bundle")
     parser.add_argument("--output", type=Path, default=Path("linux-e2e-results"))
+    parser.add_argument("--packaging", choices=["all", "native", "flatpak"], default="all")
+    parser.add_argument("--filter", default="", help="pytest -k expression; empty runs the whole suite")
     args = parser.parse_args()
     bundle, output = args.bundle.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -39,6 +41,7 @@ def main():
         code = int(pytest.main([
             str(Path(__file__).parent / "linux_e2e"),
             "--bundle", str(bundle), "--evidence", str(output),
+            "--packaging", args.packaging, "-k", args.filter,
             "--junitxml", str(output / "junit.xml"), "-v", "--tb=short",
         ], plugins=[Results(report)]))
         report["passed"] = code == 0 and any(test["phase"] == "call" for test in report["tests"])

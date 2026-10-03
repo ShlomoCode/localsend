@@ -11,6 +11,7 @@ from runtime import App, Desktop
 
 def pytest_addoption(parser):
     parser.addoption("--bundle", required=True, help="Built Linux release bundle")
+    parser.addoption("--packaging", choices=["all", "native", "flatpak"], default="all")
     parser.addoption("--evidence", default="linux-e2e-results", help="Application log directory")
 
 
@@ -20,7 +21,14 @@ def desktop():
         yield session
 
 
-@pytest.fixture(params=["native", "flatpak"])
+def pytest_generate_tests(metafunc):
+    if "packaging" in metafunc.fixturenames:
+        selected = metafunc.config.getoption("--packaging")
+        values = ["native", "flatpak"] if selected == "all" else [selected]
+        metafunc.parametrize("packaging", values, indirect=True)
+
+
+@pytest.fixture
 def packaging(request):
     return request.param
 
