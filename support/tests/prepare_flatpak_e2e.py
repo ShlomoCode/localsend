@@ -102,7 +102,7 @@ def main():
 
     run("flatpak", "build-export", str(repo), str(stage), BRANCH)
     run("flatpak", "remote-add", "--user", "--if-not-exists", "--no-gpg-verify", REMOTE, str(repo))
-    run("flatpak", "install", "--user", "--noninteractive", "--assumeyes", REMOTE, f"{APP_ID}//{BRANCH}")
+    run("flatpak", "install", "--user", "--noninteractive", "--assumeyes", "--or-update", REMOTE, f"{APP_ID}//{BRANCH}")
     installed = Path(output("flatpak", "info", "--user", "--show-location", f"{APP_ID}//{BRANCH}"))
     for name in bundle_binaries(bundle):
         if digest(installed / "files" / name) != digest(bundle / name):
