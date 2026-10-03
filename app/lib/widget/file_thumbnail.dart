@@ -140,9 +140,14 @@ class MemoryThumbnail extends StatelessWidget {
     if (bytes != null) {
       thumbnail = Padding(
         padding: fileType == FileType.apk ? const EdgeInsets.all(50) : EdgeInsets.zero,
-        child: Image.memory(
-          bytes!,
-          cacheWidth: (64 * MediaQuery.devicePixelRatioOf(context)).ceil(),
+        child: Image(
+          // APK icon padding is scaled together with the original image.
+          image: fileType == FileType.apk
+              ? MemoryImage(bytes!)
+              : _ThumbnailMemoryImage(
+                  bytes!,
+                  pixelSize: (size * MediaQuery.devicePixelRatioOf(context)).ceil(),
+                ),
           errorBuilder: (_, _, _) => Padding(
             padding: const EdgeInsets.all(10),
             child: Icon(fileType.icon, size: 32),
@@ -159,6 +164,32 @@ class MemoryThumbnail extends StatelessWidget {
       size: size,
     );
   }
+}
+
+class _ThumbnailMemoryImage extends MemoryImage {
+  final int pixelSize;
+
+  const _ThumbnailMemoryImage(super.bytes, {required this.pixelSize});
+
+  @override
+  ImageStreamCompleter loadImage(MemoryImage key, ImageDecoderCallback decode) {
+    return super.loadImage(key, (buffer, {getTargetSize}) {
+      return decode(
+        buffer,
+        getTargetSize: (width, height) {
+          // BoxFit.cover fills the square using the shorter side. Leave the
+          // other dimension unset to preserve the aspect ratio during decoding.
+          return width <= height ? TargetImageSize(width: pixelSize.clamp(1, width)) : TargetImageSize(height: pixelSize.clamp(1, height));
+        },
+      );
+    });
+  }
+
+  @override
+  bool operator ==(Object other) => other is _ThumbnailMemoryImage && super == other && pixelSize == other.pixelSize;
+
+  @override
+  int get hashCode => Object.hash(super.hashCode, pixelSize);
 }
 
 class _Thumbnail extends StatelessWidget {
