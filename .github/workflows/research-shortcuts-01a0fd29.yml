@@ -29,7 +29,9 @@ jobs:
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
       - name: Confirm source and toolchain pins
         run: |
+          flutter --version
           flutter --version --machine > flutter-version.json
+          git -C baseline rev-parse HEAD > baseline-sha.txt
           python3 - <<'PY'
           import json, pathlib
           assert json.loads(pathlib.Path('flutter-version.json').read_text())['frameworkVersion'] == '3.41.9'
@@ -53,14 +55,18 @@ jobs:
           flutter test test/research_error_message_test.dart --reporter expanded
           python3 ../../../research/runner-ui/prepare_error_test.py ../..
           flutter test test/research_error_message_test.dart --dart-define=RESEARCH_PATCHED=true --reporter expanded
+          git diff -- lib/util/rust.dart > error-helper.diff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: component-observations
           path: |
             flutter-version.json
+            baseline-sha.txt
             research/runner-ui/header-results.json
             baseline/packages/localsend_isolates/error-results-*.json
+            baseline/packages/localsend_isolates/error-helper.diff
+            baseline/pubspec.lock
           if-no-files-found: error
   tray:
     runs-on: ubuntu-24.04
@@ -80,6 +86,7 @@ jobs:
       - name: Build exact installed tray plugin harness
         working-directory: research/runner-tray
         run: |
+          flutter --version
           flutter --version --machine > flutter-version.json
           /usr/bin/python3 -c "import json; assert json.load(open('flutter-version.json'))['frameworkVersion']=='3.41.9'"
           cp pubspec.yaml research-pubspec.yaml
