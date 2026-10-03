@@ -144,6 +144,10 @@ class MemoryThumbnail extends StatelessWidget {
       thumbnail = Padding(
         padding: EdgeInsets.all(padding),
         child: Image(
+          // Moving the window between displays can change DPR and require a new decode.
+          // Keep the current frame until it is ready; changed bytes reset the Image.
+          key: ObjectKey(bytes),
+          gaplessPlayback: true,
           image: _ThumbnailMemoryImage(
             bytes!,
             pixelSize: padding == 0 ? pixelSize.ceilToDouble() : pixelSize,

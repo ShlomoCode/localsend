@@ -59,6 +59,48 @@ void main() {
     }
   });
 
+  for (final type in [FileType.image, FileType.apk]) {
+    final label = type == FileType.apk ? 'APK' : 'ordinary image';
+    for (final transition in ['DPR', 'size']) {
+      testWidgets('$label keeps the current image visible during a $transition change', (tester) async {
+        final bytes = _png(1200, 800);
+        var previous = await _show(tester, bytes, size: 50, dpr: 1, type: type);
+        final displays = transition == 'DPR' ? [(50.0, 3.0), (50.0, 1.0)] : [(140.0, 1.0), (50.0, 1.0)];
+
+        for (final display in displays) {
+          final (size, dpr) = display;
+          await tester.pumpWidget(_thumbnailWidget(bytes, size: size, dpr: dpr, type: type));
+          final raw = tester.widget<RawImage>(find.byType(RawImage));
+          expect(raw.image, isNotNull, reason: 'A target change must not blank the already decoded thumbnail');
+
+          final decoded = await _show(tester, bytes, size: size, dpr: dpr, type: type, previous: previous);
+          if (type == FileType.apk) {
+            _expectPaddedApk(tester, decoded, source: const Size(1200, 800), size: size, dpr: dpr);
+          } else {
+            _expectCover(tester, decoded, source: const Size(1200, 800), size: size, dpr: dpr);
+          }
+          previous = decoded;
+        }
+      });
+    }
+
+    testWidgets('$label replaces old pixels immediately when its bytes change', (tester) async {
+      final firstBytes = _png(512, 512);
+      final replacementBytes = _png(800, 400);
+      await _show(tester, firstBytes, size: 60, dpr: 2, type: type);
+
+      await tester.pumpWidget(_thumbnailWidget(replacementBytes, size: 60, dpr: 2, type: type));
+      expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNull, reason: 'Old file pixels must not remain visible for new bytes');
+
+      final replacement = await _show(tester, replacementBytes, size: 60, dpr: 2, type: type);
+      if (type == FileType.apk) {
+        _expectPaddedApk(tester, replacement, source: const Size(800, 400), size: 60, dpr: 2);
+      } else {
+        _expectCover(tester, replacement, source: const Size(800, 400), size: 60, dpr: 2);
+      }
+    });
+  }
+
   for (final example in [
     (48, 48, 50.0, 1.0),
     (48, 96, 60.0, 3.0),
@@ -123,7 +165,14 @@ Widget _thumbnailWidget(Uint8List bytes, {required double size, required double 
   );
 }
 
-Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double size, required double dpr, FileType type = FileType.image}) async {
+Future<RawImage> _show(
+  WidgetTester tester,
+  Uint8List bytes, {
+  required double size,
+  required double dpr,
+  FileType type = FileType.image,
+  RawImage? previous,
+}) async {
   await tester.pumpWidget(_thumbnailWidget(bytes, size: size, dpr: dpr, type: type));
   final finder = find.descendant(of: find.byType(MemoryThumbnail), matching: find.byType(RawImage));
   // Codec completion uses real asynchronous engine work, outside the fake test clock.
@@ -132,7 +181,7 @@ Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double si
     await tester.pump();
     if (finder.evaluate().isNotEmpty) {
       final raw = tester.widget<RawImage>(finder);
-      if (raw.image != null) return raw;
+      if (raw.image != null && (previous == null || !identical(raw.image, previous.image))) return raw;
     }
   }
   fail('The thumbnail image did not finish decoding');
