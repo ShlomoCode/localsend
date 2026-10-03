@@ -115,9 +115,10 @@ jobs:
             sudo apt-get install -y "$package"
             cp /usr/share/applications/localsend_app.desktop "/opt/pr3416/evidence/release-$version.desktop"
             dpkg-query -L localsend > "/opt/pr3416/evidence/release-$version-files.txt"
+            executable=$(python3 -c 'import os, pathlib, sys; paths=[pathlib.Path(p) for p in pathlib.Path(sys.argv[1]).read_text().splitlines()]; matches=[p for p in paths if p.name == "localsend_app" and p.is_file() and os.access(p, os.X_OK)]; assert len(matches) == 1, matches; print(matches[0])' "/opt/pr3416/evidence/release-$version-files.txt")
             expected=generic
             if [[ "$version" = 1.17.0 ]]; then expected=matched; fi
-            bash support/tests/pr3416-desktop-user.sh "release-$version" "$expected" /opt/localsend_app/localsend_app
+            bash support/tests/pr3416-desktop-user.sh "release-$version" "$expected" "$executable"
           done
       - name: Wait for controlled historical builds
         env:
