@@ -1,0 +1,67 @@
+name: PR 3354 Linux tray screenshots
+
+on:
+  push:
+    branches: [codex/pr3354-linux-screenshots]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build and tray dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev \
+            xvfb dbus-x11 xfce4-panel xfce4-statusnotifier-plugin xfconf openbox \
+            imagemagick python3-dbus python3-pil
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - name: Build exact PR baseline and fix
+        run: |
+          set -euo pipefail
+          mkdir -p evidence bundles
+          git fetch https://github.com/localsend/localsend.git 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b refs/pull/3354/head
+          git diff 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c -- app/lib/util/native/tray_helper.dart > evidence/fix.patch
+          git worktree add --detach source 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b
+          printf 'Base: %s\nFix: %s\nFlutter: 3.41.9\nUbuntu: 22.04, XFCE StatusNotifier, X11/Xvfb\nSNAP environment simulation; not an installed Snap or GNOME session.\n' \
+            6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c > evidence/environment.txt
+          cd source/app
+          flutter pub get
+          flutter build linux --release
+          cp -a build/linux/x64/release/bundle ../../bundles/before
+          git apply ../../evidence/fix.patch
+          flutter build linux --release
+          cp -a build/linux/x64/release/bundle ../../bundles/after
+      - name: Capture control, before and after
+        run: |
+          set -euo pipefail
+          for case in control before after; do
+            bundle=before
+            if [ "$case" = after ]; then bundle=after; fi
+            xvfb-run -a -s '-screen 0 1024x768x24' dbus-run-session -- \
+              bash support/tests/pr3354-tray-session.sh "$case" "$PWD/bundles/$bundle" "$PWD/evidence"
+          done
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw
+          result = Image.new('RGB', (1024, 160), '#202020')
+          draw = ImageDraw.Draw(result)
+          for y, name, label in [(0, 'before', 'BEFORE: baseline with SNAP'), (80, 'after', 'AFTER: PR 3354 with SNAP')]:
+              draw.text((12, y + 8), label, fill='white')
+              result.paste(Image.open('evidence/' + name + '-tray.png').convert('RGB'), (0, y + 30))
+          result.save('evidence/before-after.png')
+          PY
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: pr3354-tray-evidence
+          path: evidence/
+          if-no-files-found: error
