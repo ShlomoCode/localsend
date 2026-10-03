@@ -1,4 +1,4 @@
-name: Research tiny bug shortcuts (2026-10-04)
+name: Research uncovered tiny bugs (2026-10-04)
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  components:
+  actual-app-fixtures:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -23,89 +23,157 @@ jobs:
           ref: 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
           path: baseline
           persist-credentials: false
-      - name: Set up pinned Flutter on remote runner
+      - name: Pinned Flutter on disposable runner
         run: |
           git clone --depth 1 --branch 3.41.9 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
-      - name: Confirm source and toolchain pins
+      - name: Resolve exact source and locked packages on runner
         run: |
+          mkdir -p observations
           flutter --version
-          flutter --version --machine > flutter-version.json
-          git -C baseline rev-parse HEAD > baseline-sha.txt
-          python3 - <<'PY'
-          import json, pathlib
-          assert json.loads(pathlib.Path('flutter-version.json').read_text())['frameworkVersion'] == '3.41.9'
-          source = pathlib.Path('baseline/app/lib/pages/apk_picker_page.dart').read_text()
-          assert "const Text('Select Multiple Apps')" in source
-          assert 'const Spacer(),' in source
-          PY
-      - name: APK header before and after component matrix
-        working-directory: research/runner-ui
+          flutter --version --machine > observations/flutter-version.json
+          git -C baseline rev-parse HEAD > observations/baseline-sha.txt
+          cd baseline
+          flutter pub get --enforce-lockfile
+      - name: Settings label component matrix
+        id: settings
+        continue-on-error: true
         run: |
-          flutter pub get
-          flutter test header_test.dart --reporter expanded
-      - name: Resolve pinned workspace only on runner
-        working-directory: baseline
-        run: flutter pub get --enforce-lockfile
-      - name: Actual error helper before and after four-arm proposal
+          cp research/runner-uncovered/ui-settings-layout-harness.dart baseline/app/test/research_settings_layout_test.dart
+          cd baseline/app
+          flutter test test/research_settings_layout_test.dart --reporter expanded 2>&1 | tee ../../observations/settings-layout.log
+      - name: Actual SendNotifier stale byte length before and after
+        id: size
+        continue-on-error: true
         run: |
-          mkdir -p baseline/packages/localsend_isolates/test
-          cp research/runner-ui/error_message_test.dart baseline/packages/localsend_isolates/test/research_error_message_test.dart
-          cd baseline/packages/localsend_isolates
-          flutter test test/research_error_message_test.dart --reporter expanded
-          python3 ../../../research/runner-ui/prepare_error_test.py ../..
-          flutter test test/research_error_message_test.dart --dart-define=RESEARCH_PATCHED=true --reporter expanded
-          git diff -- lib/util/rust.dart > error-helper.diff
+          cp research/runner-uncovered/protocol-size-test.dart baseline/app/test/research_protocol_size_test.dart
+          cd baseline/app
+          set +e
+          flutter test test/research_protocol_size_test.dart --reporter expanded > ../../observations/size-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > ../../observations/size-before-status.txt
+          test "$before_status" -ne 0
+          python3 ../../research/runner-uncovered/protocol-size-apply.py ..
+          flutter test test/research_protocol_size_test.dart --reporter expanded 2>&1 | tee ../../observations/size-after.log
+          git diff -- lib/provider/network/send_provider.dart > ../../observations/size-production.diff
+      - name: Actual alias widget before and after
+        id: alias
+        continue-on-error: true
+        run: |
+          cp research/runner-uncovered/fresh-alias-history-2462-before-widget_test.dart baseline/app/test/research_alias_test.dart
+          cd baseline/app
+          set +e
+          flutter test test/research_alias_test.dart --reporter expanded > ../../observations/alias-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > ../../observations/alias-before-status.txt
+          test "$before_status" -ne 0
+          git -C .. apply ../research/runner-uncovered/fresh-alias-history-2462.patch
+          cp ../../research/runner-uncovered/fresh-alias-history-2462-after-widget_test.dart test/research_alias_test.dart
+          flutter test test/research_alias_test.dart --reporter expanded 2>&1 | tee ../../observations/alias-after.log
+          git diff -- lib/widget/dialogs/text_field_with_actions.dart lib/pages/tabs/settings_tab.dart > ../../observations/alias-production.diff
+      - name: Actual Wayland resize and persistence before and after
+        id: wayland
+        continue-on-error: true
+        run: |
+          cp research/runner-uncovered/packaging-wayland-fixture_test.dart baseline/app/test/research_wayland_test.dart
+          cd baseline/app
+          flutter test test/research_wayland_test.dart --dart-define=PATCHED=false --reporter expanded 2>&1 | tee ../../observations/wayland-before.log
+          git -C .. apply ../research/runner-uncovered/packaging-wayland-size-patch.diff
+          flutter test test/research_wayland_test.dart --dart-define=PATCHED=true --reporter expanded 2>&1 | tee ../../observations/wayland-after.log
+          git diff -- lib/provider/window_dimensions_provider.dart lib/provider/persistence_provider.dart lib/widget/watcher/window_watcher.dart > ../../observations/wayland-production.diff
+      - name: Final fixture gate
+        if: always()
+        run: |
+          test '${{ steps.settings.outcome }}' = success
+          test '${{ steps.size.outcome }}' = success
+          test '${{ steps.alias.outcome }}' = success
+          test '${{ steps.wayland.outcome }}' = success
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: component-observations
-          path: |
-            flutter-version.json
-            baseline-sha.txt
-            research/runner-ui/header-results.json
-            baseline/packages/localsend_isolates/error-results-*.json
-            baseline/packages/localsend_isolates/error-helper.diff
-            baseline/pubspec.lock
+          name: uncovered-app-observations
+          path: observations/
           if-no-files-found: error
-  tray:
+  launcher-and-metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Linux test prerequisites on remote runner
+      - name: Runtime prerequisites only on runner
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libayatana-appindicator3-dev xvfb dbus-x11 python3-dbus python3-gi gir1.2-glib-2.0
-      - name: Set up pinned Flutter on remote runner
-        run: |
+          sudo apt-get install -y python3-gi gir1.2-glib-2.0
           git clone --depth 1 --branch 3.41.9 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
-      - name: Build exact installed tray plugin harness
-        working-directory: research/runner-tray
+      - name: Actual desktop launcher generation and GLib launches
+        id: launcher
+        continue-on-error: true
         run: |
+          mkdir -p observations
           flutter --version
-          flutter --version --machine > flutter-version.json
-          /usr/bin/python3 -c "import json; assert json.load(open('flutter-version.json'))['frameworkVersion']=='3.41.9'"
-          cp pubspec.yaml research-pubspec.yaml
-          cp lib/main.dart research-main.dart
-          flutter create --no-pub --platforms=linux --project-name=tray_identity_research .
-          cp research-pubspec.yaml pubspec.yaml
-          cp research-main.dart lib/main.dart
-          /usr/bin/python3 prepare_icon.py
-          flutter pub get
-          flutter build linux --release
-      - name: Native identity and real menu callbacks across four launches
-        working-directory: research/runner-tray
-        run: dbus-run-session -- xvfb-run -a /usr/bin/python3 run.py build/linux/x64/release/bundle/tray_identity_research --output observations
+          dart research/runner-uncovered/packaging-autostart-fixture.dart research/runner-uncovered/autostart-baseline.dart research/runner-uncovered/packaging-autostart-after.dart observations/launches
+          /usr/bin/python3 research/runner-uncovered/packaging-glib-launch-fixture.py observations/launches 2>&1 | tee observations/launcher.log
+      - name: Photo export timestamp source seam before and after
+        id: photo
+        continue-on-error: true
+        run: |
+          set +e
+          dart research/runner-uncovered/fresh-photo-3316-before.dart > observations/photo-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > observations/photo-before-status.txt
+          test "$before_status" -ne 0
+          dart research/runner-uncovered/fresh-photo-3316-after.dart 2>&1 | tee observations/photo-after.log
+      - name: Favorite endpoint label source seam before and after
+        id: favorite
+        continue-on-error: true
+        run: |
+          set +e
+          dart research/runner-uncovered/fresh-alias-history-2381-before.dart > observations/favorite-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > observations/favorite-before-status.txt
+          test "$before_status" -ne 0
+          dart research/runner-uncovered/fresh-alias-history-2381-after.dart 2>&1 | tee observations/favorite-after.log
+      - name: Final fixture gate
+        if: always()
+        run: |
+          test '${{ steps.launcher.outcome }}' = success
+          test '${{ steps.photo.outcome }}' = success
+          test '${{ steps.favorite.outcome }}' = success
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: tray-observations
-          path: |
-            research/runner-tray/flutter-version.json
-            research/runner-tray/pubspec.lock
-            research/runner-tray/observations/
+          name: uncovered-launcher-observations
+          path: observations/
+          if-no-files-found: error
+  native-windows-theme:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Actual Win32 theme message before and after
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force observations | Out-Null
+          cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE research/runner-uncovered/fresh-ui-input-win32-real.cpp /Fe:theme-before.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE /DAFTER_FIX research/runner-uncovered/fresh-ui-input-win32-real.cpp /Fe:theme-after.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./theme-before.exe 2>&1 | Tee-Object observations/theme-before.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./theme-after.exe 2>&1 | Tee-Object observations/theme-after.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uncovered-windows-observations
+          path: observations/
           if-no-files-found: error

@@ -1,0 +1,54 @@
+--- a/app/lib/provider/window_dimensions_provider.dart
++++ b/app/lib/provider/window_dimensions_provider.dart
+@@ -1,5 +1,6 @@
+ import 'dart:ui';
+ import 'package:localsend_app/provider/persistence_provider.dart';
++import 'package:localsend_app/util/native/platform_check.dart';
+ import 'package:refena_flutter/refena_flutter.dart';
+ import 'package:screen_retriever/screen_retriever.dart';
+ import 'package:window_manager/window_manager.dart';
+@@ -34,7 +35,9 @@
+     final useSavedPlacement = _service.getSaveWindowPlacement();
+     final persistedDimensions = _service.getWindowLastDimensions();
+ 
+-    if (useSavedPlacement && persistedDimensions != null && await isInScreenBounds(persistedDimensions.position, persistedDimensions.size)) {
++    if (!checkPlatformIsNotWaylandDesktop() && persistedDimensions != null && await isInScreenBounds(Offset.zero, persistedDimensions.size)) {
++      await WindowManager.instance.setSize(persistedDimensions.size);
++    } else if (useSavedPlacement && persistedDimensions != null && await isInScreenBounds(persistedDimensions.position, persistedDimensions.size)) {
+       await WindowManager.instance.setSize(persistedDimensions.size);
+       await WindowManager.instance.setPosition(persistedDimensions.position);
+     } else {
+--- a/app/lib/provider/persistence_provider.dart
++++ b/app/lib/provider/persistence_provider.dart
+@@ -539,12 +539,12 @@
+       position = Offset(offsetX, offsetY);
+     }
+ 
+-    if (size == null || position == null) {
++    if (size == null || (position == null && checkPlatformIsNotWaylandDesktop())) {
+       return null;
+     }
+ 
+     return WindowDimensions(
+-      position: position,
++      position: position ?? Offset.zero,
+       size: size,
+     );
+   }
+--- a/app/lib/widget/watcher/window_watcher.dart
++++ b/app/lib/widget/watcher/window_watcher.dart
+@@ -82,6 +82,14 @@
+   }
+ 
+   @override
++  Future<void> onWindowResize() async {
++    if (checkPlatform([TargetPlatform.linux])) {
++      final windowSize = await windowManager.getSize();
++      await _dimensionsController?.storeSize(windowSize: windowSize);
++    }
++  }
++
++  @override
+   Future<void> onWindowResized() async {
+     final windowSize = await windowManager.getSize();
+     await _dimensionsController?.storeSize(windowSize: windowSize);

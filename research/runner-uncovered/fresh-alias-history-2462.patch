@@ -1,0 +1,65 @@
+--- a/app/lib/widget/dialogs/text_field_with_actions.dart
++++ b/app/lib/widget/dialogs/text_field_with_actions.dart
+@@ -32,7 +32,8 @@
+         foregroundColor: Theme.of(context).colorScheme.onSurface,
+       ),
+       onPressed: () async {
+-        await showDialog(
++        final originalValue = widget.controller.text;
++        final result = await showDialog<bool>(
+           context: context,
+           builder: (context) {
+             return AlertDialog(
+@@ -49,9 +50,8 @@
+                   TextFormField(
+                     controller: widget.controller,
+                     textAlign: TextAlign.center,
+-                    onChanged: widget.onChanged,
+                     autofocus: true,
+-                    onFieldSubmitted: (_) => context.pop(),
++                    onFieldSubmitted: (_) => context.pop(true),
+                   ),
+                 ],
+               ),
+@@ -61,13 +61,20 @@
+                     backgroundColor: Theme.of(context).colorScheme.primary,
+                     foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                   ),
+-                  onPressed: () => context.pop(),
++                  onPressed: () => context.pop(true),
+                   child: Text(t.general.confirm),
+                 ),
+               ],
+             );
+           },
+         );
++        if (!mounted) return;
++        if (result == true) {
++          widget.onChanged(widget.controller.text);
++        } else {
++          widget.controller.text = originalValue;
++        }
++        setState(() {});
+       },
+       child: Padding(
+         padding: const EdgeInsets.symmetric(vertical: 5),
+--- a/app/lib/pages/tabs/settings_tab.dart
++++ b/app/lib/pages/tabs/settings_tab.dart
+@@ -382,9 +382,6 @@
+ 
+                             // Update the TextField with the new alias
+                             vm.aliasController.text = newAlias;
+-
+-                            // Persist the new alias using the settingsProvider
+-                            await ref.notifier(settingsProvider).setAlias(newAlias);
+                           },
+                           icon: const Icon(Icons.casino),
+                         ),
+@@ -402,7 +399,6 @@
+                             }
+ 
+                             vm.aliasController.text = newAlias;
+-                            await ref.notifier(settingsProvider).setAlias(newAlias);
+                           },
+                           icon: const Icon(Icons.desktop_windows_rounded),
+                         ),
