@@ -1,0 +1,82 @@
+name: Linux tray E2E
+
+on:
+  pull_request:
+    paths:
+      - app/lib/main.dart
+      - app/lib/util/native/tray_helper.dart
+      - app/lib/widget/watcher/tray_watcher.dart
+      - support/tests/linux_tray_e2e.py
+      - .github/workflows/linux-tray-e2e.yml
+  workflow_dispatch:
+
+jobs:
+  kde-dbus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FLUTTER_VERSION: "3.41.9"
+      CXXFLAGS: -Wno-error=deprecated-declarations
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record source revision
+        run: git rev-parse HEAD | tee linux-tray-source-revision.txt
+
+      - name: Install Linux and KDE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+            libayatana-appindicator3-dev plasma-desktop plasma-workspace \
+            xdg-desktop-portal xdg-desktop-portal-kde xvfb dbus-x11
+
+      - uses: flutter-actions/setup-flutter@v4
+        with:
+          version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Resolve Dart workspace
+        working-directory: app
+        run: flutter pub get
+
+      - name: Resolve Cargokit build tool
+        working-directory: packages/localsend_isolates/rust_builder/cargokit/build_tool
+        run: flutter pub get
+
+      - name: Generate app code
+        working-directory: app
+        run: dart run build_runner build -d
+
+      - name: Build release application
+        working-directory: app
+        run: flutter build linux --release
+
+      - name: Run on a real KDE session and D-Bus
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -euo pipefail -c '
+            export XDG_CURRENT_DESKTOP=KDE
+            export XDG_SESSION_DESKTOP=KDE
+            export DESKTOP_SESSION=plasma
+            export XDG_SESSION_TYPE=x11
+            export QT_QPA_PLATFORM=xcb
+            export LIBGL_ALWAYS_SOFTWARE=1
+            dbus-update-activation-environment --all
+            startplasma-x11 > plasma-session.log 2>&1 &
+            plasma_pid=$!
+            trap "kill $plasma_pid 2>/dev/null || true" EXIT
+            python3 support/tests/linux_tray_e2e.py app/build/linux/x64/release/bundle --log linux-tray-app.log 2>&1 | tee linux-tray-results.log
+          '
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-tray-e2e-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            linux-tray-source-revision.txt
+            linux-tray-app.log
+            linux-tray-results.log
+            plasma-session.log
