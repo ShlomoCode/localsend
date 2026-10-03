@@ -1,6 +1,9 @@
 name: Issue 3416 GNOME Wayland regression
 
 on:
+  push:
+    branches: [codex/pr3354-linux-screenshots]
+    paths: [.github/workflows/pr3416-wayland-regression.yml]
   workflow_dispatch:
     inputs:
       builds_run:
@@ -75,7 +78,7 @@ jobs:
           path: bundles/
 
   desktop:
-    if: ${{ github.event.inputs.build_only != 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
