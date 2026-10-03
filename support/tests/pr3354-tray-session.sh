@@ -20,6 +20,9 @@ xfconf-query -c xfce4-panel -p /panels/panel-1/position -n -t string -s 'p=6;x=5
 xfconf-query -c xfce4-panel -p /panels/panel-1/size -n -t int -s 40
 xfconf-query -c xfce4-panel -p /panels/panel-1/length -n -t uint -s 100
 xfconf-query -c xfce4-panel -p /panels/panel-1/position-locked -n -t bool -s true
+xfconf-query -c xfce4-panel -p /panels/panel-1/background-style -n -t uint -s 1
+xfconf-query -c xfce4-panel -p /panels/panel-1/background-rgba -n -a \
+  -t double -s 0.12 -t double -s 0.12 -t double -s 0.12 -t double -s 1
 openbox > "$evidence/$case_name-wm.log" 2>&1 &
 wm_pid=$!
 xfce4-panel --disable-wm-check > "$evidence/$case_name-panel.log" 2>&1 &

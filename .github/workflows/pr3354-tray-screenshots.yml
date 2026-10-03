@@ -52,11 +52,12 @@ jobs:
           done
           python3 - <<'PY'
           from PIL import Image, ImageDraw
-          result = Image.new('RGB', (1024, 160), '#202020')
+          result = Image.new('RGB', (384, 320), '#202020')
           draw = ImageDraw.Draw(result)
-          for y, name, label in [(0, 'before', 'BEFORE: baseline with SNAP'), (80, 'after', 'AFTER: PR 3354 with SNAP')]:
+          for y, name, label in [(0, 'before', 'BEFORE: baseline with SNAP'), (160, 'after', 'AFTER: PR 3354 with SNAP')]:
               draw.text((12, y + 8), label, fill='white')
-              result.paste(Image.open('evidence/' + name + '-tray.png').convert('RGB'), (0, y + 30))
+              tray = Image.open('evidence/' + name + '-tray.png').convert('RGB')
+              result.paste(tray.crop((0, 0, 128, 40)).resize((384, 120), Image.NEAREST), (0, y + 30))
           result.save('evidence/before-after.png')
           PY
       - uses: actions/upload-artifact@v6
