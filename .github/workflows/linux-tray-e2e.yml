@@ -1,89 +1,22 @@
+# Keep the existing manual entry point; all Linux test execution lives in the reusable workflow.
 name: Linux E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      packaging:
+        description: Application packaging to test
+        type: choice
+        options: [all, native, flatpak]
+        default: all
+      test_filter:
+        description: Optional pytest -k expression; empty runs every Linux test
+        type: string
+        default: ''
 
 jobs:
   linux-e2e:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      CXXFLAGS: -Wno-error=deprecated-declarations
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Record source revision
-        run: git rev-parse HEAD | tee linux-e2e-source-revision.txt
-
-      - name: Install Linux and KDE dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
-            libayatana-appindicator3-dev plasma-desktop plasma-workspace \
-            xdg-desktop-portal xdg-desktop-portal-kde xvfb dbus-x11 \
-            flatpak python3-gi gir1.2-gtk-3.0
-
-      - name: Read Flutter version
-        id: flutter-version
-        run: python3 -c 'import json; print("version=" + json.load(open(".fvmrc"))["flutter"])' >> "$GITHUB_OUTPUT"
-
-      - uses: flutter-actions/setup-flutter@v4
-        with:
-          version: ${{ steps.flutter-version.outputs.version }}
-          channel: stable
-
-      - name: Resolve Dart workspace
-        working-directory: app
-        run: flutter pub get
-
-      - name: Resolve Cargokit build tool
-        working-directory: packages/localsend_isolates/rust_builder/cargokit/build_tool
-        run: flutter pub get
-
-      - name: Generate app code
-        working-directory: app
-        run: dart run build_runner build -d
-
-      - name: Build release application
-        working-directory: app
-        run: flutter build linux --release
-
-      - name: Package this build as a real LocalSend Flatpak
-        run: |
-          set -euo pipefail
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive --assumeyes flathub org.localsend.localsend_app
-          python3 support/tests/prepare_flatpak_e2e.py app/build/linux/x64/release/bundle \
-            --output linux-e2e-flatpak 2>&1 | tee flatpak-preparation.log
-
-      - name: Run Linux E2E tests on KDE and D-Bus
-        run: |
-          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -euo pipefail -c '
-            export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-            export XDG_CURRENT_DESKTOP=KDE
-            export XDG_SESSION_DESKTOP=KDE
-            export DESKTOP_SESSION=plasma
-            export XDG_SESSION_TYPE=x11
-            export QT_QPA_PLATFORM=xcb
-            export LIBGL_ALWAYS_SOFTWARE=1
-            dbus-update-activation-environment --all
-            startplasma-x11 > plasma-session.log 2>&1 &
-            plasma_pid=$!
-            trap "kill $plasma_pid 2>/dev/null || true" EXIT
-            python3 support/tests/run_linux_e2e.py app/build/linux/x64/release/bundle --output linux-e2e-results 2>&1 | tee linux-e2e-summary.log
-          '
-
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: linux-e2e-${{ github.run_id }}
-          if-no-files-found: warn
-          path: |
-            linux-e2e-source-revision.txt
-            linux-e2e-summary.log
-            linux-e2e-results/
-            plasma-session.log
-            flatpak-preparation.log
+    uses: ./.github/workflows/linux-e2e.yml
+    with:
+      packaging: ${{ inputs.packaging }}
+      test_filter: ${{ inputs.test_filter }}
