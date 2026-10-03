@@ -166,6 +166,12 @@ def stop_app(instance, process):
         except subprocess.TimeoutExpired:
             process.terminate()
             process.wait(timeout=5)
+    if instance is not None:
+        deadline = time.monotonic() + 10
+        while instance in instances() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if instance in instances():
+            raise InfrastructureError(f"Flatpak instance {instance} is still listed after stopping it")
 
 
 def main():
@@ -198,8 +204,9 @@ def main():
     try:
         apply_theme("dark")
         prior_items = set(registered_items())
+        prior_instances = set(instances())
         process = start_app(args.log)
-        instance = wait_for_instance(set(), process)
+        instance = wait_for_instance(prior_instances, process)
         validate_sandbox(instance)
         item = assert_icon(instance, prior_items, white, "dark startup control")
         apply_theme("light")
@@ -211,8 +218,9 @@ def main():
         process = None
         apply_theme("light")
         prior_items = set(registered_items())
+        prior_instances = set(instances())
         process = start_app(args.log)
-        instance = wait_for_instance(set(), process)
+        instance = wait_for_instance(prior_instances, process)
         validate_sandbox(instance)
         assert_icon(instance, prior_items, black, "light startup")
     finally:
