@@ -12,7 +12,7 @@ on:
       fix_ref:
         description: Committed fix branch or SHA in ShlomoCode/localsend
         required: true
-        default: 6d670f61bde1f4170dc050b1da9cdbbab3852fa4
+        default: c28b054f7c3867a810b4c082a2abd00d579666c9
 
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 120
     env:
       BASE_SHA: e768240d1ad95f0f162b852b5ff37bec71cde1ef
-      FIX_REF: ${{ inputs.fix_ref || '6d670f61bde1f4170dc050b1da9cdbbab3852fa4' }}
+      FIX_REF: ${{ inputs.fix_ref || 'c28b054f7c3867a810b4c082a2abd00d579666c9' }}
       XDG_SESSION_TYPE: x11
       XDG_CURRENT_DESKTOP: OPENBOX
       LIBGL_ALWAYS_SOFTWARE: "1"
@@ -62,7 +62,11 @@ jobs:
       - name: Select pinned Flutter SDK
         working-directory: source/app
         run: |
-          fvm install 3.41.9
+          sdk_root=$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")
+          test -x "$sdk_root/bin/flutter"
+          fvm config --cache-path "$RUNNER_TEMP/fvm-cache"
+          mkdir -p "$RUNNER_TEMP/fvm-cache/versions"
+          ln -s "$sdk_root" "$RUNNER_TEMP/fvm-cache/versions/3.41.9"
           fvm use 3.41.9 --skip-pub-get
           fvm flutter --version
       - uses: actions/cache@v4
@@ -71,8 +75,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             source/target
+            source/app/build/linux/x64/release/plugins
           key: issue508-rust-${{ runner.os }}-${{ hashFiles('source/Cargo.lock') }}
           restore-keys: issue508-rust-${{ runner.os }}-
+      - name: Resolve standalone Cargokit build tool
+        working-directory: source/packages/localsend_isolates/rust_builder/cargokit/build_tool
+        run: fvm dart pub get
       - name: Build baseline bundle
         working-directory: source/app
         run: |
@@ -95,9 +103,10 @@ jobs:
       - name: Save baseline AppImage
         run: |
           mv LocalSend-*-x86_64.AppImage results/baseline.AppImage
+          sudo chown "$(id -u):$(id -g)" results/baseline.AppImage
           chmod +x results/baseline.AppImage
           sha256sum results/baseline.AppImage > results/baseline.sha256
-          rm -rf AppDir appimage-build
+          sudo rm -rf AppDir appimage-build
       - name: Overlay only changed production files from committed fix
         run: |
           git -C source fetch --no-tags origin "$FIX_REF"
@@ -129,8 +138,17 @@ jobs:
       - name: Save candidate AppImage
         run: |
           mv LocalSend-*-x86_64.AppImage results/candidate.AppImage
+          sudo chown "$(id -u):$(id -g)" results/candidate.AppImage
           chmod +x results/candidate.AppImage
           sha256sum results/candidate.AppImage > results/candidate.sha256
+      - uses: actions/upload-artifact@v6
+        with:
+          name: issue508-built-binaries
+          path: |
+            results/baseline.AppImage
+            results/candidate.AppImage
+            results/candidate-bundle/
+          compression-level: 0
       - name: Exercise GUI and desktop-entry behavior
         id: validation
         continue-on-error: true

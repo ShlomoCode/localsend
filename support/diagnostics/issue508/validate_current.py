@@ -150,8 +150,8 @@ def baseline_case(image, out):
     return result
 
 
-def normal_candidate_case(image, out):
-    result = enable_by_gui(image, out, "candidate-normal")
+def normal_candidate_case(image, out, label="candidate-normal"):
+    result = enable_by_gui(image, out, label)
     if result["gio_executable"] != str(image):
         raise RuntimeError(f"Candidate Gio parsed {result['gio_executable']!r}, expected {image}")
     if not result["exec_exists_after_close"] or not result["mount_gone_after_close"]:
@@ -166,7 +166,7 @@ def normal_candidate_case(image, out):
     result.update(gio_relaunch_window_pid=pid, gio_relaunch_executable=exe,
                   gio_relaunch_runtime=gui.appimage_runtime_environment(pid),
                   gio_relaunch_fuse_mounted=gui.is_mounted(exe))
-    gui.snapshot(out / "candidate-normal", "gio-relaunch")
+    gui.snapshot(out / label, "gio-relaunch")
     stop_gui_pid(pid, image)
     if result["gio_relaunch_runtime"].get("APPIMAGE") != str(image) or not result["gio_relaunch_fuse_mounted"]:
         raise RuntimeError("Gio launched a different artifact or bypassed FUSE")
@@ -186,6 +186,9 @@ def hidden_candidate_case(image, out):
     result = enable_by_gui(image, out, "candidate-hidden", hidden=True)
     if result["gio_executable"] != str(image) or not result["desktop_has_hidden"]:
         raise RuntimeError("Hidden desktop entry lost its image path or --hidden argument")
+    result["tcp_absent_before_launch"] = bool(gui.wait_for(lambda: not tcp_listening(), 10))
+    if not result["tcp_absent_before_launch"]:
+        raise RuntimeError("TCP port 53317 was still occupied before the hidden launch")
     launch_desktop(Path(result["desktop_file"]), Path(result["home"]))
     pids = gui.wait_for(lambda: app_pids(image), 30)
     if not pids:
@@ -206,14 +209,24 @@ def hidden_candidate_case(image, out):
     return result
 
 
-def migration_case(image, out, *, hidden):
-    label = "migration-hidden" if hidden else "migration-normal"
+def special_path_case(image, out):
+    special = out / "odd path" / 'LocalSend "quote" `tick` $cash %rate \\slash.AppImage'
+    special.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(image, special)
+    special.chmod(0o755)
+    result = normal_candidate_case(special, out, label="candidate-special-path")
+    result["outcome"] = "special_characters_desktop_exec_gio_launch_works"
+    return result
+
+
+def migration_case(image, out, *, hidden, label=None, stale=None):
+    label = label or ("migration-hidden" if hidden else "migration-normal")
     case_out = out / label
     case_out.mkdir(parents=True, exist_ok=True)
     home = case_out / "home"
     desktop = home / ".config/autostart/localsend_app.desktop"
     desktop.parent.mkdir(parents=True, exist_ok=True)
-    stale = "/tmp/.mount_LocalSendGone/localsend_app"
+    stale = stale or "/tmp/.mount_LocalSendGone/localsend_app"
     marker = "X-Issue508-Preserve=metadata-remains"
     desktop.write_text("[Desktop Entry]\nType=Application\nName=LocalSend\n"
                        "Comment=existing entry\n" + marker + "\n"
@@ -221,6 +234,7 @@ def migration_case(image, out, *, hidden):
                        "Terminal=false\n")
     (case_out / "seeded.desktop").write_text(desktop.read_text())
     result = {"seeded_exec": desktop_info(desktop).get_string("Exec"), "home": str(home),
+              "stale_executable": stale,
               "hidden": hidden}
     process = None
     executable = ""
@@ -287,7 +301,14 @@ def main():
             ("candidate_hidden", lambda: hidden_candidate_case(candidate, out)),
             ("migration_normal", lambda: migration_case(candidate, out, hidden=False)),
             ("migration_hidden", lambda: migration_case(candidate, out, hidden=True)),
+            ("migration_custom_tmpdir", lambda: migration_case(candidate, out, hidden=True,
+                label="migration-custom-tmpdir",
+                stale="/var/tmp/issue508/.mount_LocalSendGone/localsend_app")),
+            ("migration_extract_run", lambda: migration_case(candidate, out, hidden=False,
+                label="migration-extract-run",
+                stale="/tmp/appimage_extracted_0123456789/localsend_app")),
             ("official_bundle", lambda: bundle_case(args.bundle.resolve(), out)),
+            ("candidate_special_path", lambda: special_path_case(candidate, out)),
         ]
         for label, check in cases:
             try:
