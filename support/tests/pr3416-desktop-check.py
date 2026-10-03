@@ -71,7 +71,8 @@ def local_window(data):
 
 def dock_icon(data, app_id):
     icons = [actor for actor in data['actors']
-             if actor['appId'] == app_id and actor['mapped'] and actor['width'] >= 16
+             if actor['appId'] == app_id and actor['mapped'] and actor['paintOpacity'] > 0
+             and actor['width'] >= 16
              and actor['height'] >= 16
              and 'dashtodock' in ' '.join(actor['ancestry']).lower()]
     assert len(icons) <= 1, icons
@@ -81,7 +82,7 @@ def dock_icon(data, app_id):
 def icon_descendants(data, actor):
     prefix = actor['path'] + '.'
     return [child for child in data['actors']
-            if child['path'].startswith(prefix) and child['mapped']
+            if child['path'].startswith(prefix) and child['mapped'] and child['paintOpacity'] > 0
             and (child['gicon'] or child['iconName'])]
 
 
@@ -121,9 +122,11 @@ def check_ready():
         assert int(extensions[extension]['state']) == 1, (extension, extensions)
     probe().LeaveOverview()
     time.sleep(2)
-    snapshot('desktop-ready')
-    wait_for(lambda: any('dashtodock' in ' '.join(actor['ancestry'] + [actor['styleClass'], actor['name']]).lower()
+    snapshot('desktop-ready-initial')
+    wait_for(lambda: any(actor['paintOpacity'] > 0 and
+                         'dashtodock' in ' '.join(actor['ancestry'] + [actor['styleClass'], actor['name']]).lower()
                          for actor in inspect()['actors']), 'Ubuntu Dock actor')
+    snapshot('desktop-ready')
     (OUTPUT / 'desktop-environment.json').write_text(json.dumps({
         'gnome': subprocess.check_output(['gnome-shell', '--version'], text=True).strip(),
         'session': os.environ['XDG_SESSION_TYPE'],

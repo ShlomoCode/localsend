@@ -43,6 +43,7 @@ function actorInfo(actor) {
         name: actor.name ?? '',
         x, y, width, height,
         mapped: actor.is_mapped(),
+        paintOpacity: actor.get_paint_opacity(),
         appId,
         iconName: actor.icon_name ?? '',
         gicon: iconDescription(actor.gicon),
