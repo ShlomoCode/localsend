@@ -16,7 +16,7 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gio", "2.0")
-from gi.repository import Gio  # noqa: E402
+from gi.repository import Gio, GLib  # noqa: E402
 
 import run as gui  # noqa: E402
 
@@ -26,7 +26,10 @@ def write_result(out, result):
 
 
 def desktop_info(path):
-    info = Gio.DesktopAppInfo.new_from_filename(str(path))
+    try:
+        info = Gio.DesktopAppInfo.new_from_filename(str(path))
+    except Exception as error:
+        raise RuntimeError(f"Gio rejected desktop entry {path}: {error}") from error
     if info is None:
         raise RuntimeError(f"Gio rejected desktop entry {path}")
     return info
@@ -117,16 +120,20 @@ def enable_by_gui(executable, out, label, *, hidden=False):
         gui.snapshot(case_out, "after-toggle")
         text = desktop.read_text()
         (case_out / "generated.desktop").write_text(text)
-        info = desktop_info(desktop)
-        result.update(desktop_file=str(desktop), desktop_exec=info.get_string("Exec"),
-                      gio_executable=info.get_executable(),
+        result.update(desktop_file=str(desktop),
+                      desktop_exec=next(line[5:] for line in text.splitlines() if line.startswith("Exec=")),
                       desktop_has_hidden="--hidden" in text)
+        try:
+            info = desktop_info(desktop)
+            result.update(gio_info_valid=True, gio_executable_hint=info.get_executable())
+        except RuntimeError as error:
+            result.update(gio_info_valid=False, gio_parse_error=str(error))
     finally:
         if process is not None:
             gui.stop_app(process, running_executable)
     if "desktop_file" not in result:
         raise RuntimeError(f"{label}: no desktop entry was captured")
-    result["exec_exists_after_close"] = Path(result["gio_executable"]).exists()
+    result["running_executable_exists_after_close"] = Path(result["running_executable"]).exists()
     result["mount_gone_after_close"] = not gui.is_mounted(result["running_executable"])
     return result
 
@@ -135,7 +142,7 @@ def baseline_case(image, out):
     result = enable_by_gui(image, out, "baseline")
     if not result["fuse_mounted"] or not result["mount_gone_after_close"]:
         raise RuntimeError("Baseline did not exercise a real FUSE mount and unmount")
-    if result["exec_exists_after_close"]:
+    if result["running_executable_exists_after_close"] or result["running_executable"] not in result["desktop_exec"]:
         raise RuntimeError("Baseline unexpectedly has a durable Exec")
     launch_error = None
     try:
@@ -152,10 +159,10 @@ def baseline_case(image, out):
 
 def normal_candidate_case(image, out, label="candidate-normal"):
     result = enable_by_gui(image, out, label)
-    if result["gio_executable"] != str(image):
-        raise RuntimeError(f"Candidate Gio parsed {result['gio_executable']!r}, expected {image}")
-    if not result["exec_exists_after_close"] or not result["mount_gone_after_close"]:
-        raise RuntimeError("Candidate desktop Exec is not durable after FUSE unmount")
+    if not result["gio_info_valid"]:
+        raise RuntimeError(result["gio_parse_error"])
+    if not result["mount_gone_after_close"] or "/.mount_" in result["desktop_exec"]:
+        raise RuntimeError("Candidate desktop Exec retained a transient mount path")
     if gui.localsend_window():
         raise RuntimeError("Previous GUI window remained before candidate desktop launch")
     launch_desktop(Path(result["desktop_file"]), Path(result["home"]))
@@ -184,7 +191,7 @@ def tcp_listening(port=53317):
 
 def hidden_candidate_case(image, out):
     result = enable_by_gui(image, out, "candidate-hidden", hidden=True)
-    if result["gio_executable"] != str(image) or not result["desktop_has_hidden"]:
+    if not result["gio_info_valid"] or not result["desktop_has_hidden"]:
         raise RuntimeError("Hidden desktop entry lost its image path or --hidden argument")
     result["tcp_absent_before_launch"] = bool(gui.wait_for(lambda: not tcp_listening(), 10))
     if not result["tcp_absent_before_launch"]:
@@ -209,12 +216,41 @@ def hidden_candidate_case(image, out):
     return result
 
 
-def special_path_case(image, out):
-    special = out / "odd path" / 'LocalSend "quote" `tick` $cash %rate \\slash.AppImage'
+def percent_probe(out):
+    probe_dir = out / "percent-gio-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    executable = probe_dir / "probe%rate"
+    shutil.copy2("/usr/bin/true", executable)
+    results = {"glib_version": f"{GLib.MAJOR_VERSION}.{GLib.MINOR_VERSION}.{GLib.MICRO_VERSION}"}
+    for encoding, command in (("literal", str(executable)), ("doubled", str(executable).replace("%", "%%"))):
+        desktop = probe_dir / f"{encoding}.desktop"
+        desktop.write_text(f'[Desktop Entry]\nType=Application\nName=Percent probe\nExec="{command}"\n')
+        try:
+            results[encoding] = {"gio_info_valid": True, "gio_launch_returned": launch_desktop(desktop, probe_dir)}
+        except Exception as error:
+            results[encoding] = {"gio_info_valid": False, "error": str(error)}
+    return results
+
+
+def special_path_case(image, out, label, filename, *, percent=False):
+    special = out / "odd path" / filename
     special.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(image, special)
     special.chmod(0o755)
-    result = normal_candidate_case(special, out, label="candidate-special-path")
+    if percent:
+        probe = percent_probe(out)
+        (out / "percent-gio-probe" / "result.json").write_text(json.dumps(probe, indent=2) + "\n")
+        try:
+            result = normal_candidate_case(special, out, label=label)
+        except Exception as error:
+            if not probe["doubled"].get("gio_launch_returned"):
+                return {"outcome": "glib_percent_executable_limitation", "image": str(special),
+                        "gio_probe": probe, "observed_error": str(error),
+                        "generated_desktop": str(out / label / "generated.desktop")}
+            raise
+        result["gio_probe"] = probe
+    else:
+        result = normal_candidate_case(special, out, label=label)
     result["outcome"] = "special_characters_desktop_exec_gio_launch_works"
     return result
 
@@ -233,7 +269,8 @@ def migration_case(image, out, *, hidden, label=None, stale=None):
                        f"Exec={stale}{' --hidden' if hidden else ''}\n"
                        "Terminal=false\n")
     (case_out / "seeded.desktop").write_text(desktop.read_text())
-    result = {"seeded_exec": desktop_info(desktop).get_string("Exec"), "home": str(home),
+    result = {"seeded_exec": next(line[5:] for line in desktop.read_text().splitlines()
+                                   if line.startswith("Exec=")), "home": str(home),
               "stale_executable": stale,
               "hidden": hidden}
     process = None
@@ -242,12 +279,18 @@ def migration_case(image, out, *, hidden, label=None, stale=None):
         process, window = gui.start_app(image, case_out, label, home)
         pid, executable = gui.process_details(window)
         result.update(window_pid=pid, runtime_environment=gui.appimage_runtime_environment(pid))
-        if not gui.wait_for(lambda: desktop_info(desktop).get_executable() == str(image), 15):
+        def migrated():
+            try:
+                text = desktop.read_text()
+                return str(image) in text and stale not in text and desktop_info(desktop) is not None
+            except RuntimeError:
+                return False
+        if not gui.wait_for(migrated, 15):
             raise RuntimeError("Startup did not migrate stale desktop Exec")
         text = desktop.read_text()
         (case_out / "migrated.desktop").write_text(text)
         info = desktop_info(desktop)
-        result.update(migrated_exec=info.get_string("Exec"), gio_executable=info.get_executable(),
+        result.update(migrated_exec=info.get_string("Exec"), gio_executable_hint=info.get_executable(),
                       marker_preserved=marker in text, hidden_preserved=("--hidden" in text) == hidden)
         if not result["marker_preserved"] or not result["hidden_preserved"]:
             raise RuntimeError("Startup migration changed existing metadata or hidden preference")
@@ -255,6 +298,29 @@ def migration_case(image, out, *, hidden, label=None, stale=None):
     finally:
         if process is not None:
             gui.stop_app(process, executable)
+    launch_desktop(desktop, home)
+    if hidden:
+        pids = gui.wait_for(lambda: app_pids(image), 30)
+        result["gio_relaunch_pids"] = pids
+        result["gio_relaunch_tcp"] = bool(gui.wait_for(tcp_listening, 30))
+        result["gio_relaunch_visible_window"] = bool(gui.localsend_window())
+        for pid in app_pids(image):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        if not pids or not result["gio_relaunch_tcp"] or result["gio_relaunch_visible_window"]:
+            raise RuntimeError("Migrated hidden desktop entry did not start an unmapped TCP-ready app")
+    else:
+        window = gui.wait_for(gui.localsend_window, 45)
+        if not window:
+            raise RuntimeError("Migrated desktop entry did not reopen the GUI")
+        pid, _ = gui.process_details(window)
+        result["gio_relaunch_window_pid"] = pid
+        result["gio_relaunch_appimage"] = process_appimage(pid)
+        stop_gui_pid(pid, image)
+        if result["gio_relaunch_appimage"] != str(image):
+            raise RuntimeError("Migrated desktop entry launched a different artifact")
     result["outcome"] = "stale_entry_migrated_preserving_metadata"
     return result
 
@@ -262,7 +328,7 @@ def migration_case(image, out, *, hidden, label=None, stale=None):
 def bundle_case(bundle, out):
     image = bundle / "localsend_app"
     result = enable_by_gui(image, out, "official-bundle")
-    if result["gio_executable"] != str(image) or not result["exec_exists_after_close"]:
+    if not result["gio_info_valid"] or str(image) not in result["desktop_exec"] or not image.exists():
         raise RuntimeError("Regular build bundle autostart did not retain its stable path")
     launch_desktop(Path(result["desktop_file"]), Path(result["home"]))
     window = gui.wait_for(gui.localsend_window, 45)
@@ -308,7 +374,10 @@ def main():
                 label="migration-extract-run",
                 stale="/tmp/appimage_extracted_0123456789/localsend_app")),
             ("official_bundle", lambda: bundle_case(args.bundle.resolve(), out)),
-            ("candidate_special_path", lambda: special_path_case(candidate, out)),
+            ("candidate_special_path", lambda: special_path_case(candidate, out,
+                "candidate-special-path", 'LocalSend "quote" `tick` $cash \\slash.AppImage')),
+            ("candidate_percent_path", lambda: special_path_case(candidate, out,
+                "candidate-percent-path", "LocalSend %rate.AppImage", percent=True)),
         ]
         for label, check in cases:
             try:

@@ -1,12 +1,6 @@
 name: Validate issue 508 AppImage fix
 
 on:
-  push:
-    branches:
-      - codex/validate-appimage-autostart
-    paths:
-      - .github/workflows/validate-issue508-fix.yml
-      - support/diagnostics/issue508/validate_current.py
   workflow_dispatch:
     inputs:
       fix_ref:

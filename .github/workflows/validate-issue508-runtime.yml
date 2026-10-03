@@ -1,0 +1,96 @@
+name: Recheck issue 508 built AppImages
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Run that uploaded issue508-built-binaries
+        required: true
+        default: "37159634890"
+  push:
+    branches:
+      - codex/validate-appimage-autostart
+    paths:
+      - .github/workflows/validate-issue508-runtime.yml
+      - support/diagnostics/issue508/validate_current.py
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  recheck:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      BUILD_RUN_ID: ${{ inputs.build_run_id || '37159634890' }}
+      EXPECTED_BASE_SHA: e768240d1ad95f0f162b852b5ff37bec71cde1ef
+      EXPECTED_FIX_SHA: c28b054f7c3867a810b4c082a2abd00d579666c9
+      XDG_SESSION_TYPE: x11
+      XDG_CURRENT_DESKTOP: OPENBOX
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue508-built-binaries
+          run-id: ${{ env.BUILD_RUN_ID }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: built
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue508-current-source-validation
+          run-id: ${{ env.BUILD_RUN_ID }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: build-evidence
+      - name: Verify reused binaries and source commit
+        run: |
+          mkdir -p runtime-results
+          python3 support/diagnostics/issue508/verify_build_artifacts.py \
+            --built built --evidence build-evidence \
+            --base-sha "$EXPECTED_BASE_SHA" --fix-sha "$EXPECTED_FIX_SHA" \
+            --run-id "$BUILD_RUN_ID" --output runtime-results/verification.json
+      - name: Install desktop tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 libgtk-3-0 libayatana-appindicator3-1 \
+            libegl1 libgles2 libgl1-mesa-dri libgbm1 xvfb openbox dbus-x11 \
+            xdotool scrot tesseract-ocr python3 python3-pil python3-gi gir1.2-gtk-3.0
+          test -e /dev/fuse
+          mkdir -p "$RUNNER_TEMP/issue508-runtime"
+          chmod 700 "$RUNNER_TEMP/issue508-runtime"
+      - name: Exercise downloaded AppImages
+        continue-on-error: true
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/issue508-runtime
+        run: |
+          xvfb-run -a -s '-screen 0 1600x1000x24' \
+            dbus-run-session -- \
+            python3 support/diagnostics/issue508/validate_current.py \
+              --baseline "$GITHUB_WORKSPACE/built/baseline.AppImage" \
+              --candidate "$GITHUB_WORKSPACE/built/candidate.AppImage" \
+              --bundle "$GITHUB_WORKSPACE/built/candidate-bundle" \
+              --output "$GITHUB_WORKSPACE/runtime-results/runtime"
+      - name: Show result
+        if: always()
+        run: |
+          if test -f runtime-results/runtime/result.json; then cat runtime-results/runtime/result.json; fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue508-runtime-recheck
+          path: |
+            runtime-results/**/*.png
+            runtime-results/**/*.json
+            runtime-results/**/*.log
+            runtime-results/**/*.desktop
+          if-no-files-found: warn
+      - name: Enforce case outcomes
+        if: always()
+        run: |
+          python3 -c 'import json; from pathlib import Path; r=json.loads(Path("runtime-results/runtime/result.json").read_text()); assert not r["errors"], r["errors"]'
