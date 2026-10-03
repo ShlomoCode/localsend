@@ -14,6 +14,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+from PIL import Image, ImageEnhance, ImageOps
 
 
 def command(args, *, timeout=30, check=True, **kwargs):
@@ -37,7 +38,12 @@ def snapshot(out, name):
 
 
 def ocr_lines(image):
-    result = command(["tesseract", str(image), "stdout", "--psm", "11", "tsv"], timeout=25)
+    scaled = image.with_suffix(".ocr.png")
+    with Image.open(image) as original:
+        enlarged = original.resize((original.width * 3, original.height * 3), Image.LANCZOS)
+        enhanced = ImageEnhance.Contrast(ImageOps.grayscale(enlarged)).enhance(2)
+        enhanced.save(scaled)
+    result = command(["tesseract", str(scaled), "stdout", "--psm", "11", "tsv"], timeout=30)
     groups = {}
     for word in csv.DictReader(io.StringIO(result.stdout), delimiter="\t"):
         text = word["text"].strip()
@@ -47,10 +53,10 @@ def ocr_lines(image):
         groups.setdefault(key, []).append(word)
     lines = []
     for words in groups.values():
-        left = min(int(w["left"]) for w in words)
-        top = min(int(w["top"]) for w in words)
-        right = max(int(w["left"]) + int(w["width"]) for w in words)
-        bottom = max(int(w["top"]) + int(w["height"]) for w in words)
+        left = min(int(w["left"]) for w in words) // 3
+        top = min(int(w["top"]) for w in words) // 3
+        right = max(int(w["left"]) + int(w["width"]) for w in words) // 3
+        bottom = max(int(w["top"]) + int(w["height"]) for w in words) // 3
         lines.append({"text": " ".join(w["text"] for w in words), "x": left, "y": top,
                       "width": right - left, "height": bottom - top})
     return lines
@@ -92,19 +98,27 @@ def activate(window):
 
 def open_settings(out, window):
     activate(window)
-    image = snapshot(out, "home")
-    lines = ocr_lines(image)
+    lines = []
+    for attempt in range(3):
+        image = snapshot(out, "home")
+        lines = ocr_lines(image)
+        if any(line["text"].lower() == "localsend" for line in lines):
+            break
+        time.sleep(2)
     write_lines(out, "home", lines)
     matches = [line for line in lines if re.search(r"\bsettings\b", line["text"], re.I)]
     if matches:
         line = min(matches, key=lambda item: item["x"])
         click(line["x"] + line["width"] // 2, line["y"] + line["height"] // 2)
     else:
-        # At 1200x900 the third NavigationRail item (Settings) is roughly
-        # 110px from the window's left and 230px from its top. Default OCR
-        # misses the small rail text on some Flutter releases; verify after.
-        g = geometry(window)
-        click(g["X"] + 110, g["Y"] + 230)
+        # On these releases the third NavigationRail item is 70px right and
+        # 170px below the visible LocalSend heading. Anchor to that heading
+        # because the app may override the requested window size at startup.
+        headings = [line for line in lines if line["text"].lower() == "localsend"]
+        if not headings:
+            raise RuntimeError("Could not locate LocalSend heading for Settings navigation")
+        heading = min(headings, key=lambda item: item["x"])
+        click(heading["x"] + 70, heading["y"] + 170)
     time.sleep(2)
     image = snapshot(out, "settings")
     lines = ocr_lines(image)
@@ -187,6 +201,7 @@ def start_app(executable, out, label, home):
     if not window:
         stop_app(process, "")
         raise RuntimeError(f"{label}: LocalSend window did not appear (exit={process.poll()})")
+    time.sleep(8)  # Flutter can resize the window after its first mapped frame.
     activate(window)
     return process, window
 
