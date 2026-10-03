@@ -1,12 +1,18 @@
 name: Validate issue 508 AppImage fix
 
 on:
+  push:
+    branches:
+      - codex/validate-appimage-autostart
+    paths:
+      - .github/workflows/validate-issue508-fix.yml
+      - support/diagnostics/issue508/validate_current.py
   workflow_dispatch:
     inputs:
       fix_ref:
         description: Committed fix branch or SHA in ShlomoCode/localsend
         required: true
-        default: codex/fix-appimage-autostart
+        default: 6d670f61bde1f4170dc050b1da9cdbbab3852fa4
 
 permissions:
   contents: read
@@ -17,7 +23,7 @@ jobs:
     timeout-minutes: 120
     env:
       BASE_SHA: e768240d1ad95f0f162b852b5ff37bec71cde1ef
-      FIX_REF: ${{ inputs.fix_ref }}
+      FIX_REF: ${{ inputs.fix_ref || '6d670f61bde1f4170dc050b1da9cdbbab3852fa4' }}
       XDG_SESSION_TYPE: x11
       XDG_CURRENT_DESKTOP: OPENBOX
       LIBGL_ALWAYS_SOFTWARE: "1"
