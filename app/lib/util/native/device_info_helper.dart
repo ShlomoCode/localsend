@@ -80,6 +80,7 @@ Future<String?> getSystemDeviceName() async {
     final result = await Process.run('scutil', ['--get', 'ComputerName']);
     return result.stdout.toString().trim();
   }
+  
   return Platform.localHostname;
 }
 
