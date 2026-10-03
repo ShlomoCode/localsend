@@ -98,7 +98,7 @@ String _desktopExecExecutable(String executable) {
 }
 
 final _temporaryAppImageExec = RegExp(
-  r'^Exec=(?:"/tmp/\.mount_[^"\r\n]+/localsend_app"|/tmp/\.mount_[^ \t\r\n]+/localsend_app)(?=[ \t\r]|$)',
+  r'^Exec=(?:"(?:/[^/"\r\n]+)*/(?:\.mount_[^/"\r\n]+|appimage_extracted_[^/"\r\n]+)/localsend_app"|(?:/[^/ \t\r\n]+)*/(?:\.mount_[^/ \t\r\n]+|appimage_extracted_[^/ \t\r\n]+)/localsend_app)(?=[ \t\r]|$)',
 );
 
 @visibleForTesting

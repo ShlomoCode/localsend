@@ -100,6 +100,23 @@ void main() {
     );
   });
 
+  for (final oldExec in [
+    'Exec="/home/u/temp files/.mount_localSabc/localsend_app" --hidden',
+    'Exec=/home/u/temp/appimage_extracted_123abc/localsend_app --custom=value',
+  ]) {
+    test('repairs an AppImage temporary executable under a custom TMPDIR: $oldExec', () {
+      final original = '[Desktop Entry]\nName=LocalSend\n$oldExec\nX-GNOME-Autostart-enabled=false\n';
+      desktopFile.createSync(recursive: true);
+      desktopFile.writeAsStringSync(original);
+
+      expect(repairLinuxAutoStartFile(desktopFile, '/home/u/LocalSend.AppImage'), isTrue);
+      expect(
+        desktopFile.readAsStringSync(),
+        original.replaceFirst(oldExec.substring(0, oldExec.indexOf(' --')), 'Exec="/home/u/LocalSend.AppImage"'),
+      );
+    });
+  }
+
   test('leaves missing and unrelated autostart files untouched', () {
     expect(
       repairLinuxAutoStartFile(desktopFile, '/home/u/LocalSend.AppImage'),
@@ -107,14 +124,13 @@ void main() {
     );
     expect(desktopFile.existsSync(), isFalse);
 
-    const original = '[Desktop Entry]\nExec=/usr/bin/custom-localsend --hidden\n[Desktop Action Open]\nExec=/tmp/.mount_old/localsend_app\n';
-    desktopFile.createSync(recursive: true);
-    desktopFile.writeAsStringSync(original);
+    for (final customExec in ['Exec=/usr/bin/custom-localsend --hidden', 'Exec=/opt/localsend/localsend_app --hidden']) {
+      final original = '[Desktop Entry]\n$customExec\n[Desktop Action Open]\nExec=/tmp/.mount_old/localsend_app\n';
+      desktopFile.createSync(recursive: true);
+      desktopFile.writeAsStringSync(original);
 
-    expect(
-      repairLinuxAutoStartFile(desktopFile, '/home/u/LocalSend.AppImage'),
-      isFalse,
-    );
-    expect(desktopFile.readAsStringSync(), original);
+      expect(repairLinuxAutoStartFile(desktopFile, '/home/u/LocalSend.AppImage'), isFalse);
+      expect(desktopFile.readAsStringSync(), original);
+    }
   });
 }
