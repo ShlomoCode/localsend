@@ -1,8 +1,6 @@
 name: PR 3354 real Snap GNOME desktop
 
 on:
-  push:
-    branches: [codex/pr3354-linux-screenshots]
   workflow_dispatch:
     inputs:
       builds_run:
@@ -72,8 +70,11 @@ jobs:
             xserver-xorg-video-dummy xdotool imagemagick wmctrl python3-dbus python3-pil \
             squashfs-tools snapd libayatana-appindicator3-1
           sudo systemctl enable --now snapd.socket
-          sudo snap wait system seed.loaded
+          sudo timeout 180 snap wait system seed.loaded
           sudo useradd --create-home --shell /bin/bash traytest
+          # The hosted image pins its runner's runtime path globally. Let PAM
+          # and systemd create the dedicated desktop user's own runtime instead.
+          sudo sed -i '/^XDG_RUNTIME_DIR=/d; /^DBUS_SESSION_BUS_ADDRESS=/d' /etc/environment
           sudo loginctl enable-linger traytest
           sudo mkdir -p /opt/pr3354/support/tests /opt/pr3354/evidence /opt/pr3354/snaps
           sudo cp -a support/tests/pr3354-* /opt/pr3354/support/tests/
