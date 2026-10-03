@@ -22,7 +22,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
             libayatana-appindicator3-dev plasma-desktop plasma-workspace \
-            xdg-desktop-portal xdg-desktop-portal-kde xvfb dbus-x11
+            xdg-desktop-portal xdg-desktop-portal-kde xvfb dbus-x11 \
+            flatpak python3-gi gir1.2-gtk-3.0
 
       - name: Read Flutter version
         id: flutter-version
@@ -49,9 +50,17 @@ jobs:
         working-directory: app
         run: flutter build linux --release
 
+      - name: Package this build as a real LocalSend Flatpak
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive --assumeyes flathub org.localsend.localsend_app
+          python3 support/tests/prepare_flatpak_e2e.py app/build/linux/x64/release/bundle \
+            --output linux-e2e-flatpak 2>&1 | tee flatpak-preparation.log
+
       - name: Run Linux E2E tests on KDE and D-Bus
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash -euo pipefail -c '
+            export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
             export XDG_CURRENT_DESKTOP=KDE
             export XDG_SESSION_DESKTOP=KDE
             export DESKTOP_SESSION=plasma
@@ -76,3 +85,4 @@ jobs:
             linux-e2e-summary.log
             linux-e2e-results/
             plasma-session.log
+            flatpak-preparation.log

@@ -25,3 +25,7 @@
 
 # Local Linux E2E reports
 /linux-e2e-results/
+
+/linux-e2e-flatpak/
+
+/support/tests/__pycache__/
