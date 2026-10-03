@@ -139,19 +139,16 @@ class MemoryThumbnail extends StatelessWidget {
   Widget build(BuildContext context) {
     final Widget? thumbnail;
     if (bytes != null) {
+      final padding = fileType == FileType.apk ? _apkThumbnailPadding : 0.0;
+      final pixelSize = size * MediaQuery.devicePixelRatioOf(context);
       thumbnail = Padding(
-        padding: fileType == FileType.apk ? const EdgeInsets.all(_apkThumbnailPadding) : EdgeInsets.zero,
+        padding: EdgeInsets.all(padding),
         child: Image(
-          image: fileType == FileType.apk
-              ? _PaddedThumbnailMemoryImage(
-                  bytes!,
-                  pixelSize: size * MediaQuery.devicePixelRatioOf(context),
-                  padding: _apkThumbnailPadding,
-                )
-              : _ThumbnailMemoryImage(
-                  bytes!,
-                  pixelSize: (size * MediaQuery.devicePixelRatioOf(context)).ceil(),
-                ),
+          image: _ThumbnailMemoryImage(
+            bytes!,
+            pixelSize: padding == 0 ? pixelSize.ceilToDouble() : pixelSize,
+            padding: padding,
+          ),
           errorBuilder: (_, _, _) => Padding(
             padding: const EdgeInsets.all(10),
             child: Icon(fileType.icon, size: 32),
@@ -171,40 +168,15 @@ class MemoryThumbnail extends StatelessWidget {
 }
 
 class _ThumbnailMemoryImage extends MemoryImage {
-  final int pixelSize;
-
-  const _ThumbnailMemoryImage(super.bytes, {required this.pixelSize, super.scale});
-
-  @override
-  ImageStreamCompleter loadImage(MemoryImage key, ImageDecoderCallback decode) {
-    return super.loadImage(key, (buffer, {getTargetSize}) {
-      return decode(
-        buffer,
-        getTargetSize: (width, height) {
-          // BoxFit.cover fills the square using the shorter side. Leave the
-          // other dimension unset to preserve the aspect ratio during decoding.
-          return width <= height ? TargetImageSize(width: pixelSize.clamp(1, width)) : TargetImageSize(height: pixelSize.clamp(1, height));
-        },
-      );
-    });
-  }
-
-  @override
-  bool operator ==(Object other) => other is _ThumbnailMemoryImage && super == other && pixelSize == other.pixelSize;
-
-  @override
-  int get hashCode => Object.hash(super.hashCode, pixelSize);
-}
-
-class _PaddedThumbnailMemoryImage extends ImageProvider<_ThumbnailMemoryImage> {
-  final Uint8List bytes;
   final double pixelSize;
   final double padding;
 
-  const _PaddedThumbnailMemoryImage(this.bytes, {required this.pixelSize, required this.padding});
+  const _ThumbnailMemoryImage(super.bytes, {required this.pixelSize, this.padding = 0, super.scale});
 
   @override
-  Future<_ThumbnailMemoryImage> obtainKey(ImageConfiguration configuration) async {
+  Future<MemoryImage> obtainKey(ImageConfiguration configuration) => padding == 0 ? super.obtainKey(configuration) : _obtainPaddedKey();
+
+  Future<MemoryImage> _obtainPaddedKey() async {
     final buffer = await ImmutableBuffer.fromUint8List(bytes);
     ImageDescriptor? descriptor;
     try {
@@ -213,7 +185,7 @@ class _PaddedThumbnailMemoryImage extends ImageProvider<_ThumbnailMemoryImage> {
       final target = (pixelSize * shortSide / (shortSide + 2 * padding)).ceil().clamp(1, shortSide);
       return _ThumbnailMemoryImage(
         bytes,
-        pixelSize: target,
+        pixelSize: target.toDouble(),
         // Keep the original logical size so FittedBox scales the icon and its
         // padding together as it does for the full-resolution image.
         scale: target / shortSide,
@@ -225,14 +197,28 @@ class _PaddedThumbnailMemoryImage extends ImageProvider<_ThumbnailMemoryImage> {
   }
 
   @override
-  ImageStreamCompleter loadImage(_ThumbnailMemoryImage key, ImageDecoderCallback decode) => key.loadImage(key, decode);
+  ImageStreamCompleter loadImage(MemoryImage key, ImageDecoderCallback decode) => (key as _ThumbnailMemoryImage)._load(decode);
+
+  ImageStreamCompleter _load(ImageDecoderCallback decode) {
+    return super.loadImage(
+      this,
+      (buffer, {getTargetSize}) => decode(
+        buffer,
+        getTargetSize: (width, height) {
+          // BoxFit.cover fills the square using the shorter side. Leave the
+          // other dimension unset to preserve the aspect ratio during decoding.
+          final target = pixelSize.ceil();
+          return width <= height ? TargetImageSize(width: target.clamp(1, width)) : TargetImageSize(height: target.clamp(1, height));
+        },
+      ),
+    );
+  }
 
   @override
-  bool operator ==(Object other) =>
-      other is _PaddedThumbnailMemoryImage && other.bytes == bytes && other.pixelSize == pixelSize && other.padding == padding;
+  bool operator ==(Object other) => other is _ThumbnailMemoryImage && super == other && pixelSize == other.pixelSize && padding == other.padding;
 
   @override
-  int get hashCode => Object.hash(bytes, pixelSize, padding);
+  int get hashCode => Object.hash(super.hashCode, pixelSize, padding);
 }
 
 class _Thumbnail extends StatelessWidget {

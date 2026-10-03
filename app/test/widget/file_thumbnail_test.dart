@@ -43,6 +43,13 @@ void main() {
     }
   });
 
+  testWidgets('fractional sizes with the same decode target share the cached image', (tester) async {
+    final bytes = _png(800, 600);
+    final first = await _show(tester, bytes, size: 50.1, dpr: 1);
+    final second = await _show(tester, bytes, size: 50.9, dpr: 1);
+    expect(second.image, same(first.image));
+  });
+
   testWidgets('unchanged APK rebuild keeps the decoded icon visible', (tester) async {
     final bytes = _png(512, 512);
     final raw = await _show(tester, bytes, size: 60, dpr: 2, type: FileType.apk);
