@@ -79,7 +79,7 @@ def menu_label(text):
 
 
 def local_window():
-    return next((w for w in inspect()['windows'] if w['title'] == 'LocalSend'), None)
+    return next((w for w in inspect()['windows'] if 'localsend' in w['title'].lower()), None)
 
 
 def capture_case(name, expected):
@@ -92,6 +92,13 @@ def capture_case(name, expected):
                                  '--unit=' + name + '-localsend', *invocation], stdout=log, stderr=log)
     try:
         entry = wait_for(indicator, 'LocalSend StatusNotifierItem')
+        actor = wait_for(lambda: icon_actor(expected), f'GNOME rendered {expected} icon')
+        probe().LeaveOverview()
+        if not local_window():
+            click(actor)
+            open_item = wait_for(lambda: menu_label('Open'), 'initial tray Open menu item', seconds=20)
+            click(open_item)
+            entry['initial_window_opened_by_mouse'] = True
         window = wait_for(local_window, 'LocalSend application window')
         pid = window['pid']
         profile = Path(f'/proc/{pid}/attr/current').read_text().strip()
@@ -104,7 +111,6 @@ def capture_case(name, expected):
             assert entry['icon'].startswith('assets/'), entry
         else:
             assert os.path.isabs(entry['icon']) and Path(entry['icon']).is_file(), entry
-        actor = wait_for(lambda: icon_actor(expected), f'GNOME rendered {expected} icon')
         probe().LeaveOverview()
         time.sleep(2)
         snapshot(name)
@@ -162,7 +168,7 @@ if sys.argv[1] == 'ready':
         'session': os.environ.get('XDG_SESSION_TYPE'),
         'runtime': os.environ.get('XDG_RUNTIME_DIR'),
         'desktop': os.environ.get('XDG_CURRENT_DESKTOP'),
-        'extensions': {key: int(value['state']) for key, value in states.items()},
+        'extensions': {key: int(value['state']) if 'state' in value else None for key, value in states.items()},
     }, indent=2))
 elif sys.argv[1] == 'compose':
     result = Image.new('RGB', (500, 320), '#202020')
