@@ -27,6 +27,13 @@ jobs:
           flutter-version: '3.41.9'
           channel: stable
           cache: true
+      - name: Prepare pinned sources before restoring build caches
+        run: |
+          set -euo pipefail
+          mkdir bundles
+          git fetch https://github.com/localsend/localsend.git 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c
+          git diff 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c -- app/lib/util/native/tray_helper.dart > bundles/fix.patch
+          git worktree add --detach source 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b
       - uses: actions/cache@v4
         with:
           path: |
@@ -37,10 +44,6 @@ jobs:
       - name: Build pinned before and after
         run: |
           set -euo pipefail
-          mkdir bundles
-          git fetch https://github.com/localsend/localsend.git 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c
-          git diff 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b cc50a2e8395fe9d7de60547475b44a3268ad2d0c -- app/lib/util/native/tray_helper.dart > bundles/fix.patch
-          git worktree add --detach source 6f6cd3ee496903e2206c51ffa3a13a5d10bc340b
           cd source/app
           flutter pub get
           flutter build linux --release

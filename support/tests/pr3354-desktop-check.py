@@ -65,7 +65,9 @@ def indicator():
 def icon_actor(expected):
     actors = [a for a in inspect()['panel'] if a['visible'] and a['width'] > 0]
     if expected == 'fallback':
-        return next((a for a in actors if 'image-loading-symbolic' in a['icon'] + a['gicon']), None)
+        return next((a for a in actors if (
+            'image-loading-symbolic' in a['icon'] + a['gicon'] or
+            not a['icon'] and not a['gicon'] and a.get('fallback') == 'image-loading-symbolic')), None)
     return next((a for a in actors if 'logo-32-white' in a['gicon']), None)
 
 

@@ -6,6 +6,16 @@ const xml = `<node><interface name="org.localsend.TrayProbe">
   <method name="LeaveOverview"/>
 </interface></node>`;
 
+function describeIcon(icon) {
+    if (!icon)
+        return '';
+    if (icon instanceof Gio.EmblemedIcon)
+        return describeIcon(icon.gicon);
+    if (icon instanceof Gio.FileIcon)
+        return icon.get_file().get_path() ?? '';
+    return icon.to_string() ?? '';
+}
+
 function inspectActor(actor, depth = 0) {
     if (depth > 20 || !actor)
         return [];
@@ -16,7 +26,8 @@ function inspectActor(actor, depth = 0) {
         visible: actor.is_mapped(),
         text: typeof actor.get_text === 'function' ? actor.get_text() : '',
         icon: actor.icon_name ?? '',
-        gicon: actor.gicon?.to_string() ?? '',
+        gicon: describeIcon(actor.gicon),
+        fallback: typeof actor.get_fallback_icon_name === 'function' ? actor.get_fallback_icon_name() : '',
     }];
     for (const child of actor.get_children())
         result.push(...inspectActor(child, depth + 1));
