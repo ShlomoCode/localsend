@@ -115,11 +115,14 @@ def check_ready():
     data = wait_for(inspect, 'GNOME Shell diagnostic extension', timeout=120)
     assert data['backend'] == 'wayland', data['backend']
     assert data['stage']['width'] >= 800 and data['stage']['height'] >= 600, data['stage']
-    extensions = dbus.Interface(
+    extension_manager = dbus.Interface(
         BUS.get_object('org.gnome.Shell', '/org/gnome/Shell'),
-        'org.gnome.Shell.Extensions').ListExtensions()
-    for extension in ('ubuntu-dock@ubuntu.com', 'pr3416-probe@localsend.test'):
-        assert int(extensions[extension]['state']) == 1, (extension, extensions)
+        'org.gnome.Shell.Extensions')
+    def extensions_ready():
+        states = extension_manager.ListExtensions()
+        required = ('ubuntu-dock@ubuntu.com', 'pr3416-probe@localsend.test')
+        return states if all(int(states.get(key, {}).get('state', 0)) == 1 for key in required) else None
+    extensions = wait_for(extensions_ready, 'active Ubuntu Dock and diagnostic extensions')
     probe().LeaveOverview()
     time.sleep(2)
     snapshot('desktop-ready-initial')
