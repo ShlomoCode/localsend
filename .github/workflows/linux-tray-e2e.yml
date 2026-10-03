@@ -23,7 +23,13 @@ jobs:
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
             libayatana-appindicator3-dev plasma-desktop plasma-workspace \
             xdg-desktop-portal xdg-desktop-portal-kde xvfb dbus-x11 \
-            flatpak python3-gi gir1.2-gtk-3.0
+            flatpak python3-venv python3-gi gir1.2-gtk-3.0
+
+      - name: Install pytest
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/linux-e2e-venv"
+          "$RUNNER_TEMP/linux-e2e-venv/bin/python" -m pip install -r support/tests/requirements.txt
+          echo "E2E_PYTHON=$RUNNER_TEMP/linux-e2e-venv/bin/python" >> "$GITHUB_ENV"
 
       - name: Read Flutter version
         id: flutter-version
@@ -72,7 +78,7 @@ jobs:
             startplasma-x11 > plasma-session.log 2>&1 &
             plasma_pid=$!
             trap "kill $plasma_pid 2>/dev/null || true" EXIT
-            python3 support/tests/run_linux_e2e.py app/build/linux/x64/release/bundle --output linux-e2e-results 2>&1 | tee linux-e2e-summary.log
+            "$E2E_PYTHON" support/tests/run_linux_e2e.py app/build/linux/x64/release/bundle --output linux-e2e-results 2>&1 | tee linux-e2e-summary.log
           '
 
       - name: Upload test evidence

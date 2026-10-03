@@ -29,3 +29,6 @@
 /linux-e2e-flatpak/
 
 /support/tests/__pycache__/
+
+/support/tests/linux_e2e/__pycache__/
+/.pytest_cache/
