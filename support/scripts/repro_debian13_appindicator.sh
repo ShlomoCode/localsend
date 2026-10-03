@@ -16,7 +16,7 @@ cat /etc/os-release
 test "$(dpkg --print-architecture)" = amd64
 apt-get update
 # Recent Flutter engines load EGL dynamically; a desktop supplies these libraries.
-apt-get install -y --no-install-recommends ca-certificates xvfb xauth xdotool libegl1 libegl-mesa0
+apt-get install -y --no-install-recommends ca-certificates xvfb xauth xdotool libegl1 libegl-mesa0 libgles2
 
 if [[ $case_name == control ]]; then
   apt-get install -y --no-install-recommends libayatana-appindicator3-1
@@ -64,11 +64,19 @@ xvfb-run -a bash -c '
   for attempt in {1..30}; do
     if ! kill -0 "$app_pid" 2>/dev/null; then
       wait "$app_pid"
-      exit $?
+      app_status=$?
+      if [[ $app_status == 0 ]]; then
+        echo "Application exited without a stable window."
+        exit 2
+      fi
+      exit "$app_status"
     fi
     if xdotool search --onlyvisible --pid "$app_pid" >/dev/null 2>&1; then
-      echo "Application window appeared (PID $app_pid)."
-      exit 0
+      sleep 2
+      if kill -0 "$app_pid" 2>/dev/null && xdotool search --onlyvisible --pid "$app_pid" >/dev/null 2>&1; then
+        echo "Application window appeared and remained active (PID $app_pid)."
+        exit 0
+      fi
     fi
     sleep 1
   done
