@@ -34,7 +34,7 @@ jobs:
       - name: Install desktop and diagnostic tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 libgtk-3-0 libayatana-appindicator3-1 xvfb openbox dbus-x11 xdotool scrot tesseract-ocr python3
+          sudo apt-get install -y libfuse2 libgtk-3-0 libayatana-appindicator3-1 libegl1 libgles2 libgl1-mesa-dri libgbm1 xvfb openbox dbus-x11 xdotool scrot tesseract-ocr python3
           mkdir -p "$RUNNER_TEMP/issue508-${{ matrix.version }}" "$RUNNER_TEMP/issue508-runtime"
           chmod 700 "$RUNNER_TEMP/issue508-runtime"
           test -e /dev/fuse
