@@ -30,6 +30,10 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def bundle_binaries(bundle):
+    return [Path("localsend_app"), *(path.relative_to(bundle) for path in sorted((bundle / "lib").rglob("*")) if path.is_file())]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path)
@@ -78,7 +82,7 @@ def main():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
-    for name in ("localsend_app", "lib/libapp.so", "lib/libflutter_linux_gtk.so"):
+    for name in bundle_binaries(bundle):
         if digest(files / name) != digest(bundle / name):
             raise RuntimeError(f"Staged {name} differs from this checkout's release bundle")
     for name in ("logo-32-black.png", "logo-32-white.png"):
@@ -89,7 +93,7 @@ def main():
     run("flatpak", "remote-add", "--user", "--if-not-exists", "--no-gpg-verify", REMOTE, str(repo))
     run("flatpak", "install", "--user", "--noninteractive", "--assumeyes", REMOTE, f"{APP_ID}//{BRANCH}")
     installed = Path(output("flatpak", "info", "--user", "--show-location", f"{APP_ID}//{BRANCH}"))
-    for name in ("localsend_app", "lib/libapp.so", "lib/libflutter_linux_gtk.so"):
+    for name in bundle_binaries(bundle):
         if digest(installed / "files" / name) != digest(bundle / name):
             raise RuntimeError(f"Installed Flatpak {name} differs from this checkout's release bundle")
     print(f"PASS installed {APP_ID}//{BRANCH} from release bundle {bundle}")

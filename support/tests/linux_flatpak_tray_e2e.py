@@ -30,24 +30,31 @@ def instances():
     return found
 
 
+def bundle_binaries(bundle):
+    return [Path("localsend_app"), *(path.relative_to(bundle) for path in sorted((bundle / "lib").rglob("*")) if path.is_file())]
+
+
 def wait_for_instance(previous, process, seconds=25):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         current = instances()
         created = set(current) - previous
         if len(created) == 1:
-            instance = created.pop()
-            if current[instance] != BRANCH:
-                raise InfrastructureError(f"Launched Flatpak on branch {current[instance]}, expected {BRANCH}")
-            command("flatpak", "enter", instance, "sh", "-c",
-                    f"test -f /.flatpak-info && test -x /app/localsend_app && grep -q '{APP_ID}' /.flatpak-info")
-            return instance
+            return created.pop()
         if len(created) > 1:
             raise InfrastructureError(f"More than one LocalSend Flatpak instance appeared: {created}")
         if process.poll() is not None:
             raise InfrastructureError(f"Flatpak exited before registering an instance (exit {process.returncode})")
         time.sleep(0.25)
     raise InfrastructureError("Flatpak did not start an application instance")
+
+
+def validate_sandbox(instance):
+    branch = instances().get(instance)
+    if branch != BRANCH:
+        raise InfrastructureError(f"Launched Flatpak on branch {branch}, expected {BRANCH}")
+    command("flatpak", "enter", instance, "sh", "-c",
+            f"test -f /.flatpak-info && test -x /app/localsend_app && grep -q '{APP_ID}' /.flatpak-info")
 
 
 def icon_for_item(item):
@@ -151,7 +158,7 @@ def start_app(logfile):
 
 
 def stop_app(instance, process):
-    if instance is not None and instance in instances():
+    if instance is not None and instances().get(instance) == BRANCH:
         command("flatpak", "kill", instance)
     if process is not None:
         try:
@@ -174,7 +181,7 @@ def main():
         if not path.is_file():
             raise InfrastructureError(f"Built tray asset missing: {path}")
     deployment = command("flatpak", "info", "--user", "--show-location", f"{APP_ID}//{BRANCH}").stdout.strip()
-    for name in ("localsend_app", "lib/libapp.so", "lib/libflutter_linux_gtk.so"):
+    for name in bundle_binaries(bundle):
         installed = Path(deployment) / "files" / name
         built = bundle / name
         if not installed.is_file() or not built.is_file() or digest(installed.read_bytes()) != digest(built.read_bytes()):
@@ -193,6 +200,7 @@ def main():
         prior_items = set(registered_items())
         process = start_app(args.log)
         instance = wait_for_instance(set(), process)
+        validate_sandbox(instance)
         item = assert_icon(instance, prior_items, white, "dark startup control")
         apply_theme("light")
         assert_icon(instance, prior_items, black, "dark to light", item)
@@ -205,6 +213,7 @@ def main():
         prior_items = set(registered_items())
         process = start_app(args.log)
         instance = wait_for_instance(set(), process)
+        validate_sandbox(instance)
         assert_icon(instance, prior_items, black, "light startup")
     finally:
         prior_failure = sys.exc_info()[0] is not None
