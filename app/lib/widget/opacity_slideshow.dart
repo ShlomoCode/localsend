@@ -43,11 +43,10 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
   @override
   void didUpdateWidget(OpacitySlideshow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.running && !widget.running) {
+    if (oldWidget.running != widget.running) {
       _timer?.cancel();
       _switchTimer?.cancel();
       _opacity = 1;
-    } else if (!oldWidget.running && widget.running) {
       _startTimer();
     }
   }
