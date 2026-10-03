@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -162,6 +163,20 @@ def process_details(window):
     return int(pid), executable
 
 
+def appimage_runtime_environment(pid):
+    values = {}
+    try:
+        for entry in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0"):
+            if b"=" not in entry:
+                continue
+            key, value = entry.split(b"=", 1)
+            if key in (b"APPIMAGE", b"APPDIR"):
+                values[key.decode()] = value.decode(errors="replace")
+    except OSError as error:
+        values["read_error"] = str(error)
+    return values
+
+
 def stop_app(process, executable):
     try:
         os.killpg(process.pid, signal.SIGTERM)
@@ -187,16 +202,21 @@ def stop_app(process, executable):
             pass
 
 
-def start_app(executable, out, label, home):
+def app_environment(home):
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["XDG_CONFIG_HOME"] = str(home / ".config")
     env["XDG_DATA_HOME"] = str(home / ".local/share")
     env["XDG_CACHE_HOME"] = str(home / ".cache")
     env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+    return env
+
+
+def start_app(executable, out, label, home, extra_args=()):
+    env = app_environment(home)
     home.mkdir(parents=True, exist_ok=True)
     log = (out / f"{label}.app.log").open("w")
-    process = subprocess.Popen([str(executable)], stdout=log, stderr=subprocess.STDOUT,
+    process = subprocess.Popen([str(executable), *extra_args], stdout=log, stderr=subprocess.STDOUT,
                                env=env, start_new_session=True)
     window = wait_for(localsend_window, 45)
     if not window:
@@ -232,6 +252,7 @@ def exercise(executable, out, label, result, *, expected_option=True):
         process, window = start_app(executable, out, label, home)
         pid, gui_executable = process_details(window)
         result.update(window_pid=pid, running_executable=gui_executable,
+                      runtime_environment=appimage_runtime_environment(pid),
                       fuse_mounted_while_alive=is_mounted(gui_executable))
         if label == "appimage" and not result["fuse_mounted_while_alive"]:
             raise RuntimeError("AppImage did not use a FUSE mount; extraction fallback is not a valid test")
@@ -277,7 +298,7 @@ def exercise(executable, out, label, result, *, expected_option=True):
         raise RuntimeError("AppImage FUSE mount remained after closing all app processes")
     try:
         launched = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    env={**os.environ, "HOME": str(home)}, start_new_session=True)
+                                    env=app_environment(home), start_new_session=True)
         relaunched_window = wait_for(localsend_window, 8)
         if relaunched_window:
             pid, exe = process_details(relaunched_window)
@@ -302,6 +323,41 @@ def exercise(executable, out, label, result, *, expected_option=True):
         result["outcome"] = ("stable_extracted_exec" if
                              result["exec_exists_after_exit"] and
                              "window_pid" in result["exec_relaunch"] else "extracted_exec_not_working")
+    return result
+
+
+def intervene_stable_exec(image, out, appimage_result, result):
+    """Change only the desktop Exec executable in the failing profile."""
+    desktop = Path(appimage_result["desktop_file"])
+    original = desktop.read_text()
+    original_args = appimage_result["exec_command"]
+    stable_args = [str(image), *original_args[1:]]
+    old_line = next(line for line in original.splitlines() if line.startswith("Exec="))
+    new_line = "Exec=" + " ".join(shlex.quote(arg) for arg in stable_args)
+    modified = original.replace(old_line, new_line, 1)
+    if modified == original or modified.replace(new_line, old_line, 1) != original:
+        raise RuntimeError("Stable Exec intervention changed more than the Exec line")
+    desktop.write_text(modified)
+    (out / "stable-exec-intervention.desktop").write_text(modified)
+    home = desktop.parents[2]
+    result.update(original_exec=original_args, changed_exec=stable_args,
+                  same_home=str(home), desktop_file=str(desktop))
+    if not wait_for(lambda: localsend_window() is None, 10):
+        raise RuntimeError("Original LocalSend window remained before stable Exec intervention")
+    process, window = start_app(image, out, "stable-exec-intervention", home, original_args[1:])
+    try:
+        pid, executable = process_details(window)
+        result.update(window_pid=pid, running_executable=executable,
+                      runtime_environment=appimage_runtime_environment(pid),
+                      fuse_mounted_while_alive=is_mounted(executable),
+                      same_args=stable_args[1:] == original_args[1:],
+                      original_window_pid=appimage_result["window_pid"])
+        snapshot(out, "stable-exec-intervention")
+        if pid == appimage_result["window_pid"] or not result["fuse_mounted_while_alive"]:
+            raise RuntimeError("Stable Exec did not start a fresh mounted LocalSend GUI process")
+        result["outcome"] = "same_profile_stable_exec_works"
+    finally:
+        stop_app(process, executable if "executable" in locals() else "")
     return result
 
 
@@ -345,6 +401,9 @@ def main():
         result["cases"][current_case] = {}
         exercise(image, out, "appimage", result["cases"][current_case], expected_option=expected_option)
         if result["cases"]["appimage"]["outcome"] != "unsupported_missing_option":
+            current_case = "stable_exec_intervention"
+            result["cases"][current_case] = {}
+            intervene_stable_exec(image, out, result["cases"]["appimage"], result["cases"][current_case])
             current_case = "direct_relaunch"
             control, window = start_app(image, out, "direct-relaunch", out / "direct-relaunch-home")
             result["cases"]["direct_relaunch"] = {"outcome": "stable_appimage_path_works",
@@ -358,6 +417,10 @@ def main():
             current_case = "extracted"
             result["cases"][current_case] = {}
             exercise(extracted / "AppRun", out, "extracted", result["cases"][current_case])
+            if shutil.which("readelf"):
+                interpreter = command(["readelf", "-l", result["cases"]["extracted"]["exec_command"][0]],
+                                      check=False)
+                (out / "extracted-elf-interpreter.log").write_text(interpreter.stdout + interpreter.stderr)
     except Exception as error:
         if "current_case" in locals() and current_case in result["cases"]:
             result["cases"][current_case].setdefault("outcome", "harness_error")

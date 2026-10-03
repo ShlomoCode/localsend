@@ -21,3 +21,38 @@ diagnostic branch. Each matrix job uploads `result.json`, GUI screenshots,
 application logs, release metadata, and mount/process logs even when a case
 fails. A `harness_error` outcome means the UI action or FUSE mount was not
 verified; it is not evidence that autostart works.
+
+## Observed results
+
+[Run 37156625221](https://github.com/ShlomoCode/localsend/actions/runs/37156625221)
+reproduced the AppImage failure on the published x86-64 releases 1.14.0 and
+1.18.2. The real GUI toggle created a desktop entry whose `Exec` pointed to
+`/tmp/.mount_LocalS.../localsend_app`. The executable existed while the app
+ran. After termination, the FUSE mount disappeared and running the saved
+command failed with `ENOENT`. Relaunching the original AppImage file opened
+a new LocalSend window on both releases.
+
+The 1.10.0 GUI had no Linux autostart option. This matches the source at that
+tag: it offered the setting only on Windows. Linux support was added in
+[commit cb5090bc](https://github.com/localsend/localsend/commit/cb5090bca8b02290ae92801a480d44f6ab6e712d)
+and first included in 1.11.0. The original June 2023 report and the June 2024
+AppImage comment describe different stages of support. Neither reporter
+specified an exact version; 1.10.0 and 1.14.0 are the releases available at
+the respective report dates.
+
+The extracted-AppImage experiment is a packaging diagnostic, not a passing
+control for the tar or deb packages. Its `AppRun` opened the GUI, but the
+generated raw executable failed with `ENOENT` even though its file still
+existed. A missing ELF interpreter can produce that error. Do not infer that
+ordinary directory installations pass or fail from this experiment.
+
+The current source at `e768240d1ad95f0f162b852b5ff37bec71cde1ef` still writes
+`Platform.resolvedExecutable` into the Linux desktop entry in
+`app/lib/util/native/autostart_helper.dart`. This is source evidence of the
+same path selection; the runtime experiments above used published releases,
+not a build of that source revision.
+
+These experiments executed the generated `Exec` command in an X11/Openbox
+session on Ubuntu 22.04. They did not perform a complete KDE login on Arch,
+test hidden startup, or change product code. Each artifact contains the asset
+URL, size, and SHA-256 alongside `result.json` and the generated desktop entry.
