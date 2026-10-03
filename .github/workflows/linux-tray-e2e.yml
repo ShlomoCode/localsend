@@ -1,0 +1,22 @@
+# Keep the existing manual entry point; all Linux test execution lives in the reusable workflow.
+name: Linux E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      packaging:
+        description: Application packaging to test
+        type: choice
+        options: [all, native, flatpak]
+        default: all
+      test_filter:
+        description: Optional pytest -k expression; empty runs every Linux test
+        type: string
+        default: ''
+
+jobs:
+  linux-e2e:
+    uses: ./.github/workflows/linux-e2e.yml
+    with:
+      packaging: ${{ inputs.packaging }}
+      test_filter: ${{ inputs.test_filter }}
