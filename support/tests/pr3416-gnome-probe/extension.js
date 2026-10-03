@@ -56,8 +56,9 @@ function inspectTree(actor, ancestry = [], depth = 0, path = '0') {
     info.ancestry = ancestry;
     info.path = path;
     const result = [info];
+    const ancestor = [info.type, info.styleClass, info.name].filter(Boolean).join(' ');
     actor.get_children().forEach((child, index) =>
-        result.push(...inspectTree(child, [...ancestry, info.styleClass || info.type], depth + 1, `${path}.${index}`)));
+        result.push(...inspectTree(child, [...ancestry, ancestor], depth + 1, `${path}.${index}`)));
     return result;
 }
 
@@ -93,7 +94,7 @@ function inspect() {
     const tracker = Shell.WindowTracker.get_default();
     const installed = Shell.AppSystem.get_default().lookup_app('localsend_app.desktop');
     const installedInfo = installed?.get_app_info() ?? null;
-    const actors = inspectTree(Main.uiGroup);
+    const actors = inspectTree(global.stage);
     return JSON.stringify({
         backend: Meta.is_wayland_compositor() ? 'wayland' : 'x11',
         shellVersion: Config.PACKAGE_VERSION,

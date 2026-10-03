@@ -119,11 +119,11 @@ def check_ready():
         'org.gnome.Shell.Extensions').ListExtensions()
     for extension in ('ubuntu-dock@ubuntu.com', 'pr3416-probe@localsend.test'):
         assert int(extensions[extension]['state']) == 1, (extension, extensions)
-    wait_for(lambda: any('dashtodock' in ' '.join(actor['ancestry'] + [actor['styleClass']]).lower()
-                         for actor in inspect()['actors']), 'Ubuntu Dock actor')
     probe().LeaveOverview()
     time.sleep(2)
     snapshot('desktop-ready')
+    wait_for(lambda: any('dashtodock' in ' '.join(actor['ancestry'] + [actor['styleClass'], actor['name']]).lower()
+                         for actor in inspect()['actors']), 'Ubuntu Dock actor')
     (OUTPUT / 'desktop-environment.json').write_text(json.dumps({
         'gnome': subprocess.check_output(['gnome-shell', '--version'], text=True).strip(),
         'session': os.environ['XDG_SESSION_TYPE'],
