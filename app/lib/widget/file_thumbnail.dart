@@ -10,6 +10,7 @@ import 'package:uri_content/uri_content.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
 const double defaultThumbnailSize = 50;
+const double _apkThumbnailPadding = 50;
 
 class SmartFileThumbnail extends StatelessWidget {
   final Uint8List? bytes;
@@ -139,11 +140,14 @@ class MemoryThumbnail extends StatelessWidget {
     final Widget? thumbnail;
     if (bytes != null) {
       thumbnail = Padding(
-        padding: fileType == FileType.apk ? const EdgeInsets.all(50) : EdgeInsets.zero,
+        padding: fileType == FileType.apk ? const EdgeInsets.all(_apkThumbnailPadding) : EdgeInsets.zero,
         child: Image(
-          // APK icon padding is scaled together with the original image.
           image: fileType == FileType.apk
-              ? MemoryImage(bytes!)
+              ? _PaddedThumbnailMemoryImage(
+                  bytes!,
+                  pixelSize: size * MediaQuery.devicePixelRatioOf(context),
+                  padding: _apkThumbnailPadding,
+                )
               : _ThumbnailMemoryImage(
                   bytes!,
                   pixelSize: (size * MediaQuery.devicePixelRatioOf(context)).ceil(),
@@ -169,7 +173,7 @@ class MemoryThumbnail extends StatelessWidget {
 class _ThumbnailMemoryImage extends MemoryImage {
   final int pixelSize;
 
-  const _ThumbnailMemoryImage(super.bytes, {required this.pixelSize});
+  const _ThumbnailMemoryImage(super.bytes, {required this.pixelSize, super.scale});
 
   @override
   ImageStreamCompleter loadImage(MemoryImage key, ImageDecoderCallback decode) {
@@ -190,6 +194,38 @@ class _ThumbnailMemoryImage extends MemoryImage {
 
   @override
   int get hashCode => Object.hash(super.hashCode, pixelSize);
+}
+
+class _PaddedThumbnailMemoryImage extends ImageProvider<_ThumbnailMemoryImage> {
+  final Uint8List bytes;
+  final double pixelSize;
+  final double padding;
+
+  const _PaddedThumbnailMemoryImage(this.bytes, {required this.pixelSize, required this.padding});
+
+  @override
+  Future<_ThumbnailMemoryImage> obtainKey(ImageConfiguration configuration) async {
+    final buffer = await ImmutableBuffer.fromUint8List(bytes);
+    ImageDescriptor? descriptor;
+    try {
+      descriptor = await ImageDescriptor.encoded(buffer);
+      final shortSide = descriptor.width <= descriptor.height ? descriptor.width : descriptor.height;
+      final target = (pixelSize * shortSide / (shortSide + 2 * padding)).ceil().clamp(1, shortSide);
+      return _ThumbnailMemoryImage(
+        bytes,
+        pixelSize: target,
+        // Keep the original logical size so FittedBox scales the icon and its
+        // padding together as it does for the full-resolution image.
+        scale: target / shortSide,
+      );
+    } finally {
+      descriptor?.dispose();
+      buffer.dispose();
+    }
+  }
+
+  @override
+  ImageStreamCompleter loadImage(_ThumbnailMemoryImage key, ImageDecoderCallback decode) => key.loadImage(key, decode);
 }
 
 class _Thumbnail extends StatelessWidget {

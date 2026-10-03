@@ -42,6 +42,48 @@ void main() {
       expect(math.min(raw.image!.width, raw.image!.height), lessThanOrEqualTo((size * dpr).ceil() + 1));
     }
   });
+
+  for (final example in [
+    (48, 48, 50.0, 1.0),
+    (48, 96, 60.0, 3.0),
+    (96, 48, 50.0, 2.0),
+    (96, 96, 60.0, 1.25),
+    (96, 192, 50.0, 3.0),
+    (192, 96, 60.0, 2.0),
+    (192, 192, 50.0, 2.625),
+    (192, 512, 60.0, 3.0),
+    (512, 192, 50.0, 1.0),
+    (512, 512, 60.0, 2.0),
+    (301, 199, 50.0, 1.25),
+    (199, 301, 60.0, 2.625),
+  ]) {
+    final (width, height, size, dpr) = example;
+    testWidgets('APK ${width}x$height preserves padded bounds at size $size and DPR $dpr', (tester) async {
+      final raw = await _show(tester, _png(width, height), size: size, dpr: dpr, type: FileType.apk);
+      _expectPaddedApk(tester, raw, source: Size(width.toDouble(), height.toDouble()), size: size, dpr: dpr);
+    });
+  }
+
+  testWidgets('same cached bytes adapt between ordinary images and padded APK icons', (tester) async {
+    final bytes = _png(512, 512);
+    for (final display in [
+      (FileType.image, 50.0, 1.0),
+      (FileType.apk, 50.0, 1.0),
+      (FileType.apk, 60.0, 3.0),
+      (FileType.apk, 60.0, 1.25),
+      (FileType.image, 60.0, 1.25),
+      (FileType.apk, 50.0, 1.0),
+    ]) {
+      final (type, size, dpr) = display;
+      final raw = await _show(tester, bytes, size: size, dpr: dpr, type: type);
+      if (type == FileType.apk) {
+        _expectPaddedApk(tester, raw, source: const Size(512, 512), size: size, dpr: dpr);
+      } else {
+        _expectCover(tester, raw, source: const Size(512, 512), size: size, dpr: dpr);
+        expect(math.min(raw.image!.width, raw.image!.height), lessThanOrEqualTo((size * dpr).ceil() + 1));
+      }
+    }
+  });
 }
 
 Uint8List _png(int width, int height) {
@@ -50,7 +92,7 @@ Uint8List _png(int width, int height) {
   return Uint8List.fromList(img.encodePng(source));
 }
 
-Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double size, required double dpr}) async {
+Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double size, required double dpr, FileType type = FileType.image}) async {
   await tester.pumpWidget(
     MediaQuery(
       data: MediaQueryData(devicePixelRatio: dpr),
@@ -59,7 +101,7 @@ Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double si
         child: Theme(
           data: ThemeData(inputDecorationTheme: const InputDecorationTheme(fillColor: Colors.white)),
           child: Center(
-            child: MemoryThumbnail(bytes: bytes, fileType: FileType.image, size: size),
+            child: MemoryThumbnail(bytes: bytes, fileType: type, size: size),
           ),
         ),
       ),
@@ -76,6 +118,41 @@ Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double si
     }
   }
   fail('The thumbnail image did not finish decoding');
+}
+
+void _expectPaddedApk(WidgetTester tester, RawImage raw, {required Size source, required double size, required double dpr}) {
+  final thumbnail = tester.renderObject<RenderBox>(find.byType(MemoryThumbnail));
+  final imageBox = tester.renderObject<RenderBox>(find.byType(RawImage));
+  expect(thumbnail.size, Size.square(size));
+  final transform = imageBox.getTransformTo(thumbnail);
+  final painted = Rect.fromPoints(
+    MatrixUtils.transformPoint(transform, Offset.zero),
+    MatrixUtils.transformPoint(transform, imageBox.size.bottomRight(Offset.zero)),
+  );
+  final shortSide = math.min(source.width, source.height);
+  final originalScale = size / (shortSide + 100);
+  final expected = Rect.fromCenter(
+    center: Offset(size / 2, size / 2),
+    width: source.width * originalScale,
+    height: source.height * originalScale,
+  );
+  final decoded = raw.image!;
+  final roundingTolerance = originalScale * shortSide / math.min(decoded.width, decoded.height) + 0.001;
+  expect(painted.left, closeTo(expected.left, roundingTolerance));
+  expect(painted.top, closeTo(expected.top, roundingTolerance));
+  expect(painted.right, closeTo(expected.right, roundingTolerance));
+  expect(painted.bottom, closeTo(expected.bottom, roundingTolerance));
+  expect(decoded.width, lessThanOrEqualTo(source.width));
+  expect(decoded.height, lessThanOrEqualTo(source.height));
+  if (size * dpr <= shortSide + 100) {
+    expect(painted.width * dpr / decoded.width, lessThanOrEqualTo(1.00001));
+    expect(painted.height * dpr / decoded.height, lessThanOrEqualTo(1.00001));
+  }
+  final maximumShortSide = math.min(shortSide, (size * dpr * shortSide / (shortSide + 100)).ceil());
+  expect(math.min(decoded.width, decoded.height), lessThanOrEqualTo(maximumShortSide));
+  if (shortSide >= 512) {
+    expect(decoded.width * decoded.height * 4, lessThan(source.width * source.height * 4 / 4));
+  }
 }
 
 void _expectCover(
