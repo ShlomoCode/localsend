@@ -16,3 +16,5 @@ Use these guidelines when changing the app's UI or interaction behavior. Preserv
 - When a view offers multiple primary actions, leave them without initial focus. Let the user choose an action through focus traversal before activation.
 - Focus the main input when text entry is the clear purpose of a view.
 - A view-level keyboard handler must yield to a focused child control so the control keeps its standard keyboard behavior.
+- Use Enter for view-level default actions and Space for activating the focused control.
+- Keep button labels focused on the action. Show keyboard shortcuts in desktop tooltips only when the action and shortcut are available.

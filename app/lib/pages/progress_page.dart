@@ -533,16 +533,19 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
                                 icon: const Icon(Icons.info),
                                 label: Text(_advanced ? t.general.hide : t.general.advanced),
                               ),
-                              TextButton.icon(
-                                style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurface),
-                                onPressed: () => _exit(closeSession: true),
-                                icon: Icon(status == SessionStatus.sending ? Icons.close : Icons.check_circle),
-                                label: Text(
-                                  status == SessionStatus.sending
-                                      ? t.general.cancel
-                                      : _finishTimer != null
-                                      ? '${t.general.done} ($_finishCounter)'
-                                      : t.general.done,
+                              Tooltip(
+                                message: checkPlatformIsDesktop() && status != SessionStatus.sending ? '${t.general.done} (Enter)' : '',
+                                child: TextButton.icon(
+                                  style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurface),
+                                  onPressed: () => _exit(closeSession: true),
+                                  icon: Icon(status == SessionStatus.sending ? Icons.close : Icons.check_circle),
+                                  label: Text(
+                                    status == SessionStatus.sending
+                                        ? t.general.cancel
+                                        : _finishTimer != null
+                                        ? '${t.general.done} ($_finishCounter)'
+                                        : t.general.done,
+                                  ),
                                 ),
                               ),
                             ],
