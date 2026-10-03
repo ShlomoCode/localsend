@@ -23,7 +23,6 @@ class OpacitySlideshow extends StatefulWidget {
 
 class _OpacitySlideshowState extends State<OpacitySlideshow> {
   Timer? _timer;
-  Timer? _switchTimer;
   int _index = 0;
   double _opacity = 1;
 
@@ -36,7 +35,6 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
   @override
   void dispose() {
     _timer?.cancel();
-    _switchTimer?.cancel();
     super.dispose();
   }
 
@@ -45,7 +43,6 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.running != widget.running) {
       _timer?.cancel();
-      _switchTimer?.cancel();
       _opacity = 1;
       _startTimer();
     }
@@ -57,18 +54,11 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
     }
 
     _timer = Timer.periodic(Duration(milliseconds: widget.durationMillis), (_) {
-      // Let a pending fade finish before starting another one.
-      if (_switchTimer?.isActive ?? false) {
+      if (_opacity == 0) {
         return;
       }
       setState(() {
         _opacity = 0;
-      });
-      _switchTimer = Timer(Duration(milliseconds: widget.switchDurationMillis), () {
-        setState(() {
-          _index = (_index + 1) % widget.children.length;
-          _opacity = 1;
-        });
       });
     });
   }
@@ -78,6 +68,14 @@ class _OpacitySlideshowState extends State<OpacitySlideshow> {
     return AnimatedOpacity(
       opacity: _opacity,
       duration: Duration(milliseconds: widget.switchDurationMillis),
+      // A zero-duration fade can finish during build.
+      onEnd: () => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !widget.running || _opacity != 0) return;
+        setState(() {
+          _index = (_index + 1) % widget.children.length;
+          _opacity = 1;
+        });
+      }),
       child: widget.children[_index],
     );
   }

@@ -67,6 +67,8 @@ void main() {
       await tester.pumpWidget(slideshow(true));
       await tester.pump(const Duration(milliseconds: 500));
       expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 0);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pumpWidget(slideshow(false));
       expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 1);
       final pausedWakeups = wakeups.count;
@@ -75,23 +77,29 @@ void main() {
       expect(find.text('first'), findsOneWidget);
       await tester.pumpWidget(slideshow(true));
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 201));
+      await tester.pump();
       expect(find.text('second'), findsOneWidget);
     });
   });
 
-  testWidgets('a fade longer than the slideshow interval still completes', (tester) async {
-    final wakeups = _TimerWakeups();
-    await wakeups.run(tester, () async {
-      await tester.pumpWidget(
-        const Directionality(
-          textDirection: TextDirection.ltr,
-          child: OpacitySlideshow(durationMillis: 100, switchDurationMillis: 200, children: [Text('first'), Text('second')]),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(find.text('second'), findsOneWidget);
+  for (final fadeDuration in [0, 200]) {
+    testWidgets('slideshow completes a $fadeDuration ms fade with a 100 ms interval', (tester) async {
+      final wakeups = _TimerWakeups();
+      await wakeups.run(tester, () async {
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: OpacitySlideshow(durationMillis: 100, switchDurationMillis: fadeDuration, children: const [Text('first'), Text('second')]),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+        await tester.pump(Duration(milliseconds: fadeDuration + 1));
+        await tester.pump();
+        expect(find.text('second'), findsOneWidget);
+      });
     });
-  });
+  }
 }
