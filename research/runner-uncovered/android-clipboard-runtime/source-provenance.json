@@ -1,0 +1,9 @@
+{
+  "flutter_version": "3.41.9",
+  "flutter_source": "/Users/shlomo/fvm/versions/3.41.9/engine/src/flutter/shell/platform/android/io/flutter/plugin/platform/PlatformPlugin.java",
+  "flutter_source_sha256": "bcd5850765dbce78a03a5c0cb37f945a25558804cb4c9ed0bc733a73f414438c",
+  "flutter_body": "Exact getClipboardData body; only class wrappers/imports/stub enum outside method added",
+  "native_body": "Exact new getClipboardText case body copied from pinned-source proposal; ContextWrapper substitutes MainActivity solely to provide getSystemService",
+  "localsend_pin": "9529e915f438d8edd8bdf23e9f7aab2261a8b3e6",
+  "plugin_pin": "58748dae405df5e68a131e4905d48e75d0624be2"
+}

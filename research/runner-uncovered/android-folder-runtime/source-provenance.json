@@ -1,0 +1,29 @@
+{
+  "pin": "9529e915f438d8edd8bdf23e9f7aab2261a8b3e6",
+  "methods": "BeforeEnumerator.listFiles exact MainActivity.listFiles extraction; AfterEnumerator.listFiles exact approved18LOCpatch native portion; wrapper adds public enumerate only",
+  "FastDocumentFile": "exact complete pinned class copied",
+  "FileInfo_and_timestamp": "exact bottom MainActivity.kt copied",
+  "diff": [
+    "--- \n",
+    "+++ \n",
+    "@@ -1,14 +1,15 @@\n",
+    "-    private fun listFiles(uri: Uri, files: MutableList<FileInfo>) {",
+    "+    private fun listFiles(uri: Uri, files: MutableList<FileInfo>, parentPath: String? = null) {",
+    "         val pickedDir: FastDocumentFile = FastDocumentFile.fromTreeUri(this, uri)",
+    "+        val relative = parentPath ?: FastDocumentFile.fromDocumentUri(this, pickedDir.uri)?.name ?: error(\"Missing directory name\")",
+    " ",
+    "         for (file in pickedDir.listFiles()) {",
+    "             if (file.isDirectory) {",
+    "                 // Recursive call",
+    "-                listFiles(file.uri, files)",
+    "+                listFiles(file.uri, files, \"$relative/${file.name}\")",
+    "             } else if (file.isFile) {",
+    "                 files.add(",
+    "                     FileInfo(",
+    "-                        name = file.name,",
+    "+                        name = \"$relative/${file.name}\",",
+    "                         size = file.size,",
+    "                         uri = file.uri.toString(),",
+    "                         lastModified = file.lastModified?.toRfc3339(),"
+  ]
+}

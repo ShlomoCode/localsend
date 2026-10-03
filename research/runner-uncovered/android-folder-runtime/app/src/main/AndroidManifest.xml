@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <activity android:name="org.localsend.localsend_app.BeforeDirectoryActivity" />
+    <activity android:name="org.localsend.localsend_app.AfterDirectoryActivity" />
+    <provider android:name="org.localsend.localsend_app.OpaqueDocumentsProvider"
+      android:authorities="localsend.fixture.documents" android:exported="true"
+      android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+      <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
+    </provider>
+  </application>
+</manifest>

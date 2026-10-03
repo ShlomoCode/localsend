@@ -5,7 +5,7 @@ import 'dart:io';
 // platform environment/executable dependencies are injected for fixtures.
 Future<void> main(List<String> args) async {
   if (args.length != 3) throw ArgumentError('baseline source, patched source, output directory required');
-  final output = Directory(args[2])..createSync(recursive: true);
+  final output = Directory(args[2]).absolute..createSync(recursive: true);
   final manifest = <Map<String, dynamic>>[];
   final names = ['plain.AppImage', 'space name.AppImage', 'quote"name.AppImage', r'back\slash.AppImage', r'dollar$name.AppImage', 'back`tick.AppImage', 'percent%f.AppImage', 'line\nbreak.AppImage', 'tab\tname.AppImage'];
   for (var version = 0; version < 2; version++) {

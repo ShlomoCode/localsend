@@ -1,0 +1,45 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version '1.9.24'
+}
+repositories { google(); mavenCentral() }
+java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
+kotlin { jvmToolchain(17) }
+configurations { androidAars }
+dependencyLocking { lockAllConfigurations() }
+dependencies {
+    compileOnly 'org.robolectric:android-all:14-robolectric-10818077'
+    testImplementation 'org.robolectric:android-all:14-robolectric-10818077'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation('org.robolectric:robolectric:4.14.1') {
+        exclude group: 'androidx.test', module: 'monitor'
+        exclude group: 'androidx.test.espresso', module: 'espresso-idling-resource'
+    }
+    androidAars('androidx.test:monitor:1.7.2@aar') { transitive = false }
+    androidAars('androidx.test.espresso:espresso-idling-resource:3.6.1@aar') { transitive = false }
+    testImplementation files(layout.buildDirectory.dir('android-aar-jars').map { it.asFile })
+}
+def extractAndroidAars = tasks.register('extractAndroidAars') {
+    inputs.files(configurations.androidAars)
+    outputs.dir(layout.buildDirectory.dir('android-aar-jars'))
+    doLast {
+        configurations.androidAars.files.each { aar ->
+            copy {
+                from zipTree(aar)
+                include 'classes.jar'
+                into layout.buildDirectory.dir('android-aar-jars')
+                rename 'classes.jar', aar.name.replace('.aar', '.jar')
+            }
+        }
+    }
+}
+// Use extracted classes.jar files on the Java test classpath instead of AAR archives.
+sourceSets.test.compileClasspath += fileTree(layout.buildDirectory.dir('android-aar-jars')) { include '*.jar' }
+sourceSets.test.runtimeClasspath += fileTree(layout.buildDirectory.dir('android-aar-jars')) { include '*.jar' }
+tasks.named('compileTestJava') { dependsOn extractAndroidAars }
+tasks.named('test') {
+    dependsOn extractAndroidAars
+    maxHeapSize = '1g'
+    systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+    testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true; exceptionFormat = 'full' }
+}

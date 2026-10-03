@@ -30,6 +30,8 @@ for row in manifest:
     success = actual == row["expected_argv"]
     result = dict(row, success=success, actual_argv=actual, launch_error=error, desktop_contents=pathlib.Path(row["desktop"]).read_text())
     results.append(result)
+    if row["version"] == "after" and not success:
+        print("CASE_FAILURE " + json.dumps({key: result[key] for key in ["name", "hidden", "use_appimage", "launch_error", "actual_argv", "expected_argv", "desktop_contents"]}), flush=True)
 (root / "glib-results.json").write_text(json.dumps(results, indent=2))
 after = [r for r in results if r["version"] == "after"]
 before_appimage = [r for r in results if r["version"] == "before" and r["use_appimage"]]

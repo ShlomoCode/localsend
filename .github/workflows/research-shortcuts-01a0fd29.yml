@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   actual-app-fixtures:
     runs-on: ubuntu-24.04
@@ -73,6 +77,21 @@ jobs:
           cp ../../research/runner-uncovered/fresh-alias-history-2462-after-widget_test.dart test/research_alias_test.dart
           flutter test test/research_alias_test.dart --reporter expanded 2>&1 | tee ../../observations/alias-after.log
           git diff -- lib/widget/dialogs/text_field_with_actions.dart lib/pages/tabs/settings_tab.dart > ../../observations/alias-production.diff
+      - name: Actual completed-share navigation before and after
+        id: share
+        continue-on-error: true
+        run: |
+          cp research/runner-uncovered/protocol-share-test.dart baseline/app/test/protocol_share_test.dart
+          cd baseline/app
+          python3 ../../research/runner-uncovered/protocol-share-apply.py .. before
+          set +e
+          flutter test test/protocol_share_test.dart --reporter expanded > ../../observations/share-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > ../../observations/share-before-status.txt
+          test "$before_status" -ne 0
+          python3 ../../research/runner-uncovered/protocol-share-apply.py .. after
+          flutter test test/protocol_share_test.dart --reporter expanded 2>&1 | tee ../../observations/share-after.log
       - name: Actual Wayland resize and persistence before and after
         id: wayland
         continue-on-error: true
@@ -83,13 +102,128 @@ jobs:
           git -C .. apply ../research/runner-uncovered/packaging-wayland-size-patch.diff
           flutter test test/research_wayland_test.dart --dart-define=PATCHED=true --reporter expanded 2>&1 | tee ../../observations/wayland-after.log
           git diff -- lib/provider/window_dimensions_provider.dart lib/provider/persistence_provider.dart lib/widget/watcher/window_watcher.dart > ../../observations/wayland-production.diff
+      - name: Actual stale receive page timer before and after
+        id: timer
+        continue-on-error: true
+        run: |
+          cp research/runner-uncovered/protocol-stale-timer-test.dart baseline/app/test/protocol_stale_timer_test.dart
+          cd baseline/app
+          python3 ../../research/runner-uncovered/protocol-stale-timer-apply.py .. before
+          set +e
+          flutter test test/protocol_stale_timer_test.dart --reporter expanded > ../../observations/timer-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > ../../observations/timer-before-status.txt
+          test "$before_status" -ne 0
+          python3 ../../research/runner-uncovered/protocol-stale-timer-apply.py .. after
+          flutter test test/protocol_stale_timer_test.dart --reporter expanded 2>&1 | tee ../../observations/timer-after.log
+      - name: Actual receive filename allocation and existing regression tests
+        id: filenames
+        continue-on-error: true
+        run: |
+          cd baseline
+          git apply ../research/runner-uncovered/files-collision-harness/before-fixture.patch
+          cd packages/localsend_isolates
+          set +e
+          flutter test --no-pub test/task/server/file_saver_test.dart test/task/server/file_saver_traversal_test.dart --reporter expanded > ../../../observations/filenames-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > ../../../observations/filenames-before-status.txt
+          test "$before_status" -ne 0
+          git -C ../.. apply ../research/runner-uncovered/files-collision-harness/session-reservations.patch
+          flutter test --no-pub test/task/server/file_saver_test.dart test/task/server/file_saver_traversal_test.dart --reporter expanded 2>&1 | tee ../../../observations/filenames-after.log
+      # Insert under actual-app-fixtures.steps before its final gate.
+      # Add `test '${{ steps.clipboard_app.outcome }}' = success` to that existing gate.
+      # This step uses a separate pinned scratch checkout, so prior app fixtures cannot
+      # change clipboard behavior and these source snapshots cannot overwrite their edits.
+      - name: Actual Android clipboard selection before and after
+        id: clipboard_app
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p observations
+          clipboard_fixture_root="$GITHUB_WORKSPACE/research/runner-uncovered/android-clipboard-runtime"
+          clipboard_scratch="$(mktemp -d /tmp/localsend-clipboard-fixture-XXXXXX)"
+          clipboard_repo="$clipboard_scratch/repo"
+          trap 'rm -rf "$clipboard_scratch"' EXIT
+          git clone --no-hardlinks "$GITHUB_WORKSPACE/baseline" "$clipboard_repo"
+          git -C "$clipboard_repo" checkout --detach 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          test "$(git -C "$clipboard_repo" rev-parse HEAD)" = 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          git -C "$clipboard_repo" rev-parse HEAD > observations/clipboard-app-baseline-sha.txt
+          (
+            cd "$clipboard_repo"
+            flutter pub get --enforce-lockfile
+          )
+          python3 "$clipboard_fixture_root/apply_flutter_fixture.py" --repo "$clipboard_repo" --mode baseline
+          (
+            cd "$clipboard_repo/app"
+            set +e
+            flutter test --no-pub test/fresh_clipboard_2862_test.dart --plain-name 'SAF text file remains a file and never requests coerced text' --reporter json 2>&1 | tee "$GITHUB_WORKSPACE/observations/clipboard-app-before.jsonl"
+            clipboard_before_status=${PIPESTATUS[0]}
+            set -e
+            echo "$clipboard_before_status" > "$GITHUB_WORKSPACE/observations/clipboard-app-before-status.txt"
+            test "$clipboard_before_status" -ne 0
+          )
+          # Require the specific observable file-as-message assertion, not merely a
+          # nonzero status caused by compilation, dependencies, or a missing channel.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('observations/clipboard-app-before.jsonl')
+          events = []
+          for line in p.read_text().splitlines():
+              try:
+                  events.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          target = 'SAF text file remains a file and never requests coerced text'
+          ids = {e['test']['id'] for e in events if e.get('type') == 'testStart' and target in e['test']['name']}
+          errors = [e for e in events if e.get('type') == 'error' and e.get('testID') in ids]
+          expected_uri = 'content://test.documents/document/TAIR10_GFF3_genes.gff'
+          assert any('Expected:' in e.get('error', '') and expected_uri in e['error'] and 'Actual: <null>' in e['error'] for e in errors), errors
+          assert any(e.get('type') == 'testDone' and e.get('testID') in ids and e.get('result') == 'failure' for e in events), events
+          assert not any('MissingPluginException' in e.get('error', '') for e in errors), errors
+          Path('observations/clipboard-app-before-proof.json').write_text(json.dumps({'behavioral_failure_verified': True, 'expected_path': expected_uri, 'actual_path': None, 'test_ids': sorted(ids)}, indent=2))
+          PY
+          python3 "$clipboard_fixture_root/apply_flutter_fixture.py" --repo "$clipboard_repo" --mode patched
+          (
+            cd "$clipboard_repo/app"
+            flutter test --no-pub test/fresh_clipboard_2862_test.dart --reporter json 2>&1 | tee "$GITHUB_WORKSPACE/observations/clipboard-app-after.jsonl"
+          )
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          events = []
+          for line in Path('observations/clipboard-app-after.jsonl').read_text().splitlines():
+              try:
+                  events.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          expected = [
+              'SAF text file remains a file and never requests coerced text',
+              'explicit copied text wins even with an accompanying URI',
+              'desktop still uses Flutter clipboard',
+          ]
+          completed = {e.get('testID'): e.get('result') for e in events if e.get('type') == 'testDone'}
+          observed = {name: any(e.get('type') == 'testStart' and name in e['test']['name'] and completed.get(e['test']['id']) == 'success' for e in events) for name in expected}
+          assert all(observed.values()), observed
+          assert not any(e.get('type') == 'error' for e in events), events
+          assert any(e.get('type') == 'done' and e.get('success') is True for e in events), events
+          Path('observations/clipboard-app-after-proof.json').write_text(json.dumps({'all_three_tests_passed': True, 'tests': observed, 'linux_test_seam': 'UriContent(internalPlatform: TargetPlatform.android), identical in both modes'}, indent=2))
+          PY
+          git -C "$clipboard_repo" diff -- app/lib/util/native/file_picker.dart app/lib/util/native/channel/android_channel.dart > observations/clipboard-app-after-with-test-seam.diff
+
       - name: Final fixture gate
         if: always()
         run: |
           test '${{ steps.settings.outcome }}' = success
           test '${{ steps.size.outcome }}' = success
           test '${{ steps.alias.outcome }}' = success
+          test '${{ steps.share.outcome }}' = success
           test '${{ steps.wayland.outcome }}' = success
+          test '${{ steps.timer.outcome }}' = success
+          test '${{ steps.filenames.outcome }}' = success
+          test '${{ steps.clipboard_app.outcome }}' = success
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -139,17 +273,40 @@ jobs:
           echo "$before_status" > observations/favorite-before-status.txt
           test "$before_status" -ne 0
           dart research/runner-uncovered/fresh-alias-history-2381-after.dart 2>&1 | tee observations/favorite-after.log
+      - name: Actual cache worker isolate lifetime before and after
+        id: cache
+        continue-on-error: true
+        run: |
+          set +e
+          dart research/runner-uncovered/fresh-photo-secondary-cache-before.dart > observations/cache-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > observations/cache-before-status.txt
+          test "$before_status" -ne 0
+          dart research/runner-uncovered/fresh-photo-secondary-cache-after.dart 2>&1 | tee observations/cache-after.log
       - name: Final fixture gate
         if: always()
         run: |
           test '${{ steps.launcher.outcome }}' = success
           test '${{ steps.photo.outcome }}' = success
           test '${{ steps.favorite.outcome }}' = success
+          test '${{ steps.cache.outcome }}' = success
+      - name: Archive launcher observations with special filename cases
+        if: always()
+        run: |
+          if test -d observations/launches; then
+            tar -czf observations/launcher-fixture.tar.gz -C observations launches
+            cp observations/launches/glib-results.json observations/launcher-results.json
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: uncovered-launcher-observations
-          path: observations/
+          path: |
+            observations/*.json
+            observations/*.log
+            observations/*.txt
+            observations/*.tar.gz
           if-no-files-found: error
   native-windows-theme:
     runs-on: windows-latest
@@ -171,9 +328,159 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./theme-after.exe 2>&1 | Tee-Object observations/theme-after.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE research/runner-uncovered/fresh-ui-input-1735-complete-win32-real.cpp /Fe:app-theme-before.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE /DAFTER_FIX research/runner-uncovered/fresh-ui-input-1735-complete-win32-real.cpp /Fe:app-theme-after.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./app-theme-before.exe 2>&1 | Tee-Object observations/app-theme-before.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./app-theme-after.exe 2>&1 | Tee-Object observations/app-theme-after.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl /nologo /EHsc /std:c++17 research/runner-uncovered/fresh-lifecycle-windows-native-fixture.cpp /Fe:power-flags.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./power-flags.exe 2>&1 | Tee-Object observations/power-flags.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: uncovered-windows-observations
           path: observations/
+          if-no-files-found: error
+  native-android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Resolve SDK only on the runner
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Real Android document metadata and UI traversal
+        id: folders
+        continue-on-error: true
+        working-directory: research/runner-uncovered/android-folder-runtime
+        run: gradle --no-daemon :app:testDebugUnitTest --tests org.localsend.localsend_app.OpaqueFolderTest --tests org.localsend.localsend_app.DirectoryThreadTest --stacktrace
+      - name: Real Android clipboard coercion and completion
+        id: clipboard
+        continue-on-error: true
+        working-directory: research/runner-uncovered/android-clipboard-runtime
+        run: gradle --no-daemon test --tests proof.ClipboardProofTest --tests proof.NullFilesCompletionTest --write-locks --stacktrace
+      - name: Final native fixture gate
+        if: always()
+        run: |
+          test '${{ steps.folders.outcome }}' = success
+          test '${{ steps.clipboard.outcome }}' = success
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uncovered-android-observations
+          path: |
+            research/runner-uncovered/android-folder-runtime/app/build/test-results/
+            research/runner-uncovered/android-folder-runtime/app/build/fixture-evidence/
+            research/runner-uncovered/android-clipboard-runtime/build/test-results/
+            research/runner-uncovered/android-clipboard-runtime/gradle.lockfile
+          if-no-files-found: error
+  windows-flutter-ffi:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: localsend/localsend
+          ref: 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          path: baseline
+          persist-credentials: false
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Resolve pinned SDK and workspace only on runner
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch 3.41.9 https://github.com/flutter/flutter.git "$env:RUNNER_TEMP/flutter"
+          "$env:RUNNER_TEMP/flutter/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Actual app helper and MaterialApp builder with real Win32 FFI
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force observations | Out-Null
+          flutter --version
+          Push-Location baseline
+          flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          python research/runner-uncovered/fresh-ui-input-windows-flutter/prepare_fixture.py baseline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl /nologo /EHsc /std:c++17 research/runner-uncovered/fresh-ui-input-windows-flutter/native_host.cpp /Fe:native_host.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:LOCALSEND_THEME_HOST = (Resolve-Path native_host.exe).Path
+          Push-Location baseline
+          flutter pub get --offline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location app
+          flutter test --no-pub test/widget/fresh_windows_theme_integration_test.dart --reporter expanded 2>&1 | Tee-Object ../../observations/windows-flutter.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uncovered-windows-flutter-observations
+          path: observations/
+          if-no-files-found: error
+  ios-extension-compatibility:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: localsend/localsend
+          ref: 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          path: baseline
+          persist-credentials: false
+      - name: Exact plugin and app subclass compile at both minimum targets
+        run: |
+          mkdir -p observations/before observations/after
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          plugin=research/runner-uncovered/ios-share-models
+          for minimum in 16.0 14.0; do
+            if test "$minimum" = 16.0; then variant=before; else variant=after; fi
+            swiftc -sdk "$sdk" -target arm64-apple-ios${minimum}-simulator -application-extension -parse-as-library -emit-library -emit-module -module-name share_handler_ios_models -emit-module-path observations/$variant/share_handler_ios_models.swiftmodule -o observations/$variant/libshare_handler_ios_models.dylib "$plugin/ShareHandlerIosViewController.swift" "$plugin/SharedModels.swift" 2>&1 | tee observations/$variant-compiler.log
+            swiftc -sdk "$sdk" -target arm64-apple-ios${minimum}-simulator -application-extension -I observations/$variant -typecheck baseline/app/ios/ShareExtension/ShareViewController.swift 2>&1 | tee observations/$variant-subclass.log
+            xcrun vtool -show-build observations/$variant/libshare_handler_ios_models.dylib > observations/$variant-build-version.txt
+          done
+          xcodebuild -version > observations/xcode-version.txt
+          git -C baseline apply ../research/runner-uncovered/fresh-photo-secondary-410.patch
+          git -C baseline diff -- app/ios/Runner.xcodeproj/project.pbxproj > observations/deployment-target.diff
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uncovered-ios-extension-observations
+          path: observations/
+          if-no-files-found: error
+  browser-storage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Browser transport only on disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-websocket
+      - name: Actual full web pages with native blocked session storage
+        run: /usr/bin/python3 research/runner-uncovered/fresh-web-browser/run.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uncovered-browser-observations
+          path: research/runner-uncovered/fresh-web-browser/runtime/
           if-no-files-found: error

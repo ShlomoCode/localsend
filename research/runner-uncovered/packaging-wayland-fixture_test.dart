@@ -22,6 +22,7 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
       cacheWaylandStatus(false);
     });
+    try {
     SharedPreferences.setMockInitialValues({
       'ls_version': 999,
       'ls_locale': 'en',
@@ -53,6 +54,7 @@ void main() {
     messenger.setMockMethodCallHandler(const MethodChannel('dev.leanflutter.plugins/screen_retriever'), (call) async {
       if (call.method == 'getAllDisplays') return {'displays': [display]};
       if (call.method == 'getPrimaryDisplay') return display;
+      if (call.method == 'getCursorScreenPoint') return {'dx': 0.0, 'dy': 0.0};
       return null;
     });
     addTearDown(() {
@@ -93,5 +95,9 @@ void main() {
     if (patched) expect(bounds.where((args) => args.containsKey('x') || args.containsKey('y')), isEmpty);
     print('PATCHED=$patched resize callback saved=${prefs.getDouble('ls_window_width')} restart size=$sizes');
     await tester.pumpWidget(const SizedBox());
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      cacheWaylandStatus(false);
+    }
   });
 }

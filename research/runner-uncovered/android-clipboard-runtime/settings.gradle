@@ -1,0 +1,2 @@
+pluginManagement { repositories { gradlePluginPortal(); mavenCentral(); google() } }
+rootProject.name = 'localsend-2862-clipboard-proof'

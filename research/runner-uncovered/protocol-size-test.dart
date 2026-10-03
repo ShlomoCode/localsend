@@ -53,7 +53,7 @@ void main() {
       expect(api.client.requests, hasLength(1));
       return api.client.requests.single.files.values.single;
     } finally {
-      container.dispose();
+      container.disposeContainer();
       api.client.requests.clear();
     }
   }

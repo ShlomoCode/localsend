@@ -1,0 +1,8 @@
+{
+  "pin": "9529e915f438d8edd8bdf23e9f7aab2261a8b3e6",
+  "primary_docs": [
+    "https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage",
+    "https://www.chromium.org/for-testers/bug-reporting-guidelines/uncaught-securityerror-failed-to-read-the-localstorage-property-from-window-access-is-denied-for-this-document/"
+  ],
+  "note": "Use ordinary localhost HTTP origin; no opaque origin or mocked sessionStorage. Native Chrome cookies content setting = 2."
+}

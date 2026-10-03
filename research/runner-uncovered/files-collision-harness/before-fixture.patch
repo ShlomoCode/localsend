@@ -1,0 +1,29 @@
+--- a/packages/localsend_isolates/test/task/server/file_saver_test.dart
++++ b/packages/localsend_isolates/test/task/server/file_saver_test.dart
+@@ -30,6 +30,26 @@
+     );
+     return path;
+   }
++
++
++  test('keeps all payloads when a batch allocates identical names concurrently', () async {
++    final targets = await Future.wait(
++      List.generate(20, (_) => digestFilePathAndPrepareDirectory(
++        parentDirectory: tempDir.path,
++        fileName: 'Frame.jpg',
++        createdDirectories: {},
++      )),
++    );
++    expect(tempDir.listSync(), isEmpty, reason: 'allocation must not create abandoned files before writers start');
++
++    for (var i = 0; i < targets.length; i++) {
++      await File(targets[i].$1).writeAsString('payload-$i');
++    }
++    final names = targets.map((target) => target.$1).toSet();
++    final payloads = await Future.wait(names.map((name) => File(name).readAsString()));
++    expect(names, hasLength(20));
++    expect(payloads.toSet(), {for (var i = 0; i < 20; i++) 'payload-$i'});
++  });
+ 
+   test('creates the destination directory when it does not exist', () async {
+     final destination = p.join(tempDir.path, 'gone');

@@ -1,0 +1,47 @@
+{
+  "versions": {
+    "gradle": "8.7",
+    "java": "17",
+    "kotlin": "1.9.24",
+    "robolectric": "4.14.1",
+    "sdk": 34,
+    "android_all": "14-robolectric-10818077",
+    "junit": "4.13.2",
+    "androidx_test_monitor": "1.7.2",
+    "espresso_idling_resource": "3.6.1"
+  },
+  "native_run": [
+    "gradle --no-daemon test --tests proof.ClipboardProofTest --write-locks"
+  ],
+  "native_expected": {
+    "tests": 7,
+    "baseline": "4,194,304 chars equal full file, ContentProvider.openTypedAssetFile count>=2",
+    "patched": "raw null, file URI retained, providerOpens=0",
+    "controls": [
+      "explicit 4MB clipboard text retained",
+      "mixed explicit URL text/content URI retained as text",
+      "https URI raw behavior unchanged",
+      "image URI no coerce into text",
+      "empty clipboard text null",
+      "SecurityException caught"
+    ]
+  },
+  "flutter_run": [
+    "python3 apply_flutter_fixture.py --repo /tmp/localsend-clipboard-fixture --mode baseline",
+    "cd /tmp/localsend-clipboard-fixture/app && fvm flutter test test/fresh_clipboard_2862_test.dart",
+    "python3 apply_flutter_fixture.py --repo /tmp/localsend-clipboard-fixture --mode patched",
+    "cd /tmp/localsend-clipboard-fixture/app && fvm flutter test test/fresh_clipboard_2862_test.dart"
+  ],
+  "flutter_expected": {
+    "baseline": "SAF file test fails: file is bytes-backed message and calls Clipboard.getData. Mixed test also records baseline FlutterClipboard call. Desktop control passes.",
+    "patched": "All3tests pass: content URI path, bytes null, 42MB metadata size; mixed URL text stays text; desktop remains Flutter Clipboard."
+  },
+  "scope": "Scratch-only no production worktree edits. 4MB provider runtime proof scales coercion mechanism safely; 42MB metadata Flutter fixture proves file path selection. Not a profile of original device or Windows11GB memory.",
+  "lock_note": "Every declared version is fixed; --write-locks records all resolved transitives into gradle.lockfile for replay. No dependency resolution or installs were performed locally.",
+  "new_noIssue_native_run": "gradle --no-daemon test --tests proof.NullFilesCompletionTest --write-locks",
+  "new_noIssue_native_expected": {
+    "tests": 3,
+    "null_clip": "baselineCallbacks=0 patchedCallbacks=1 result=[]",
+    "controls": "2URI same values callback1; plaintext []callback1"
+  }
+}

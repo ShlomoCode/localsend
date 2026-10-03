@@ -1,0 +1,110 @@
+--- a/packages/localsend_isolates/lib/src/task/server/file_saver.dart
++++ b/packages/localsend_isolates/lib/src/task/server/file_saver.dart
+@@ -46,6 +46,7 @@
+   required String fileName,
+   required bool saveToGallery,
+   required Set<String> createdDirectories,
++  required Set<String> allocatedPaths,
+   int? androidSdkInt,
+ }) async {
+   final parentDirectory = saveToGallery ? cacheDirectory : destinationDirectory;
+@@ -54,6 +55,7 @@
+     parentDirectory: parentDirectory,
+     fileName: fileName,
+     createdDirectories: createdDirectories,
++    allocatedPaths: allocatedPaths,
+   );
+ 
+   // When saveToGallery is enabled, the cache directory is used so SAF is not needed
+@@ -129,6 +131,7 @@
+   required String fileName,
+   required bool isImage,
+   required Set<String> createdDirectories,
++  required Set<String> allocatedPaths,
+ }) async {
+   try {
+     isImage ? await Gal.putImage(cachedPath) : await Gal.putVideo(cachedPath);
+@@ -139,6 +142,7 @@
+       parentDirectory: destinationDirectory,
+       fileName: fileName,
+       createdDirectories: createdDirectories,
++      allocatedPaths: allocatedPaths,
+     );
+ 
+     _logger.info('Moving file from $cachedPath to $fallbackPath');
+@@ -198,6 +202,7 @@
+   required String parentDirectory,
+   required String fileName,
+   required Set<String> createdDirectories,
++  required Set<String> allocatedPaths,
+ }) async {
+   final components = sanitizeRelativeName(fileName);
+   fileName = components.join('/');
+@@ -244,7 +249,7 @@
+   do {
+     destinationPath = counter == 1 ? p.join(dir, actualFileName) : p.join(dir, actualFileName.withCount(counter));
+     counter++;
+-  } while (await FileSystemEntity.type(destinationPath, followLinks: false) != FileSystemEntityType.notFound);
++  } while (await FileSystemEntity.type(destinationPath, followLinks: false) != FileSystemEntityType.notFound || !allocatedPaths.add(destinationPath));
+   return (destinationPath, null, p.basename(destinationPath));
+ }
+ 
+--- a/packages/localsend_isolates/lib/src/isolate/child/server_isolate.dart
++++ b/packages/localsend_isolates/lib/src/isolate/child/server_isolate.dart
+@@ -354,6 +354,7 @@
+   /// Directories already created inside the destination, shared across all
+   /// files of the session.
+   final Set<String> createdDirectories = {};
++  final Set<String> allocatedPaths = {};
+ 
+   /// One queue per file ID, so that uploads of the same file do not overlap.
+   ///
+@@ -657,6 +658,7 @@
+             fileName: desiredName,
+             saveToGallery: shouldSaveToGallery,
+             createdDirectories: session.createdDirectories,
++            allocatedPaths: session.allocatedPaths,
+             androidSdkInt: config.androidSdkInt,
+           );
+     session.targets[fileId] = target;
+@@ -713,6 +715,7 @@
+         fileName: desiredName,
+         isImage: isImage,
+         createdDirectories: session.createdDirectories,
++        allocatedPaths: session.allocatedPaths,
+       );
+     } else {
+       filePath = target.displayPath;
+--- a/packages/localsend_isolates/test/task/server/file_saver_test.dart
++++ b/packages/localsend_isolates/test/task/server/file_saver_test.dart
+@@ -27,17 +27,20 @@
+       parentDirectory: parentDirectory,
+       fileName: fileName,
+       createdDirectories: {},
++      allocatedPaths: {},
+     );
+     return path;
+   }
+ 
+ 
+   test('keeps all payloads when a batch allocates identical names concurrently', () async {
++    final allocatedPaths = <String>{};
+     final targets = await Future.wait(
+       List.generate(20, (_) => digestFilePathAndPrepareDirectory(
+         parentDirectory: tempDir.path,
+         fileName: 'Frame.jpg',
+         createdDirectories: {},
++        allocatedPaths: allocatedPaths,
+       )),
+     );
+     expect(tempDir.listSync(), isEmpty, reason: 'allocation must not create abandoned files before writers start');
+--- a/packages/localsend_isolates/test/task/server/file_saver_traversal_test.dart
++++ b/packages/localsend_isolates/test/task/server/file_saver_traversal_test.dart
+@@ -34,6 +34,7 @@
+       parentDirectory: destination.path,
+       fileName: fileName,
+       createdDirectories: {},
++      allocatedPaths: {},
+     );
+     return path;
+   }
