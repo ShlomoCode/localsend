@@ -149,8 +149,7 @@ class AppDelegate: FlutterAppDelegate {
             result(nil)
         case "configureWindowFrameAutosave":
             guard let arguments = call.arguments as? [String: Any],
-                  let enabled = arguments["enabled"] as? Bool,
-                  let migrateLegacyFrame = arguments["migrateLegacyFrame"] as? Bool else {
+                  let enabled = arguments["enabled"] as? Bool else {
                 result(FlutterError(code: "INVALID_ARGUMENT", message: "Expected window frame autosave options", details: nil))
                 return
             }
@@ -159,12 +158,7 @@ class AppDelegate: FlutterAppDelegate {
                 return
             }
             if enabled {
-                let restored = window.setFrameUsingName(windowFrameAutosaveName)
-                if !restored && migrateLegacyFrame {
-                    // Let AppKit constrain the old Dart placement on its first native restore.
-                    window.saveFrame(usingName: windowFrameAutosaveName)
-                    _ = window.setFrameUsingName(windowFrameAutosaveName)
-                }
+                _ = window.setFrameUsingName(windowFrameAutosaveName)
                 guard window.setFrameAutosaveName(windowFrameAutosaveName) else {
                     result(FlutterError(code: "AUTOSAVE_UNAVAILABLE", message: "Window frame autosave name is unavailable", details: nil))
                     return

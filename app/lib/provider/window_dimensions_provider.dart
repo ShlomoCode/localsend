@@ -45,10 +45,7 @@ class WindowDimensionsController {
       } else {
         await _setDefaultDimensions();
       }
-      await macos_channel.configureWindowFrameAutosave(
-        enabled: useSavedPlacement,
-        migrateLegacyFrame: useSavedPlacement && persistedDimensions != null,
-      );
+      await macos_channel.configureWindowFrameAutosave(enabled: useSavedPlacement);
       return;
     }
 
