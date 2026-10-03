@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:localsend_isolates/model/device.dart';
@@ -61,6 +63,32 @@ Future<DeviceInfoResult> getDeviceInfo() async {
     deviceModel: deviceModel,
     androidSdkInt: androidSdkInt,
   );
+}
+
+/// Returns the system name for the alias shortcut, or null when Android has no usable name or model.
+Future<String?> getSystemDeviceName() async {
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      final info = await DeviceInfoPlugin().androidInfo;
+      return _usableAndroidName(info.name) ?? _usableAndroidName(info.model);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  if (Platform.isMacOS) {
+    final result = await Process.run('scutil', ['--get', 'ComputerName']);
+    return result.stdout.toString().trim();
+  }
+  return Platform.localHostname;
+}
+
+String? _usableAndroidName(String value) {
+  final name = value.trim();
+  if (name.isEmpty || const {'localhost', '127.0.0.1', 'unknown'}.contains(name.toLowerCase())) {
+    return null;
+  }
+  return name;
 }
 
 extension on BrowserName {
