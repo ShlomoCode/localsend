@@ -85,7 +85,7 @@ Future<String?> getSystemDeviceName() async {
 
 String? _usableAndroidName(String value) {
   final name = value.trim();
-  if (name.isEmpty || name.toLowerCase() == 'localhost') {
+  if (name.isEmpty) {
     return null;
   }
   return name;

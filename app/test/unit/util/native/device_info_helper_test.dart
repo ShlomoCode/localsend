@@ -50,19 +50,21 @@ void main() {
 
   test('Android system name uses the configured name instead of the model or hostname', () async {
     expect(await getSystemDeviceName(), 'My phone');
+    deviceInfo['name'] = 'localhost';
+    expect(await getSystemDeviceName(), 'localhost');
   });
 
-  test('Android system name falls back to the model when the configured name is unusable', () async {
+  test('Android system name falls back to the model when the configured name is empty', () async {
     deviceInfo['model'] = '  Pixel 8 Pro  ';
-    for (final name in [null, '', '   ', 'LOCALHOST']) {
+    for (final name in [null, '', '   ']) {
       deviceInfo['name'] = name;
       expect(await getSystemDeviceName(), 'Pixel 8 Pro', reason: 'name: $name');
     }
   });
 
-  test('Android system name returns no replacement when both name and model are unusable', () async {
+  test('Android system name returns no replacement when both name and model are empty', () async {
     deviceInfo['name'] = '';
-    for (final model in ['', '   ', 'localhost']) {
+    for (final model in ['', '   ']) {
       deviceInfo['model'] = model;
       expect(await getSystemDeviceName(), isNull, reason: 'model: $model');
     }
