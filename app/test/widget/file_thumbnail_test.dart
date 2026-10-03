@@ -43,6 +43,15 @@ void main() {
     }
   });
 
+  testWidgets('unchanged APK rebuild keeps the decoded icon visible', (tester) async {
+    final bytes = _png(512, 512);
+    final raw = await _show(tester, bytes, size: 60, dpr: 2, type: FileType.apk);
+    for (var rebuild = 0; rebuild < 3; rebuild++) {
+      await tester.pumpWidget(_thumbnailWidget(bytes, size: 60, dpr: 2, type: FileType.apk));
+      expect(tester.widget<RawImage>(find.byType(RawImage)).image, same(raw.image), reason: 'An unchanged parent rebuild must not clear the icon');
+    }
+  });
+
   for (final example in [
     (48, 48, 50.0, 1.0),
     (48, 96, 60.0, 3.0),
@@ -92,21 +101,23 @@ Uint8List _png(int width, int height) {
   return Uint8List.fromList(img.encodePng(source));
 }
 
-Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double size, required double dpr, FileType type = FileType.image}) async {
-  await tester.pumpWidget(
-    MediaQuery(
-      data: MediaQueryData(devicePixelRatio: dpr),
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: Theme(
-          data: ThemeData(inputDecorationTheme: const InputDecorationTheme(fillColor: Colors.white)),
-          child: Center(
-            child: MemoryThumbnail(bytes: bytes, fileType: type, size: size),
-          ),
+Widget _thumbnailWidget(Uint8List bytes, {required double size, required double dpr, required FileType type}) {
+  return MediaQuery(
+    data: MediaQueryData(devicePixelRatio: dpr),
+    child: Directionality(
+      textDirection: TextDirection.ltr,
+      child: Theme(
+        data: ThemeData(inputDecorationTheme: const InputDecorationTheme(fillColor: Colors.white)),
+        child: Center(
+          child: MemoryThumbnail(bytes: bytes, fileType: type, size: size),
         ),
       ),
     ),
   );
+}
+
+Future<RawImage> _show(WidgetTester tester, Uint8List bytes, {required double size, required double dpr, FileType type = FileType.image}) async {
+  await tester.pumpWidget(_thumbnailWidget(bytes, size: size, dpr: dpr, type: type));
   final finder = find.descendant(of: find.byType(MemoryThumbnail), matching: find.byType(RawImage));
   // Codec completion uses real asynchronous engine work, outside the fake test clock.
   for (var attempt = 0; attempt < 20; attempt++) {

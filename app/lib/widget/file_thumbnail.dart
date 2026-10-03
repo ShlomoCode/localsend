@@ -226,6 +226,13 @@ class _PaddedThumbnailMemoryImage extends ImageProvider<_ThumbnailMemoryImage> {
 
   @override
   ImageStreamCompleter loadImage(_ThumbnailMemoryImage key, ImageDecoderCallback decode) => key.loadImage(key, decode);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PaddedThumbnailMemoryImage && other.bytes == bytes && other.pixelSize == pixelSize && other.padding == padding;
+
+  @override
+  int get hashCode => Object.hash(bytes, pixelSize, padding);
 }
 
 class _Thumbnail extends StatelessWidget {
