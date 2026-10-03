@@ -15,7 +15,8 @@ exec > >(tee "reproduction/$case_name.log") 2>&1
 cat /etc/os-release
 test "$(dpkg --print-architecture)" = amd64
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates xvfb xauth xdotool
+# Recent Flutter engines load EGL dynamically; a desktop supplies these libraries.
+apt-get install -y --no-install-recommends ca-certificates xvfb xauth xdotool libegl1 libegl-mesa0
 
 if [[ $case_name == control ]]; then
   apt-get install -y --no-install-recommends libayatana-appindicator3-1
