@@ -67,16 +67,17 @@ Terminal=false
 // The desktop entry's string escaping runs before Exec quoting, so a literal
 // backslash in a quoted argument needs four backslashes in the file.
 String _desktopExecExecutable(String executable) {
-  final escaped = executable
-      .replaceAll('\\', '\\\\')
-      .replaceAll('"', '\\"')
-      .replaceAll('`', '\\`')
-      .replaceAll(r'$', r'\$')
-      .replaceAll('\\', '\\\\')
-      .replaceAll('\n', r'\n')
-      .replaceAll('\r', r'\r')
-      .replaceAll('\t', r'\t')
-      .replaceAll('%', '%%');
+  const escapes = {
+    '\\': r'\\\\',
+    '"': r'\\"',
+    '`': r'\\`',
+    r'$': r'\\$',
+    '\n': r'\n',
+    '\r': r'\r',
+    '\t': r'\t',
+    '%': '%%',
+  };
+  final escaped = executable.replaceAllMapped(RegExp(r'[\\"`$\n\r\t%]'), (match) => escapes[match[0]]!);
   return '"$escaped"';
 }
 
