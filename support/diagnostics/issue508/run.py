@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
@@ -301,19 +302,19 @@ def exercise(executable, out, label, result, *, expected_option=True):
 
 def download_release(version, out):
     tag = "v" + version
-    release = json.loads(command(["gh", "api", f"repos/localsend/localsend/releases/tags/{tag}"],
-                                 timeout=30).stdout)
-    assets = [a for a in release["assets"] if a["name"].endswith(".AppImage") and
-              re.search(r"(x86[-_]?64|amd64)", a["name"], re.I)]
-    if len(assets) != 1:
-        raise RuntimeError(f"Expected one x86-64 AppImage in {tag}, found {[a['name'] for a in assets]}")
-    asset = assets[0]
-    (out / "release.json").write_text(json.dumps({"tag": tag, "release_id": release["id"],
-        "published_at": release["published_at"], "asset": {key: asset[key] for key in
-        ("name", "id", "size", "digest", "browser_download_url") if key in asset}}, indent=2) + "\n")
-    command(["gh", "release", "download", tag, "--repo", "localsend/localsend",
-             "--pattern", asset["name"], "--dir", str(out)], timeout=180)
-    path = out / asset["name"]
+    name = f"LocalSend-{version}-linux-x86-64.AppImage"
+    url = f"https://github.com/localsend/localsend/releases/download/{tag}/{name}"
+    path = out / name
+    command(["curl", "--fail", "--location", "--retry", "5", "--retry-all-errors",
+             "--retry-delay", "3", "--connect-timeout", "20", "--max-time", "300",
+             "--output", str(path), url], timeout=360)
+    hasher = hashlib.sha256()
+    with path.open("rb") as asset_file:
+        for chunk in iter(lambda: asset_file.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
+    (out / "release.json").write_text(json.dumps({"tag": tag, "asset": {"name": name,
+        "browser_download_url": url, "size": path.stat().st_size, "sha256": digest}}, indent=2) + "\n")
     path.chmod(0o755)
     return path
 
