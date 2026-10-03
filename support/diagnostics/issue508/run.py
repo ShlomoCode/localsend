@@ -37,7 +37,7 @@ def snapshot(out, name):
 
 
 def ocr_lines(image):
-    result = command(["tesseract", str(image), "stdout", "tsv"], timeout=25)
+    result = command(["tesseract", str(image), "stdout", "--psm", "11", "tsv"], timeout=25)
     groups = {}
     for word in csv.DictReader(io.StringIO(result.stdout), delimiter="\t"):
         text = word["text"].strip()
@@ -100,10 +100,11 @@ def open_settings(out, window):
         line = min(matches, key=lambda item: item["x"])
         click(line["x"] + line["width"] // 2, line["y"] + line["height"] // 2)
     else:
-        # NavigationRail has receive/send/settings in this order. This
-        # coordinate is retained only as a fallback and is checked by OCR.
+        # At 1200x900 the third NavigationRail item (Settings) is roughly
+        # 110px from the window's left and 230px from its top. Default OCR
+        # misses the small rail text on some Flutter releases; verify after.
         g = geometry(window)
-        click(g["X"] + 75, g["Y"] + g["HEIGHT"] // 2 + 80)
+        click(g["X"] + 110, g["Y"] + 230)
     time.sleep(2)
     image = snapshot(out, "settings")
     lines = ocr_lines(image)
