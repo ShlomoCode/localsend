@@ -54,7 +54,7 @@ void main() {
 
   test('Android system name falls back to the model when the configured name is unusable', () async {
     deviceInfo['model'] = '  Pixel 8 Pro  ';
-    for (final name in [null, '', '   ', 'LOCALHOST', '127.0.0.1', 'unknown']) {
+    for (final name in [null, '', '   ', 'LOCALHOST']) {
       deviceInfo['name'] = name;
       expect(await getSystemDeviceName(), 'Pixel 8 Pro', reason: 'name: $name');
     }
@@ -62,7 +62,7 @@ void main() {
 
   test('Android system name returns no replacement when both name and model are unusable', () async {
     deviceInfo['name'] = '';
-    for (final model in ['', '   ', 'localhost', '127.0.0.1', 'Unknown']) {
+    for (final model in ['', '   ', 'localhost']) {
       deviceInfo['model'] = model;
       expect(await getSystemDeviceName(), isNull, reason: 'model: $model');
     }
