@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Historical reproduction of the released 1.17.0 amd64 Debian package.
+# Reproduce startup with declared dependencies of a released amd64 Debian package.
 # Run in a fresh debian:13 container for each case; see the companion workflow.
 set -euo pipefail
 
 case "${1:-}" in
   control|legacy) case_name=$1 ;;
-  *) echo 'Usage: repro_debian13_appindicator.sh control|legacy' >&2; exit 2 ;;
+  *) echo 'Usage: repro_debian13_appindicator.sh control|legacy [absolute-deb-path]' >&2; exit 2 ;;
 esac
+package=${2:-/work/reproduction/LocalSend-1.17.0-linux-x86-64.deb}
+test -f "$package"
 
 export DEBIAN_FRONTEND=noninteractive
 exec > >(tee "reproduction/$case_name.log") 2>&1
@@ -37,23 +39,19 @@ EOF
   apt-get update
   apt-get install -y --no-install-recommends libgtk-3-0t64 libgdk-pixbuf-2.0-0
   apt-get install -y --no-install-recommends libappindicator3-1=0.4.92-7 gir1.2-appindicator3-0.1=0.4.92-7
+  test "$(dpkg-query -W -f='${Status}' libappindicator3-1)" = 'install ok installed'
+  if dpkg-query -W -f='${Status}' libayatana-appindicator3-1 2>/dev/null | grep -qx 'install ok installed'; then
+    echo 'Harness error: Ayatana was installed before LocalSend; the reported environment was not reproduced.'
+    exit 2
+  fi
 fi
 
-package=/work/reproduction/LocalSend-1.17.0-linux-x86-64.deb
 dpkg-deb -f "$package" Package Version Architecture Depends
 apt-get install -y --no-install-recommends "$package"
 apt-get check
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' '*appindicator*'
 binary=$(readlink -f "$(command -v localsend_app)")
 ldd "$binary" || true
-
-if [[ $case_name == legacy ]]; then
-  test "$(dpkg-query -W -f='${Status}' libappindicator3-1)" = 'install ok installed'
-  if dpkg-query -W -f='${Status}' libayatana-appindicator3-1 2>/dev/null | grep -qx 'install ok installed'; then
-    echo 'Harness error: Ayatana was installed; the reported environment was not reproduced.'
-    exit 2
-  fi
-fi
 
 # The control must create a real app window, not merely avoid the loader error.
 # xvfb-run gives both cases the same display environment.
