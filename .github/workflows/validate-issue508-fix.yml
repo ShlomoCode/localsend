@@ -1,0 +1,156 @@
+name: Validate issue 508 AppImage fix
+
+on:
+  workflow_dispatch:
+    inputs:
+      fix_ref:
+        description: Committed fix branch or SHA in ShlomoCode/localsend
+        required: true
+        default: codex/fix-appimage-autostart
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      BASE_SHA: e768240d1ad95f0f162b852b5ff37bec71cde1ef
+      FIX_REF: ${{ inputs.fix_ref }}
+      XDG_SESSION_TYPE: x11
+      XDG_CURRENT_DESKTOP: OPENBOX
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: diagnostics
+      - uses: actions/checkout@v6
+        with:
+          ref: e768240d1ad95f0f162b852b5ff37bec71cde1ef
+          path: source
+          fetch-depth: 0
+      - name: Install build and desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev \
+            libfuse2 libegl1 libgles2 libgl1-mesa-dri libgbm1 xvfb openbox dbus-x11 xdotool \
+            scrot tesseract-ocr python3 python3-pil python3-gi gir1.2-gtk-3.0 \
+            squashfs-tools binutils iproute2
+          test -e /dev/fuse
+          mkdir -p results "$RUNNER_TEMP/issue508-runtime"
+          chmod 700 "$RUNNER_TEMP/issue508-runtime"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.9"
+          channel: stable
+          cache: true
+          pub-cache-path: ${{ runner.tool_cache }}/flutter-pub-cache
+      - name: Install FVM for the repository-pinned Flutter
+        run: |
+          dart pub global activate fvm
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+      - name: Select pinned Flutter SDK
+        working-directory: source/app
+        run: |
+          fvm install 3.41.9
+          fvm use 3.41.9 --skip-pub-get
+          fvm flutter --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/target
+          key: issue508-rust-${{ runner.os }}-${{ hashFiles('source/Cargo.lock') }}
+          restore-keys: issue508-rust-${{ runner.os }}-
+      - name: Build baseline bundle
+        working-directory: source/app
+        run: |
+          fvm flutter pub get
+          fvm flutter build linux --release
+      - name: Stage baseline bundle and AppDir
+        run: |
+          cp -a source/app/build/linux/x64/release/bundle results/baseline-bundle
+          mkdir AppDir
+          cp -a source/app/build/linux/x64/release/bundle/. AppDir/
+          for size in 32 128 256; do
+            mkdir -p "AppDir/usr/share/icons/hicolor/${size}x${size}/apps"
+            cp "source/app/assets/img/logo-${size}.png" "AppDir/usr/share/icons/hicolor/${size}x${size}/apps/localsend.png"
+          done
+          cp source/support/build/appimage/AppImageBuilder_x86_64.yml AppImageBuilder.yml
+      - name: Package baseline with the official recipe
+        uses: AppImageCrafters/build-appimage@57c3bc6963f870ce3be103117de5b5e33ffbaeb6
+        with:
+          recipe: ./AppImageBuilder.yml
+      - name: Save baseline AppImage
+        run: |
+          mv LocalSend-*-x86_64.AppImage results/baseline.AppImage
+          chmod +x results/baseline.AppImage
+          sha256sum results/baseline.AppImage > results/baseline.sha256
+          rm -rf AppDir appimage-build
+      - name: Overlay only changed production files from committed fix
+        run: |
+          git -C source fetch --no-tags origin "$FIX_REF"
+          FIX_SHA=$(git -C source rev-parse FETCH_HEAD)
+          git -C source diff --name-only --diff-filter=ACMR "$BASE_SHA" "$FIX_SHA" -- app/lib app/linux > results/changed-production-files.txt
+          test -s results/changed-production-files.txt
+          while IFS= read -r file; do
+            git -C source restore --source="$FIX_SHA" -- "$file"
+          done < results/changed-production-files.txt
+          printf '%s\n' "base=$BASE_SHA" "fix=$FIX_SHA" > results/source-commits.txt
+          git -C source diff --check
+      - name: Build candidate bundle with the same toolchain
+        working-directory: source/app
+        run: fvm flutter build linux --release
+      - name: Stage candidate bundle and AppDir
+        run: |
+          cp -a source/app/build/linux/x64/release/bundle results/candidate-bundle
+          mkdir AppDir
+          cp -a source/app/build/linux/x64/release/bundle/. AppDir/
+          for size in 32 128 256; do
+            mkdir -p "AppDir/usr/share/icons/hicolor/${size}x${size}/apps"
+            cp "source/app/assets/img/logo-${size}.png" "AppDir/usr/share/icons/hicolor/${size}x${size}/apps/localsend.png"
+          done
+          cp source/support/build/appimage/AppImageBuilder_x86_64.yml AppImageBuilder.yml
+      - name: Package candidate with the same official recipe
+        uses: AppImageCrafters/build-appimage@57c3bc6963f870ce3be103117de5b5e33ffbaeb6
+        with:
+          recipe: ./AppImageBuilder.yml
+      - name: Save candidate AppImage
+        run: |
+          mv LocalSend-*-x86_64.AppImage results/candidate.AppImage
+          chmod +x results/candidate.AppImage
+          sha256sum results/candidate.AppImage > results/candidate.sha256
+      - name: Exercise GUI and desktop-entry behavior
+        id: validation
+        continue-on-error: true
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/issue508-runtime
+        run: |
+          xvfb-run -a -s '-screen 0 1600x1000x24' \
+            dbus-run-session -- \
+            python3 diagnostics/support/diagnostics/issue508/validate_current.py \
+              --baseline "$GITHUB_WORKSPACE/results/baseline.AppImage" \
+              --candidate "$GITHUB_WORKSPACE/results/candidate.AppImage" \
+              --bundle "$GITHUB_WORKSPACE/results/candidate-bundle" \
+              --output "$GITHUB_WORKSPACE/results/runtime"
+      - name: Show validation result
+        if: always()
+        run: |
+          if test -f results/runtime/result.json; then cat results/runtime/result.json; fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue508-current-source-validation
+          path: |
+            results/**/*.png
+            results/**/*.json
+            results/**/*.log
+            results/**/*.desktop
+            results/*.txt
+            results/*.sha256
+          if-no-files-found: warn
