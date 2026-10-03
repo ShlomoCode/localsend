@@ -243,8 +243,13 @@ def exercise(executable, out, label, result, *, expected_option=True):
             result["outcome"] = "unsupported_missing_option"
             return result
         result["option_ocr"] = option
-        g = geometry(window)
-        click(g["X"] + g["WIDTH"] - 75, option["y"] + option["height"] // 2)
+        # The switch sits in the right column of the 570px Settings card,
+        # about 467px to the right of the OCR label in the 1200px window.
+        # Clicking the far window edge misses the card entirely.
+        switch_x = option["x"] + 467
+        switch_y = option["y"] + option["height"] // 2
+        result["switch_click"] = {"x": switch_x, "y": switch_y}
+        click(switch_x, switch_y)
         desktop = wait_for(lambda: next((home / ".config/autostart").glob("*.desktop"), None)
                            if (home / ".config/autostart").exists() else None, 12)
         snapshot(out, "after-toggle-" + label)
