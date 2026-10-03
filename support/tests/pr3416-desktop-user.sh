@@ -4,10 +4,10 @@ set -euo pipefail
 desktop_uid=$(id -u traytest)
 runtime_dir="/run/user/$desktop_uid"
 for _ in {1..120}; do
-  [[ -S "$runtime_dir/wayland-0" ]] && break
+  sudo -u traytest test -S "$runtime_dir/wayland-0" && break
   sleep 1
 done
-if [[ ! -S "$runtime_dir/wayland-0" ]]; then
+if ! sudo -u traytest test -S "$runtime_dir/wayland-0"; then
   echo "GNOME Wayland socket is missing: $runtime_dir/wayland-0" >&2
   exit 1
 fi
