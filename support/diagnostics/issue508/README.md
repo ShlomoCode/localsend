@@ -32,6 +32,20 @@ ran. After termination, the FUSE mount disappeared and running the saved
 command failed with `ENOENT`. Relaunching the original AppImage file opened
 a new LocalSend window on both releases.
 
+[Controlled comparison run 37156911230](https://github.com/ShlomoCode/localsend/actions/runs/37156911230)
+repeated the failure on both releases, then changed only the generated
+desktop entry's executable to the original AppImage file. With the same
+arguments and HOME/XDG profile, both versions opened a new LocalSend process
+in a new FUSE mount. The per-case outcome is
+`same_profile_stable_exec_works`. The running apps also exposed `APPIMAGE`
+with the stable file path and `APPDIR` with the temporary mount path.
+
+This comparison identifies the saved temporary executable path as the cause
+of the reproduced failure. A product correction should select the AppImage
+runtime's stable `APPIMAGE` path for that packaging format and preserve the
+regular executable path for other formats. No product correction was applied
+or validated by this investigation.
+
 The 1.10.0 GUI had no Linux autostart option. This matches the source at that
 tag: it offered the setting only on Windows. Linux support was added in
 [commit cb5090bc](https://github.com/localsend/localsend/commit/cb5090bca8b02290ae92801a480d44f6ab6e712d)
@@ -43,8 +57,11 @@ the respective report dates.
 The extracted-AppImage experiment is a packaging diagnostic, not a passing
 control for the tar or deb packages. Its `AppRun` opened the GUI, but the
 generated raw executable failed with `ENOENT` even though its file still
-existed. A missing ELF interpreter can produce that error. Do not infer that
-ordinary directory installations pass or fail from this experiment.
+existed. `readelf -l` recorded the relative interpreter
+`lib64/ld-linux-x86-64.so.2`; the diagnostic launched the raw binary outside
+the extracted directory. That packaging dependency makes this control
+unsuitable for conclusions about ordinary directory installations. The
+stable AppImage intervention above is the passing control.
 
 The current source at `e768240d1ad95f0f162b852b5ff37bec71cde1ef` still writes
 `Platform.resolvedExecutable` into the Linux desktop entry in
