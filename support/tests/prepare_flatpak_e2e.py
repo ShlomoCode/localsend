@@ -66,6 +66,17 @@ def main():
     shutil.copytree(official / "export", stage / "export", symlinks=True)
 
     files = stage / "files"
+    # Installed Flatpak exports already contain a rewritten `flatpak run ...`
+    # Exec line. Export the original in-package desktop file so installation
+    # performs that rewrite exactly once.
+    desktop_name = f"{APP_ID}.desktop"
+    source_desktop = files / "share/applications" / desktop_name
+    exported_desktop = stage / "export/share/applications" / desktop_name
+    if "Exec=localsend %U" not in source_desktop.read_text(encoding="utf-8"):
+        parser.error(f"Unexpected Flathub desktop launch command: {source_desktop}")
+    exported_desktop.unlink()
+    shutil.copy2(source_desktop, exported_desktop)
+
     shutil.copy2(executable, files / "localsend_app")
     shutil.rmtree(files / "data")
     shutil.copytree(bundle / "data", files / "data", symlinks=True)

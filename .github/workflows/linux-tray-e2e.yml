@@ -52,6 +52,7 @@ jobs:
 
       - name: Package this build as a real LocalSend Flatpak
         run: |
+          set -euo pipefail
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive --assumeyes flathub org.localsend.localsend_app
           python3 support/tests/prepare_flatpak_e2e.py app/build/linux/x64/release/bundle \
