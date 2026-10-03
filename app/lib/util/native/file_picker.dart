@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show LineSplitter;
 import 'dart:io' show File;
 
 import 'package:file_selector/file_selector.dart';
@@ -295,8 +296,12 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
   List<String>? clipboardFiles;
   if (data?.text != null) {
     final text = data!.text!;
-    if (!kIsWeb && checkPlatformIsDesktop() && await File(text).exists()) {
-      // Some file managers put a file and its path text on the clipboard; use the file: https://github.com/localsend/localsend/issues/3499
+    final paths = const LineSplitter().convert(text);
+    if (!kIsWeb &&
+        checkPlatformIsDesktop() &&
+        paths.isNotEmpty &&
+        (await Future.wait(paths.map((path) => File(path).exists()))).every((exists) => exists)) {
+      // Some file managers also put copied file paths on the clipboard as text, one per line: https://github.com/localsend/localsend/issues/3499
       clipboardFiles = await Pasteboard.files();
     }
     if (clipboardFiles?.isNotEmpty != true) {
