@@ -1,0 +1,128 @@
+name: Validate Debian 13 appindicator dependency fix
+
+on:
+  push:
+    branches: [codex/repro-debian13-2898]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 1.17.0
+            sha256: b0244b2c3eacb2a81d61b2662534d6036ab37ace10d6782da36b630c222fa04c
+          - version: 1.18.2
+            sha256: cc42a4f3eacdcb25ec31f0016b1272acb003145ab30484db8965450e20c72cd2
+    env:
+      RELEASE_VERSION: ${{ matrix.version }}
+      RELEASE_SHA256: ${{ matrix.sha256 }}
+      FIX_COMMIT: 874d816c2570b7a9a9875a45d6ca0fa33cf7fe6e
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Fetch exact PR packaging config and released package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p reproduction
+          actual_head=$(gh api repos/localsend/localsend/pulls/3525 --jq '.head.sha')
+          test "$actual_head" = "$FIX_COMMIT"
+          gh api --method GET repos/localsend/localsend/contents/app/linux/packaging/deb/make_config.yaml \
+            -f ref="$FIX_COMMIT" --jq '.content' | base64 --decode > reproduction/pr3525-make_config.yaml
+          test -s reproduction/pr3525-make_config.yaml
+          gh release download "v$RELEASE_VERSION" --repo localsend/localsend \
+            --pattern "LocalSend-$RELEASE_VERSION-linux-x86-64.deb" --dir reproduction
+          original="reproduction/LocalSend-$RELEASE_VERSION-linux-x86-64.deb"
+          echo "$RELEASE_SHA256  $original" | sha256sum -c -
+          sha256sum "$original" > reproduction/original-package.sha256
+          {
+            echo "PR: localsend/localsend#3525"
+            echo "PR head: $actual_head"
+            echo "Packaging config: app/linux/packaging/deb/make_config.yaml at $FIX_COMMIT"
+            echo "Release: $RELEASE_VERSION"
+            cat reproduction/original-package.sha256
+          } | tee reproduction/summary.txt
+
+      - name: Original package works with Ayatana installed
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work" -w /work debian:13 \
+            bash support/scripts/repro_debian13_appindicator.sh control \
+              "/work/reproduction/LocalSend-$RELEASE_VERSION-linux-x86-64.deb"
+          mv reproduction/control.log reproduction/original-control.log
+          mv reproduction/control-startup.log reproduction/original-control-startup.log
+          echo 'Original control: PASS (window appeared)' | tee -a reproduction/summary.txt
+
+      - name: Original package reproduces the exact missing-library failure
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work" -w /work debian:13 \
+            bash support/scripts/repro_debian13_appindicator.sh legacy \
+              "/work/reproduction/LocalSend-$RELEASE_VERSION-linux-x86-64.deb"
+          status=$?
+          set -e
+          mv reproduction/legacy.log reproduction/original-legacy.log
+          mv reproduction/legacy-startup.log reproduction/original-legacy-startup.log
+          test "$status" -eq 1
+          grep -Fq 'error while loading shared libraries: libayatana-appindicator3.so.1: cannot open shared object file' \
+            reproduction/original-legacy-startup.log
+          echo 'Original legacy: expected exit 1 and exact missing-Ayatana loader error' | tee -a reproduction/summary.txt
+
+      - name: Repack release with PR runtime dependency metadata
+        run: |
+          set -euo pipefail
+          python3 support/scripts/repack_debian_dependency.py \
+            "reproduction/LocalSend-$RELEASE_VERSION-linux-x86-64.deb" \
+            "reproduction/LocalSend-$RELEASE_VERSION-pr3525-metadata-only.deb" \
+            reproduction/pr3525-make_config.yaml | tee reproduction/repack.log
+          sha256sum "reproduction/LocalSend-$RELEASE_VERSION-pr3525-metadata-only.deb" \
+            > reproduction/patched-package.sha256
+          cat reproduction/patched-package.sha256 | tee -a reproduction/summary.txt
+          echo 'Intervention: Debian control Depends only; installed payload verified identical' \
+            | tee -a reproduction/summary.txt
+
+      - name: Patched package starts after legacy upgrade
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work" -w /work debian:13 \
+            bash support/scripts/repro_debian13_appindicator.sh legacy \
+              "/work/reproduction/LocalSend-$RELEASE_VERSION-pr3525-metadata-only.deb"
+          mv reproduction/legacy.log reproduction/patched-legacy.log
+          mv reproduction/legacy-startup.log reproduction/patched-legacy-startup.log
+          grep -Fq 'Application window appeared' reproduction/patched-legacy.log
+          echo 'Patched legacy: PASS (window appeared)' | tee -a reproduction/summary.txt
+
+      - name: Patched package starts with Ayatana control
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work" -w /work debian:13 \
+            bash support/scripts/repro_debian13_appindicator.sh control \
+              "/work/reproduction/LocalSend-$RELEASE_VERSION-pr3525-metadata-only.deb"
+          mv reproduction/control.log reproduction/patched-control.log
+          mv reproduction/control-startup.log reproduction/patched-control-startup.log
+          grep -Fq 'Application window appeared' reproduction/patched-control.log
+          echo 'Patched control: PASS (window appeared)' | tee -a reproduction/summary.txt
+
+      - name: Upload comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: debian13-pr3525-validation-${{ matrix.version }}
+          path: |
+            reproduction/*.log
+            reproduction/*.sha256
+            reproduction/*.yaml
+            reproduction/summary.txt
