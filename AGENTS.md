@@ -83,8 +83,7 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 ### Platform checks (Flutter)
 
-Use `defaultTargetPlatform` for Flutter platform behavior so tests can override the target platform. For Material widget styling, use `Theme.of(context).platform` so theme overrides apply.
-When calling an OS-specific API or running a system command (for example, macOS `scutil`), use `dart:io`'s `Platform` to check the actual host OS. Guard native-only code with `kIsWeb` when the code can also run in a browser.
+Use `defaultTargetPlatform` for Flutter behavior, `Theme.of(context).platform` for Material styling, and `dart:io`'s `Platform` for native OS calls. In shared web/native code, guard native calls with `kIsWeb`.
 
 ### State management
 
