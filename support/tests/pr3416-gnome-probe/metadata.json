@@ -1,0 +1,6 @@
+{
+  "uuid": "pr3416-probe@localsend.test",
+  "name": "LocalSend Wayland dock probe",
+  "description": "Read GNOME Shell's actual window, app, and dock state for the PR 3416 regression test",
+  "shell-version": ["46"]
+}
