@@ -1,0 +1,74 @@
+name: LocalSend Flatpak autostart portal probe
+
+on:
+  push:
+    branches:
+      - codex/flatpak-autostart-portal-probe
+    paths:
+      - .github/workflows/diagnose_flatpak_autostart.yml
+      - evidence/ci-flatpak-autostart/**
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak-autostart:
+    name: Flatpak sandbox and Background portal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Flatpak and portal test tools
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            dbus-x11 flatpak gcc libglib2.0-dev openbox pkg-config xauth xdg-desktop-portal \
+            xdg-desktop-portal-gtk xvfb
+
+      - name: Install the signed LocalSend Flatpak
+        timeout-minutes: 8
+        run: |
+          sudo flatpak remote-add --system --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install --system --noninteractive --no-related flathub \
+            org.localsend.localsend_app
+
+      - name: Compile the sandboxed portal probe
+        run: |
+          mkdir -p "$RUNNER_TEMP/localsend-flatpak-autostart/bin"
+          gcc -O2 -Wall -Wextra -Werror \
+            evidence/ci-flatpak-autostart/portal_probe.c \
+            -o "$RUNNER_TEMP/localsend-flatpak-autostart/bin/portal-probe" \
+            $(pkg-config --cflags --libs gio-2.0 glib-2.0)
+
+      - name: Reproduce both file paths and exercise the Background portal
+        timeout-minutes: 5
+        env:
+          AUTOSTART_ARTIFACT_DIR: ${{ runner.temp }}/localsend-flatpak-autostart/artifacts
+          AUTOSTART_HOST_CONFIG: ${{ runner.temp }}/localsend-flatpak-autostart/host-config
+          AUTOSTART_PROBE: ${{ runner.temp }}/localsend-flatpak-autostart/bin/portal-probe
+          LANG: en_US.UTF-8
+          LC_ALL: C.UTF-8
+          XDG_CURRENT_DESKTOP: GNOME
+          XDG_SESSION_DESKTOP: gnome
+          XDG_SESSION_TYPE: x11
+        run: |
+          mkdir -p "$AUTOSTART_ARTIFACT_DIR" "$AUTOSTART_HOST_CONFIG"
+          xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' \
+            dbus-run-session -- bash -eu -c '
+              openbox --sm-disable >"$AUTOSTART_ARTIFACT_DIR/openbox.log" 2>&1 &
+              export XDG_CONFIG_HOME="$AUTOSTART_HOST_CONFIG"
+              python3 evidence/ci-flatpak-autostart/run.py
+            '
+
+      - name: Publish diagnostic result
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: localsend-flatpak-autostart-portal-probe
+          path: ${{ runner.temp }}/localsend-flatpak-autostart/artifacts
+          if-no-files-found: warn
+          retention-days: 7
