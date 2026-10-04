@@ -83,7 +83,7 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 ### Platform checks (Flutter)
 
-Use `defaultTargetPlatform` for platform checks in Flutter code.
+Use `defaultTargetPlatform` for platform checks in Flutter code so tests can simulate different platforms.
 
 ### State management
 
