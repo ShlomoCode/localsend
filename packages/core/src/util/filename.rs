@@ -1,5 +1,6 @@
 //! Filename sanitization for untrusted, peer-supplied file names.
 
+use std::path::Path;
 use unicode_normalization::UnicodeNormalization;
 
 /// Characters that are illegal on Windows and FAT volumes.
@@ -18,8 +19,9 @@ const RESERVED_WINDOWS_NAMES: &[&str] = &[
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-/// Maximum file name length: UTF-16 code units under Windows, decomposed
-/// UTF-16 code units under Hfs, and bytes under the other rules.
+/// Maximum file name length: raw UTF-16 code units under Windows, APFS and
+/// detected FAT-family volumes; decomposed UTF-16 units under HFS+; bytes
+/// under byte-limited policies.
 ///
 /// References: [Windows limits], [HFS Plus Names], and [ext4 directory entries].
 /// [Windows limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
@@ -39,10 +41,16 @@ pub enum Rules {
     /// [Microsoft's limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
     /// [naming rules]: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
     Windows,
+    /// APFS preserves the supplied normalization and stores UTF-8. We use a
+    /// conservative 255 raw UTF-16-unit budget (without HFS decomposition),
+    /// consistent with Apple DTS's discussion of its 255 Unicode-character limit.
+    /// https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/APFS_Guide/FAQ/FAQ.html
+    /// https://developer.apple.com/forums/thread/726970
+    Apfs,
     /// Conservative Apple policy: `/` and `:`, with a decomposed UTF-16 limit.
     /// [Apple TN1150] defines HFS+ names and decomposition exceptions. Full NFD
-    /// may overcount those exceptions and names accepted by APFS; no separate
-    /// APFS relaxation is applied without a destination-specific contract.
+    /// may overcount those exceptions. APFS uses a separate raw-UTF-16 policy
+    /// only when the destination filesystem is identified.
     ///
     /// [Apple TN1150]: https://developer.apple.com/library/archive/technotes/tn1150.html
     Hfs,
@@ -55,11 +63,19 @@ pub enum Rules {
     /// [exFAT specification]: https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification
     /// [AOSP FileUtils]: https://android.googlesource.com/platform/frameworks/base/+/HEAD/core/java/android/os/FileUtils.java
     Fat,
+    /// Detected FAT/VFAT volume: long names use a 255 Unicode-unit budget.
+    /// This differs from the conservative byte-limited Android default above.
+    /// https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
+    FatVolume,
+    /// exFAT uses up to 255 Unicode code units and FAT-family illegal chars.
+    /// https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification#773-filename-field
+    ExFat,
     /// Unix policy: `/`, NUL and control characters, with a 255-byte limit
-    /// documented for [ext4]. Other Unix filesystems are not detected, so this
-    /// is a conservative default rather than a filesystem-wide guarantee.
+    /// documented for [ext4]. This is also used for recognized [btrfs] volumes
+    /// and as the generic Unix default; it is not a filesystem-wide guarantee.
     ///
     /// [ext4]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
+    /// [btrfs]: https://btrfs.readthedocs.io/en/latest/btrfs-man5.html#filesystem-limits
     Posix,
     /// Conservative intersection of the policies above, using a byte limit.
     /// This is an application fallback, not a universal filesystem standard;
@@ -85,8 +101,8 @@ impl Rules {
 
     fn illegal_chars(self) -> &'static [char] {
         match self {
-            Self::Windows | Self::Fat => ILLEGAL_WINDOWS_CHARS,
-            Self::Hfs => ILLEGAL_HFS_CHARS,
+            Self::Windows | Self::Fat | Self::FatVolume | Self::ExFat => ILLEGAL_WINDOWS_CHARS,
+            Self::Hfs | Self::Apfs => ILLEGAL_HFS_CHARS,
             Self::Posix => ILLEGAL_POSIX_CHARS,
             // `Universal` is handled by combining the sets, see `is_illegal_char`.
             Self::Universal => &[],
@@ -103,14 +119,20 @@ impl Rules {
         }
     }
 
-    /// Whether reserved device names and trailing `.`/` ` matter.
+    /// Whether reserved device names and trailing `.`/` ` matter. Detected
+    /// FAT-family volumes may also be written through the Windows API.
     fn is_windows_like(self) -> bool {
-        matches!(self, Self::Windows | Self::Universal)
+        matches!(
+            self,
+            Self::Windows | Self::FatVolume | Self::ExFat | Self::Universal
+        )
     }
 
     fn name_len(self, name: &str) -> usize {
         match self {
-            Self::Windows => name.encode_utf16().count(),
+            Self::Windows | Self::Apfs | Self::FatVolume | Self::ExFat => {
+                name.encode_utf16().count()
+            }
             // HFS+ decomposes names, with some exceptions. Full NFD can
             // overcount those names; that is conservative for HFS+/APFS and
             // keeps the supplied spelling unchanged.
@@ -122,12 +144,186 @@ impl Rules {
     }
 
     fn truncate(self, name: &mut String) {
+        self.truncate_to(name, MAX_LEN);
+    }
+
+    fn truncate_to(self, name: &mut String, max: usize) {
         match self {
-            Self::Windows => truncate_utf16(name, MAX_LEN),
-            Self::Hfs => truncate_hfs(name, MAX_LEN),
-            _ => truncate_bytes(name, MAX_LEN),
+            Self::Windows | Self::Apfs | Self::FatVolume | Self::ExFat => truncate_utf16(name, max),
+            Self::Hfs => truncate_hfs(name, max),
+            _ => truncate_bytes(name, max),
         }
     }
+}
+
+/// Selects filename rules for the nearest existing directory ancestor of a
+/// destination path. An unknown filesystem or failed probe uses `Universal`.
+/// This is for local paths; document providers that do not expose a real path
+/// should use `Universal` directly.
+pub fn rules_for_directory(directory: &Path) -> Rules {
+    let absolute = if directory.is_absolute() {
+        directory.to_path_buf()
+    } else {
+        let Ok(current) = std::env::current_dir() else {
+            return Rules::Universal;
+        };
+        current.join(directory)
+    };
+    for ancestor in absolute.ancestors() {
+        match ancestor.metadata() {
+            Ok(metadata) if metadata.is_dir() => return probe_rules(ancestor),
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Rules::Universal,
+        }
+    }
+    Rules::Universal
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios", windows, test))]
+fn rules_for_filesystem(name: &str) -> Rules {
+    match name.to_ascii_lowercase().as_str() {
+        "apfs" => Rules::Apfs,
+        "hfs" | "hfs+" | "hfsx" => Rules::Hfs,
+        "ntfs" => Rules::Windows,
+        "exfat" => Rules::ExFat,
+        "msdos" | "vfat" | "fat" | "fat12" | "fat16" | "fat32" => Rules::FatVolume,
+        "ext4" | "btrfs" => Rules::Posix,
+        _ => Rules::Universal,
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn probe_rules(directory: &Path) -> Rules {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(path) = CString::new(directory.as_os_str().as_bytes()) else {
+        return Rules::Universal;
+    };
+    let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: path is NUL-terminated and info points to writable storage.
+    if unsafe { libc::statfs(path.as_ptr(), info.as_mut_ptr()) } != 0 {
+        return Rules::Universal;
+    }
+    // SAFETY: statfs initialized info on success.
+    let info = unsafe { info.assume_init() };
+    let bytes = info.f_fstypename.map(|byte| byte as u8);
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(bytes.len());
+    rules_for_filesystem(&String::from_utf8_lossy(&bytes[..end]))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn probe_rules(directory: &Path) -> Rules {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(path) = CString::new(directory.as_os_str().as_bytes()) else {
+        return Rules::Universal;
+    };
+    let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: path is NUL-terminated and info points to writable storage.
+    if unsafe { libc::statfs(path.as_ptr(), info.as_mut_ptr()) } != 0 {
+        return Rules::Universal;
+    }
+    // Linux statfs(2) reports the filesystem type in f_type. Values are from
+    // include/uapi/linux/magic.h; unlisted (including remote/FUSE) types fall back.
+    // https://man7.org/linux/man-pages/man2/statfs.2.html
+    let kind = unsafe { info.assume_init().f_type as u64 };
+    match kind {
+        0xef53 | 0x9123_683e => Rules::Posix, // ext4, btrfs
+        0x2011_bab0 => Rules::ExFat,
+        0x4d44 => Rules::FatVolume, // msdos/vfat
+        _ => Rules::Universal,
+    }
+}
+
+#[cfg(windows)]
+fn probe_rules(directory: &Path) -> Rules {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetVolumePathNameW(path: *const u16, volume: *mut u16, length: u32) -> i32;
+        fn GetDriveTypeW(root: *const u16) -> u32;
+        fn GetVolumeInformationW(
+            root: *const u16,
+            volume_name: *mut u16,
+            volume_name_length: u32,
+            serial: *mut u32,
+            max_component_length: *mut u32,
+            flags: *mut u32,
+            filesystem_name: *mut u16,
+            filesystem_name_length: u32,
+        ) -> i32;
+    }
+    // GetVolumePathNameW respects nested volume mount points; querying a drive
+    // letter alone could report the wrong filesystem. Both are Win32 file APIs.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumepathnamew
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumeinformationw
+    let Ok(directory) = directory.canonicalize() else {
+        return Rules::Universal;
+    };
+    let canonical = directory.to_string_lossy();
+    if canonical.starts_with(r"\\?\UNC\")
+        || (canonical.starts_with(r"\\") && !canonical.starts_with(r"\\?\"))
+    {
+        return Rules::Universal;
+    }
+    let mut path: Vec<u16> = directory.as_os_str().encode_wide().collect();
+    path.push(0);
+    let mut volume = vec![0u16; 32768];
+    // SAFETY: path is NUL-terminated and volume is a writable UTF-16 buffer.
+    if unsafe { GetVolumePathNameW(path.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) } == 0 {
+        return Rules::Universal;
+    }
+    // Network servers can advertise NTFS while applying different filename
+    // semantics. DRIVE_REMOTE is the Win32 remote-volume classification.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getdrivetypew
+    // SAFETY: GetVolumePathNameW wrote a NUL-terminated root on success.
+    if unsafe { GetDriveTypeW(volume.as_ptr()) } == 4 {
+        return Rules::Universal;
+    }
+    let mut filesystem = [0u16; 64];
+    let mut max_component_length = 0u32;
+    // SAFETY: volume is a NUL-terminated root; output pointers refer to live
+    // writable storage, and the optional outputs are null.
+    if unsafe {
+        GetVolumeInformationW(
+            volume.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut max_component_length,
+            std::ptr::null_mut(),
+            filesystem.as_mut_ptr(),
+            filesystem.len() as u32,
+        )
+    } == 0
+    {
+        return Rules::Universal;
+    }
+    if max_component_length < MAX_LEN as u32 {
+        return Rules::Universal;
+    }
+    let end = filesystem
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(filesystem.len());
+    rules_for_filesystem(&String::from_utf16_lossy(&filesystem[..end]))
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "android",
+    windows
+)))]
+fn probe_rules(_directory: &Path) -> Rules {
+    Rules::Universal
 }
 
 /// Options for [`sanitize_with`].
@@ -156,6 +352,33 @@ impl Default for Options<'_> {
 /// should take the last segment first — see [`sanitize_path`].
 pub fn sanitize(name: &str, rules: Rules) -> String {
     sanitize_with(name, rules, &Options::default())
+}
+
+/// Builds a collision name such as `photo (2).jpg` while preserving as much
+/// of the original stem and extension as fits the destination's component
+/// limit. `counter` is the number to display; callers choose where to start.
+pub fn sanitize_numbered(name: &str, rules: Rules, counter: u32) -> String {
+    let (raw_stem, raw_extension) = match name.rfind('.') {
+        Some(index) if index > 0 => (&name[..index], &name[index..]),
+        _ => (name, ""),
+    };
+    let mut stem = sanitize(raw_stem, rules);
+    let mut extension = if raw_extension.is_empty() {
+        String::new()
+    } else {
+        sanitize(raw_extension, rules)
+    };
+    let suffix = format!(" ({counter})");
+    let first_len = stem
+        .chars()
+        .next()
+        .map(|c| rules.name_len(&c.to_string()))
+        .unwrap_or(0);
+    let extension_budget = MAX_LEN.saturating_sub(rules.name_len(&suffix) + first_len);
+    rules.truncate_to(&mut extension, extension_budget);
+    let stem_budget = MAX_LEN.saturating_sub(rules.name_len(&suffix) + rules.name_len(&extension));
+    rules.truncate_to(&mut stem, stem_budget);
+    sanitize(&format!("{stem}{suffix}{extension}"), rules)
 }
 
 /// [`sanitize`] with explicit replacement and placeholder strings.
@@ -412,6 +635,67 @@ mod tests {
         assert_eq!(sanitized, at_limit);
         assert!(is_valid(&sanitized, Rules::Hfs));
         assert!(is_valid(&too_long, Rules::Windows));
+    }
+
+    #[test]
+    fn test_apfs_preserves_long_composed_name_that_hfs_shortens() {
+        let name = "é".repeat(200);
+        assert_eq!(sanitize(&name, Rules::Apfs), name);
+        assert_eq!(sanitize(&name, Rules::Hfs), "é".repeat(127));
+        assert!(is_valid(&name, Rules::Apfs));
+        assert!(!is_valid(&name, Rules::Hfs));
+    }
+
+    #[test]
+    fn test_detected_fat_uses_unicode_units_without_changing_android_default() {
+        let name = "界".repeat(200);
+        assert_eq!(sanitize(&name, Rules::FatVolume), name);
+        assert_eq!(sanitize(&name, Rules::ExFat), name);
+        assert_eq!(sanitize(&name, Rules::Fat), "界".repeat(85));
+        assert_eq!(sanitize("CON.txt", Rules::FatVolume), "_.txt");
+        assert_eq!(sanitize("CON.txt", Rules::ExFat), "_.txt");
+        assert_eq!(sanitize("CON.txt", Rules::Fat), "CON.txt");
+    }
+
+    #[test]
+    fn test_numbered_name_preserves_extension_and_full_length_budget() {
+        let original = format!("{}.jpg", "é".repeat(250));
+        let numbered = sanitize_numbered(&original, Rules::Apfs, 12);
+        assert_eq!(numbered, format!("{} (12).jpg", "é".repeat(246)));
+        assert_eq!(numbered.encode_utf16().count(), MAX_LEN);
+        assert!(is_valid(&numbered, Rules::Apfs));
+
+        let posix = sanitize_numbered(&original, Rules::Posix, 12);
+        assert!(posix.ends_with(" (12).jpg"));
+        assert!(is_valid(&posix, Rules::Posix));
+    }
+
+    #[test]
+    fn test_nearest_existing_directory_ancestor() {
+        let existing = std::env::temp_dir();
+        let nonexistent = existing
+            .join(format!("localsend-missing-{}", std::process::id()))
+            .join("nested");
+        assert_eq!(
+            rules_for_directory(&nonexistent),
+            rules_for_directory(&existing)
+        );
+        let relative = Path::new("localsend-missing-relative").join("nested");
+        assert_eq!(
+            rules_for_directory(&relative),
+            rules_for_directory(&std::env::current_dir().unwrap())
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_apfs_probe_and_composed_name_on_host_volume() {
+        let directory = std::env::temp_dir();
+        if probe_rules(&directory) == Rules::Apfs {
+            assert_eq!(rules_for_directory(&directory), Rules::Apfs);
+            let name = "é".repeat(200);
+            assert_eq!(sanitize(&name, rules_for_directory(&directory)), name);
+        }
     }
 
     #[test]

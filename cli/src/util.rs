@@ -93,19 +93,16 @@ pub fn progress_bar(fraction: f64, width: usize) -> String {
 /// final path component and sanitized for the local filesystem, so it can
 /// neither escape the target directory nor carry illegal characters.
 pub fn unique_path(dir: &Path, file_name: &str) -> PathBuf {
-    let name = filename::sanitize_path(file_name, filename::Rules::current());
+    let rules = filename::rules_for_directory(dir);
+    let name = filename::sanitize_path(file_name, rules);
 
     let candidate = dir.join(&name);
     if !candidate.exists() {
         return candidate;
     }
 
-    let (stem, extension) = match name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
-        _ => (name.as_str(), String::new()),
-    };
-    (1..)
-        .map(|i| dir.join(format!("{stem} ({i}){extension}")))
+    (1..=u32::MAX)
+        .map(|i| dir.join(filename::sanitize_numbered(&name, rules, i)))
         .find(|candidate| !candidate.exists())
         .unwrap()
 }
@@ -141,5 +138,32 @@ impl SpeedMeter {
         self.last_bytes = bytes_now;
         self.last_time = now;
         self.ema
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collision_at_filename_limit_remains_writable_and_keeps_extension() {
+        let dir = std::env::temp_dir().join(format!("localsend-cli-name-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let name = format!("{}.mp4", "a".repeat(251));
+        let first = unique_path(&dir, &name);
+        std::fs::write(&first, b"first").unwrap();
+        let second = unique_path(&dir, &name);
+        assert_ne!(first, second);
+        assert!(
+            second
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(" (1).mp4")
+        );
+        std::fs::write(&second, b"second").unwrap();
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

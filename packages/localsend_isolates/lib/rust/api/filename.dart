@@ -10,6 +10,11 @@ import 'package:localsend_isolates/rust/frb_generated.dart';
 /// replacing illegal characters with `_`.
 String sanitizeFileName({required String name}) => RustLib.instance.api.crateApiFilenameSanitizeFileName(name: name);
 
+/// Sanitizes a received name for its actual parent directory. Opaque Android
+/// destinations have no inspectable filesystem, so they use conservative rules.
+String sanitizeFileNameForDirectory({required String name, required String directory, int? counter, required bool conservative}) =>
+    RustLib.instance.api.crateApiFilenameSanitizeFileNameForDirectory(name: name, directory: directory, counter: counter, conservative: conservative);
+
 /// Whether `name` is a legal file name on the current platform, i.e. whether
 /// [sanitize_file_name] would leave it untouched.
 bool isValidFileName({required String name}) => RustLib.instance.api.crateApiFilenameIsValidFileName(name: name);

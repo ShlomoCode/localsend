@@ -8,6 +8,7 @@ env:
 
 jobs:
   build:
+    if: github.ref != 'refs/heads/codex/diagnose-3536-windows'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
@@ -22,6 +23,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
   build_windows_exe_x86_64:
+    if: github.ref != 'refs/heads/codex/diagnose-3536-windows'
     needs: build
     runs-on: windows-latest
 
@@ -73,3 +75,78 @@ jobs:
           name: windows-exe-x86-64-unsigned
           path: ${{ runner.temp }}\inno-result\LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe
           if-no-files-found: error
+
+  diagnose_3536:
+    if: github.ref == 'refs/heads/codex/diagnose-3536-windows'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fixed]
+    steps:
+      - name: Fix long file paths
+        run: git config --system core.longpaths true
+
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Restore unpatched filename source for baseline
+        if: matrix.variant == 'baseline'
+        run: git restore --source=9529e915 -- packages/core/src/util/filename.rs
+
+      - name: Record source and toolchain
+        shell: pwsh
+        run: |
+          git rev-parse HEAD
+          git diff -- packages/core/src/util/filename.rs
+          rustc --version
+          python --version
+          Get-ComputerInfo | Select-Object OsName, OsVersion, OsArchitecture
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Build MSIX helper required by CMake
+        shell: pwsh
+        run: |
+          $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
+          & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
+          & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
+
+      - name: Resolve Flutter dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build native Windows app
+        working-directory: app
+        run: flutter build windows
+
+      - name: Verify binary and run loopback transfers
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          flutter --version
+          New-Item -ItemType Directory -Force -Path 'C:\ls3536' | Out-Null
+          $volume = [System.IO.DriveInfo]::new('C:\')
+          Write-Output "Destination filesystem: $($volume.DriveFormat)"
+          if ($volume.DriveFormat -ne 'NTFS') { throw "Expected NTFS diagnostic destination; got $($volume.DriveFormat)" }
+          $bundle = Join-Path $PWD 'app\build\windows\x64\runner\Release'
+          Get-FileHash (Join-Path $bundle 'localsend_app.exe') -Algorithm SHA256
+          Get-ChildItem $bundle -Filter '*.dll' | Get-FileHash -Algorithm SHA256
+          python support\scripts\diagnose_3536_windows.py --bundle "$bundle" --root 'C:\ls3536' --variant '${{ matrix.variant }}' --results "${{ runner.temp }}\issue-3536-${{ matrix.variant }}.json"
+
+      - name: Upload per-case evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: issue-3536-${{ matrix.variant }}-evidence
+          path: ${{ runner.temp }}\issue-3536-${{ matrix.variant }}.json
+          if-no-files-found: warn
