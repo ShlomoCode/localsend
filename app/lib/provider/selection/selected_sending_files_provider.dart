@@ -356,6 +356,10 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
 
 /// Removes all files from the list.
 class ClearSelectionAction extends ReduxAction<SelectedSendingFilesNotifier, List<CrossFile>> with GlobalActions {
+  final Set<String> preserveCachePaths;
+
+  ClearSelectionAction({this.preserveCachePaths = const {}});
+
   @override
   List<CrossFile> reduce() {
     return const [];
@@ -363,6 +367,6 @@ class ClearSelectionAction extends ReduxAction<SelectedSendingFilesNotifier, Lis
 
   @override
   void after() {
-    global.dispatchAsync(ClearCacheAction()); // ignore: discarded_futures
+    global.dispatchAsync(ClearCacheAction(preservePaths: preserveCachePaths)); // ignore: discarded_futures
   }
 }

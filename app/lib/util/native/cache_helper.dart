@@ -19,17 +19,23 @@ final _logger = Logger('ClearCacheAction');
 /// Clears the cache.
 /// It runs on a separate isolate to avoid blocking the UI.
 class ClearCacheAction extends AsyncGlobalAction {
+  final Set<String> preservePaths;
+
+  ClearCacheAction({this.preservePaths = const {}});
+
   @override
   Future<void> reduce() async {
     // The token statement must be outside the lambda because it must be executed on the root isolate.
     final token = ServicesBinding.rootIsolateToken!;
-    await Isolate.run(() => _clear(token));
+    final pathsToPreserve = preservePaths;
+    await Isolate.run(() => _clear(token, pathsToPreserve));
   }
 }
 
-Future<void> _clear(RootIsolateToken token) async {
+Future<void> _clear(RootIsolateToken token, Set<String> preservePaths) async {
   initLogger(Level.ALL);
   BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+  final protectedPaths = preservePaths.map(_canonicalPath).toSet();
 
   final futures = (
     FilePicker.clearTemporaryFiles(),
@@ -37,7 +43,7 @@ Future<void> _clear(RootIsolateToken token) async {
     checkPlatform([TargetPlatform.iOS, TargetPlatform.android])
         ? getTemporaryDirectory().then((cacheDir) {
             cacheDir.list().listen((event) {
-              if (event is File) {
+              if (event is File && !protectedPaths.contains(_canonicalPath(event.path))) {
                 event.delete().then((_) {}).catchError((error) {
                   _logger.warning('Failed to delete file: $error');
                 });
@@ -60,7 +66,7 @@ Future<void> _clear(RootIsolateToken token) async {
 
                 // delete contents of the directory (only files, not directories)
                 await for (final entry in directory.list(recursive: false, followLinks: false)) {
-                  if (entry is File && !entry.path.fileName.startsWith('.')) {
+                  if (entry is File && !entry.path.fileName.startsWith('.') && !protectedPaths.contains(_canonicalPath(entry.path))) {
                     _logger.info('Deleting ${entry.path}');
                     entry.deleteSync();
                   }
@@ -73,5 +79,13 @@ Future<void> _clear(RootIsolateToken token) async {
     await futures;
   } catch (e) {
     _logger.warning('Failed to clear cache: $e');
+  }
+}
+
+String _canonicalPath(String path) {
+  try {
+    return File(path).resolveSymbolicLinksSync();
+  } catch (_) {
+    return path;
   }
 }
