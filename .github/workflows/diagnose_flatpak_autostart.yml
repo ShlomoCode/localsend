@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            dbus-x11 flatpak gcc libglib2.0-dev openbox pkg-config xauth xdg-desktop-portal \
+            cinnamon-common dbus-x11 flatpak gcc libglib2.0-dev openbox pkg-config xauth xdg-desktop-portal \
             xdg-desktop-portal-gtk xdg-desktop-portal-xapp xvfb
 
       - name: Install the signed LocalSend Flatpak
