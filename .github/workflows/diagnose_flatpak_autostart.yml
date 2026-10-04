@@ -63,6 +63,7 @@ jobs:
           LANG: en_US.UTF-8
           LC_ALL: C.UTF-8
           XDG_CURRENT_DESKTOP: X-Cinnamon
+          XDG_CONFIG_HOME: ${{ runner.temp }}/localsend-flatpak-autostart/host-config
           XDG_SESSION_DESKTOP: cinnamon
           XDG_SESSION_TYPE: x11
         run: |
@@ -70,7 +71,6 @@ jobs:
           xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' \
             dbus-run-session -- bash -eu -c '
               openbox --sm-disable >"$AUTOSTART_ARTIFACT_DIR/openbox.log" 2>&1 &
-              export XDG_CONFIG_HOME="$AUTOSTART_HOST_CONFIG"
               python3 evidence/ci-flatpak-autostart/run.py
             '
 
