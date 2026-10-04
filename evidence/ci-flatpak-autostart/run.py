@@ -126,8 +126,9 @@ test -f "$file"
         entry = parser["Desktop Entry"]
         exec_line = entry.get("Exec", "")
         exec_args = shlex.split(exec_line)
-        if entry.get("X-XDP-Autostart") != APP_ID:
-            raise RuntimeError("Background portal desktop file lacks the LocalSend X-XDP-Autostart marker")
+        portal_marker = entry.get("X-XDP-Autostart") or entry.get("X-Flatpak")
+        if portal_marker != APP_ID:
+            raise RuntimeError("Background portal desktop file lacks a LocalSend app-id marker")
         if not exec_args or Path(exec_args[0]).name != "flatpak" or "run" not in exec_args:
             raise RuntimeError(f"Background portal generated an unexpected Exec: {exec_line}")
         if APP_ID not in exec_args or "--hidden" not in exec_args or "--command=localsend" not in exec_args:

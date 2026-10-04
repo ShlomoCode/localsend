@@ -26,7 +26,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             dbus-x11 flatpak gcc libglib2.0-dev openbox pkg-config xauth xdg-desktop-portal \
-            xdg-desktop-portal-gtk xvfb
+            xdg-desktop-portal-gtk xdg-desktop-portal-xapp xvfb
 
       - name: Install the signed LocalSend Flatpak
         timeout-minutes: 8
@@ -52,8 +52,8 @@ jobs:
           AUTOSTART_PROBE: ${{ runner.temp }}/localsend-flatpak-autostart/bin/portal-probe
           LANG: en_US.UTF-8
           LC_ALL: C.UTF-8
-          XDG_CURRENT_DESKTOP: GNOME
-          XDG_SESSION_DESKTOP: gnome
+          XDG_CURRENT_DESKTOP: X-Cinnamon
+          XDG_SESSION_DESKTOP: cinnamon
           XDG_SESSION_TYPE: x11
         run: |
           mkdir -p "$AUTOSTART_ARTIFACT_DIR" "$AUTOSTART_HOST_CONFIG"
