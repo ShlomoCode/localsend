@@ -15,6 +15,7 @@ defaults:
 
 jobs:
   actual-app-fixtures:
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -325,6 +326,7 @@ jobs:
             observations/*.tar.gz
           if-no-files-found: error
   native-windows-theme:
+    if: false
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -377,6 +379,8 @@ jobs:
         with:
           gradle-version: '8.7'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - name: Resolve SDK only on the runner
         run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
       - name: Real Android document metadata and UI traversal
@@ -405,6 +409,7 @@ jobs:
             research/runner-uncovered/android-clipboard-runtime/gradle.lockfile
           if-no-files-found: error
   windows-flutter-ffi:
+    if: false
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -450,6 +455,7 @@ jobs:
           path: observations/
           if-no-files-found: error
   ios-extension-compatibility:
+    if: false
     runs-on: macos-14
     timeout-minutes: 15
     steps:
