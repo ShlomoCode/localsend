@@ -19,12 +19,12 @@ const RESERVED_WINDOWS_NAMES: &[&str] = &[
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-/// Maximum file name length: raw UTF-16 code units under Windows, APFS and
+/// Maximum file name length: raw UTF-16 code units under NTFS, APFS and
 /// detected FAT-family volumes; decomposed UTF-16 units under HFS+; bytes
 /// under byte-limited policies.
 ///
-/// References: [Windows limits], [HFS Plus Names], and [ext4 directory entries].
-/// [Windows limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
+/// References: [NTFS/FAT filesystem limits], [HFS Plus Names], and [ext4 directory entries].
+/// [NTFS/FAT filesystem limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
 /// [HFS Plus Names]: https://developer.apple.com/library/archive/technotes/tn1150.html
 /// [ext4 directory entries]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
 const MAX_LEN: usize = 255;
@@ -35,10 +35,10 @@ const MAX_LEN: usize = 255;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rules {
     /// NTFS: illegal characters, reserved device names, no trailing `.` or ` `.
-    /// Uses the Unicode component limit documented by [Microsoft's limits]
-    /// and [naming rules]. This is not a guarantee for every Windows volume.
+    /// Uses the NTFS component limit and the Windows API's [naming rules].
+    /// [Filesystem limits] differ by volume; this policy is selected for NTFS.
     ///
-    /// [Microsoft's limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
+    /// [Filesystem limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
     /// [naming rules]: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
     Windows,
     /// APFS preserves the supplied normalization and stores UTF-8. We use a
