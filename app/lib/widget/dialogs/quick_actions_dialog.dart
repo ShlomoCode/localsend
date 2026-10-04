@@ -3,6 +3,7 @@ import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/provider/selection/selected_receiving_files_provider.dart';
 import 'package:localsend_app/widget/labeled_checkbox.dart';
+import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
@@ -94,14 +95,17 @@ class _QuickActionsDialogState extends State<QuickActionsDialog> with Refena {
           if (_action == _QuickAction.counter) ...[
             Text(t.dialogs.quickActions.prefix),
             const SizedBox(height: 5),
-            TextField(
-              autofocus: true,
-              onChanged: (s) {
-                _validate(s);
-                setState(() {
-                  _prefix = s;
-                });
-              },
+            TvTextInputFocus(
+              builder: (focusNode) => TextField(
+                focusNode: focusNode,
+                autofocus: true,
+                onChanged: (s) {
+                  _validate(s);
+                  setState(() {
+                    _prefix = s;
+                  });
+                },
+              ),
             ),
             const SizedBox(height: 5),
             Visibility(

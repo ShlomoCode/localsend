@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
+import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
 import 'package:localsend_isolates/util/file_path_helper.dart';
 import 'package:routerino/routerino.dart';
@@ -78,11 +79,14 @@ class _FileNameInputDialogState extends State<FileNameInputDialog> {
         children: [
           Text(t.dialogs.fileNameInput.original(original: widget.originalName)),
           const SizedBox(height: 10),
-          TextFormField(
-            controller: _textController,
-            autofocus: true,
-            onChanged: (value) => _validate(value.trim()),
-            onFieldSubmitted: (_) => _submit(),
+          TvTextInputFocus(
+            builder: (focusNode) => TextFormField(
+              focusNode: focusNode,
+              controller: _textController,
+              autofocus: true,
+              onChanged: (value) => _validate(value.trim()),
+              onFieldSubmitted: (_) => _submit(),
+            ),
           ),
           const SizedBox(height: 5),
           Visibility(

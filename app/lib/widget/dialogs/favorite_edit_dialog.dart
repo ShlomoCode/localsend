@@ -8,6 +8,7 @@ import 'package:localsend_app/provider/http_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/widget/dialogs/error_dialog.dart';
 import 'package:localsend_app/widget/dialogs/favorite_delete_dialog.dart';
+import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/util/rust.dart';
@@ -68,28 +69,40 @@ class _FavoriteEditDialogState extends State<FavoriteEditDialog> with Refena {
           children: [
             Text(t.dialogs.favoriteEditDialog.name),
             const SizedBox(height: 5),
-            TextFormField(
-              controller: _aliasController,
-              decoration: InputDecoration(
-                hintText: t.dialogs.favoriteEditDialog.auto,
+            TvTextInputFocus(
+              editable: !_fetching,
+              builder: (focusNode) => TextFormField(
+                focusNode: focusNode,
+                controller: _aliasController,
+                decoration: InputDecoration(
+                  hintText: t.dialogs.favoriteEditDialog.auto,
+                ),
+                enabled: !_fetching,
               ),
-              enabled: !_fetching,
             ),
             const SizedBox(height: 16),
             Text(t.dialogs.favoriteEditDialog.ip),
             const SizedBox(height: 5),
-            TextFormField(
-              controller: _ipController,
-              autofocus: widget.favorite == null && widget.prefilledDevice == null,
-              enabled: !_fetching,
+            TvTextInputFocus(
+              editable: !_fetching,
+              builder: (focusNode) => TextFormField(
+                focusNode: focusNode,
+                controller: _ipController,
+                autofocus: widget.favorite == null && widget.prefilledDevice == null,
+                enabled: !_fetching,
+              ),
             ),
             const SizedBox(height: 16),
             Text(t.dialogs.favoriteEditDialog.port),
             const SizedBox(height: 5),
-            TextFormField(
-              controller: _portController,
-              enabled: !_fetching,
-              keyboardType: TextInputType.number,
+            TvTextInputFocus(
+              editable: !_fetching,
+              builder: (focusNode) => TextFormField(
+                focusNode: focusNode,
+                controller: _portController,
+                enabled: !_fetching,
+                keyboardType: TextInputType.number,
+              ),
             ),
             if (widget.favorite != null) ...[
               const SizedBox(height: 16),

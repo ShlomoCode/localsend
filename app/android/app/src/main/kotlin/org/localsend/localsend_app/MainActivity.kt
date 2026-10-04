@@ -9,10 +9,14 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.Settings
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.MimeTypeMap
+import android.widget.FrameLayout
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -36,6 +40,20 @@ private const val API_LEVEL_ANDROID_17 = 37
 class MainActivity : FlutterActivity() {
     private var pendingResult: MethodChannel.Result? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private var nativeTextInputFocused = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (packageManager.hasSystemFeature("android.software.leanback")) {
+            val flutterView = findViewById<View>(FLUTTER_VIEW_ID) as? ViewGroup
+            if (flutterView != null) {
+                flutterView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+                val proxy = TextEditorProxyView(this, flutterView) { nativeTextInputFocused }
+                flutterView.addView(proxy, FrameLayout.LayoutParams(1, 1))
+                if (flutterView.isFocused) proxy.requestFocus()
+            }
+        }
+    }
 
     /// share_handler drops share intents arriving via onNewIntent while the Dart side
     /// is not subscribed to its media stream yet, which happens when this singleTask
@@ -116,6 +134,11 @@ class MainActivity : FlutterActivity() {
 
                 "shareIntentReady" -> {
                     onShareIntentReady()
+                    result.success(null)
+                }
+
+                "setNativeTextInputFocused" -> {
+                    nativeTextInputFocused = call.arguments == true
                     result.success(null)
                 }
 

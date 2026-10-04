@@ -8,6 +8,7 @@ import 'package:localsend_app/util/ui/nav_bar_padding.dart';
 import 'package:localsend_app/widget/file_thumbnail.dart';
 import 'package:localsend_app/widget/responsive_list_view.dart';
 import 'package:localsend_app/widget/sliver/sliver_pinned_header.dart';
+import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:localsend_isolates/util/file_size_helper.dart';
 import 'package:refena_flutter/refena_flutter.dart';
@@ -136,29 +137,32 @@ class _ApkPickerPageState extends State<ApkPickerPage> with Refena {
               height: 80,
               child: Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: TextFormField(
-                  controller: _textController,
-                  autofocus: true,
-                  onChanged: (s) {
-                    ref.notifier(apkSearchParamProvider).setState((old) => old.copyWith(query: s));
-                    setState(() {});
-                  },
-                  decoration: InputDecoration(
-                    fillColor: ElevationOverlay.applySurfaceTint(
-                      Theme.of(context).inputDecorationTheme.fillColor!,
-                      Theme.of(context).colorScheme.surfaceTint,
-                      3,
+                child: TvTextInputFocus(
+                  builder: (focusNode) => TextFormField(
+                    focusNode: focusNode,
+                    controller: _textController,
+                    autofocus: true,
+                    onChanged: (s) {
+                      ref.notifier(apkSearchParamProvider).setState((old) => old.copyWith(query: s));
+                      setState(() {});
+                    },
+                    decoration: InputDecoration(
+                      fillColor: ElevationOverlay.applySurfaceTint(
+                        Theme.of(context).inputDecorationTheme.fillColor!,
+                        Theme.of(context).colorScheme.surfaceTint,
+                        3,
+                      ),
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: apkParams.query.isNotEmpty
+                          ? IconButton(
+                              onPressed: () {
+                                ref.notifier(apkSearchParamProvider).setState((old) => old.copyWith(query: ''));
+                                _textController.clear();
+                              },
+                              icon: const Icon(Icons.clear),
+                            )
+                          : Text(apkParams.query),
                     ),
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: apkParams.query.isNotEmpty
-                        ? IconButton(
-                            onPressed: () {
-                              ref.notifier(apkSearchParamProvider).setState((old) => old.copyWith(query: ''));
-                              _textController.clear();
-                            },
-                            icon: const Icon(Icons.clear),
-                          )
-                        : Text(apkParams.query),
                   ),
                 ),
               ),
