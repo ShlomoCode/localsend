@@ -1,0 +1,4 @@
+<overlay xmlns:android="http://schemas.android.com/apk/res/android">
+    <item target="bool/config_preventImeStartupUnlessTextEditor"
+        value="@bool/config_preventImeStartupUnlessTextEditor" />
+</overlay>

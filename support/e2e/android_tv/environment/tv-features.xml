@@ -1,0 +1,5 @@
+<permissions>
+    <feature name="android.hardware.type.television" />
+    <feature name="android.software.leanback" />
+    <feature name="android.software.leanback_only" />
+</permissions>
