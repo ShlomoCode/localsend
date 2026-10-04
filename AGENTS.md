@@ -81,6 +81,11 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 ## Architecture
 
+### Platform checks (Flutter)
+
+Use `defaultTargetPlatform` for Flutter platform behavior so tests can override the target platform. For Material widget styling, use `Theme.of(context).platform` so theme overrides apply.
+When calling an OS-specific API or running a system command (for example, macOS `scutil`), use `dart:io`'s `Platform` to check the actual host OS; a Flutter platform override does not make native APIs or commands available. Guard native-only code with `kIsWeb` when the code can also run in a browser.
+
 ### State management
 
 Refena (`refena_flutter`), not Riverpod. Providers live in `app/lib/provider/`; `NotifierProvider` for plain state, `ReduxProvider` + dispatched action classes for anything the isolate layer touches. `app/lib/config/init.dart` (`preInit`) is the bootstrap: it initialises logging, `RustLib.init()`, persistence, the isolate container, tray/window, and returns the `RefenaContainer` that `main.dart` mounts.
