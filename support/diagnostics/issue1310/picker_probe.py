@@ -21,19 +21,20 @@ import time
 from pathlib import Path
 
 
-MAX_SECONDS = 78
+MAX_SECONDS = 120
 CHOOSER_WAIT_SECONDS = 9
 POLL_SECONDS = 0.6
 CHOOSER_TITLE = re.compile(r"(open|select|choose|folder|directory|file|save)", re.I)
 CHOOSER_CLASS = re.compile(r"(gtk|portal|filechooser)", re.I)
 
 
-def run(*args, timeout=4, check=False):
+def run(*args, timeout=4, check=False, env=None):
     """Run a bounded external UI command without a shell."""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("probe deadline reached")
-    result = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=min(timeout, remaining))
+    result = subprocess.run(args, capture_output=True, text=True, errors="replace", env=env,
+                            timeout=min(timeout, remaining))
     if check and result.returncode:
         raise RuntimeError(f"{' '.join(args)} failed ({result.returncode}): {result.stderr.strip()}")
     return result.stdout.rstrip("\n")
@@ -65,7 +66,7 @@ def windows():
         result[wid] = {
             "id": hex(wid), "desktop": parts[1], "pid": parts[2],
             "x": parts[3], "y": parts[4], "width": parts[5],
-            "height": parts[6], "host": parts[7], "wm_class": parts[8],
+            "height": parts[6], "wm_class": parts[7], "host": parts[8],
             "title": parts[9] if len(parts) > 9 else "",
             "xdotool_visible": wid in visible_ids,
             "wmctrl_client": True,
@@ -95,10 +96,31 @@ def windows():
                     "xwininfo_tree": run("xwininfo", "-root", "-tree")}
 
 
-def ocr(image_path, tsv_path):
-    tsv = run("tesseract", str(image_path), "stdout", "--psm", "11", "tsv", timeout=7, check=True)
+def ocr(image_path, tsv_path, region=None):
+    ocr_image = image_path.with_name(image_path.stem + "_ocr.png")
+    if region:
+        x, y, width, height = region
+        # A full root image has a large black surround. OCR on the visible app
+        # or chooser client area keeps LocalSend's small teal labels legible.
+        run(image_magick, str(image_path), "-background", "white", "-alpha", "remove", "-alpha", "off",
+            "-crop", f"{width}x{height}+{x}+{y}", "+repage", "-resize", "200%", str(ocr_image),
+            timeout=7, check=True)
+    else:
+        run(image_magick, str(image_path), "-background", "white", "-alpha", "remove", "-alpha", "off",
+            str(ocr_image), timeout=7, check=True)
+    tesseract_env = os.environ.copy()
+    tesseract_env["OMP_THREAD_LIMIT"] = "1"
+    tsv = run("tesseract", str(ocr_image), "stdout", "--psm", "11", "tsv", timeout=12,
+              check=True, env=tesseract_env)
     tsv_path.write_text(tsv + "\n", encoding="utf-8")
-    return parse_tsv(tsv)
+    words = parse_tsv(tsv)
+    if region:
+        for word in words:
+            word["x"] = x + word["x"] // 2
+            word["y"] = y + word["y"] // 2
+            word["width"] = max(1, word["width"] // 2)
+            word["height"] = max(1, word["height"] // 2)
+    return words, ocr_image.name
 
 
 def parse_tsv(tsv):
@@ -122,21 +144,46 @@ def capture(label):
     image = output / f"{label}.png"
     tsv = output / f"{label}.tsv"
     run("import", "-window", "root", str(image), timeout=6, check=True)
-    words = ocr(image, tsv)
     wins, raw = windows()
+    region = ocr_region(wins)
+    words, ocr_image = ocr(image, tsv, region)
     (output / f"{label}_windows.txt").write_text(
         "wmctrl -lpGx\n" + raw["wmctrl"] + "\n\n"
         + "xdotool search --onlyvisible --name .\n" + raw["xdotool_visible"]
         + "\n\nxwininfo -root -tree\n" + raw["xwininfo_tree"] + "\n",
         encoding="utf-8",
     )
-    return {"label": label, "screenshot": image.name, "ocr_tsv": tsv.name,
+    return {"label": label, "screenshot": image.name, "ocr_image": ocr_image,
+            "ocr_region": region, "ocr_tsv": tsv.name,
             "windows_file": f"{label}_windows.txt", "windows": list(wins.values()),
             "ocr_words": words, "_windows_by_id": wins}
 
 
 def public_capture(snapshot):
     return {key: value for key, value in snapshot.items() if not key.startswith("_")}
+
+
+def ocr_region(wins):
+    visible = [window for window in wins.values() if window.get("xdotool_visible")
+               and window.get("wmctrl_client")]
+    def geometry(window):
+        try:
+            x, y = int(window["x"]), int(window["y"])
+            width, height = int(window["width"]), int(window["height"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        if width < 300 or height < 250 or x < 0 or y < 0:
+            return None
+        return (x, y, width, height)
+    # Prefer a native dialog when one is visible; otherwise OCR LocalSend.
+    dialogs = [window for window in visible if CHOOSER_TITLE.search(window.get("title", ""))
+               and "localsend" not in window.get("title", "").casefold()
+               and geometry(window)]
+    if dialogs:
+        return geometry(dialogs[-1])
+    apps = [window for window in visible if "localsend" in window.get("title", "").casefold()
+            and geometry(window)]
+    return geometry(apps[-1]) if apps else None
 
 
 def token(snapshot, expected):
@@ -158,7 +205,7 @@ def click_word(snapshot, expected):
                 [w for w in snapshot["ocr_words"] if expected.casefold() in w["text"].casefold()]}
     x = word["x"] + word["width"] // 2
     y = word["y"] + word["height"] // 2
-    run("xdotool", "mousemove", "--sync", str(x), str(y), "click", "1", check=True)
+    run("xdotool", "mousemove", str(x), str(y), "click", "1", check=True)
     return {"word": expected, "found": True, "x": x, "y": y, "ocr": word}
 
 
@@ -240,6 +287,10 @@ def main():
         for program in ("xdotool", "wmctrl", "xwininfo", "xprop", "import", "tesseract"):
             if shutil.which(program) is None:
                 raise RuntimeError(f"missing command: {program}")
+        global image_magick
+        image_magick = shutil.which("magick") or shutil.which("convert")
+        if not image_magick:
+            raise RuntimeError("missing ImageMagick magick/convert")
         if not os.environ.get("DISPLAY"):
             raise RuntimeError("DISPLAY is unset; start Xvfb and openbox first")
         baseline = capture("baseline")

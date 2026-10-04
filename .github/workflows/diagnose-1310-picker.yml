@@ -37,6 +37,12 @@ jobs:
           cat /etc/os-release > evidence/os-release.txt
           dpkg-query -W > evidence/packages.txt
           gcc support/diagnostics/issue1310/gtk_probe.c -o gtk-probe $(pkg-config --cflags --libs gtk+-3.0)
+          mkdir -p image
+          curl -fL --retry 3 "https://github.com/localsend/localsend/releases/download/v${VERSION}/LocalSend-${VERSION}-linux-x86-64.AppImage" -o image/release.AppImage
+          sha256sum image/release.AppImage > evidence/appimage-sha256.txt
+          chmod +x image/release.AppImage
+          (cd image && ./release.AppImage --appimage-extract) > evidence/appimage-extract.txt
+          cp image/squashfs-root/AppRun.env evidence/ 2>/dev/null || true
       - name: Run real app and GTK controls in XFCE
         env:
           DISPLAY: ':99'
@@ -47,6 +53,8 @@ jobs:
           G_MESSAGES_DEBUG: all
         run: |
           Xvfb :99 -screen 0 1200x900x24 -ac > evidence/xvfb.log 2>&1 &
+          mkdir -p /run/dbus
+          dbus-daemon --system --fork
           sleep 2
           dbus-run-session -- bash support/diagnostics/issue1310/run.sh
       - uses: actions/upload-artifact@v4

@@ -22,6 +22,7 @@ for scenario in native healthy-portal missing-portal; do
     sleep 2
   fi
   python3 support/diagnostics/issue1310/picker_probe.py "$binary" "evidence/$scenario" || echo "App probe failed for $scenario; inspect result.json" >&2
+  python3 support/diagnostics/issue1310/picker_probe.py image/squashfs-root/AppRun "evidence/appimage-$scenario" || echo "AppImage probe failed for $scenario; inspect result.json" >&2
   for action in folder file multiple; do
     ./gtk-probe "$action" > "evidence/gtk-$scenario-$action.log" 2>&1 &
     probe_pid=$!
