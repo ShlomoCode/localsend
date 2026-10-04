@@ -81,6 +81,10 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 ## Architecture
 
+### UI accessibility
+
+When creating or modifying UI components, use the framework's built-in accessibility support. Ensure controls have clear accessible names and states, and associate labels with their controls. Add accessibility annotations only when information is missing.
+
 ### State management
 
 Refena (`refena_flutter`), not Riverpod. Providers live in `app/lib/provider/`; `NotifierProvider` for plain state, `ReduxProvider` + dispatched action classes for anything the isolate layer touches. `app/lib/config/init.dart` (`preInit`) is the bootstrap: it initialises logging, `RustLib.init()`, persistence, the isolate container, tray/window, and returns the `RefenaContainer` that `main.dart` mounts.

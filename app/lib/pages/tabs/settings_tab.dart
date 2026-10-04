@@ -674,32 +674,34 @@ class _BooleanEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return _SettingsEntry(
-      label: label,
-      description: description,
-      child: Stack(
-        children: [
-          Container(
-            width: double.infinity,
-            height: 50,
-            decoration: BoxDecoration(
-              color: theme.inputDecorationTheme.fillColor,
-              borderRadius: theme.inputDecorationTheme.borderRadius,
-            ),
-          ),
-          Positioned.fill(
-            child: Center(
-              child: Switch(
-                value: value,
-                onChanged: onChanged,
-                activeTrackColor: theme.colorScheme.primary,
-                activeThumbColor: theme.colorScheme.onPrimary,
-                inactiveThumbColor: theme.colorScheme.outline,
-                inactiveTrackColor: theme.colorScheme.surface,
+    return MergeSemantics(
+      child: _SettingsEntry(
+        label: label,
+        description: description,
+        child: Stack(
+          children: [
+            Container(
+              width: double.infinity,
+              height: 50,
+              decoration: BoxDecoration(
+                color: theme.inputDecorationTheme.fillColor,
+                borderRadius: theme.inputDecorationTheme.borderRadius,
               ),
             ),
-          ),
-        ],
+            Positioned.fill(
+              child: Center(
+                child: Switch(
+                  value: value,
+                  onChanged: onChanged,
+                  activeTrackColor: theme.colorScheme.primary,
+                  activeThumbColor: theme.colorScheme.onPrimary,
+                  inactiveThumbColor: theme.colorScheme.outline,
+                  inactiveTrackColor: theme.colorScheme.surface,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
