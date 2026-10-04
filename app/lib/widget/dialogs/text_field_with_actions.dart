@@ -52,6 +52,7 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
                       focusNode: focusNode,
                       controller: widget.controller,
                       textAlign: TextAlign.center,
+                      enableSuggestions: false,
                       onChanged: widget.onChanged,
                       autofocus: true,
                       onFieldSubmitted: (_) => context.pop(),
