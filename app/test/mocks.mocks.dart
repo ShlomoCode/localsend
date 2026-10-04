@@ -606,6 +606,18 @@ class MockPersistenceService extends _i1.Mock implements _i4.PersistenceService 
           as _i5.Future<void>);
 
   @override
+  Map<String, int>? getWindowsWindowPlacement() => (super.noSuchMethod(Invocation.method(#getWindowsWindowPlacement, [])) as Map<String, int>?);
+
+  @override
+  _i5.Future<void> setWindowsWindowPlacement(Map<String, int>? placement) =>
+      (super.noSuchMethod(
+            Invocation.method(#setWindowsWindowPlacement, [placement]),
+            returnValue: _i5.Future<void>.value(),
+            returnValueForMissingStub: _i5.Future<void>.value(),
+          )
+          as _i5.Future<void>);
+
+  @override
   _i5.Future<void> setSaveWindowPlacement(bool? savePlacement) =>
       (super.noSuchMethod(
             Invocation.method(#setSaveWindowPlacement, [savePlacement]),
