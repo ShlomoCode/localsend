@@ -1,5 +1,7 @@
 //! Filename sanitization for untrusted, peer-supplied file names.
 
+use unicode_normalization::UnicodeNormalization;
+
 /// Characters that are illegal on Windows and FAT volumes.
 const ILLEGAL_WINDOWS_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
@@ -16,8 +18,8 @@ const RESERVED_WINDOWS_NAMES: &[&str] = &[
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-/// Maximum file name length: UTF-16 code units under Windows rules, bytes
-/// under all other rules.
+/// Maximum file name length: UTF-16 code units under Windows, decomposed
+/// UTF-16 code units under Hfs, and bytes under the other rules.
 const MAX_LEN: usize = 255;
 
 /// The naming rules to apply, selected by target filesystem rather than by OS
@@ -83,6 +85,10 @@ impl Rules {
     fn name_len(self, name: &str) -> usize {
         match self {
             Self::Windows => name.encode_utf16().count(),
+            // HFS+ decomposes names, with some exceptions. Full NFD can
+            // overcount those names; that is conservative for HFS+/APFS and
+            // keeps the supplied spelling unchanged.
+            Self::Hfs => name.nfd().map(char::len_utf16).sum(),
             _ => name.len(),
         }
     }
@@ -90,6 +96,7 @@ impl Rules {
     fn truncate(self, name: &mut String) {
         match self {
             Self::Windows => truncate_utf16(name, MAX_LEN),
+            Self::Hfs => truncate_hfs(name, MAX_LEN),
             _ => truncate_bytes(name, MAX_LEN),
         }
     }
@@ -243,6 +250,18 @@ fn truncate_utf16(value: &mut String, max: usize) {
     }
 }
 
+/// Truncates to an NFD UTF-16 limit without rewriting the original characters.
+fn truncate_hfs(value: &mut String, max: usize) {
+    let mut units = 0;
+    for (index, c) in value.char_indices() {
+        units += c.nfd().map(char::len_utf16).sum::<usize>();
+        if units > max {
+            value.truncate(index);
+            return;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,57 +338,77 @@ mod tests {
     }
 
     #[test]
-    fn test_windows_keeps_reported_japanese_filename() {
+    fn test_windows_and_hfs_keep_reported_japanese_filename() {
         let name = "土曜のあさはほめるちゃん 20260926 ＃124「関西のいま気になるエリアのええところ“ほめるポイント＝ほめポ”を見つけながら、ぶらりするほっこりトークがたっぷりのほめぶら番組！今回は、“グラングリーン大阪”をぶらり！」.mp4";
         assert_eq!(name.encode_utf16().count(), 116);
         assert_eq!(name.len(), 314);
-        assert!(is_valid(name, Rules::Windows));
-        assert_eq!(sanitize(name, Rules::Windows), name);
+        for rules in [Rules::Windows, Rules::Hfs] {
+            assert!(is_valid(name, rules), "{rules:?}");
+            assert_eq!(sanitize(name, rules), name, "{rules:?}");
+        }
         assert!(!is_valid(name, Rules::Posix));
     }
 
     #[test]
-    fn test_windows_utf16_boundary_does_not_split_emoji() {
+    fn test_windows_and_hfs_utf16_boundary_does_not_split_emoji() {
         let at_limit = format!("{}😀b", "a".repeat(252));
         assert_eq!(at_limit.encode_utf16().count(), MAX_LEN);
-        assert!(is_valid(&at_limit, Rules::Windows));
-        assert_eq!(sanitize(&at_limit, Rules::Windows), at_limit);
-
         let too_long = format!("{}😀b", "a".repeat(253));
         assert_eq!(too_long.encode_utf16().count(), MAX_LEN + 1);
-        assert!(!is_valid(&too_long, Rules::Windows));
-        let sanitized = sanitize(&too_long, Rules::Windows);
-        assert_eq!(sanitized, format!("{}😀", "a".repeat(253)));
-        assert_eq!(sanitized.encode_utf16().count(), MAX_LEN);
-        assert!(is_valid(&sanitized, Rules::Windows));
-
         let emoji_over_boundary = format!("{}😀", "a".repeat(254));
-        assert_eq!(
-            sanitize(&emoji_over_boundary, Rules::Windows),
-            "a".repeat(254)
-        );
+        for rules in [Rules::Windows, Rules::Hfs] {
+            assert!(is_valid(&at_limit, rules), "{rules:?}");
+            assert_eq!(sanitize(&at_limit, rules), at_limit, "{rules:?}");
+            assert!(!is_valid(&too_long, rules), "{rules:?}");
+            let sanitized = sanitize(&too_long, rules);
+            assert_eq!(sanitized, format!("{}😀", "a".repeat(253)), "{rules:?}");
+            assert_eq!(sanitized.encode_utf16().count(), MAX_LEN, "{rules:?}");
+            assert!(is_valid(&sanitized, rules), "{rules:?}");
+            assert_eq!(
+                sanitize(&emoji_over_boundary, rules),
+                "a".repeat(254),
+                "{rules:?}"
+            );
+        }
     }
 
     #[test]
-    fn test_windows_custom_replacement_and_placeholder_use_utf16_limit() {
+    fn test_hfs_counts_canonical_decomposition_without_rewriting_name() {
+        let at_limit = "é".repeat(127); // HFS+ stores each composed character as two NFD units.
+        assert!(is_valid(&at_limit, Rules::Hfs));
+        assert_eq!(sanitize(&at_limit, Rules::Hfs), at_limit);
+
+        let too_long = "é".repeat(128);
+        assert!(!is_valid(&too_long, Rules::Hfs));
+        let sanitized = sanitize(&too_long, Rules::Hfs);
+        assert_eq!(sanitized, at_limit);
+        assert!(is_valid(&sanitized, Rules::Hfs));
+        assert!(is_valid(&too_long, Rules::Windows));
+    }
+
+    #[test]
+    fn test_windows_and_hfs_custom_replacement_and_placeholder_use_utf16_limit() {
         let options = Options {
             replacement: "😀",
             placeholder: &"界".repeat(MAX_LEN),
         };
         let name = format!("{}/b", "a".repeat(252));
-        assert_eq!(
-            sanitize_with(&name, Rules::Windows, &options),
-            format!("{}😀b", "a".repeat(252))
-        );
-
         let empty_replacement = Options {
             replacement: "",
             ..options
         };
-        let placeholder = sanitize_with("/", Rules::Windows, &empty_replacement);
-        assert_eq!(placeholder.encode_utf16().count(), MAX_LEN);
-        assert_eq!(placeholder, options.placeholder);
-        assert!(is_valid(&placeholder, Rules::Windows));
+        for rules in [Rules::Windows, Rules::Hfs] {
+            assert_eq!(
+                sanitize_with(&name, rules, &options),
+                format!("{}😀b", "a".repeat(252)),
+                "{rules:?}"
+            );
+
+            let placeholder = sanitize_with("/", rules, &empty_replacement);
+            assert_eq!(placeholder.encode_utf16().count(), MAX_LEN, "{rules:?}");
+            assert_eq!(placeholder, options.placeholder, "{rules:?}");
+            assert!(is_valid(&placeholder, rules), "{rules:?}");
+        }
     }
 
     /// Truncation must not leave a trailing `.` or ` ` behind on Windows-like
