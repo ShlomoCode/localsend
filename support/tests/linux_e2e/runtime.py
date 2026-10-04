@@ -229,7 +229,7 @@ def bundle_binaries(bundle):
 class App:
     """Own one LocalSend process and its fixed status notifier item."""
 
-    def __init__(self, bundle, packaging, profile, log):
+    def __init__(self, bundle, packaging, profile, log, env=None):
         if packaging not in ("native", "flatpak"):
             raise ValueError("packaging must be native or flatpak")
         self.bundle = Path(bundle).resolve()
@@ -241,10 +241,13 @@ class App:
         self.item = None
         self._prior_items = None
         self._temp_profile = None
+        self.environment = env or {}
+        if packaging != "native" and self.environment:
+            raise ValueError("Environment overrides are supported only for native applications")
 
     @classmethod
-    def create(cls, bundle, packaging, profile, log):
-        return cls(bundle, packaging, profile, log)
+    def create(cls, bundle, packaging, profile, log, env=None):
+        return cls(bundle, packaging, profile, log, env=env)
 
     @property
     def identity(self):
@@ -298,6 +301,11 @@ class App:
                                 "XDG_CACHE_HOME": str(self.profile / "cache"),
                                 "XDG_DATA_HOME": str(self.profile / "data"),
                                 "LD_LIBRARY_PATH": str(self.bundle / "lib")})
+                    for name, value in self.environment.items():
+                        if value is None:
+                            env.pop(name, None)
+                        else:
+                            env[name] = value
                     self.process = subprocess.Popen([str(self.bundle / "localsend_app")], cwd=self.bundle, env=env,
                                                     stdin=subprocess.DEVNULL, stdout=logfile, stderr=subprocess.STDOUT,
                                                     start_new_session=True)

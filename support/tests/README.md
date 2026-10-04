@@ -27,6 +27,10 @@ In that KDE session with D-Bus, include `$HOME/.local/share/flatpak/exports/shar
 
 Add scenarios as `test_*.py` in `support/tests/linux_e2e/`. The `desktop` fixture sets and restores KDE themes; `launch_app` starts and stops an owned application, parametrized for native and Flatpak packaging. Assertions check the actual tray icon bytes and keep the same process, Flatpak instance, and D-Bus tray item during live changes. Tests use pytest without AI, API keys, or paid services.
 
+The native autostart scenarios use Linux accessibility actions to operate **Autostart after login** in the built application. They check the custom `XDG_CONFIG_HOME` path, fallback paths for unset, empty, and relative values, the desktop entry's icon, and disabling autostart after its entry has been deleted externally. A separate enable/disable scenario checks the normal path. Each scenario uses a temporary home directory and saves accessibility logs and generated desktop entries as evidence. These checks cover settings and desktop-entry generation; they do not simulate a new login or cover Flatpak autostart.
+
+Install `python3-pyatspi` and `at-spi2-core` for these scenarios. Run only autostart checks with `--packaging native --filter autostart`. A Flatpak-only run excludes the native autostart scenarios.
+
 The runner executes the whole suite even if a scenario fails. `report.json` records setup, test, and cleanup outcomes, and `junit.xml` provides standard test results. Application output is written to a separate log per scenario. An unavailable desktop or package is a failure, never a skipped test.
 
 For a focused local run, append `--packaging native --filter startup` to the runner command. New `test_*.py` files are collected automatically; the workflow needs no list of scenarios.
