@@ -302,7 +302,7 @@ Instructions in [localsend/snap/README.md](https://github.com/localsend/snap/blo
 
 ## Contributors
 
-LocalSend is co-maintained by [ShlomoCode](https://github.com/ShlomoCode).
+LocalSend is maintained by [Tienisto](https://github.com/Tienisto) (lead maintainer) and [ShlomoCode](https://github.com/ShlomoCode) (co-maintainer).
 
 <a href="https://github.com/localsend/localsend/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=localsend/localsend"  alt="Localsend Contributors"/>
