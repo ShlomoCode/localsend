@@ -12,7 +12,7 @@ enum DockIcon: CaseIterable {
 
 @main
 class AppDelegate: FlutterAppDelegate {
-    private let windowFrameAutosaveName = "LocalSendMainWindow"
+    private let windowFrameStorageName = "LocalSendMainWindow"
     private var statusItem: NSStatusItem?
     private var channel: FlutterMethodChannel?
     private var pendingFilesObservation: Defaults.Observation?
@@ -164,19 +164,19 @@ class AppDelegate: FlutterAppDelegate {
                 return
             }
             if enabled {
-                _ = window.setFrameUsingName(windowFrameAutosaveName)
-                guard window.setFrameAutosaveName(windowFrameAutosaveName) else {
+                _ = window.setFrameUsingName(windowFrameStorageName)
+                guard window.setFrameAutosaveName(windowFrameStorageName) else {
                     result(FlutterError(code: "AUTOSAVE_UNAVAILABLE", message: "Window frame autosave name is unavailable", details: nil))
                     return
                 }
                 // Enabling autosave alone does not save until the next move or resize.
-                window.saveFrame(usingName: windowFrameAutosaveName)
+                window.saveFrame(usingName: windowFrameStorageName)
             } else {
                 guard window.setFrameAutosaveName("") else {
                     result(FlutterError(code: "AUTOSAVE_UNAVAILABLE", message: "Could not disable window frame autosave", details: nil))
                     return
                 }
-                NSWindow.removeFrame(usingName: windowFrameAutosaveName)
+                NSWindow.removeFrame(usingName: windowFrameStorageName)
             }
             result(nil)
         case "removeDestinationFolderAccess":
