@@ -117,8 +117,8 @@ struct DiscoveryState {
     /// [`DiscoveryHandle::set_answer_announcements`].
     answering: AtomicBool,
 
-    /// The interface addresses a subnet scan is currently running for.
-    scanning: std::sync::Mutex<HashSet<Ipv4Addr>>,
+    /// The subnet and HTTP endpoint a scan is currently probing.
+    scanning: std::sync::Mutex<HashSet<(Ipv4Addr, u16, ProtocolType)>>,
 
     /// Number of confirmations in this run, on which
     /// [`DiscoveryHandle::discover_staged`] decides whether to escalate.
@@ -337,24 +337,25 @@ impl DiscoveryHandle {
     /// by sending every other host a register request,
     /// for networks that do not carry multicast.
     ///
-    /// At most one scan runs per interface: a call for an address that is
-    /// still being scanned returns an empty list immediately.
+    /// At most one scan runs per `/24` subnet and HTTP endpoint: a duplicate
+    /// call returns an empty list immediately.
     pub async fn scan_subnet(
         &self,
         interface_ip: Ipv4Addr,
         port: u16,
         protocol: ProtocolType,
     ) -> Result<Vec<StatefulDevice>, ClientError> {
-        if !self.state.scanning.lock().unwrap().insert(interface_ip) {
+        let base = interface_ip.octets();
+        let scan_key = (Ipv4Addr::new(base[0], base[1], base[2], 0), port, protocol);
+        if !self.state.scanning.lock().unwrap().insert(scan_key) {
             return Ok(Vec::new());
         }
         let _guard = ScanGuard {
             state: &self.state,
-            interface_ip,
+            scan_key,
         };
 
         let client = self.state.unpinned_client()?;
-        let base = interface_ip.octets();
 
         let state = &self.state;
         let client = &client;
@@ -420,16 +421,12 @@ impl DiscoveryHandle {
 /// cancelled by dropping its future.
 struct ScanGuard<'a> {
     state: &'a DiscoveryState,
-    interface_ip: Ipv4Addr,
+    scan_key: (Ipv4Addr, u16, ProtocolType),
 }
 
 impl Drop for ScanGuard<'_> {
     fn drop(&mut self) {
-        self.state
-            .scanning
-            .lock()
-            .unwrap()
-            .remove(&self.interface_ip);
+        self.state.scanning.lock().unwrap().remove(&self.scan_key);
     }
 }
 
