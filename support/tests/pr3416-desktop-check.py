@@ -202,6 +202,8 @@ def check_case(name, expected, executable, expected_wm_class):
         assert actor, 'LocalSend dock icon disappeared before screenshot'
         icons = icon_descendants(data, actor)
         assert icons, 'No mapped icon child was rendered in dock'
+        expected_icon = 'localsend_app' if expected == 'matched' else 'application-x-executable'
+        assert any(expected_icon in icon['gicon'] + icon['iconName'] for icon in icons), icons
         crop_dock(name, data, actor)
         result = {
             'case': name,

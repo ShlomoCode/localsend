@@ -160,6 +160,13 @@ jobs:
           echo 'StartupWMClass=org.localsend.localsend_app' | sudo tee -a /usr/share/applications/localsend_app.desktop
           sudo update-desktop-database /usr/share/applications
           cp /usr/share/applications/localsend_app.desktop /opt/pr3416/evidence/desktop-fix.desktop
+          # Shell retains GDesktopAppInfo instances for installed apps. Start
+          # a fresh session, as a user would after changing the desktop entry.
+          sudo systemctl stop pr3416-gnome.service
+          sudo loginctl terminate-user traytest
+          sudo systemctl stop "user@$(id -u traytest).service"
+          sudo systemctl start pr3416-gnome.service
+          bash support/tests/pr3416-desktop-user.sh ready
           bash support/tests/pr3416-desktop-user.sh desktop-fix matched /opt/pr3416/app/localsend_app
       - name: Preserve desktop diagnostics
         if: always()
