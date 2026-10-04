@@ -11,7 +11,6 @@ import 'package:localsend_app/provider/last_devices.provider.dart';
 import 'package:localsend_app/provider/local_ip_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/widget/dialogs/error_dialog.dart';
-import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/util/rust.dart';
@@ -151,22 +150,18 @@ class _AddressInputDialogState extends State<AddressInputDialog> with Refena {
             }).toList(),
           ),
           const SizedBox(height: 15),
-          TvTextInputFocus(
-            editable: !_fetching,
-            builder: (focusNode) => TextFormField(
-              focusNode: focusNode,
-              key: ValueKey('input-$_mode'),
-              autofocus: true,
-              enabled: !_fetching,
-              keyboardType: _mode == _InputMode.hashtag ? TextInputType.number : TextInputType.text,
-              decoration: InputDecoration(
-                prefixText: _mode == _InputMode.hashtag ? '# ' : 'IP: ',
-              ),
-              onChanged: (s) {
-                setState(() => _input = s);
-              },
-              onFieldSubmitted: (s) async => _submit(localIps, settings.port),
+          TextFormField(
+            key: ValueKey('input-$_mode'),
+            autofocus: true,
+            enabled: !_fetching,
+            keyboardType: _mode == _InputMode.hashtag ? TextInputType.number : TextInputType.text,
+            decoration: InputDecoration(
+              prefixText: _mode == _InputMode.hashtag ? '# ' : 'IP: ',
             ),
+            onChanged: (s) {
+              setState(() => _input = s);
+            },
+            onFieldSubmitted: (s) async => _submit(localIps, settings.port),
           ),
           const SizedBox(height: 10),
           if (_mode == _InputMode.hashtag) ...[

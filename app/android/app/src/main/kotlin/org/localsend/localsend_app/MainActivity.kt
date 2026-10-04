@@ -40,7 +40,6 @@ private const val API_LEVEL_ANDROID_17 = 37
 class MainActivity : FlutterActivity() {
     private var pendingResult: MethodChannel.Result? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
-    private var nativeTextInputFocused = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +47,7 @@ class MainActivity : FlutterActivity() {
             val flutterView = findViewById<View>(FLUTTER_VIEW_ID) as? ViewGroup
             if (flutterView != null) {
                 flutterView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-                val proxy = TextEditorProxyView(this, flutterView) { nativeTextInputFocused }
+                val proxy = TextEditorProxyView(this, flutterView)
                 flutterView.addView(proxy, FrameLayout.LayoutParams(1, 1))
                 if (flutterView.isFocused) proxy.requestFocus()
             }
@@ -134,11 +133,6 @@ class MainActivity : FlutterActivity() {
 
                 "shareIntentReady" -> {
                     onShareIntentReady()
-                    result.success(null)
-                }
-
-                "setNativeTextInputFocused" -> {
-                    nativeTextInputFocused = call.arguments == true
                     result.success(null)
                 }
 

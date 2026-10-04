@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/provider/tv_provider.dart';
-import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
 
@@ -43,15 +42,12 @@ class _TextFieldTvState extends State<TextFieldTv> with Refena {
             builder: (context) {
               return AlertDialog(
                 title: Text(widget.name),
-                content: TvTextInputFocus(
-                  builder: (focusNode) => TextFormField(
-                    focusNode: focusNode,
-                    controller: widget.controller,
-                    textAlign: TextAlign.center,
-                    onChanged: widget.onChanged,
-                    autofocus: true,
-                    onFieldSubmitted: (_) => context.pop(),
-                  ),
+                content: TextFormField(
+                  controller: widget.controller,
+                  textAlign: TextAlign.center,
+                  onChanged: widget.onChanged,
+                  autofocus: true,
+                  onFieldSubmitted: (_) => context.pop(),
                 ),
                 actions: [
                   ElevatedButton(
@@ -73,22 +69,19 @@ class _TextFieldTvState extends State<TextFieldTv> with Refena {
         ),
       );
     } else {
-      return TvTextInputFocus(
-        builder: (focusNode) => TextFormField(
-          focusNode: focusNode,
-          controller: widget.controller,
-          textAlign: TextAlign.center,
-          onChanged: widget.onChanged,
-          decoration: InputDecoration(
-            suffixIcon: widget.onDelete != null
-                ? IconButton(
-                    icon: Icon(Icons.clear),
-                    onPressed: () {
-                      widget.onDelete?.call();
-                    },
-                  )
-                : null,
-          ),
+      return TextFormField(
+        controller: widget.controller,
+        textAlign: TextAlign.center,
+        onChanged: widget.onChanged,
+        decoration: InputDecoration(
+          suffixIcon: widget.onDelete != null
+              ? IconButton(
+                  icon: Icon(Icons.clear),
+                  onPressed: () {
+                    widget.onDelete?.call();
+                  },
+                )
+              : null,
         ),
       );
     }

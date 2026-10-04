@@ -9,7 +9,6 @@ import android.view.inputmethod.InputConnection
 internal class TextEditorProxyView(
     context: Context,
     private val flutterView: View,
-    private val isEditorActive: () -> Boolean,
 ) : View(context) {
     init {
         isFocusable = true
@@ -17,7 +16,9 @@ internal class TextEditorProxyView(
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
-    override fun onCheckIsTextEditor(): Boolean = isEditorActive()
+    // The view can act as an editor. Flutter returns no InputConnection when
+    // there is no active text client, so this does not open an idle keyboard.
+    override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? = flutterView.onCreateInputConnection(outAttrs)
 

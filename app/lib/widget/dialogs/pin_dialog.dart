@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
-import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:nanoid2/nanoid2.dart';
 import 'package:routerino/routerino.dart';
 
@@ -39,14 +38,11 @@ class _PinDialogState extends State<PinDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TvTextInputFocus(
-            builder: (focusNode) => TextFormField(
-              focusNode: focusNode,
-              controller: _textController,
-              autofocus: true,
-              obscureText: widget.obscureText,
-              onFieldSubmitted: (value) => context.pop(value),
-            ),
+          TextFormField(
+            controller: _textController,
+            autofocus: true,
+            obscureText: widget.obscureText,
+            onFieldSubmitted: (value) => context.pop(value),
           ),
           if (widget.showInvalidPin)
             Padding(

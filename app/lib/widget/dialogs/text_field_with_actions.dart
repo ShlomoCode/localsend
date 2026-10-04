@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
-import 'package:localsend_app/widget/tv_text_input_focus.dart';
 import 'package:routerino/routerino.dart';
 
 /// A [AlertDialog] on all devices.
@@ -47,16 +46,13 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
                     children: widget.actions,
                   ),
                   const SizedBox(height: 10),
-                  TvTextInputFocus(
-                    builder: (focusNode) => TextFormField(
-                      focusNode: focusNode,
-                      controller: widget.controller,
-                      textAlign: TextAlign.center,
-                      enableSuggestions: false,
-                      onChanged: widget.onChanged,
-                      autofocus: true,
-                      onFieldSubmitted: (_) => context.pop(),
-                    ),
+                  TextFormField(
+                    controller: widget.controller,
+                    textAlign: TextAlign.center,
+                    enableSuggestions: false,
+                    onChanged: widget.onChanged,
+                    autofocus: true,
+                    onFieldSubmitted: (_) => context.pop(),
                   ),
                 ],
               ),
