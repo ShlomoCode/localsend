@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Run Linux E2E scenarios against one release bundle in the active KDE and D-Bus session.
+# Run Linux E2E scenarios against one release bundle.
 
 """Manual Linux release test runner using pytest."""
 
@@ -27,7 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path, help="app/build/linux/<arch>/release/bundle")
     parser.add_argument("--output", type=Path, default=Path("linux-e2e-results"))
-    parser.add_argument("--packaging", choices=["all", "native", "flatpak", "appimage"], default="all")
+    parser.add_argument("--packaging", choices=["all", "native", "appimage"], default="all")
     parser.add_argument("--filter", default="", help="pytest -k expression; empty runs the whole suite")
     parser.add_argument("--appimage", default="", help="AppImage built from this release bundle")
     args = parser.parse_args()

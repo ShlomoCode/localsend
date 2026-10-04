@@ -11,7 +11,8 @@ import subprocess
 import time
 import uuid
 
-from runtime import InfrastructureError
+class InfrastructureError(RuntimeError):
+    """The host cannot support the requested Linux session."""
 
 
 WATCHER = ("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher")
