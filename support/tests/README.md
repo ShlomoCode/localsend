@@ -5,7 +5,7 @@ Run the **Linux E2E** workflow manually from GitHub Actions on the branch or tag
 For the complete suite, leave packaging set to `all` and the test filter empty. For a focused run, set the filter to `autostart`; choose `native` or `appimage` to run only those three scenarios. The equivalent terminal trigger is:
 
 ```bash
-gh workflow run linux-e2e.yml --ref <branch-or-tag>
+gh workflow run linux-tray-e2e.yml --ref <branch-or-tag>
 ```
 
 The workflow also accepts `workflow_call` inputs named `packaging` and `test_filter`. Its generic runner supports `native`, `flatpak`, and `appimage`, and the workflow can prepare a Flatpak for future scenarios. The current suite has no Flatpak tests: selecting `flatpak` produces no tests and fails the run. New `test_*.py` files under `support/tests/linux_e2e/` are discovered automatically.
