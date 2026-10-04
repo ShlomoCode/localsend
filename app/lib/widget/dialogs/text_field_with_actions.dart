@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
+import 'package:localsend_app/provider/tv_provider.dart';
+import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
 
 /// A [AlertDialog] on all devices.
@@ -22,9 +24,10 @@ class TextFieldWithActions extends StatefulWidget {
   State<TextFieldWithActions> createState() => _TextFieldWithActionsState();
 }
 
-class _TextFieldWithActionsState extends State<TextFieldWithActions> {
+class _TextFieldWithActionsState extends State<TextFieldWithActions> with Refena {
   @override
   Widget build(BuildContext context) {
+    final isTv = ref.watch(tvProvider);
     return TextButton(
       style: TextButton.styleFrom(
         backgroundColor: Theme.of(context).inputDecorationTheme.fillColor,
@@ -49,7 +52,8 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
                   TextFormField(
                     controller: widget.controller,
                     textAlign: TextAlign.center,
-                    enableSuggestions: false,
+                    // TV Gboard can append the suggested word again instead of replacing it.
+                    enableSuggestions: !isTv,
                     onChanged: widget.onChanged,
                     autofocus: true,
                     onFieldSubmitted: (_) => context.pop(),
