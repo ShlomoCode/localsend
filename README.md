@@ -302,6 +302,8 @@ Instructions in [localsend/snap/README.md](https://github.com/localsend/snap/blo
 
 ## Contributors
 
+Co-maintainer: [ShlomoCode](https://github.com/ShlomoCode)
+
 <a href="https://github.com/localsend/localsend/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=localsend/localsend"  alt="Localsend Contributors"/>
 </a>
