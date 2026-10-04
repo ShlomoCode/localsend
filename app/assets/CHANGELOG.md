@@ -1,8 +1,11 @@
 ## Unreleased
 
 - feat: show the full bundled changelog after each version update, with a link to GitHub release notes (@ShlomoCode)
+- fix: avoid adding a trailing dot when renaming files without an extension (@ShlomoCode)
+- fix(macos): prevent intermittent MissingPluginException during startup (@ShlomoCode)
 - fix(macos): file sharing via Share Extension doesn't work in DMG builds (@ShlomoCode, @vdmkotai)
 - fix: show the real error when a file cannot be read while sending, instead of transferring it as an empty file (@leopalmieri-spec)
+- fix: show the actual save location path for receiving files (@ShlomoCode)
 
 ## 1.18.2 (2026-08-21)
 
