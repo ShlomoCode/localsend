@@ -12,7 +12,6 @@ enum DockIcon: CaseIterable {
 
 @main
 class AppDelegate: FlutterAppDelegate {
-    private let windowFrameStorageName = "LocalSendMainWindow"
     private var statusItem: NSStatusItem?
     private var channel: FlutterMethodChannel?
     private var pendingFilesObservation: Defaults.Observation?
@@ -154,6 +153,7 @@ class AppDelegate: FlutterAppDelegate {
             setupStatusBarItem(i18n: i18n)
             result(nil)
         case "configureWindowFrameAutosave":
+            let windowFrameStorageName = "LocalSendMainWindow"
             guard let arguments = call.arguments as? [String: Any],
                   let enabled = arguments["enabled"] as? Bool else {
                 result(FlutterError(code: "INVALID_ARGUMENT", message: "Expected window frame autosave options", details: nil))
