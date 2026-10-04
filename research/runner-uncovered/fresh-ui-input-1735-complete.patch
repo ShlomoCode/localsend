@@ -59,11 +59,10 @@
    windows_taskbar: 1.1.2
 --- a/app/windows/runner/win32_window.cpp
 +++ b/app/windows/runner/win32_window.cpp
-@@ -212,10 +212,6 @@
-         SetFocus(child_content_);
+@@ -213,9 +213,6 @@
        }
        return 0;
--
+ 
 -    case WM_DWMCOLORIZATIONCOLORCHANGED:
 -      UpdateTheme(hwnd);
 -      return 0;

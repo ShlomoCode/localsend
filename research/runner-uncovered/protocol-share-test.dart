@@ -122,6 +122,7 @@ Future<RefenaContainer> _mount(WidgetTester tester, SessionStatus status, {bool 
       container: fixture,
       ownsContainer: false,
       child: MaterialApp(
+        theme: ThemeData(inputDecorationTheme: const InputDecorationTheme(fillColor: Colors.grey)),
         navigatorKey: Routerino.navigatorKey,
         home: Scaffold(
           body: PageView(

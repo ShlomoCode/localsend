@@ -38,12 +38,14 @@ void main() {
       return hwnd;
     });
   });
-  setUp(() { debugDefaultTargetPlatformOverride = TargetPlatform.windows; });
-  tearDown(() { debugDefaultTargetPlatformOverride = null; });
   tearDownAll(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     PostMessage(hwnd, WM_CLOSE, 0, 0);
-    try { await host.exitCode.timeout(const Duration(seconds: 5)); } catch (_) { host.kill(); }
+    try {
+      await host.exitCode.timeout(const Duration(seconds: 5));
+    } catch (_) {
+      host.kill();
+    }
     await temp.delete(recursive: true);
   });
 
@@ -54,42 +56,67 @@ void main() {
     return value.value;
   });
 
-  test('actual app helper makes native frame dark', () async {
-    await updateSystemOverlayStyleWithBrightness(Brightness.dark);
-    expect(nativeDark(), 1);
-    expect(getIdCalls, greaterThan(0));
-  });
-  test('actual app helper reverses native frame to light', () async {
-    await updateSystemOverlayStyleWithBrightness(Brightness.dark);
-    await updateSystemOverlayStyleWithBrightness(Brightness.light);
-    expect(nativeDark(), 0);
-  });
-  testWidgets('exact app builder applies explicitly selected light theme', (tester) async {
-    await updateSystemOverlayStyleWithBrightness(Brightness.dark);
-    await tester.pumpWidget(fixtureApp(ThemeMode.light));
-    await tester.pumpAndSettle();
-    expect(nativeDark(), 0);
-    expect(tester.takeException(), isNull);
-  });
-  testWidgets('exact app builder applies explicitly selected dark theme', (tester) async {
-    await updateSystemOverlayStyleWithBrightness(Brightness.light);
-    await tester.pumpWidget(fixtureApp(ThemeMode.dark));
-    await tester.pumpAndSettle();
-    expect(nativeDark(), 1);
-    expect(tester.takeException(), isNull);
-  });
-  testWidgets('app builder follows inherited system brightness changes', (tester) async {
-    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
-    await tester.pumpWidget(fixtureApp(ThemeMode.system));
-    await tester.pumpAndSettle();
-    expect(nativeDark(), 0);
-    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
-    await tester.pumpAndSettle();
-    expect(nativeDark(), 1);
-    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
-    await tester.pumpAndSettle();
-    expect(nativeDark(), 0);
-    expect(tester.takeException(), isNull);
-  });
+  test(
+    'actual app helper makes native frame dark',
+    () => withWindows(() async {
+      await updateSystemOverlayStyleWithBrightness(Brightness.dark);
+      expect(nativeDark(), 1);
+      expect(getIdCalls, greaterThan(0));
+    }),
+  );
+  test(
+    'actual app helper reverses native frame to light',
+    () => withWindows(() async {
+      await updateSystemOverlayStyleWithBrightness(Brightness.dark);
+      await updateSystemOverlayStyleWithBrightness(Brightness.light);
+      expect(nativeDark(), 0);
+    }),
+  );
+  testWidgets(
+    'exact app builder applies explicitly selected light theme',
+    (tester) => withWindows(() async {
+      await updateSystemOverlayStyleWithBrightness(Brightness.dark);
+      await tester.pumpWidget(fixtureApp(ThemeMode.light));
+      await tester.pumpAndSettle();
+      expect(nativeDark(), 0);
+      expect(tester.takeException(), isNull);
+    }),
+  );
+  testWidgets(
+    'exact app builder applies explicitly selected dark theme',
+    (tester) => withWindows(() async {
+      await updateSystemOverlayStyleWithBrightness(Brightness.light);
+      await tester.pumpWidget(fixtureApp(ThemeMode.dark));
+      await tester.pumpAndSettle();
+      expect(nativeDark(), 1);
+      expect(tester.takeException(), isNull);
+    }),
+  );
+  testWidgets(
+    'app builder follows inherited system brightness changes',
+    (tester) => withWindows(() async {
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      await tester.pumpWidget(fixtureApp(ThemeMode.system));
+      await tester.pumpAndSettle();
+      expect(nativeDark(), 0);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      await tester.pumpAndSettle();
+      expect(nativeDark(), 1);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      await tester.pumpAndSettle();
+      expect(nativeDark(), 0);
+      expect(tester.takeException(), isNull);
+    }),
+  );
+}
+
+Future<T> withWindows<T>(Future<T> Function() run) async {
+  final previous = debugDefaultTargetPlatformOverride;
+  debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+  try {
+    return await run();
+  } finally {
+    debugDefaultTargetPlatformOverride = previous;
+  }
 }

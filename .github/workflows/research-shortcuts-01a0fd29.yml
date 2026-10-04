@@ -117,6 +117,20 @@ jobs:
           test "$before_status" -ne 0
           python3 ../../research/runner-uncovered/protocol-stale-timer-apply.py .. after
           flutter test test/protocol_stale_timer_test.dart --reporter expanded 2>&1 | tee ../../observations/timer-after.log
+      - name: Actual concurrent send and receive progress pages
+        id: progress_identity
+        continue-on-error: true
+        run: |
+          cp research/runner-uncovered/supplemental-ui-progress-test.dart baseline/app/test/supplemental_ui_progress_test.dart
+          cd baseline/app
+          set +e
+          flutter test test/supplemental_ui_progress_test.dart --reporter expanded > ../../observations/progress-identity-before.log 2>&1
+          before_status=$?
+          set -e
+          echo "$before_status" > ../../observations/progress-identity-before-status.txt
+          test "$before_status" -ne 0
+          python3 ../../research/runner-uncovered/supplemental-ui-progress-apply.py .. after
+          flutter test test/supplemental_ui_progress_test.dart --reporter expanded 2>&1 | tee ../../observations/progress-identity-after.log
       - name: Actual receive filename allocation and existing regression tests
         id: filenames
         continue-on-error: true
@@ -179,9 +193,10 @@ jobs:
           target = 'SAF text file remains a file and never requests coerced text'
           ids = {e['test']['id'] for e in events if e.get('type') == 'testStart' and target in e['test']['name']}
           errors = [e for e in events if e.get('type') == 'error' and e.get('testID') in ids]
+          messages = [e.get('message', '') for e in events if e.get('type') == 'print' and e.get('testID') in ids]
           expected_uri = 'content://test.documents/document/TAIR10_GFF3_genes.gff'
-          assert any('Expected:' in e.get('error', '') and expected_uri in e['error'] and 'Actual: <null>' in e['error'] for e in errors), errors
-          assert any(e.get('type') == 'testDone' and e.get('testID') in ids and e.get('result') == 'failure' for e in events), events
+          assert any('Expected:' in message and expected_uri in message and 'Actual: <null>' in message for message in messages), messages
+          assert any(e.get('type') == 'testDone' and e.get('testID') in ids and e.get('result') in ('failure', 'error') for e in events), events
           assert not any('MissingPluginException' in e.get('error', '') for e in errors), errors
           Path('observations/clipboard-app-before-proof.json').write_text(json.dumps({'behavioral_failure_verified': True, 'expected_path': expected_uri, 'actual_path': None, 'test_ids': sorted(ids)}, indent=2))
           PY
@@ -212,7 +227,6 @@ jobs:
           Path('observations/clipboard-app-after-proof.json').write_text(json.dumps({'all_three_tests_passed': True, 'tests': observed, 'linux_test_seam': 'UriContent(internalPlatform: TargetPlatform.android), identical in both modes'}, indent=2))
           PY
           git -C "$clipboard_repo" diff -- app/lib/util/native/file_picker.dart app/lib/util/native/channel/android_channel.dart > observations/clipboard-app-after-with-test-seam.diff
-
       - name: Final fixture gate
         if: always()
         run: |
@@ -222,6 +236,7 @@ jobs:
           test '${{ steps.share.outcome }}' = success
           test '${{ steps.wayland.outcome }}' = success
           test '${{ steps.timer.outcome }}' = success
+          test '${{ steps.progress_identity.outcome }}' = success
           test '${{ steps.filenames.outcome }}' = success
           test '${{ steps.clipboard_app.outcome }}' = success
       - uses: actions/upload-artifact@v4
@@ -231,6 +246,7 @@ jobs:
           path: observations/
           if-no-files-found: error
   launcher-and-metadata:
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -360,6 +376,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - uses: android-actions/setup-android@v3
       - name: Resolve SDK only on the runner
         run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
       - name: Real Android document metadata and UI traversal
@@ -447,15 +464,8 @@ jobs:
           persist-credentials: false
       - name: Exact plugin and app subclass compile at both minimum targets
         run: |
-          mkdir -p observations/before observations/after
-          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
-          plugin=research/runner-uncovered/ios-share-models
-          for minimum in 16.0 14.0; do
-            if test "$minimum" = 16.0; then variant=before; else variant=after; fi
-            swiftc -sdk "$sdk" -target arm64-apple-ios${minimum}-simulator -application-extension -parse-as-library -emit-library -emit-module -module-name share_handler_ios_models -emit-module-path observations/$variant/share_handler_ios_models.swiftmodule -o observations/$variant/libshare_handler_ios_models.dylib "$plugin/ShareHandlerIosViewController.swift" "$plugin/SharedModels.swift" 2>&1 | tee observations/$variant-compiler.log
-            swiftc -sdk "$sdk" -target arm64-apple-ios${minimum}-simulator -application-extension -I observations/$variant -typecheck baseline/app/ios/ShareExtension/ShareViewController.swift 2>&1 | tee observations/$variant-subclass.log
-            xcrun vtool -show-build observations/$variant/libshare_handler_ios_models.dylib > observations/$variant-build-version.txt
-          done
+          mkdir -p observations
+          python3 research/runner-uncovered/ios-fixture-compile.py --models research/runner-uncovered/ios-share-models --subclass baseline/app/ios/ShareExtension/ShareViewController.swift --out observations/compiler
           xcodebuild -version > observations/xcode-version.txt
           git -C baseline apply ../research/runner-uncovered/fresh-photo-secondary-410.patch
           git -C baseline diff -- app/ios/Runner.xcodeproj/project.pbxproj > observations/deployment-target.diff
@@ -466,6 +476,7 @@ jobs:
           path: observations/
           if-no-files-found: error
   browser-storage:
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

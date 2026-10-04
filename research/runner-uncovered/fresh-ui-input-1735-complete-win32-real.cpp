@@ -128,11 +128,6 @@ void Win32Window::UpdateTheme(HWND const window) {
   }
 }
 
-namespace flutter { using EncodableValue = std::variant<std::string>; using EncodableMap = std::map<EncodableValue, EncodableValue>; }
-class WindowManager { public: HWND hwnd_; HWND GetMainWindow(){return hwnd_;} void SetBrightness(const flutter::EncodableMap&); };
-void WindowManager::SetBrightness(const flutter::EncodableMap& args);
-  
-
 int main() {
  HWND h=nullptr;
  try {

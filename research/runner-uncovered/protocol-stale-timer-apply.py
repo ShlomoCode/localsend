@@ -2,6 +2,8 @@ from pathlib import Path
 import sys
 file = Path(sys.argv[1]) / 'app/lib/pages/progress_page.dart'
 s = file.read_text()
+seam = "\nvoid protocolStaleExitHook(State state) {\n  (state as _ProgressPageState)._exit(closeSession: true);\n}\n"
+s = s.replace(seam, "")
 if sys.argv[2] == 'after':
     marker = '    final sendSession = ref.read(sendProvider)[widget.sessionId];'
     # Only first occurrence: _exit, not build().

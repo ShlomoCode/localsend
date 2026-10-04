@@ -5,6 +5,8 @@ root = Path(sys.argv[1])
 mode = sys.argv[2]
 file = root / 'app/lib/config/init.dart'
 source = file.read_text()
+seam = '''\nFuture<void> protocolShareTestHook(Ref ref, SharedMedia payload) async {\n  await ref.global.dispatchAsync(_HandleShareIntentAction(payload: payload));\n}\n'''
+source = source.replace(seam, '')
 if mode == 'after':
     imports = [
         "import 'package:localsend_app/pages/progress_page.dart';",
@@ -15,7 +17,7 @@ if mode == 'after':
     marker = '    final message = payload.content;'
     block = '''    final navigator = Navigator.of(Routerino.context);
     navigator.popUntil((route) {
-      if (route is ModalRoute && route.settings.name == ProgressPage.toString() && ref.read(serverProvider)?.session == null) {
+      if (route is ModalRoute && route.settings.name == (ProgressPage as Type).toString() && ref.read(serverProvider)?.session == null) {
         void closeFinished(Element element) {
           if (element.widget case ProgressPage(:final sessionId)) {
             if (ref.read(sendProvider)[sessionId]?.status == SessionStatus.finished) {

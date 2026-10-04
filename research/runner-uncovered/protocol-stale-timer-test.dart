@@ -131,6 +131,7 @@ Future<RefenaContainer> mount(WidgetTester tester, SessionStatus status) async {
       container: f,
       ownsContainer: false,
       child: MaterialApp(
+        theme: ThemeData(inputDecorationTheme: const InputDecorationTheme(fillColor: Colors.grey)),
         navigatorKey: Routerino.navigatorKey,
         home: const Scaffold(body: Text('HOME')),
       ),

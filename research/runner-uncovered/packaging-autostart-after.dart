@@ -133,5 +133,5 @@ String _quoteDesktopExecutable(String executable) {
       .replaceAll('\n', r'\n')
       .replaceAll('\r', r'\r')
       .replaceAll('\t', r'\t');
-  return '"$escaped"';
+  return r'/bin/sh -c "exec \\"\\$0\\" \\"\\$@\\"" ' '"$escaped"';
 }
