@@ -43,7 +43,8 @@ jobs:
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
             libayatana-appindicator3-dev plasma-desktop plasma-workspace \
             xdg-desktop-portal xdg-desktop-portal-kde xvfb dbus-x11 \
-            flatpak python3-venv python3-gi gir1.2-gtk-3.0
+            flatpak python3-venv python3-gi gir1.2-gtk-3.0 \
+            python3-pyatspi at-spi2-core
 
       - name: Install pytest
         run: |

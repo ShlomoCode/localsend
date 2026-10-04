@@ -23,14 +23,31 @@ def desktop():
 
 def pytest_generate_tests(metafunc):
     if "packaging" in metafunc.fixturenames:
-        selected = metafunc.config.getoption("--packaging")
-        values = ["native", "flatpak"] if selected == "all" else [selected]
+        marker = metafunc.definition.get_closest_marker("packaging")
+        values = marker.args if marker else ("native", "flatpak")
         metafunc.parametrize("packaging", values, indirect=True)
 
 
 @pytest.fixture
 def packaging(request):
     return request.param
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "packaging(*formats): installation formats supported by a scenario")
+
+
+def pytest_collection_modifyitems(config, items):
+    selected = config.getoption("--packaging")
+    if selected == "all":
+        return
+    kept, removed = [], []
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        value = callspec.params.get("packaging") if callspec else None
+        (kept if value in (None, selected) else removed).append(item)
+    config.hook.pytest_deselected(items=removed)
+    items[:] = kept
 
 
 @pytest.fixture

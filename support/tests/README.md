@@ -25,10 +25,12 @@ In that KDE session with D-Bus, include `$HOME/.local/share/flatpak/exports/shar
 /tmp/localsend-e2e-venv/bin/python support/tests/run_linux_e2e.py app/build/linux/x64/release/bundle --output linux-e2e-results
 ```
 
-Add scenarios as `test_*.py` in `support/tests/linux_e2e/`. The `desktop` fixture sets and restores KDE themes; `launch_app` starts and stops an owned application, parametrized for native and Flatpak packaging. Assertions check the actual tray icon bytes and keep the same process, Flatpak instance, and D-Bus tray item during live changes. Tests use pytest without AI, API keys, or paid services.
+Add scenarios as `test_*.py` in `support/tests/linux_e2e/`. The `desktop` fixture sets and restores KDE themes; `launch_app` starts and stops an owned application, parametrized for native and Flatpak packaging. A `packaging` marker can restrict a scenario to the formats it supports. Assertions check the actual tray icon bytes and keep the same process, Flatpak instance, and D-Bus tray item during live changes. Native autostart scenarios use AT-SPI to operate the real settings switch and verify the generated desktop entry. Tests use pytest without AI, API keys, or paid services.
 
 The runner executes the whole suite even if a scenario fails. `report.json` records setup, test, and cleanup outcomes, and `junit.xml` provides standard test results. Application output is written to a separate log per scenario. An unavailable desktop or package is a failure, never a skipped test.
 
 For a focused local run, append `--packaging native --filter startup` to the runner command. New `test_*.py` files are collected automatically; the workflow needs no list of scenarios.
+
+To run only the autostart regressions, use `--packaging native --filter autostart`.
 
 The manual entry point calls `.github/workflows/linux-e2e.yml`, which also supports `workflow_call` with `packaging` and `test_filter` inputs. Other workflows can reuse the same Linux setup and test runner.

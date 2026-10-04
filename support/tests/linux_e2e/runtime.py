@@ -283,6 +283,8 @@ class App:
         if self.profile is None:
             self._temp_profile = tempfile.TemporaryDirectory(prefix="localsend-tray-e2e-")
             self.profile = Path(self._temp_profile.name)
+        home = self.profile / "home"
+        home.mkdir(parents=True, exist_ok=True)
         self.log.parent.mkdir(parents=True, exist_ok=True)
         try:
             with self.log.open("a", encoding="utf-8") as logfile:
@@ -294,7 +296,8 @@ class App:
                                                     start_new_session=True)
                 else:
                     env = os.environ.copy()
-                    env.update({"XDG_CONFIG_HOME": str(self.profile / "config"),
+                    env.update({"HOME": str(home),
+                                "XDG_CONFIG_HOME": str(self.profile / "config"),
                                 "XDG_CACHE_HOME": str(self.profile / "cache"),
                                 "XDG_DATA_HOME": str(self.profile / "data"),
                                 "LD_LIBRARY_PATH": str(self.bundle / "lib")})
