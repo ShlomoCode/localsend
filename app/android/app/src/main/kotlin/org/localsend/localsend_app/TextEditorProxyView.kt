@@ -5,6 +5,8 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 
+// TODO: Remove this proxy and its MainActivity setup once the pinned Flutter version
+// includes the fix for https://github.com/flutter/flutter/issues/177360 and TV input is verified.
 /** A focused Android view that exposes Flutter's editor connection to TV keyboards. */
 internal class TextEditorProxyView(
     context: Context,
