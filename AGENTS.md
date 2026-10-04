@@ -83,7 +83,7 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 ### Platform checks (Flutter)
 
-Use `defaultTargetPlatform` for Flutter behavior, `Theme.of(context).platform` for Material styling, and `dart:io`'s `Platform` for native OS calls. In shared web/native code, guard native calls with `kIsWeb`.
+Use `defaultTargetPlatform` for platform checks in Flutter code.
 
 ### State management
 
