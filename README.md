@@ -47,6 +47,8 @@ LocalSend is a cross-platform app that enables secure communication between devi
 
 ## Sponsors
 
+This project is tested with BrowserStack
+
 Browser testing via
 
 <a href="https://www.testmuai.com/?utm_medium=sponsor&utm_source=localsend" target="_blank">
