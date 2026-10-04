@@ -20,6 +20,11 @@ const RESERVED_WINDOWS_NAMES: &[&str] = &[
 
 /// Maximum file name length: UTF-16 code units under Windows, decomposed
 /// UTF-16 code units under Hfs, and bytes under the other rules.
+///
+/// References: [Windows limits], [HFS Plus Names], and [ext4 directory entries].
+/// [Windows limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
+/// [HFS Plus Names]: https://developer.apple.com/library/archive/technotes/tn1150.html
+/// [ext4 directory entries]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
 const MAX_LEN: usize = 255;
 
 /// The naming rules to apply, selected by target filesystem rather than by OS
@@ -88,6 +93,8 @@ impl Rules {
             // HFS+ decomposes names, with some exceptions. Full NFD can
             // overcount those names; that is conservative for HFS+/APFS and
             // keeps the supplied spelling unchanged.
+            // See TN1150, "Unicode Subtleties / Canonical Decomposition":
+            // https://developer.apple.com/library/archive/technotes/tn1150.html
             Self::Hfs => name.nfd().map(char::len_utf16).sum(),
             _ => name.len(),
         }
