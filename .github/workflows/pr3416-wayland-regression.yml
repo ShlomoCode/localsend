@@ -157,11 +157,12 @@ jobs:
           sudo chown -R traytest:traytest /opt/pr3416/app
           sudo chmod +x /opt/pr3416/app/localsend_app
           sudo sed -i '/^StartupWMClass=/d' /usr/share/applications/localsend_app.desktop
-          echo 'StartupWMClass=org.localsend.localsend_app' | sudo tee -a /usr/share/applications/localsend_app.desktop
+          printf '\nStartupWMClass=org.localsend.localsend_app\n' | sudo tee -a /usr/share/applications/localsend_app.desktop
+          desktop-file-validate /usr/share/applications/localsend_app.desktop
+          sudo /usr/bin/python3 -c 'from gi.repository import Gio; info=Gio.DesktopAppInfo.new_from_filename("/usr/share/applications/localsend_app.desktop"); assert info.get_startup_wm_class() == "org.localsend.localsend_app"; assert info.get_boolean("StartupNotify")'
           sudo update-desktop-database /usr/share/applications
           cp /usr/share/applications/localsend_app.desktop /opt/pr3416/evidence/desktop-fix.desktop
-          # Shell retains GDesktopAppInfo instances for installed apps. Start
-          # a fresh session, as a user would after changing the desktop entry.
+          # Verify the updated desktop entry after logout and login.
           sudo systemctl stop pr3416-gnome.service
           sudo loginctl terminate-user traytest
           sudo systemctl stop "user@$(id -u traytest).service"
