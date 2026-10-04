@@ -10,9 +10,9 @@ dbus-monitor --session > evidence/dbus.log 2>&1 &
 sleep 3
 binary=$(cat evidence/binary-path.txt | head -1)
 ldd "$binary" > evidence/ldd.txt
-for scenario in native healthy-portal missing-portal; do
+for scenario in native healthy-portal missing-portal missing-portal-native; do
   export GTK_USE_PORTAL=1
-  if [ "$scenario" = native ]; then
+  if [ "$scenario" = native ] || [ "$scenario" = missing-portal-native ]; then
     export GTK_USE_PORTAL=0
   elif [ "$scenario" = missing-portal ]; then
     # Disable only the frontend service in this disposable diagnostic container.
