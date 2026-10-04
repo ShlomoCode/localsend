@@ -8,9 +8,11 @@ import 'package:localsend_app/model/send_mode.dart';
 import 'package:localsend_app/model/state/settings_state.dart';
 import 'package:localsend_app/provider/persistence_provider.dart';
 import 'package:localsend_app/util/native/macos_channel.dart' as macos_channel;
+import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:refena_flutter/refena_flutter.dart';
+import 'package:window_manager/window_manager.dart';
 
 final _listEq = const ListEquality().equals;
 
@@ -68,6 +70,7 @@ class SettingsService extends PureNotifier<SettingsState> {
     https: _persistence.isHttps(),
     sendMode: _persistence.getSendMode(),
     saveWindowPlacement: _persistence.getSaveWindowPlacement(),
+    alwaysOnTop: _persistence.getAlwaysOnTop(),
     enableAnimations: _persistence.getEnableAnimations(),
     deviceType: _persistence.getDeviceType(),
     deviceModel: _persistence.getDeviceModel(),
@@ -250,6 +253,15 @@ class SettingsService extends PureNotifier<SettingsState> {
     state = state.copyWith(
       saveWindowPlacement: savePlacement,
     );
+  }
+
+  Future<void> setAlwaysOnTop(bool alwaysOnTop) async {
+    if (!checkPlatformIsNotWaylandDesktop()) return;
+    if (checkPlatformIsDesktop()) {
+      await windowManager.setAlwaysOnTop(alwaysOnTop);
+    }
+    await _persistence.setAlwaysOnTop(alwaysOnTop);
+    state = state.copyWith(alwaysOnTop: alwaysOnTop);
   }
 
   Future<void> setEnableAnimations(bool enableAnimations) async {
