@@ -165,7 +165,11 @@ jobs:
           sudo systemctl stop pr3416-gnome.service
           sudo loginctl terminate-user traytest
           sudo systemctl stop "user@$(id -u traytest).service"
-          sudo systemctl start pr3416-gnome.service
+          sudo systemd-run --unit=pr3416-gnome --uid=traytest --property=PAMName=login --property=WorkingDirectory=/home/traytest \
+            --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_SESSION_DESKTOP=ubuntu \
+            --setenv=XDG_CURRENT_DESKTOP=ubuntu:GNOME --setenv=GNOME_SHELL_SESSION_MODE=ubuntu \
+            --setenv=LIBGL_ALWAYS_SOFTWARE=1 --setenv=LANG=C.UTF-8 \
+            /bin/bash /opt/pr3416/support/tests/pr3416-start-gnome.sh
           bash support/tests/pr3416-desktop-user.sh ready
           bash support/tests/pr3416-desktop-user.sh desktop-fix matched /opt/pr3416/app/localsend_app
       - name: Preserve desktop diagnostics
