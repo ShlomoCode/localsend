@@ -27,27 +27,48 @@ const RESERVED_WINDOWS_NAMES: &[&str] = &[
 /// [ext4 directory entries]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
 const MAX_LEN: usize = 255;
 
-/// The naming rules to apply, selected by target filesystem rather than by OS
-/// so that callers can sanitize for a destination that is not the local one
-/// (a SAF tree on external FAT storage, for instance).
+/// Filename policies. Callers may select a policy explicitly; `current()`
+/// chooses a platform default without detecting the destination filesystem.
+/// All policies reject control characters as an application safety choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rules {
     /// NTFS: illegal characters, reserved device names, no trailing `.` or ` `.
+    /// Uses the Unicode component limit documented by [Microsoft's limits]
+    /// and [naming rules]. This is not a guarantee for every Windows volume.
+    ///
+    /// [Microsoft's limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
+    /// [naming rules]: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
     Windows,
-    /// HFS+/APFS: `/` and `:`.
+    /// Conservative Apple policy: `/` and `:`, with a decomposed UTF-16 limit.
+    /// [Apple TN1150] defines HFS+ names and decomposition exceptions. Full NFD
+    /// may overcount those exceptions and names accepted by APFS; no separate
+    /// APFS relaxation is applied without a destination-specific contract.
+    ///
+    /// [Apple TN1150]: https://developer.apple.com/library/archive/technotes/tn1150.html
     Hfs,
-    /// FAT/exFAT, the common case for Android external storage: the Windows
-    /// character set without the reserved names.
+    /// Conservative Android policy: FAT/exFAT illegal characters without
+    /// Windows device names, but a 255-byte limit for mixed storage targets.
+    /// The [exFAT specification] permits longer Unicode names; this policy
+    /// deliberately does not assume that the destination is an exFAT volume.
+    /// [AOSP FileUtils] likewise caps its FAT-safe names at 255 UTF-8 bytes.
+    ///
+    /// [exFAT specification]: https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification
+    /// [AOSP FileUtils]: https://android.googlesource.com/platform/frameworks/base/+/HEAD/core/java/android/os/FileUtils.java
     Fat,
-    /// POSIX: `/` and NUL only.
+    /// Unix policy: `/`, NUL and control characters, with a 255-byte limit
+    /// documented for [ext4]. Other Unix filesystems are not detected, so this
+    /// is a conservative default rather than a filesystem-wide guarantee.
+    ///
+    /// [ext4]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
     Posix,
-    /// The intersection of all of the above. Use when the destination
-    /// filesystem is unknown or the file may be copied between platforms.
+    /// Conservative intersection of the policies above, using a byte limit.
+    /// This is an application fallback, not a universal filesystem standard;
+    /// unknown destinations may impose additional restrictions.
     Universal,
 }
 
 impl Rules {
-    /// The rules for the platform this binary was compiled for.
+    /// Platform defaults; does not inspect mounts, remote servers or providers.
     pub const fn current() -> Self {
         if cfg!(target_os = "windows") {
             Self::Windows
