@@ -30,6 +30,7 @@ class TvTextFieldFactory(private val messenger: BinaryMessenger) : PlatformViewF
 
 private class TvTextField(context: Context, messenger: BinaryMessenger, viewId: Int, params: Map<*, *>?) : PlatformView {
     private val channel = MethodChannel(messenger, "org.localsend.localsend_app/tv_text_field/$viewId")
+    private var flutterView: View? = null
     private var layoutObserver: ViewTreeObserver? = null
     private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { checkImeVisibility() }
     private var imeWasVisible = false
@@ -138,6 +139,14 @@ private class TvTextField(context: Context, messenger: BinaryMessenger, viewId: 
 
     override fun getView(): View = editText
 
+    override fun onFlutterViewAttached(flutterView: View) {
+        this.flutterView = flutterView
+    }
+
+    override fun onFlutterViewDetached() {
+        flutterView = null
+    }
+
     private fun submitOnce() {
         if (submitted || disposed) return
         submitted = true
@@ -151,6 +160,9 @@ private class TvTextField(context: Context, messenger: BinaryMessenger, viewId: 
         dismissHandled = true
         hideKeyboard()
         editText.clearFocus()
+        // Flutter's FocusNode can select Confirm while Android still directs D-pad
+        // events to the platform view. Return physical focus to Flutter first.
+        flutterView?.requestFocus()
         channel.invokeMethod("keyboardDismissed", null)
     }
 
@@ -189,6 +201,7 @@ private class TvTextField(context: Context, messenger: BinaryMessenger, viewId: 
 
     override fun dispose() {
         disposed = true
+        flutterView = null
         stopObservingImeVisibility()
         hideKeyboard()
         channel.setMethodCallHandler(null)
