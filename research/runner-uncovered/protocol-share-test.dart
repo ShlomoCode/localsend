@@ -32,11 +32,8 @@ import 'package:share_handler/share_handler.dart';
 // by protocol-share-apply.py. The route contains the real ProgressPage and the
 // notifier inherits the real closeSession business logic.
 void main() {
-  setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.android);
-  tearDown(() => debugDefaultTargetPlatformOverride = null);
-
   for (final status in [SessionStatus.finished, SessionStatus.sending, SessionStatus.finishedWithErrors]) {
-    testWidgets('new share over actual progress page with $status', (tester) async {
+    _test('new share over actual progress page with $status', (tester) async {
       final fixture = await _mount(tester, status);
       await protocolShareTestHook(fixture, SharedMedia(content: 'new share'));
       await tester.pump();
@@ -61,7 +58,7 @@ void main() {
     });
   }
 
-  testWidgets('removed completed route cancels auto-finish timer before new share', (tester) async {
+  _test('removed completed route cancels auto-finish timer before new share', (tester) async {
     final fixture = await _mount(tester, SessionStatus.finished, autoFinish: true);
     await protocolShareTestHook(fixture, SharedMedia(content: 'new share'));
     await tester.pump();
@@ -73,7 +70,7 @@ void main() {
     fixture.disposeContainer();
   });
 
-  testWidgets('active receive preserves completed send page and queues share', (tester) async {
+  _test('active receive route and finished background send remain while share queues', (tester) async {
     final fixture = await _mount(tester, SessionStatus.finished, receiving: true);
     await protocolShareTestHook(fixture, SharedMedia(content: 'new share'));
     await tester.pump();
@@ -86,7 +83,7 @@ void main() {
     fixture.disposeContainer();
   });
 
-  testWidgets('dialog above completed progress page stays open and share is queued', (tester) async {
+  _test('dialog above completed progress page stays open and share is queued', (tester) async {
     final fixture = await _mount(tester, SessionStatus.finished);
     showDialog<void>(
       context: Routerino.context,
@@ -137,7 +134,7 @@ Future<RefenaContainer> _mount(WidgetTester tester, SessionStatus status, {bool 
       ),
     ),
   );
-  Routerino.context.pushImmediately(() => const ProgressPage(showAppBar: false, closeSessionOnClose: true, sessionId: 'old'));
+  Routerino.context.pushImmediately(() => ProgressPage(showAppBar: false, closeSessionOnClose: true, sessionId: receiving ? 'receive' : 'old'));
   await tester.pump();
   await tester.pump();
   expect(find.byType(ProgressPage), findsOneWidget);
@@ -249,4 +246,16 @@ class _Receiving extends ServerService {
       createdDirectories: {},
     ),
   );
+}
+
+void _test(String description, WidgetTesterCallback callback) {
+  testWidgets(description, (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await callback(tester);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }

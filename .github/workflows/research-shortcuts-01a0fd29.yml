@@ -15,7 +15,6 @@ defaults:
 
 jobs:
   actual-app-fixtures:
-    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -228,6 +227,73 @@ jobs:
           Path('observations/clipboard-app-after-proof.json').write_text(json.dumps({'all_three_tests_passed': True, 'tests': observed, 'linux_test_seam': 'UriContent(internalPlatform: TargetPlatform.android), identical in both modes'}, indent=2))
           PY
           git -C "$clipboard_repo" diff -- app/lib/util/native/file_picker.dart app/lib/util/native/channel/android_channel.dart > observations/clipboard-app-after-with-test-seam.diff
+      # Insert under actual-app-fixtures.steps; add nullclip_app.outcome success to gate.
+      - name: Actual empty Android clipboard completion before and after
+        id: nullclip_app
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p observations
+          nullclip_fixture_root="$GITHUB_WORKSPACE/research/runner-uncovered"
+          nullclip_scratch="$(mktemp -d /tmp/localsend-nullclip-fixture-XXXXXX)"
+          nullclip_repo="$nullclip_scratch/repo"
+          trap 'rm -rf "$nullclip_scratch"' EXIT
+          git clone --no-hardlinks "$GITHUB_WORKSPACE/baseline" "$nullclip_repo"
+          git -C "$nullclip_repo" checkout --detach 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          test "$(git -C "$nullclip_repo" rev-parse HEAD)" = 9529e915f438d8edd8bdf23e9f7aab2261a8b3e6
+          git -C "$nullclip_repo" rev-parse HEAD > observations/nullclip-app-baseline-sha.txt
+          (cd "$nullclip_repo" && flutter pub get --enforce-lockfile)
+          python3 "$nullclip_fixture_root/fresh-nullclip-inapp-apply.py" --repo "$nullclip_repo" --mode before
+          (
+            cd "$nullclip_repo/app"
+            set +e
+            flutter test --no-pub test/fresh_nullclip_inapp_test.dart --plain-name 'empty Android clipboard completes and shows no-item message' --reporter json 2>&1 | tee "$GITHUB_WORKSPACE/observations/nullclip-app-before.jsonl"
+            nullclip_before_status=${PIPESTATUS[0]}
+            set -e
+            echo "$nullclip_before_status" > "$GITHUB_WORKSPACE/observations/nullclip-app-before-status.txt"
+            test "$nullclip_before_status" -ne 0
+          )
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          events = []
+          for line in Path('observations/nullclip-app-before.jsonl').read_text().splitlines():
+              try:
+                  events.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          target = 'empty Android clipboard completes and shows no-item message'
+          ids = {e['test']['id'] for e in events if e.get('type') == 'testStart' and target in e['test']['name']}
+          messages = [e.get('message', '') for e in events if e.get('type') == 'print' and e.get('testID') in ids]
+          assert any('Empty Android clipboard must finish instead of waiting for a missing native files callback' in m and re.search(r'Actual:\s*(?:<false>|false)', m) for m in messages), messages
+          assert any(e.get('type') == 'testDone' and e.get('testID') in ids and e.get('result') in ('failure', 'error') for e in events), events
+          Path('observations/nullclip-app-before-proof.json').write_text(json.dumps({'behavioral_missing_completion_verified': True, 'timeout_ms': 300, 'actual_completed': False}, indent=2))
+          PY
+          python3 "$nullclip_fixture_root/fresh-nullclip-inapp-apply.py" --repo "$nullclip_repo" --mode after
+          (cd "$nullclip_repo/app" && flutter test --no-pub test/fresh_nullclip_inapp_test.dart --reporter json 2>&1 | tee "$GITHUB_WORKSPACE/observations/nullclip-app-after.jsonl")
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          events = []
+          for line in Path('observations/nullclip-app-after.jsonl').read_text().splitlines():
+              try:
+                  events.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          expected = [
+              'empty Android clipboard completes and shows no-item message',
+              'copied Android URI still selects a file',
+              'ordinary Android text keeps existing text priority',
+              'empty desktop clipboard still uses existing pasteboard route',
+          ]
+          completed = {e.get('testID'): e.get('result') for e in events if e.get('type') == 'testDone'}
+          observed = {name: any(e.get('type') == 'testStart' and name in e['test']['name'] and completed.get(e['test']['id']) == 'success' for e in events) for name in expected}
+          assert all(observed.values()), observed
+          assert not any(e.get('type') == 'error' for e in events), events
+          assert any(e.get('type') == 'done' and e.get('success') is True for e in events), events
+          Path('observations/nullclip-app-after-proof.json').write_text(json.dumps({'all_four_tests_passed': True, 'tests': observed, 'linux_test_seam': 'UriContent internalPlatform Android in both modes'}, indent=2))
+          PY
+          git -C "$nullclip_repo" diff -- app/android/app/src/main/kotlin/org/localsend/localsend_app/MainActivity.kt app/lib/util/native/channel/android_channel.dart app/lib/util/native/file_picker.dart > observations/nullclip-app-after-with-test-seam.diff
       - name: Final fixture gate
         if: always()
         run: |
@@ -240,6 +306,7 @@ jobs:
           test '${{ steps.progress_identity.outcome }}' = success
           test '${{ steps.filenames.outcome }}' = success
           test '${{ steps.clipboard_app.outcome }}' = success
+          test '${{ steps.nullclip_app.outcome }}' = success
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -392,7 +459,7 @@ jobs:
         id: clipboard
         continue-on-error: true
         working-directory: research/runner-uncovered/android-clipboard-runtime
-        run: gradle --no-daemon test --tests proof.ClipboardProofTest --tests proof.NullFilesCompletionTest --write-locks --stacktrace
+        run: gradle --no-daemon test --tests proof.ClipboardProofTest --tests proof.NullFilesCompletionTest --tests proof.FreshHasClipboardContentTest --write-locks --stacktrace
       - name: Final native fixture gate
         if: always()
         run: |

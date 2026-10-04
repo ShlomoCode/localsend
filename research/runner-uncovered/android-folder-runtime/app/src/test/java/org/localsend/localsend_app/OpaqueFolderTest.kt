@@ -1,5 +1,6 @@
 package org.localsend.localsend_app
 
+import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -21,6 +22,24 @@ import java.io.FileNotFoundException
 
 private const val AUTHORITY = "localsend.fixture.documents"
 private const val DIR = DocumentsContract.Document.MIME_TYPE_DIR
+
+/** Explicit metadata is required by DocumentsProvider.attachInfo. Robolectric's
+ * create(authority) did not inherit all manifest provider flags in batch4.
+ */
+fun createOpaqueDocumentsProvider(): OpaqueDocumentsProvider {
+    val application = RuntimeEnvironment.getApplication()
+    val info = ProviderInfo().apply {
+        authority = AUTHORITY
+        name = OpaqueDocumentsProvider::class.java.name
+        packageName = application.packageName
+        applicationInfo = application.applicationInfo
+        exported = true
+        grantUriPermissions = true
+        readPermission = "android.permission.MANAGE_DOCUMENTS"
+        writePermission = "android.permission.MANAGE_DOCUMENTS"
+    }
+    return Robolectric.buildContentProvider(OpaqueDocumentsProvider::class.java).create(info).get()
+}
 
 /** This fixture implements Android's actual DocumentsProvider query routing.
  * IDs deliberately carry no filesystem hierarchy. Only display names do.
@@ -92,7 +111,7 @@ class OpaqueDocumentsProvider : DocumentsProvider() {
 class OpaqueFolderTest {
     @Test fun actualNativeEnumerationPreservesRootAndNestedDisplayNamesForOpaqueIds() {
         val context = RuntimeEnvironment.getApplication()
-        val provider = Robolectric.buildContentProvider(OpaqueDocumentsProvider::class.java).create(AUTHORITY).get()
+        val provider = createOpaqueDocumentsProvider()
         val evidence = JSONArray()
         // Numeric, no-colon, colon, and encoded slash/colon provider IDs must all behave identically.
         for (rootId in listOf("16621", "opaqueRoot", "msf:16621", "opaque/root:16621")) {

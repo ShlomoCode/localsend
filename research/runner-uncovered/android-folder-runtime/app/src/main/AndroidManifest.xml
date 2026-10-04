@@ -4,7 +4,8 @@
     <activity android:name="org.localsend.localsend_app.AfterDirectoryActivity" />
     <provider android:name="org.localsend.localsend_app.OpaqueDocumentsProvider"
       android:authorities="localsend.fixture.documents" android:exported="true"
-      android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+      android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS"
+      android:readPermission="android.permission.MANAGE_DOCUMENTS" android:writePermission="android.permission.MANAGE_DOCUMENTS">
       <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
     </provider>
   </application>

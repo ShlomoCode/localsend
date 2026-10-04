@@ -36,10 +36,8 @@ final List<dynamic> cancelMessages = [];
 
 void main() {
   setUp(cancelMessages.clear);
-  setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.android);
-  tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-  testWidgets('old finished receive timer leaves replacement B untouched', (tester) async {
+  _test('old finished receive timer leaves replacement B untouched', (tester) async {
     final f = await mount(tester, SessionStatus.finished);
     f.notifier(serverProvider).closeSession();
     (f.notifier(serverProvider) as FixtureServer).replace('B', SessionStatus.sending);
@@ -59,7 +57,7 @@ void main() {
     f.disposeContainer();
   });
 
-  testWidgets('own finished receive still auto-finishes', (tester) async {
+  _test('own finished receive still auto-finishes', (tester) async {
     final f = await mount(tester, SessionStatus.finished);
     for (var i = 0; i < 4; i++) {
       await tester.pump(const Duration(seconds: 1));
@@ -71,7 +69,7 @@ void main() {
     f.disposeContainer();
   });
 
-  testWidgets('own active receive still asks for cancellation', (tester) async {
+  _test('own active receive still asks for cancellation', (tester) async {
     final f = await mount(tester, SessionStatus.sending);
     protocolStaleExitHook(tester.state(find.byType(ProgressPage)));
     await tester.pumpAndSettle();
@@ -85,7 +83,7 @@ void main() {
     f.disposeContainer();
   });
 
-  testWidgets('own active receive cancellation still reaches its actual controller', (tester) async {
+  _test('own active receive cancellation still reaches its actual controller', (tester) async {
     final f = await mount(tester, SessionStatus.sending);
     protocolStaleExitHook(tester.state(find.byType(ProgressPage)));
     await tester.pumpAndSettle();
@@ -100,7 +98,7 @@ void main() {
     f.disposeContainer();
   });
 
-  testWidgets('confirmation opened for A cannot close replacement B', (tester) async {
+  _test('confirmation opened for A cannot close replacement B', (tester) async {
     final f = await mount(tester, SessionStatus.sending);
     protocolStaleExitHook(tester.state(find.byType(ProgressPage)));
     await tester.pumpAndSettle();
@@ -120,7 +118,15 @@ void main() {
 Future<RefenaContainer> mount(WidgetTester tester, SessionStatus status) async {
   Routerino.navigatorKey = GlobalKey<NavigatorState>();
   final f = RefenaContainer(
-    overrides: [settingsProvider.overrideWithNotifier((_) => _Settings(true)), serverProvider.overrideWithNotifier((_) => FixtureServer(status))],
+    overrides: [
+      settingsProvider.overrideWithNotifier((_) => _Settings(true)),
+      serverProvider.overrideWithNotifier((_) => FixtureServer(status)),
+      parentIsolateProvider.overrideWithNotifier(
+        (_) => IsolateController(
+          initialState: ParentIsolateState(syncState: FixtureSync(), discovery: null, httpUpload: null, httpServer: FixtureConnector()),
+        ),
+      ),
+    ],
   );
   f.read(navigationProvider).setKey(Routerino.navigatorKey);
   f
@@ -243,4 +249,16 @@ class FixtureConnector<R, S> implements IsolateConnector<R, S> {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError('Unexpected connector use');
+}
+
+void _test(String description, WidgetTesterCallback callback) {
+  testWidgets(description, (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await callback(tester);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }

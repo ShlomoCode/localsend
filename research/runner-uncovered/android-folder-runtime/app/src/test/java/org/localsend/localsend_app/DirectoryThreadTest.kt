@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 @Config(sdk = [34])
 class DirectoryThreadTest {
     private fun provider(): OpaqueDocumentsProvider =
-        Robolectric.buildContentProvider(OpaqueDocumentsProvider::class.java).create("localsend.fixture.documents").get()
+        createOpaqueDocumentsProvider()
     private fun pickedIntent(): Intent = Intent().setData(
         DocumentsContract.buildTreeDocumentUri("localsend.fixture.documents", "16621")
     ).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

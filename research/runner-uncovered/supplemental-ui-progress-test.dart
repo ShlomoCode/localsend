@@ -35,11 +35,8 @@ import 'package:typed_isolates/typed_isolates.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 
 void main() {
-  setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.android);
-  tearDown(() => debugDefaultTargetPlatformOverride = null);
-
   for (final otherReceive in [false, true]) {
-    testWidgets(
+    progressTest(
       'outgoing progress uses its own title and files; unrelated receive=$otherReceive',
       (tester) async {
         final f = await mount(tester, outgoing: true, receive: otherReceive);
@@ -53,7 +50,7 @@ void main() {
     );
   }
 
-  testWidgets('own receiving progress retains incoming title and files', (
+  progressTest('own receiving progress retains incoming title and files', (
     tester,
   ) async {
     final f = await mount(tester, outgoing: false, receive: true);
@@ -65,7 +62,7 @@ void main() {
     f.disposeContainer();
   });
 
-  testWidgets(
+  progressTest(
     'opening incoming progress retains a mounted outgoing progress route safely',
     (tester) async {
       final f = await mount(tester, outgoing: true, receive: false);
@@ -93,7 +90,7 @@ void main() {
     },
   );
 
-  testWidgets(
+  progressTest(
     'a replaced receive route cannot dismiss the new receive progress route',
     (tester) async {
       final f = await mount(tester, outgoing: false, receive: true);
@@ -131,7 +128,22 @@ void main() {
     },
   );
 
-  testWidgets(
+  progressTest('a removed own current receive route still returns home', (
+    tester,
+  ) async {
+    final f = await mount(tester, outgoing: false, receive: true);
+    (f.notifier(serverProvider) as FixtureServer).setReceive(false);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ProgressPage), findsNothing);
+    expect(find.text('HOME'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    f.disposeContainer();
+  });
+
+  progressTest(
     'an incoming transfer cannot relabel an already open outgoing page',
     (tester) async {
       final f = await mount(tester, outgoing: true, receive: false);
@@ -146,6 +158,20 @@ void main() {
       f.disposeContainer();
     },
   );
+}
+
+void progressTest(
+  String description,
+  Future<void> Function(WidgetTester) body,
+) {
+  testWidgets(description, (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await body(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }
 
 Future<RefenaContainer> mount(

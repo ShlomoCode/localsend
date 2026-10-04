@@ -64,35 +64,47 @@ void main() {
   }
 
   testWidgets('SAF text file remains a file and never requests coerced text', (tester) async {
-    nativeUris = ['content://test.documents/document/TAIR10_GFF3_genes.gff'];
-    final ref = await paste(tester);
-    final selected = ref.read(selectedSendingFilesProvider);
-    expect(selected, hasLength(1));
-    expect(selected.single.path, nativeUris.single);
-    expect(selected.single.bytes, isNull);
-    expect(selected.single.size, 42 * 1024 * 1024);
-    expect(coercedReads, 0);
-    ref.disposeContainer();
+    try {
+      nativeUris = ['content://test.documents/document/TAIR10_GFF3_genes.gff'];
+      final ref = await paste(tester);
+      final selected = ref.read(selectedSendingFilesProvider);
+      expect(selected, hasLength(1));
+      expect(selected.single.path, nativeUris.single);
+      expect(selected.single.bytes, isNull);
+      expect(selected.single.size, 42 * 1024 * 1024);
+      expect(coercedReads, 0);
+      ref.disposeContainer();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('explicit copied text wins even with an accompanying URI', (tester) async {
-    rawText = 'https://example.com';
-    nativeUris = ['content://test.documents/document/attachment'];
-    final ref = await paste(tester);
-    final selected = ref.read(selectedSendingFilesProvider);
-    expect(selected, hasLength(1));
-    expect(utf8.decode(selected.single.bytes!), rawText);
-    expect(selected.single.path, isNull);
-    expect(coercedReads, 0);
-    expect(pasteboardReads, 0);
-    ref.disposeContainer();
+    try {
+      rawText = 'https://example.com';
+      nativeUris = ['content://test.documents/document/attachment'];
+      final ref = await paste(tester);
+      final selected = ref.read(selectedSendingFilesProvider);
+      expect(selected, hasLength(1));
+      expect(utf8.decode(selected.single.bytes!), rawText);
+      expect(selected.single.path, isNull);
+      expect(coercedReads, 0);
+      expect(pasteboardReads, 0);
+      ref.disposeContainer();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('desktop still uses Flutter clipboard', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    final ref = await paste(tester);
-    expect(coercedReads, 1);
-    expect(utf8.decode(ref.read(selectedSendingFilesProvider).single.bytes!), 'GFF3 provider text coerced into a message');
-    ref.disposeContainer();
+    try {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      final ref = await paste(tester);
+      expect(coercedReads, 1);
+      expect(utf8.decode(ref.read(selectedSendingFilesProvider).single.bytes!), 'GFF3 provider text coerced into a message');
+      ref.disposeContainer();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }
