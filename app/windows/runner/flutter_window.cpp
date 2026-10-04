@@ -22,10 +22,10 @@ bool ReadCoordinate(const flutter::EncodableMap& values, const char* key,
   }
 
   int64_t number;
-  if (const auto* value = std::get_if<int32_t>(&item->second)) {
-    number = *value;
-  } else if (const auto* value = std::get_if<int64_t>(&item->second)) {
-    number = *value;
+  if (const auto* int32_value = std::get_if<int32_t>(&item->second)) {
+    number = *int32_value;
+  } else if (const auto* int64_value = std::get_if<int64_t>(&item->second)) {
+    number = *int64_value;
   } else {
     return false;
   }
@@ -92,10 +92,10 @@ bool FlutterWindow::OnCreate() {
             return;
           }
           flutter::EncodableMap values;
-          values[flutter::EncodableValue("left")] = bounds.left;
-          values[flutter::EncodableValue("top")] = bounds.top;
-          values[flutter::EncodableValue("right")] = bounds.right;
-          values[flutter::EncodableValue("bottom")] = bounds.bottom;
+          values[flutter::EncodableValue("left")] = static_cast<int32_t>(bounds.left);
+          values[flutter::EncodableValue("top")] = static_cast<int32_t>(bounds.top);
+          values[flutter::EncodableValue("right")] = static_cast<int32_t>(bounds.right);
+          values[flutter::EncodableValue("bottom")] = static_cast<int32_t>(bounds.bottom);
           result->Success(flutter::EncodableValue(values));
         } else if (call.method_name() == "restoreWindowPlacement") {
           RECT bounds{};
