@@ -20,9 +20,47 @@ pub enum Command {
         #[arg(long, value_name = "TARGET")]
         to: Option<String>,
 
+        /// Port to use when --to is an IP address
+        #[arg(long, requires = "to")]
+        target_port: Option<u16>,
+
+        /// Maximum time to discover and complete the transfer, in seconds
+        #[arg(long, requires = "to", value_parser = clap::value_parser!(u64).range(1..=86400))]
+        timeout: Option<u64>,
+
+        /// Emit newline-delimited JSON instead of terminal output
+        #[arg(long, requires = "to")]
+        json: bool,
+
         /// Files or directories to send (directories are collected recursively)
         #[arg(value_name = "PATH", required = true, num_args = 1..)]
         paths: Vec<PathBuf>,
+    },
+    /// Discover nearby devices and print one snapshot
+    Discover {
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=86400))]
+        timeout: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Receive transfers without a terminal
+    Receive {
+        /// Accept requests from any sender (default: paired senders only)
+        #[arg(long)]
+        auto_accept: bool,
+        /// Exit after one completed transfer
+        #[arg(long)]
+        once: bool,
+        /// Stop after this many seconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=86400))]
+        timeout: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Serve JSON-line commands and events over stdin/stdout
+    Serve {
+        #[arg(long, required = true)]
+        stdio: bool,
     },
 }
 
@@ -62,7 +100,23 @@ const HELP_SECTIONS: &str = "Events:\n  \
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    tokio::runtime::Runtime::new()?.block_on(app::run(args))
+    let json = matches!(
+        &args.command,
+        Some(Command::Send { json: true, .. })
+            | Some(Command::Discover { json: true, .. })
+            | Some(Command::Receive { json: true, .. })
+            | Some(Command::Serve { .. })
+    );
+    let result = tokio::runtime::Runtime::new()?.block_on(app::run(args));
+    if let Err(error) = &result
+        && json
+    {
+        println!(
+            "{}",
+            serde_json::json!({"type":"error","code":"command_failed","error":error.to_string()})
+        );
+    }
+    result
 }
 
 #[cfg(test)]
@@ -76,7 +130,7 @@ mod tests {
         let args = Args::try_parse_from(["localsend-cli", "send", "one.txt", "two.txt", "backup"])
             .unwrap();
 
-        let Some(Command::Send { to, paths }) = args.command else {
+        let Some(Command::Send { to, paths, .. }) = args.command else {
             panic!("expected the send command");
         };
         assert_eq!(to, None);
@@ -96,7 +150,7 @@ mod tests {
             Args::try_parse_from(["localsend-cli", "send", "--to", "Cute Tomato", "one.txt"])
                 .unwrap();
 
-        let Some(Command::Send { to, paths }) = args.command else {
+        let Some(Command::Send { to, paths, .. }) = args.command else {
             panic!("expected the send command");
         };
         assert_eq!(to.as_deref(), Some("Cute Tomato"));
@@ -109,7 +163,7 @@ mod tests {
             Args::try_parse_from(["localsend-cli", "send", "--to", "192.168.27.26", "one.txt"])
                 .unwrap();
 
-        let Some(Command::Send { to, paths }) = args.command else {
+        let Some(Command::Send { to, paths, .. }) = args.command else {
             panic!("expected the send command");
         };
         assert_eq!(to.as_deref(), Some("192.168.27.26"));

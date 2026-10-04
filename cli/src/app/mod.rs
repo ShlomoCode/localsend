@@ -1,7 +1,7 @@
 mod devices;
 mod discovery;
-mod headless;
 mod keys;
+mod machine;
 mod receive;
 mod sending;
 mod status;
@@ -76,11 +76,11 @@ pub enum AppEvent {
 
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let (preselected, target) = match &args.command {
-        Some(Command::Send { to, paths }) => (
+        Some(Command::Send { to, paths, .. }) => (
             paths.clone(),
             to.as_deref().map(TargetSelector::parse).transpose()?,
         ),
-        None => (Vec::new(), None),
+        _ => (Vec::new(), None),
     };
     for path in &preselected {
         anyhow::ensure!(
@@ -90,9 +90,38 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         );
     }
     let storage = storage::Repository::load(&args)?;
-    match target {
-        Some(target) => headless::run(storage, target, preselected).await,
-        None => run_interactive(storage, preselected).await,
+    match args.command {
+        Some(Command::Discover { timeout, json }) => {
+            machine::discover(storage, timeout, json).await
+        }
+        Some(Command::Receive {
+            auto_accept,
+            once,
+            timeout,
+            json,
+        }) => machine::receive(storage, auto_accept, once, timeout, json).await,
+        Some(Command::Serve { stdio: true }) => machine::serve(storage).await,
+        Some(Command::Send {
+            to: Some(_),
+            target_port,
+            timeout,
+            json,
+            ..
+        }) => {
+            machine::send(
+                storage,
+                target.unwrap(),
+                target_port,
+                timeout,
+                json,
+                preselected,
+            )
+            .await
+        }
+        _ => match target {
+            Some(target) => machine::send(storage, target, None, None, false, preselected).await,
+            None => run_interactive(storage, preselected).await,
+        },
     }
 }
 
@@ -411,7 +440,7 @@ impl App {
                 // In `send` mode the transfer is the whole program.
                 return !self.preselected.is_empty();
             }
-            // Only the headless mode acts on the end of the startup discovery.
+            // Only machine modes act on the end of startup discovery.
             AppEvent::DiscoveryFinished => {}
             AppEvent::Log { category, text } => self.ui.log(category, &text),
         }

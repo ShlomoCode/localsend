@@ -156,6 +156,13 @@ pub(super) fn collect_files(
     ui: &mut Ui,
     picked: Vec<PathBuf>,
 ) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
+    collect_files_with_log(picked, |message| ui.log(Category::Send, &message))
+}
+
+pub(super) fn collect_files_with_log(
+    picked: Vec<PathBuf>,
+    mut log: impl FnMut(String),
+) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
     let mut files = HashMap::new();
     let mut paths = HashMap::new();
     let mut total_bytes = 0u64;
@@ -163,20 +170,17 @@ pub(super) fn collect_files(
         let (path, file_name) = match collected {
             Ok(collected) => collected,
             Err((path, error)) => {
-                ui.log(
-                    Category::Send,
-                    &format!("Skipping unreadable path: {} ({error})", path.display()),
-                );
+                log(format!(
+                    "Skipping unreadable path: {} ({error})",
+                    path.display()
+                ));
                 continue;
             }
         };
         let metadata = match std::fs::metadata(&path) {
             Ok(metadata) if metadata.is_file() => metadata,
             _ => {
-                ui.log(
-                    Category::Send,
-                    &format!("Skipping unreadable file: {}", path.display()),
-                );
+                log(format!("Skipping unreadable file: {}", path.display()));
                 continue;
             }
         };
