@@ -15,9 +15,13 @@ def nodes(root):
 
 def app_nodes():
     desktop = pyatspi.Registry.getDesktop(0)
-    for app in desktop:
-        if "localsend" in app.name.lower():
-            return list(nodes(app))
+    try:
+        for app in desktop:
+            if "localsend" in app.name.lower():
+                return list(nodes(app))
+    except IndexError:
+        # A settings update can replace children mid-read; retry the snapshot on the next poll.
+        return []
     return []
 
 
