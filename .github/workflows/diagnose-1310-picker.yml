@@ -1,0 +1,56 @@
+name: Diagnose issue 1310 Linux picker
+
+on:
+  push:
+    branches: [codex/diagnose-1310-picker]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  released-app:
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "debian:12"]
+        version: ["1.14.0", "1.18.2"]
+    steps:
+      - name: Install XFCE and diagnostic tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates curl git python3 xvfb dbus-x11 xfwm4 xfce4-settings xfce4-panel xdotool wmctrl imagemagick tesseract-ocr libgtk-3-0 libayatana-appindicator3-1 libsqlite3-0 xdg-desktop-portal xdg-desktop-portal-gtk strace gcc libgtk-3-dev
+      - uses: actions/checkout@v6
+      - name: Download original release
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          mkdir -p release evidence
+          curl -fL --retry 3 "https://github.com/localsend/localsend/releases/download/v${VERSION}/LocalSend-${VERSION}-linux-x86-64.tar.gz" -o release.tar.gz
+          sha256sum release.tar.gz > evidence/release-sha256.txt
+          tar -xzf release.tar.gz -C release
+          find release -type f -name localsend_app > evidence/binary-path.txt
+          cat /etc/os-release > evidence/os-release.txt
+          dpkg-query -W > evidence/packages.txt
+          gcc support/diagnostics/issue1310/gtk_probe.c -o gtk-probe $(pkg-config --cflags --libs gtk+-3.0)
+      - name: Run real app and GTK controls in XFCE
+        env:
+          DISPLAY: ':99'
+          XDG_CURRENT_DESKTOP: XFCE
+          XDG_SESSION_DESKTOP: xfce
+          XDG_SESSION_TYPE: x11
+          LANG: C.UTF-8
+          G_MESSAGES_DEBUG: all
+        run: |
+          Xvfb :99 -screen 0 1200x900x24 -ac > evidence/xvfb.log 2>&1 &
+          sleep 2
+          dbus-run-session -- bash support/diagnostics/issue1310/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: picker-${{ strategy.job-index }}-${{ matrix.version }}
+          path: evidence/
