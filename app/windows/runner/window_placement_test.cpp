@@ -71,6 +71,8 @@ int main() {
     passed &= Check(GetNormalWindowPlacement(window, &captured) &&
                         !SameRect(captured, offscreen),
                     "Windows moves entirely off-screen placement into view");
+    passed &= Check(::MonitorFromWindow(window, MONITOR_DEFAULTTONULL) != nullptr,
+                    "restored window intersects a monitor");
 
     const RECT partial{monitor_info.rcMonitor.right - 200,
                        monitor_info.rcMonitor.top + 100,
