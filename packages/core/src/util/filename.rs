@@ -16,7 +16,8 @@ const RESERVED_WINDOWS_NAMES: &[&str] = &[
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-/// Maximum file name length in bytes, the limit on ext4, APFS and HFS+.
+/// Maximum file name length: UTF-16 code units under Windows rules, bytes
+/// under all other rules.
 const MAX_LEN: usize = 255;
 
 /// The naming rules to apply, selected by target filesystem rather than by OS
@@ -78,6 +79,20 @@ impl Rules {
     fn is_windows_like(self) -> bool {
         matches!(self, Self::Windows | Self::Universal)
     }
+
+    fn name_len(self, name: &str) -> usize {
+        match self {
+            Self::Windows => name.encode_utf16().count(),
+            _ => name.len(),
+        }
+    }
+
+    fn truncate(self, name: &mut String) {
+        match self {
+            Self::Windows => truncate_utf16(name, MAX_LEN),
+            _ => truncate_bytes(name, MAX_LEN),
+        }
+    }
 }
 
 /// Options for [`sanitize_with`].
@@ -127,18 +142,18 @@ pub fn sanitize_with(name: &str, rules: Rules, options: &Options) -> String {
         }
     }
 
-    truncate_bytes(&mut result, MAX_LEN);
+    rules.truncate(&mut result);
 
     if rules.is_windows_like() {
         // Truncation can cut right after a `.` or ` `, leaving a trailing run
         // that did not exist before the cut.
         collapse_trailing_run(&mut result, options.replacement);
-        truncate_bytes(&mut result, MAX_LEN);
+        rules.truncate(&mut result);
     }
 
     if result.is_empty() || is_relative(&result) {
         result = options.placeholder.to_string();
-        truncate_bytes(&mut result, MAX_LEN);
+        rules.truncate(&mut result);
     }
 
     result
@@ -157,7 +172,7 @@ fn collapse_trailing_run(result: &mut String, replacement: &str) {
 /// would leave it untouched. Suitable for validating user input before it is
 /// written.
 pub fn is_valid(name: &str, rules: Rules) -> bool {
-    if name.is_empty() || name.len() > MAX_LEN || is_relative(name) {
+    if name.is_empty() || rules.name_len(name) > MAX_LEN || is_relative(name) {
         return false;
     }
 
@@ -214,6 +229,18 @@ fn truncate_bytes(value: &mut String, max: usize) {
         end -= 1;
     }
     value.truncate(end);
+}
+
+/// Truncates in place to at most `max` UTF-16 code units, keeping whole chars.
+fn truncate_utf16(value: &mut String, max: usize) {
+    let mut units = 0;
+    for (index, c) in value.char_indices() {
+        units += c.len_utf16();
+        if units > max {
+            value.truncate(index);
+            return;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -289,6 +316,60 @@ mod tests {
         let sanitized = sanitize(&long, Rules::Posix);
         assert_eq!(sanitized.len(), MAX_LEN - 1); // 254: 127 × 2 bytes
         assert!(sanitized.chars().all(|c| c == 'ä'));
+    }
+
+    #[test]
+    fn test_windows_keeps_reported_japanese_filename() {
+        let name = "土曜のあさはほめるちゃん 20260926 ＃124「関西のいま気になるエリアのええところ“ほめるポイント＝ほめポ”を見つけながら、ぶらりするほっこりトークがたっぷりのほめぶら番組！今回は、“グラングリーン大阪”をぶらり！」.mp4";
+        assert_eq!(name.encode_utf16().count(), 116);
+        assert_eq!(name.len(), 314);
+        assert!(is_valid(name, Rules::Windows));
+        assert_eq!(sanitize(name, Rules::Windows), name);
+        assert!(!is_valid(name, Rules::Posix));
+    }
+
+    #[test]
+    fn test_windows_utf16_boundary_does_not_split_emoji() {
+        let at_limit = format!("{}😀b", "a".repeat(252));
+        assert_eq!(at_limit.encode_utf16().count(), MAX_LEN);
+        assert!(is_valid(&at_limit, Rules::Windows));
+        assert_eq!(sanitize(&at_limit, Rules::Windows), at_limit);
+
+        let too_long = format!("{}😀b", "a".repeat(253));
+        assert_eq!(too_long.encode_utf16().count(), MAX_LEN + 1);
+        assert!(!is_valid(&too_long, Rules::Windows));
+        let sanitized = sanitize(&too_long, Rules::Windows);
+        assert_eq!(sanitized, format!("{}😀", "a".repeat(253)));
+        assert_eq!(sanitized.encode_utf16().count(), MAX_LEN);
+        assert!(is_valid(&sanitized, Rules::Windows));
+
+        let emoji_over_boundary = format!("{}😀", "a".repeat(254));
+        assert_eq!(
+            sanitize(&emoji_over_boundary, Rules::Windows),
+            "a".repeat(254)
+        );
+    }
+
+    #[test]
+    fn test_windows_custom_replacement_and_placeholder_use_utf16_limit() {
+        let options = Options {
+            replacement: "😀",
+            placeholder: &"界".repeat(MAX_LEN),
+        };
+        let name = format!("{}/b", "a".repeat(252));
+        assert_eq!(
+            sanitize_with(&name, Rules::Windows, &options),
+            format!("{}😀b", "a".repeat(252))
+        );
+
+        let empty_replacement = Options {
+            replacement: "",
+            ..options
+        };
+        let placeholder = sanitize_with("/", Rules::Windows, &empty_replacement);
+        assert_eq!(placeholder.encode_utf16().count(), MAX_LEN);
+        assert_eq!(placeholder, options.placeholder);
+        assert!(is_valid(&placeholder, Rules::Windows));
     }
 
     /// Truncation must not leave a trailing `.` or ` ` behind on Windows-like
