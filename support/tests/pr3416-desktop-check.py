@@ -165,7 +165,14 @@ def check_case(name, expected, executable, expected_wm_class):
     env = os.environ.copy()
     env['GDK_BACKEND'] = 'wayland'
     env.pop('DISPLAY', None)
-    log = (OUTPUT / f'{name}-app.log').open('w')
+    # Preferences migrated by 1.18 cannot be read by the historical 1.17
+    # builds. Give every variant fresh application data under the test user.
+    assert Path(name).name == name and name not in ('.', '..'), name
+    profile = Path.home() / '.local/share/pr3416-profiles' / name
+    profile.mkdir(parents=True, exist_ok=True)
+    env['XDG_DATA_HOME'] = str(profile)
+    log_path = OUTPUT / f'{name}-app.log'
+    log = log_path.open('w')
     launcher = subprocess.Popen([str(executable)], cwd=executable.parent,
                                 env=env, stdout=log, stderr=subprocess.STDOUT)
     window_pid = None
@@ -176,6 +183,11 @@ def check_case(name, expected, executable, expected_wm_class):
         window_pid = int(window['pid'])
         assert window_pid > 0 and Path(f'/proc/{window_pid}/exe').exists(), window
         assert window['clientType'] == 'wayland', window
+        def initialized():
+            text = log_path.read_text()
+            assert 'Error during init' not in text and 'Unhandled Exception' not in text, text
+            return 'Server started.' in text
+        wait_for(initialized, 'successful LocalSend initialization', timeout=90)
         if expected_wm_class:
             assert window['wmClass'] == expected_wm_class, window
         if expected == 'matched':
@@ -196,6 +208,7 @@ def check_case(name, expected, executable, expected_wm_class):
         probe().LeaveOverview()
         time.sleep(2)
         data = snapshot(name)
+        assert initialized(), 'LocalSend initialization failed before capture'
         window = local_window(data)
         assert window and window['pid'] == window_pid and window['appId'] == app_id, data['windows']
         actor = dock_icon(data, app_id)
@@ -208,6 +221,8 @@ def check_case(name, expected, executable, expected_wm_class):
         result = {
             'case': name,
             'expected': expected,
+            'initialized': True,
+            'profileDataHome': str(profile),
             'executable': os.readlink(f'/proc/{window_pid}/exe'),
             'pid': window_pid,
             'desktopFile': desktop_path,
