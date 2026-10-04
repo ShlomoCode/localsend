@@ -49,7 +49,7 @@ LocalSend is a cross-platform app that enables secure communication between devi
 
 This project is tested with BrowserStack
 
-Browser testing via
+Supported by TestMu AI
 
 <a href="https://www.testmuai.com/?utm_medium=sponsor&utm_source=localsend" target="_blank">
     <img src="https://localsend.org/img/sponsors/tesmu.svg" style="vertical-align: middle;" width="250" height="45" />
