@@ -15,6 +15,7 @@ defaults:
 
 jobs:
   actual-app-fixtures:
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:

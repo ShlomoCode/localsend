@@ -27,6 +27,7 @@ private const val DIR = DocumentsContract.Document.MIME_TYPE_DIR
  * create(authority) did not inherit all manifest provider flags in batch4.
  */
 fun createOpaqueDocumentsProvider(): OpaqueDocumentsProvider {
+    org.robolectric.shadows.ShadowLog.stream = System.out
     val application = RuntimeEnvironment.getApplication()
     val info = ProviderInfo().apply {
         authority = AUTHORITY
@@ -107,7 +108,7 @@ class OpaqueDocumentsProvider : DocumentsProvider() {
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], shadows = [ModernQueryResolverShadow::class])
 class OpaqueFolderTest {
     @Test fun actualNativeEnumerationPreservesRootAndNestedDisplayNamesForOpaqueIds() {
         val context = RuntimeEnvironment.getApplication()

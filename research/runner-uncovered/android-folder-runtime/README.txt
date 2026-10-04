@@ -27,3 +27,11 @@ Qualification limit:
 This is native Android-framework metadata integration under Robolectric, not a physical-device reproduction or whole Flutter app test.
 Pair exported before/after FileInfo maps with exact existing Dart ContentUriHelper/AddAndroidDirectoryAction harness.
 Before wrong transmitted opaque names occur in that real Dart stage; do not label native-before basename itself as the issue.
+
+Batch5 fixture transport correction:
+Robolectric4.13 ShadowContentResolver legacy five-argument query calls provider.query5 directly.
+Android14 DocumentsProvider intentionally rejects that legacy provider entrypoint; actual Android
+resolver Binder transport converts SQLarguments to Bundle then calls provider.query4.
+ModernQueryResolverShadow restores this conversion and delegates actual framework provider routing.
+No production FastDocumentFile/listFiles method or provider metadata/output is replaced.
+Batch6 must rerun actual6tests; ShadowLog now emits caughtnativequeryexceptions fordiagnosis.

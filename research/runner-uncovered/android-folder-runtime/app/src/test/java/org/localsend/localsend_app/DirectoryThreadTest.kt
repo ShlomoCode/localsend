@@ -17,7 +17,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], shadows = [ModernQueryResolverShadow::class])
 class DirectoryThreadTest {
     private fun provider(): OpaqueDocumentsProvider =
         createOpaqueDocumentsProvider()
