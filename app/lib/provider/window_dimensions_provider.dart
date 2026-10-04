@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:localsend_app/provider/persistence_provider.dart';
 import 'package:localsend_app/util/native/macos_channel.dart' as macos_channel;
+import 'package:localsend_app/util/native/windows_channel.dart' as windows_channel;
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
@@ -37,9 +38,34 @@ class WindowDimensionsController {
     final useSavedPlacement = _service.getSaveWindowPlacement();
     if (_usesNativeWindowFrameAutosave) {
       await _restoreNativeDimensions(useSavedPlacement: useSavedPlacement);
+    } else if (defaultTargetPlatform == TargetPlatform.windows) {
+      await _restoreWindowsDimensions(useSavedPlacement: useSavedPlacement);
     } else {
       await _restorePersistedDimensions(useSavedPlacement: useSavedPlacement);
     }
+  }
+
+  Future<void> _restoreWindowsDimensions({required bool useSavedPlacement}) async {
+    if (useSavedPlacement) {
+      final placement = _service.getWindowsWindowPlacement();
+      if (placement != null && await windows_channel.restoreWindowPlacement(placement)) return;
+
+      final persistedDimensions = _service.getWindowLastDimensions();
+      if (persistedDimensions != null) {
+        // Convert legacy logical screen coordinates through the existing window API.
+        await _applyDimensions(persistedDimensions);
+        final migratedPlacement = await windows_channel.getWindowPlacement();
+        if (await windows_channel.restoreWindowPlacement(migratedPlacement)) {
+          await _storeWindowsPlacement();
+          return;
+        }
+      }
+    }
+    await _setDefaultDimensions();
+  }
+
+  Future<void> _storeWindowsPlacement() async {
+    await _service.setWindowsWindowPlacement(await windows_channel.getWindowPlacement());
   }
 
   Future<void> _restorePersistedDimensions({required bool useSavedPlacement}) async {
@@ -104,6 +130,10 @@ class WindowDimensionsController {
     required Size windowSize,
   }) async {
     if (_usesNativeWindowFrameAutosave) return;
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await _storeWindowsPlacement();
+      return;
+    }
     if (await isInScreenBounds(windowOffset)) {
       await _service.setWindowOffsetX(windowOffset.dx);
       await _service.setWindowOffsetY(windowOffset.dy);
@@ -114,6 +144,10 @@ class WindowDimensionsController {
 
   Future<void> storePosition({required Offset windowOffset}) async {
     if (_usesNativeWindowFrameAutosave) return;
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await _storeWindowsPlacement();
+      return;
+    }
     if (await isInScreenBounds(windowOffset)) {
       await _service.setWindowOffsetX(windowOffset.dx);
       await _service.setWindowOffsetY(windowOffset.dy);
@@ -122,6 +156,10 @@ class WindowDimensionsController {
 
   Future<void> storeSize({required Size windowSize}) async {
     if (_usesNativeWindowFrameAutosave) return;
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await _storeWindowsPlacement();
+      return;
+    }
     await _service.setWindowHeight(windowSize.height);
     await _service.setWindowWidth(windowSize.width);
   }

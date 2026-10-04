@@ -63,6 +63,7 @@ const _windowOffsetX = 'ls_window_offset_x';
 const _windowOffsetY = 'ls_window_offset_y';
 const _windowWidth = 'ls_window_width';
 const _windowHeight = 'ls_window_height';
+const _windowsWindowPlacement = 'ls_windows_window_placement';
 const _saveWindowPlacement = 'ls_save_window_placement';
 const _alwaysOnTop = 'ls_always_on_top';
 
@@ -547,6 +548,24 @@ class PersistenceService {
       position: position,
       size: size,
     );
+  }
+
+  // Win32 workspace coordinates must be restored through SetWindowPlacement.
+  Map<String, int>? getWindowsWindowPlacement() {
+    final serialized = _prefs.getString(_windowsWindowPlacement);
+    if (serialized == null) return null;
+    try {
+      final placement = jsonDecode(serialized) as Map<String, dynamic>;
+      return placement.map((key, value) => MapEntry(key, value as int));
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
+  }
+
+  Future<void> setWindowsWindowPlacement(Map<String, int> placement) async {
+    await _prefs.setString(_windowsWindowPlacement, jsonEncode(placement));
   }
 
   Future<void> setSaveWindowPlacement(bool savePlacement) async {

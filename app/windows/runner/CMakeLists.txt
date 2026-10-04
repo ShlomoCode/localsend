@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
   "utils.cpp"
+  "window_placement.cpp"
   "win32_window.cpp"
   "winrt_ext.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"

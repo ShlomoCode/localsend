@@ -1,0 +1,43 @@
+name: Windows window placement
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - app/windows/runner/**
+      - .github/workflows/windows-window-placement.yml
+
+permissions:
+  contents: read
+
+jobs:
+  native-placement:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Compile native placement test
+        shell: cmd
+        run: cl /nologo /EHsc /W4 /WX /wd4100 /std:c++20 /DNOMINMAX /D_HAS_EXCEPTIONS=0 /I app\windows\runner app\windows\runner\window_placement_test.cpp app\windows\runner\window_placement.cpp user32.lib /Fe:window_placement_test.exe
+      - name: Exercise native window placement
+        shell: cmd
+        run: window_placement_test.exe
+
+  runner-channel-compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.9"
+          channel: stable
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Download Windows Flutter engine headers
+        run: flutter precache --windows
+      - name: Compile runner channel
+        shell: pwsh
+        run: |
+          $flutterBin = Split-Path (Get-Command flutter).Source -Parent
+          $engine = Join-Path (Split-Path $flutterBin -Parent) 'bin\cache\artifacts\engine\windows-x64'
+          & cl /nologo /EHsc /W4 /WX /wd4100 /std:c++20 /DNOMINMAX /D_HAS_EXCEPTIONS=0 /c /I app\windows /I $engine /I (Join-Path $engine 'cpp_client_wrapper\include') app\windows\runner\flutter_window.cpp
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
