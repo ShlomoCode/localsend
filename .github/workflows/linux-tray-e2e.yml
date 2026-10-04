@@ -7,7 +7,7 @@ on:
       packaging:
         description: Application packaging to test
         type: choice
-        options: [all, native, flatpak, appimage]
+        options: [all, native, appimage]
         default: all
       test_filter:
         description: Optional pytest -k expression; empty runs every Linux test

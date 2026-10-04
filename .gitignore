@@ -25,7 +25,6 @@
 
 # Local Linux E2E reports and build artifacts
 /linux-e2e-results/
-/linux-e2e-flatpak/
 /linux-e2e-appimage*/
 /support/tests/__pycache__/
 /support/tests/linux_e2e/__pycache__/
