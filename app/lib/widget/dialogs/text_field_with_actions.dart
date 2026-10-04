@@ -52,7 +52,7 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> with Refena
                   TextFormField(
                     controller: widget.controller,
                     textAlign: TextAlign.center,
-                    // TV Gboard can append the suggested word again instead of replacing it.
+                    // In emulator testing, TV Gboard was observed appending the suggested word instead of replacing it.
                     enableSuggestions: !isTv,
                     onChanged: widget.onChanged,
                     autofocus: true,
