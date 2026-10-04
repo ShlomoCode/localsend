@@ -83,9 +83,7 @@ Codegen has a habit of rewriting `app/test/mocks.mocks.dart` at 80 columns; reve
 
 ### UI accessibility
 
-When creating or modifying interactive UI, ensure each control exposes a localized accessible name, its role, current value or state, and supported actions through the framework's accessibility APIs. Associate visible labels with their controls and preserve keyboard navigation and focus.
-
-Prefer standard widgets with built-in semantics. In Flutter, use `Semantics` or `MergeSemantics` when needed to describe custom controls or combine a control with its label; keep independent controls separate and avoid duplicate announcements. Verify the affected controls in the semantics tree or with a screen reader. Follow the [official Flutter accessibility guidance](https://docs.flutter.dev/ui/accessibility) and [MergeSemantics documentation](https://api.flutter.dev/flutter/widgets/MergeSemantics-class.html).
+When creating or modifying UI components, use the framework's built-in accessibility support. Ensure controls have clear accessible names and states, and associate labels with their controls. Add accessibility annotations only when information is missing.
 
 ### State management
 
