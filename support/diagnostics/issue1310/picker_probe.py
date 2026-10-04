@@ -33,10 +33,10 @@ def run(*args, timeout=4, check=False):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("probe deadline reached")
-    result = subprocess.run(args, capture_output=True, text=True, timeout=min(timeout, remaining))
+    result = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=min(timeout, remaining))
     if check and result.returncode:
         raise RuntimeError(f"{' '.join(args)} failed ({result.returncode}): {result.stderr.strip()}")
-    return result.stdout.strip()
+    return result.stdout.rstrip("\n")
 
 
 def pause(seconds):
@@ -96,11 +96,15 @@ def windows():
 
 
 def ocr(image_path, tsv_path):
-    tsv = run("tesseract", str(image_path), "stdout", "tsv", "--psm", "11", timeout=7)
+    tsv = run("tesseract", str(image_path), "stdout", "--psm", "11", "tsv", timeout=7, check=True)
     tsv_path.write_text(tsv + "\n", encoding="utf-8")
+    return parse_tsv(tsv)
+
+
+def parse_tsv(tsv):
     words = []
     for row in csv.DictReader(io.StringIO(tsv), delimiter="\t"):
-        token = row.get("text", "").strip()
+        token = (row.get("text") or "").strip()
         if not token:
             continue
         try:
@@ -283,7 +287,7 @@ def main():
             if not evidence["steps"]["send"]["control_succeeded"]:
                 evidence["error"] = "Send page did not expose both Folder and File controls"
                 return 1
-            # Folder is the experimental action; File is the native picker control.
+            # Folder is the working control; File is the target action.
             evidence["steps"]["folder"] = chooser_action("Folder", send_post, process.pid)
             file_pre = capture("file_pre")
             evidence["steps"]["file"] = chooser_action("File", file_pre, process.pid)
@@ -296,7 +300,7 @@ def main():
             else:
                 evidence["conclusion"] = "inconclusive_control_failed"
             return 0
-    except (OSError, RuntimeError, subprocess.TimeoutExpired, TimeoutError) as exc:
+    except (OSError, RuntimeError, ValueError, AttributeError, subprocess.TimeoutExpired, TimeoutError) as exc:
         evidence["error"] = f"{type(exc).__name__}: {exc}"
         return 1
     finally:

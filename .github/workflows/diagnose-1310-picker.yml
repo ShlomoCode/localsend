@@ -23,7 +23,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update
-          apt-get install -y ca-certificates curl git python3 xvfb dbus-x11 xfwm4 xfce4-settings xfce4-panel xdotool wmctrl imagemagick tesseract-ocr libgtk-3-0 libayatana-appindicator3-1 libsqlite3-0 xdg-desktop-portal xdg-desktop-portal-gtk strace gcc libgtk-3-dev
+          apt-get install -y ca-certificates curl git python3 procps x11-utils xvfb dbus-x11 xfwm4 xfce4-settings xfce4-panel xdotool wmctrl imagemagick tesseract-ocr libgtk-3-0 libayatana-appindicator3-1 libsqlite3-0 xdg-desktop-portal xdg-desktop-portal-gtk strace gcc libgtk-3-dev
       - uses: actions/checkout@v6
       - name: Download original release
         env:
