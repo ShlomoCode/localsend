@@ -24,11 +24,7 @@ class FileSaveTarget {
   /// and to locate the file after it has been written.
   final String displayPath;
 
-  FileSaveTarget({
-    required this.path,
-    required this.fileDescriptor,
-    required this.displayPath,
-  });
+  FileSaveTarget({required this.path, required this.fileDescriptor, required this.displayPath});
 }
 
 /// Prepares the destination for an incoming file with [fileName].
@@ -71,23 +67,12 @@ Future<FileSaveTarget> prepareFileSaveTarget({
 
     if (parentUri != null) {
       _logger.info('Using SAF to save file to $parentUri as $finalName');
-      final createdFile = await android_channel.createFileAndroid(
-        parentUri: parentUri,
-        fileName: finalName,
-      );
-      return FileSaveTarget(
-        path: null,
-        fileDescriptor: createdFile.fileDescriptor,
-        displayPath: createdFile.uri,
-      );
+      final createdFile = await android_channel.createFileAndroid(parentUri: parentUri, fileName: finalName);
+      return FileSaveTarget(path: null, fileDescriptor: createdFile.fileDescriptor, displayPath: createdFile.uri);
     }
   }
 
-  return FileSaveTarget(
-    path: destinationPath,
-    fileDescriptor: null,
-    displayPath: destinationPath,
-  );
+  return FileSaveTarget(path: destinationPath, fileDescriptor: null, displayPath: destinationPath);
 }
 
 /// Prepares [target] for another attempt at the same file, e.g. after the
@@ -161,13 +146,12 @@ Future<(bool, String?)> saveCachedFileToGallery({
 /// The peer chooses them, so they get the same treatment as the base name:
 /// `..` and absolute names are refused outright rather than rewritten, since a
 /// name that tries to leave the destination is not a name to guess at, and
-/// every remaining component is sanitized. Without that, only the base name
-/// was checked and a directory could still be named `con`, end in a dot or
-/// carry control characters.
+/// every remaining component is sanitized for the filesystem containing its
+/// parent directory.
 ///
 /// Throws `'Path traversal detected'` when the name tries to leave the
 /// destination.
-List<String> sanitizeRelativeName(String fileName) {
+List<String> _splitRelativeName(String fileName) {
   final parts = p.split(fileName);
 
   final components = <String>[];
@@ -182,12 +166,12 @@ List<String> sanitizeRelativeName(String fileName) {
     if (part == '.' || part.isEmpty) {
       continue;
     }
-    components.add(rust_filename.sanitizeFileName(name: part));
+    components.add(part);
   }
 
   // Everything collapsed, e.g. the name was empty or just '.'.
   if (components.isEmpty) {
-    components.add(rust_filename.sanitizeFileName(name: ''));
+    components.add('');
   }
 
   return components;
@@ -199,7 +183,36 @@ Future<(String, String?, String)> digestFilePathAndPrepareDirectory({
   required String fileName,
   required Set<String> createdDirectories,
 }) async {
-  final components = sanitizeRelativeName(fileName);
+  final sourceComponents = _splitRelativeName(fileName);
+  final isContentUri = parentDirectory.startsWith('content://');
+  final conservativeNames = isContentUri || (Platform.isAndroid && getSdCardPath(parentDirectory) != null);
+  final components = <String>[];
+
+  // Each directory component may cross a mount boundary. Create it before
+  // choosing the rules for the next component, so detection sees its actual
+  // parent filesystem. SAF and Android SD paths remain opaque to this check.
+  var parent = parentDirectory;
+  if (!isContentUri) {
+    Directory(parent).createSync(recursive: true);
+  }
+  for (var i = 0; i < sourceComponents.length; i++) {
+    final component = rust_filename.sanitizeFileNameForDirectory(
+      name: sourceComponents[i],
+      directory: parent,
+      counter: null,
+      conservative: conservativeNames,
+    );
+    components.add(component);
+    if (i < sourceComponents.length - 1) {
+      parent = p.join(parent, component);
+      if (!isContentUri) {
+        if (!p.isWithin(parentDirectory, parent)) {
+          throw 'Path traversal detected';
+        }
+        Directory(parent).createSync(recursive: true);
+      }
+    }
+  }
   fileName = components.join('/');
 
   if (parentDirectory.startsWith('content://')) {
@@ -242,7 +255,10 @@ Future<(String, String?, String)> digestFilePathAndPrepareDirectory({
   String destinationPath;
   int counter = 1;
   do {
-    destinationPath = counter == 1 ? p.join(dir, actualFileName) : p.join(dir, actualFileName.withCount(counter));
+    final candidate = counter == 1
+        ? actualFileName
+        : rust_filename.sanitizeFileNameForDirectory(name: sourceComponents.last, directory: dir, counter: counter, conservative: conservativeNames);
+    destinationPath = p.join(dir, candidate);
     counter++;
   } while (await FileSystemEntity.type(destinationPath, followLinks: false) != FileSystemEntityType.notFound);
   return (destinationPath, null, p.basename(destinationPath));
