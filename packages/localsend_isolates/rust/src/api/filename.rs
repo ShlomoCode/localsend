@@ -1,33 +1,29 @@
+use anyhow::Result;
 use flutter_rust_bridge::frb;
 use localsend::util::filename;
 use std::path::Path;
 
-/// Rewrites `name` into a file name that is legal on the current platform,
-/// replacing illegal characters with `_`.
+/// Applies the shared filename policy with the current platform's default limit.
 #[frb(sync)]
-pub fn sanitize_file_name(name: String) -> String {
-    filename::sanitize(&name, filename::Rules::current())
+pub fn sanitize_file_name(name: String) -> Result<String> {
+    Ok(filename::sanitize(&name, filename::Rules::current())?)
 }
 
-/// Sanitizes a received name for its actual parent directory. Opaque Android
-/// destinations have no inspectable filesystem, so they use conservative rules.
+/// Sanitizes a received name using its parent directory's component and path
+/// limits. Opaque storage providers use the conservative default limit.
 #[frb(sync)]
 pub fn sanitize_file_name_for_directory(
     name: String,
     directory: String,
     counter: Option<u32>,
     conservative: bool,
-) -> String {
-    let rules = if conservative || directory.starts_with("content://") {
-        filename::Rules::Universal
-    } else {
-        filename::rules_for_directory(Path::new(&directory))
-    };
-
-    match counter {
-        Some(counter) => filename::sanitize_numbered(&name, rules, counter),
-        None => filename::sanitize(&name, rules),
-    }
+) -> Result<String> {
+    Ok(filename::sanitize_for_directory(
+        &name,
+        Path::new(&directory),
+        counter,
+        conservative || directory.starts_with("content://"),
+    )?)
 }
 
 /// Whether `name` is a legal file name on the current platform, i.e. whether

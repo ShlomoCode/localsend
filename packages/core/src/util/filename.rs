@@ -1,97 +1,31 @@
-//! Filename sanitization for untrusted, peer-supplied file names.
+//! Filename handling for untrusted, peer-supplied names.
 
+use icu_properties::{props::GeneralCategory, CodePointMapData};
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use unicode_normalization::UnicodeNormalization;
 
-/// Characters that are illegal on Windows and FAT volumes.
-const ILLEGAL_WINDOWS_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
-
-/// Characters that are illegal on HFS/APFS. `:` is the classic Mac path
-/// separator and still shows up as `/` in Finder.
-const ILLEGAL_HFS_CHARS: &[char] = &['/', ':'];
-
-/// Characters that are illegal on POSIX filesystems.
-const ILLEGAL_POSIX_CHARS: &[char] = &['/'];
-
-/// Device names Windows reserves regardless of extension.
+const FALLBACK_LIMIT: usize = 255;
+const MIN_TRUNCATED_STEM: usize = 5;
+const ILLEGAL_ASCII: &str = "\"*/:<>?\\|";
 const RESERVED_WINDOWS_NAMES: &[&str] = &[
     "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-/// Maximum file name length: raw UTF-16 code units under NTFS, APFS and
-/// detected FAT-family volumes; decomposed UTF-16 units under HFS+; bytes
-/// under byte-limited policies.
-///
-/// References: [NTFS/FAT filesystem limits], [HFS Plus Names], and [ext4 directory entries].
-/// [NTFS/FAT filesystem limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
-/// [HFS Plus Names]: https://developer.apple.com/library/archive/technotes/tn1150.html
-/// [ext4 directory entries]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
-const MAX_LEN: usize = 255;
-
-/// Filename policies. Callers may select a policy explicitly; `current()`
-/// chooses a platform default without detecting the destination filesystem.
-/// All policies reject control characters as an application safety choice.
+/// Rules that affect the encoding budget and Windows device names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rules {
-    /// NTFS: illegal characters, reserved device names, no trailing `.` or ` `.
-    /// Uses the NTFS component limit and the Windows API's [naming rules].
-    /// [Filesystem limits] differ by volume; this policy is selected for NTFS.
-    ///
-    /// [Filesystem limits]: https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
-    /// [naming rules]: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
     Windows,
-    /// APFS preserves the supplied normalization and stores UTF-8. We use a
-    /// conservative 255 raw UTF-16-unit budget (without HFS decomposition),
-    /// consistent with Apple DTS's discussion of its 255 Unicode-character limit.
-    /// https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/APFS_Guide/FAQ/FAQ.html
-    /// https://developer.apple.com/forums/thread/726970
-    Apfs,
-    /// Conservative Apple policy: `/` and `:`, with a decomposed UTF-16 limit.
-    /// [Apple TN1150] defines HFS+ names and decomposition exceptions. Full NFD
-    /// may overcount those exceptions. APFS uses a separate raw-UTF-16 policy
-    /// only when the destination filesystem is identified.
-    ///
-    /// [Apple TN1150]: https://developer.apple.com/library/archive/technotes/tn1150.html
-    Hfs,
-    /// Conservative Android policy: FAT/exFAT illegal characters without
-    /// Windows device names, but a 255-byte limit for mixed storage targets.
-    /// The [exFAT specification] permits longer Unicode names; this policy
-    /// deliberately does not assume that the destination is an exFAT volume.
-    /// [AOSP FileUtils] likewise caps its FAT-safe names at 255 UTF-8 bytes.
-    ///
-    /// [exFAT specification]: https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification
-    /// [AOSP FileUtils]: https://android.googlesource.com/platform/frameworks/base/+/HEAD/core/java/android/os/FileUtils.java
-    Fat,
-    /// Detected FAT/VFAT volume: long names use a 255 Unicode-unit budget.
-    /// This differs from the conservative byte-limited Android default above.
-    /// https://learn.microsoft.com/en-us/windows/win32/fileio/filesystem-functionality-comparison#limits
-    FatVolume,
-    /// exFAT uses up to 255 Unicode code units and FAT-family illegal chars.
-    /// https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification#773-filename-field
-    ExFat,
-    /// Unix policy: `/`, NUL and control characters, with a 255-byte limit
-    /// documented for [ext4]. This is also used for recognized [btrfs] volumes
-    /// and as the generic Unix default; it is not a filesystem-wide guarantee.
-    ///
-    /// [ext4]: https://kernel.org/doc/html/latest/filesystems/ext4/directory.html
-    /// [btrfs]: https://btrfs.readthedocs.io/en/latest/btrfs-man5.html#filesystem-limits
     Posix,
-    /// Conservative intersection of the policies above, using a byte limit.
-    /// This is an application fallback, not a universal filesystem standard;
-    /// unknown destinations may impose additional restrictions.
+    /// Conservative policy for paths supplied by opaque document providers.
     Universal,
 }
 
 impl Rules {
-    /// Platform defaults; does not inspect mounts, remote servers or providers.
     pub const fn current() -> Self {
-        if cfg!(target_os = "windows") {
+        if cfg!(windows) {
             Self::Windows
-        } else if cfg!(any(target_os = "macos", target_os = "ios")) {
-            Self::Hfs
-        } else if cfg!(target_os = "android") {
-            Self::Fat
         } else if cfg!(unix) {
             Self::Posix
         } else {
@@ -99,239 +33,134 @@ impl Rules {
         }
     }
 
-    fn illegal_chars(self) -> &'static [char] {
+    fn units(self, value: &str) -> usize {
         match self {
-            Self::Windows | Self::Fat | Self::FatVolume | Self::ExFat => ILLEGAL_WINDOWS_CHARS,
-            Self::Hfs | Self::Apfs => ILLEGAL_HFS_CHARS,
-            Self::Posix => ILLEGAL_POSIX_CHARS,
-            // `Universal` is handled by combining the sets, see `is_illegal_char`.
-            Self::Universal => &[],
+            Self::Windows => value.encode_utf16().count(),
+            _ => value.len(),
         }
     }
 
-    fn is_illegal_char(self, c: char) -> bool {
-        if c.is_control() {
-            return true;
-        }
-        match self {
-            Self::Universal => ILLEGAL_WINDOWS_CHARS.contains(&c) || ILLEGAL_HFS_CHARS.contains(&c),
-            _ => self.illegal_chars().contains(&c),
-        }
-    }
-
-    /// Whether reserved device names and trailing `.`/` ` matter. Detected
-    /// FAT-family volumes may also be written through the Windows API.
-    fn is_windows_like(self) -> bool {
-        matches!(
-            self,
-            Self::Windows | Self::FatVolume | Self::ExFat | Self::Universal
-        )
-    }
-
-    fn name_len(self, name: &str) -> usize {
-        match self {
-            Self::Windows | Self::Apfs | Self::FatVolume | Self::ExFat => {
-                name.encode_utf16().count()
-            }
-            // HFS+ decomposes names, with some exceptions. Full NFD can
-            // overcount those names; that is conservative for HFS+/APFS and
-            // keeps the supplied spelling unchanged.
-            // See TN1150, "Unicode Subtleties / Canonical Decomposition":
-            // https://developer.apple.com/library/archive/technotes/tn1150.html
-            Self::Hfs => name.nfd().map(char::len_utf16).sum(),
-            _ => name.len(),
-        }
-    }
-
-    fn truncate(self, name: &mut String) {
-        self.truncate_to(name, MAX_LEN);
-    }
-
-    fn truncate_to(self, name: &mut String, max: usize) {
-        match self {
-            Self::Windows | Self::Apfs | Self::FatVolume | Self::ExFat => truncate_utf16(name, max),
-            Self::Hfs => truncate_hfs(name, max),
-            _ => truncate_bytes(name, max),
-        }
+    fn windows_names(self) -> bool {
+        matches!(self, Self::Windows | Self::Universal)
     }
 }
 
-/// Selects filename rules for the nearest existing directory ancestor of a
-/// destination path. An unknown filesystem or failed probe uses `Universal`.
-/// This is for local paths; document providers that do not expose a real path
-/// should use `Universal` directly.
-pub fn rules_for_directory(directory: &Path) -> Rules {
+/// Component limit queried from the destination volume, in UTF-16 units on
+/// Windows and UTF-8 bytes elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Policy {
+    pub rules: Rules,
+    pub max_len: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum FilenameError {
+    #[error("filename extension and minimum basename exceed the destination limit")]
+    InsufficientSpace,
+}
+
+/// Find the nearest existing directory before querying the actual component
+/// limit. A failed query uses a conservative 255-byte budget.
+pub fn rules_for_directory(directory: &Path) -> Policy {
     let absolute = if directory.is_absolute() {
         directory.to_path_buf()
     } else {
-        let Ok(current) = std::env::current_dir() else {
-            return Rules::Universal;
-        };
-        current.join(directory)
-    };
-    for ancestor in absolute.ancestors() {
-        match ancestor.metadata() {
-            Ok(metadata) if metadata.is_dir() => return probe_rules(ancestor),
-            Ok(_) => continue,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return Rules::Universal,
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(directory),
+            Err(_) => {
+                return Policy {
+                    rules: Rules::Universal,
+                    max_len: FALLBACK_LIMIT,
+                }
+            }
         }
-    }
-    Rules::Universal
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios", windows, test))]
-fn rules_for_filesystem(name: &str) -> Rules {
-    match name.to_ascii_lowercase().as_str() {
-        "apfs" => Rules::Apfs,
-        "hfs" | "hfs+" | "hfsx" => Rules::Hfs,
-        "ntfs" => Rules::Windows,
-        "exfat" => Rules::ExFat,
-        "msdos" | "vfat" | "fat" | "fat12" | "fat16" | "fat32" => Rules::FatVolume,
-        "ext4" | "btrfs" => Rules::Posix,
-        _ => Rules::Universal,
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn probe_rules(directory: &Path) -> Rules {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-
-    let Ok(path) = CString::new(directory.as_os_str().as_bytes()) else {
-        return Rules::Universal;
     };
-    let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
-    // SAFETY: path is NUL-terminated and info points to writable storage.
-    if unsafe { libc::statfs(path.as_ptr(), info.as_mut_ptr()) } != 0 {
-        return Rules::Universal;
-    }
-    // SAFETY: statfs initialized info on success.
-    let info = unsafe { info.assume_init() };
-    let bytes = info.f_fstypename.map(|byte| byte as u8);
-    let end = bytes
-        .iter()
-        .position(|&byte| byte == 0)
-        .unwrap_or(bytes.len());
-    rules_for_filesystem(&String::from_utf8_lossy(&bytes[..end]))
+    let queried = absolute
+        .ancestors()
+        .find(|ancestor| ancestor.is_dir())
+        .and_then(query_component_limit)
+        .filter(|limit| *limit > 0);
+    let (rules, max_len) = match queried {
+        Some(limit) => (Rules::current(), limit),
+        None => (Rules::Universal, FALLBACK_LIMIT),
+    };
+    #[cfg(windows)]
+    let max_len = {
+        // Win32's ordinary full-path limit includes the terminator. Reserve
+        // the actual intended directory prefix even when only its ancestor exists.
+        let prefix = absolute.as_os_str().encode_wide().count() + 1;
+        max_len.min(259usize.saturating_sub(prefix))
+    };
+    Policy { rules, max_len }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn probe_rules(directory: &Path) -> Rules {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-
-    let Ok(path) = CString::new(directory.as_os_str().as_bytes()) else {
-        return Rules::Universal;
-    };
-    let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
-    // SAFETY: path is NUL-terminated and info points to writable storage.
-    if unsafe { libc::statfs(path.as_ptr(), info.as_mut_ptr()) } != 0 {
-        return Rules::Universal;
-    }
-    // Linux statfs(2) reports the filesystem type in f_type. Values are from
-    // include/uapi/linux/magic.h; unlisted (including remote/FUSE) types fall back.
-    // https://man7.org/linux/man-pages/man2/statfs.2.html
-    let kind = unsafe { info.assume_init().f_type as u64 };
-    match kind {
-        0xef53 | 0x9123_683e => Rules::Posix, // ext4, btrfs
-        0x2011_bab0 => Rules::ExFat,
-        0x4d44 => Rules::FatVolume, // msdos/vfat
-        _ => Rules::Universal,
-    }
+#[cfg(unix)]
+fn query_component_limit(directory: &Path) -> Option<usize> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    let path = CString::new(directory.as_os_str().as_bytes()).ok()?;
+    // POSIX pathconf(_PC_NAME_MAX) queries the selected directory's volume.
+    // https://pubs.opengroup.org/onlinepubs/9799919799/functions/pathconf.html
+    // SAFETY: `path` is NUL-terminated and remains alive for the call.
+    let limit = unsafe { libc::pathconf(path.as_ptr(), libc::_PC_NAME_MAX) };
+    (limit > 0).then_some(limit as usize)
 }
 
 #[cfg(windows)]
-fn probe_rules(directory: &Path) -> Rules {
+fn query_component_limit(directory: &Path) -> Option<usize> {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "kernel32")]
     extern "system" {
         fn GetVolumePathNameW(path: *const u16, volume: *mut u16, length: u32) -> i32;
-        fn GetDriveTypeW(root: *const u16) -> u32;
         fn GetVolumeInformationW(
             root: *const u16,
-            volume_name: *mut u16,
-            volume_name_length: u32,
+            name: *mut u16,
+            name_length: u32,
             serial: *mut u32,
-            max_component_length: *mut u32,
+            maximum: *mut u32,
             flags: *mut u32,
-            filesystem_name: *mut u16,
-            filesystem_name_length: u32,
+            filesystem: *mut u16,
+            filesystem_length: u32,
         ) -> i32;
     }
-    // GetVolumePathNameW respects nested volume mount points; querying a drive
-    // letter alone could report the wrong filesystem. Both are Win32 file APIs.
-    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumepathnamew
+    // These APIs resolve nested volume mount points and return that volume's
+    // maximumComponentLength rather than assuming NTFS's common value.
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumeinformationw
-    let Ok(directory) = directory.canonicalize() else {
-        return Rules::Universal;
-    };
-    let canonical = directory.to_string_lossy();
-    if canonical.starts_with(r"\\?\UNC\")
-        || (canonical.starts_with(r"\\") && !canonical.starts_with(r"\\?\"))
-    {
-        return Rules::Universal;
-    }
     let mut path: Vec<u16> = directory.as_os_str().encode_wide().collect();
     path.push(0);
     let mut volume = vec![0u16; 32768];
-    // SAFETY: path is NUL-terminated and volume is a writable UTF-16 buffer.
+    // SAFETY: `path` is NUL-terminated; `volume` is a writable UTF-16 buffer.
     if unsafe { GetVolumePathNameW(path.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) } == 0 {
-        return Rules::Universal;
+        return None;
     }
-    // Network servers can advertise NTFS while applying different filename
-    // semantics. DRIVE_REMOTE is the Win32 remote-volume classification.
-    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getdrivetypew
-    // SAFETY: GetVolumePathNameW wrote a NUL-terminated root on success.
-    if unsafe { GetDriveTypeW(volume.as_ptr()) } == 4 {
-        return Rules::Universal;
-    }
-    let mut filesystem = [0u16; 64];
-    let mut max_component_length = 0u32;
-    // SAFETY: volume is a NUL-terminated root; output pointers refer to live
-    // writable storage, and the optional outputs are null.
+    let mut maximum = 0;
+    // SAFETY: the successful volume query wrote a NUL-terminated root; the
+    // maximum pointer is valid and optional output pointers are null.
     if unsafe {
         GetVolumeInformationW(
             volume.as_ptr(),
             std::ptr::null_mut(),
             0,
             std::ptr::null_mut(),
-            &mut max_component_length,
+            &mut maximum,
             std::ptr::null_mut(),
-            filesystem.as_mut_ptr(),
-            filesystem.len() as u32,
+            std::ptr::null_mut(),
+            0,
         )
     } == 0
     {
-        return Rules::Universal;
+        return None;
     }
-    if max_component_length < MAX_LEN as u32 {
-        return Rules::Universal;
-    }
-    let end = filesystem
-        .iter()
-        .position(|&unit| unit == 0)
-        .unwrap_or(filesystem.len());
-    rules_for_filesystem(&String::from_utf16_lossy(&filesystem[..end]))
+    (maximum > 0).then_some(maximum as usize)
 }
 
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "android",
-    windows
-)))]
-fn probe_rules(_directory: &Path) -> Rules {
-    Rules::Universal
+#[cfg(not(any(unix, windows)))]
+fn query_component_limit(_directory: &Path) -> Option<usize> {
+    None
 }
 
-/// Options for [`sanitize_with`].
 #[derive(Debug, Clone, Copy)]
 pub struct Options<'a> {
-    /// Substituted for each illegal character.
     pub replacement: &'a str,
-    /// Used when sanitization leaves the name empty.
     pub placeholder: &'a str,
 }
 
@@ -344,173 +173,244 @@ impl Default for Options<'_> {
     }
 }
 
-/// Rewrites `name` into a file name that is legal under `rules`, using the
-/// default [`Options`].
-///
-/// `name` must already be a single path segment; this does not split paths and
-/// will replace any separator it finds. Callers holding a peer-supplied path
-/// should take the last segment first — see [`sanitize_path`].
-pub fn sanitize(name: &str, rules: Rules) -> String {
+pub fn sanitize(name: &str, rules: Rules) -> Result<String, FilenameError> {
     sanitize_with(name, rules, &Options::default())
 }
 
-/// Builds a collision name such as `photo (2).jpg` while preserving as much
-/// of the original stem and extension as fits the destination's component
-/// limit. `counter` is the number to display; callers choose where to start.
-pub fn sanitize_numbered(name: &str, rules: Rules, counter: u32) -> String {
-    let (raw_stem, raw_extension) = match name.rfind('.') {
-        Some(index) if index > 0 => (&name[..index], &name[index..]),
-        _ => (name, ""),
-    };
-    let mut stem = sanitize(raw_stem, rules);
-    let mut extension = if raw_extension.is_empty() {
-        String::new()
-    } else {
-        sanitize(raw_extension, rules)
-    };
-    let suffix = format!(" ({counter})");
-    let first_len = stem
-        .chars()
-        .next()
-        .map(|c| rules.name_len(&c.to_string()))
-        .unwrap_or(0);
-    let extension_budget = MAX_LEN.saturating_sub(rules.name_len(&suffix) + first_len);
-    rules.truncate_to(&mut extension, extension_budget);
-    let stem_budget = MAX_LEN.saturating_sub(rules.name_len(&suffix) + rules.name_len(&extension));
-    rules.truncate_to(&mut stem, stem_budget);
-    sanitize(&format!("{stem}{suffix}{extension}"), rules)
+pub fn sanitize_numbered(name: &str, rules: Rules, counter: u32) -> Result<String, FilenameError> {
+    sanitize_impl(
+        name,
+        Policy {
+            rules,
+            max_len: FALLBACK_LIMIT,
+        },
+        Some(counter),
+        &Options::default(),
+    )
 }
 
-/// [`sanitize`] with explicit replacement and placeholder strings.
-pub fn sanitize_with(name: &str, rules: Rules, options: &Options) -> String {
+pub fn sanitize_with(name: &str, rules: Rules, options: &Options) -> Result<String, FilenameError> {
+    sanitize_impl(
+        name,
+        Policy {
+            rules,
+            max_len: FALLBACK_LIMIT,
+        },
+        None,
+        options,
+    )
+}
+
+/// Sanitize against the actual destination. `counter` is inserted before the
+/// extension and counted before shortening. Use `conservative` for opaque
+/// providers whose destination path cannot be queried meaningfully.
+pub fn sanitize_for_directory(
+    name: &str,
+    directory: &Path,
+    counter: Option<u32>,
+    conservative: bool,
+) -> Result<String, FilenameError> {
+    let policy = if conservative {
+        Policy {
+            rules: Rules::Universal,
+            max_len: FALLBACK_LIMIT,
+        }
+    } else {
+        rules_for_directory(directory)
+    };
+    sanitize_impl(name, policy, counter, &Options::default())
+}
+
+/// Chromium's `TruncateFilename` keeps the extension and at least five native
+/// units of basename when a name needs shortening. The counter occupies part
+/// of that basename budget. Our Unix input is already UTF-8, so truncation can
+/// preserve a character boundary; Chromium's generic POSIX FilePath cannot
+/// assume that encoding. LocalSend writes final names directly, so it needs no
+/// temporary .crdownload or :Zone.Identifier reservation.
+/// https://chromium.googlesource.com/chromium/src/+/e7e371aa7a6adf445cc773f6fae73a52d5c795f0/components/filename_generation/filename_generation.cc#152
+fn sanitize_impl(
+    name: &str,
+    policy: Policy,
+    counter: Option<u32>,
+    options: &Options,
+) -> Result<String, FilenameError> {
+    let rules = policy.rules;
+    let mut prepared = prepare_generated_name(name, rules);
+    if prepared.is_empty() || prepared.chars().all(|c| c == '-' || c == '_') {
+        prepared = prepare_generated_name(options.placeholder, rules);
+    }
+    let cleaned = replace_illegal(&prepared, rules, options.replacement);
+    let suffix = counter
+        .map(|value| format!(" ({value})"))
+        .unwrap_or_default();
+    let (stem, extension) = split_extension(&cleaned, rules);
+    let required = rules.units(&suffix) + rules.units(extension) + MIN_TRUNCATED_STEM;
+    let mut candidate = format!("{stem}{suffix}{extension}");
+    if rules.units(&candidate) > policy.max_len {
+        if required > policy.max_len {
+            return Err(FilenameError::InsufficientSpace);
+        }
+        let budget = policy.max_len - rules.units(&suffix) - rules.units(extension);
+        let stem = truncate_units(stem, rules, budget);
+        if rules.units(stem) < MIN_TRUNCATED_STEM {
+            return Err(FilenameError::InsufficientSpace);
+        }
+        candidate = format!("{stem}{suffix}{extension}");
+    }
+    // Truncation may expose an illegal endpoint (for example a space just
+    // before the cut); repair it without changing the protected extension.
+    if let Some(end) = candidate.chars().last() {
+        if is_illegal_at_end(end) {
+            candidate.replace_range(candidate.len() - end.len_utf8().., "_");
+        }
+    }
+    Ok(candidate)
+}
+
+/// Mirrors the generated-name prepass in Chromium's filename_util_internal.cc:
+/// Windows preserves the number of trimmed endpoint characters as underscores;
+/// all platforms remove leading/trailing dots before ICU character replacement.
+/// https://chromium.googlesource.com/chromium/src/+/e7e371aa7a6adf445cc773f6fae73a52d5c795f0/net/base/filename_util_internal.cc#79
+fn prepare_generated_name(name: &str, rules: Rules) -> String {
+    let mut prepared = name.to_string();
+    if rules.windows_names() {
+        let trimmed = prepared
+            .trim_end_matches(|c: char| c == '.' || c.is_whitespace())
+            .len();
+        let removed = prepared[trimmed..].chars().count();
+        prepared.truncate(trimmed);
+        for _ in 0..removed {
+            prepared.push('_');
+        }
+    }
+    prepared.trim_matches('.').to_string()
+}
+
+fn replace_illegal(name: &str, rules: Rules, replacement: &str) -> String {
+    let categories = CodePointMapData::<GeneralCategory>::new();
+    let could_be_short = rules.windows_names() && could_be_short_name(name);
+    let chars: Vec<char> = name.chars().collect();
     let mut result = String::with_capacity(name.len());
-    for c in name.chars() {
-        if rules.is_illegal_char(c) {
-            result.push_str(options.replacement);
+    for (index, &c) in chars.iter().enumerate() {
+        let category = categories.get(c);
+        let noncharacter =
+            (0xFDD0..=0xFDEF).contains(&(c as u32)) || ((c as u32) & 0xFFFE == 0xFFFE);
+        if ILLEGAL_ASCII.contains(c)
+            || matches!(category, GeneralCategory::Control | GeneralCategory::Format)
+            || noncharacter
+            || (could_be_short && c == '~')
+            || ((index == 0 || index + 1 == chars.len()) && is_illegal_at_end(c))
+        {
+            result.push_str(replacement);
         } else {
             result.push(c);
         }
     }
-
-    if rules.is_windows_like() {
-        collapse_trailing_run(&mut result, options.replacement);
-
-        if let Some(reserved) = reserved_prefix(&result) {
-            result = format!("{}{}", options.replacement, &result[reserved.len()..]);
-        }
+    if result.is_empty() {
+        return result;
     }
-
-    rules.truncate(&mut result);
-
-    if rules.is_windows_like() {
-        // Truncation can cut right after a `.` or ` `, leaving a trailing run
-        // that did not exist before the cut.
-        collapse_trailing_run(&mut result, options.replacement);
-        rules.truncate(&mut result);
+    if rules.windows_names() && reserved_windows_name(&result) {
+        result.insert(0, '_');
     }
-
-    if result.is_empty() || is_relative(&result) {
-        result = options.placeholder.to_string();
-        rules.truncate(&mut result);
-    }
-
     result
 }
 
-/// Replaces a trailing run of `.`/` ` with a single `replacement`.
-fn collapse_trailing_run(result: &mut String, replacement: &str) {
-    let trimmed_len = result.trim_end_matches(['.', ' ']).len();
-    if trimmed_len != result.len() {
-        result.truncate(trimmed_len);
-        result.push_str(replacement);
-    }
+fn is_illegal_at_end(c: char) -> bool {
+    c == '.' || c == '~' || c.is_whitespace()
 }
 
-/// Whether `name` is already legal under `rules`, i.e. whether [`sanitize`]
-/// would leave it untouched. Suitable for validating user input before it is
-/// written.
-pub fn is_valid(name: &str, rules: Rules) -> bool {
-    if name.is_empty() || rules.name_len(name) > MAX_LEN || is_relative(name) {
+fn could_be_short_name(name: &str) -> bool {
+    if !name.contains('~') || name.encode_utf16().count() > 12 {
         return false;
     }
-
-    if name.chars().any(|c| rules.is_illegal_char(c)) {
-        return false;
-    }
-
-    if rules.is_windows_like()
-        && (name.ends_with('.') || name.ends_with(' ') || reserved_prefix(name).is_some())
+    let mut parts = name.split('.');
+    let stem = parts.next().unwrap_or("");
+    let extension = parts.next();
+    if parts.next().is_some()
+        || stem.is_empty()
+        || stem.encode_utf16().count() > 8
+        || extension.is_some_and(|ext| ext.encode_utf16().count() > 3)
     {
         return false;
     }
-
-    true
+    !name
+        .chars()
+        .any(|c| c.is_whitespace() || "\"/[]:+|<>=;?,*\\".contains(c))
 }
 
-/// Sanitizes a peer-supplied *path* — a name that may carry directory
-/// components, as protocol v2 allows for folder transfers — into a single
-/// legal file name.
-///
-/// Only the last segment survives, so `../../etc/passwd` becomes `passwd`:
-/// this collapses the path rather than preserving the directory structure.
-pub fn sanitize_path(path: &str, rules: Rules) -> String {
-    let last = path
-        .rsplit(['/', '\\'])
-        .find(|segment| !segment.is_empty() && !is_relative(segment))
-        .unwrap_or("");
-
-    sanitize(last, rules)
-}
-
-/// Returns the reserved device name `name` starts with, if its stem (the part
-/// before the first `.`) is reserved.
-fn reserved_prefix(name: &str) -> Option<&'static str> {
+fn reserved_windows_name(name: &str) -> bool {
+    // Chromium's DOS device names also reserve CLOCK$ by stem, while the
+    // four shell-sensitive magic names below match only the entire filename.
+    // https://chromium.googlesource.com/chromium/src/+/e7e371aa7a6adf445cc773f6fae73a52d5c795f0/base/files/file_util.cc#541
     let stem = name.split('.').next().unwrap_or(name);
-    RESERVED_WINDOWS_NAMES
+    let reserved_device = RESERVED_WINDOWS_NAMES
         .iter()
-        .copied()
-        .find(|reserved| stem.eq_ignore_ascii_case(reserved))
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved));
+    reserved_device
+        || stem.eq_ignore_ascii_case("clock$")
+        || ["desktop.ini", "thumbs.db", "conin$", "conout$"]
+            .iter()
+            .any(|reserved| name.eq_ignore_ascii_case(reserved))
 }
 
-fn is_relative(name: &str) -> bool {
-    name == "." || name == ".."
-}
-
-/// Truncates in place to at most `max` bytes, cutting on a character boundary.
-fn truncate_bytes(value: &mut String, max: usize) {
-    if value.len() <= max {
-        return;
-    }
-
-    let mut end = max;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value.truncate(end);
-}
-
-/// Truncates in place to at most `max` UTF-16 code units, keeping whole chars.
-fn truncate_utf16(value: &mut String, max: usize) {
-    let mut units = 0;
-    for (index, c) in value.char_indices() {
-        units += c.len_utf16();
-        if units > max {
-            value.truncate(index);
-            return;
+fn split_extension(name: &str, rules: Rules) -> (&str, &str) {
+    // FilePath::Extension combines a 1–4 native-unit penultimate component
+    // with a recognized compressed suffix, or the exact `user.js` pair.
+    // https://chromium.googlesource.com/chromium/src/+/e7e371aa7a6adf445cc773f6fae73a52d5c795f0/base/files/file_path.cc#54
+    const COMPRESSED: &[&str] = &["bz", "bz2", "gz", "lz", "lzma", "lzo", "xz", "z", "zst"];
+    let Some(last) = name
+        .rfind('.')
+        .filter(|&index| index > 0 && index + 1 < name.len())
+    else {
+        return (name, "");
+    };
+    if let Some(previous) = name[..last].rfind('.').filter(|&index| index > 0) {
+        let penultimate = &name[previous + 1..last];
+        let final_component = &name[last + 1..];
+        if (1..=4).contains(&rules.units(penultimate))
+            && (COMPRESSED
+                .iter()
+                .any(|suffix| final_component.eq_ignore_ascii_case(suffix))
+                || (penultimate.eq_ignore_ascii_case("user")
+                    && final_component.eq_ignore_ascii_case("js")))
+        {
+            return (&name[..previous], &name[previous..]);
         }
     }
+    (&name[..last], &name[last..])
 }
 
-/// Truncates to an NFD UTF-16 limit without rewriting the original characters.
-fn truncate_hfs(value: &mut String, max: usize) {
-    let mut units = 0;
-    for (index, c) in value.char_indices() {
-        units += c.nfd().map(char::len_utf16).sum::<usize>();
-        if units > max {
-            value.truncate(index);
-            return;
+fn truncate_units(name: &str, rules: Rules, budget: usize) -> &str {
+    let mut used = 0;
+    for (index, c) in name.char_indices() {
+        let size = match rules {
+            Rules::Windows => c.len_utf16(),
+            _ => c.len_utf8(),
+        };
+        if used + size > budget {
+            return &name[..index];
         }
+        used += size;
     }
+    name
+}
+
+pub fn is_valid(name: &str, rules: Rules) -> bool {
+    if name.is_empty() || name == "." || name == ".." || rules.units(name) > FALLBACK_LIMIT {
+        return false;
+    }
+    sanitize(name, rules).is_ok_and(|cleaned| cleaned == name)
+}
+
+/// Return the last meaningful segment of a peer-supplied path.
+pub fn final_component(path: &str) -> &str {
+    path.rsplit(['/', '\\'])
+        .find(|part| !part.is_empty() && *part != "." && *part != "..")
+        .unwrap_or("")
+}
+
+pub fn sanitize_path(path: &str, rules: Rules) -> Result<String, FilenameError> {
+    sanitize(final_component(path), rules)
 }
 
 #[cfg(test)]
@@ -518,303 +418,153 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_replaces_illegal_characters() {
-        assert_eq!(
-            sanitize("a<b>c:d\"e/f\\g|h?i*j", Rules::Windows),
-            "a_b_c_d_e_f_g_h_i_j"
-        );
-        assert_eq!(sanitize("a/b:c", Rules::Hfs), "a_b_c");
-        assert_eq!(sanitize("a/b:c", Rules::Posix), "a_b:c");
-        assert_eq!(sanitize("a\u{0}b\u{7f}c", Rules::Posix), "a_b_c");
-    }
-
-    #[test]
-    fn test_keeps_legal_names() {
-        for rules in [
-            Rules::Windows,
-            Rules::Hfs,
-            Rules::Fat,
-            Rules::Posix,
-            Rules::Universal,
-        ] {
-            assert_eq!(
-                sanitize("holiday photo (1).jpg", rules),
-                "holiday photo (1).jpg"
-            );
-            assert_eq!(sanitize("Ünïcödé — 文件.txt", rules), "Ünïcödé — 文件.txt");
-        }
-    }
-
-    #[test]
-    fn test_windows_trailing_characters() {
-        assert_eq!(sanitize("report.", Rules::Windows), "report_");
-        assert_eq!(sanitize("report...  ", Rules::Windows), "report_");
-        assert_eq!(sanitize("report.", Rules::Posix), "report.");
-        assert_eq!(sanitize("report.", Rules::Fat), "report.");
-    }
-
-    #[test]
-    fn test_reserved_windows_names() {
-        assert_eq!(sanitize("con", Rules::Windows), "_");
-        assert_eq!(sanitize("NUL.txt", Rules::Windows), "_.txt");
-        assert_eq!(sanitize("com9.tar.gz", Rules::Windows), "_.tar.gz");
-        // Only the exact stem is reserved.
-        assert_eq!(sanitize("console.txt", Rules::Windows), "console.txt");
-        assert_eq!(sanitize("com10.txt", Rules::Windows), "com10.txt");
-        // FAT has no reserved names.
-        assert_eq!(sanitize("con", Rules::Fat), "con");
-    }
-
-    #[test]
-    fn test_placeholder() {
-        assert_eq!(sanitize("", Rules::Posix), "untitled");
-        assert_eq!(sanitize(".", Rules::Posix), "untitled");
-        assert_eq!(sanitize("..", Rules::Posix), "untitled");
-        assert_eq!(sanitize("///", Rules::Posix), "___");
-
-        let options = Options {
-            replacement: "",
-            placeholder: "unnamed",
-        };
-        assert_eq!(sanitize_with("///", Rules::Posix, &options), "unnamed");
-        assert_eq!(sanitize_with("a/b", Rules::Posix, &options), "ab");
-    }
-
-    #[test]
-    fn test_truncates_on_char_boundary() {
-        let long = "ä".repeat(200); // 400 bytes
-        let sanitized = sanitize(&long, Rules::Posix);
-        assert_eq!(sanitized.len(), MAX_LEN - 1); // 254: 127 × 2 bytes
-        assert!(sanitized.chars().all(|c| c == 'ä'));
-    }
-
-    #[test]
-    fn test_windows_and_hfs_keep_reported_japanese_filename() {
+    fn reported_japanese_posix_name_keeps_mp4_extension_when_shortened() {
         let name = "土曜のあさはほめるちゃん 20260926 ＃124「関西のいま気になるエリアのええところ“ほめるポイント＝ほめポ”を見つけながら、ぶらりするほっこりトークがたっぷりのほめぶら番組！今回は、“グラングリーン大阪”をぶらり！」.mp4";
-        assert_eq!(name.encode_utf16().count(), 116);
         assert_eq!(name.len(), 314);
-        for rules in [Rules::Windows, Rules::Hfs] {
-            assert!(is_valid(name, rules), "{rules:?}");
-            assert_eq!(sanitize(name, rules), name, "{rules:?}");
-        }
-        assert!(!is_valid(name, Rules::Posix));
+        assert_eq!(name.encode_utf16().count(), 116);
+        assert_eq!(sanitize(name, Rules::Windows).unwrap(), name);
+        let shortened = sanitize(name, Rules::Posix).unwrap();
+        assert!(shortened.ends_with(".mp4"));
+        assert!(shortened.len() <= 255);
     }
 
     #[test]
-    fn test_windows_and_hfs_utf16_boundary_does_not_split_emoji() {
-        let at_limit = format!("{}😀b", "a".repeat(252));
-        assert_eq!(at_limit.encode_utf16().count(), MAX_LEN);
-        let too_long = format!("{}😀b", "a".repeat(253));
-        assert_eq!(too_long.encode_utf16().count(), MAX_LEN + 1);
-        let emoji_over_boundary = format!("{}😀", "a".repeat(254));
-        for rules in [Rules::Windows, Rules::Hfs] {
-            assert!(is_valid(&at_limit, rules), "{rules:?}");
-            assert_eq!(sanitize(&at_limit, rules), at_limit, "{rules:?}");
-            assert!(!is_valid(&too_long, rules), "{rules:?}");
-            let sanitized = sanitize(&too_long, rules);
-            assert_eq!(sanitized, format!("{}😀", "a".repeat(253)), "{rules:?}");
-            assert_eq!(sanitized.encode_utf16().count(), MAX_LEN, "{rules:?}");
-            assert!(is_valid(&sanitized, rules), "{rules:?}");
-            assert_eq!(
-                sanitize(&emoji_over_boundary, rules),
-                "a".repeat(254),
-                "{rules:?}"
-            );
-        }
+    fn emoji_and_collision_fit_without_splitting_extension() {
+        let name = format!("{}😀.tar.gz", "a".repeat(245));
+        let numbered = sanitize_numbered(&name, Rules::Posix, 12).unwrap();
+        assert!(numbered.ends_with(" (12).tar.gz"));
+        assert!(numbered.len() <= 255);
+        assert!(std::str::from_utf8(numbered.as_bytes()).is_ok());
+
+        let windows_at_limit = format!("{}😀.mp4", "a".repeat(249));
+        assert!(windows_at_limit.len() > 255);
+        assert_eq!(windows_at_limit.encode_utf16().count(), 255);
+        assert_eq!(
+            sanitize(&windows_at_limit, Rules::Windows).unwrap(),
+            windows_at_limit
+        );
+        let windows_over_limit = format!("{}😀.mp4", "a".repeat(250));
+        let shortened = sanitize(&windows_over_limit, Rules::Windows).unwrap();
+        assert_eq!(shortened, format!("{}.mp4", "a".repeat(250)));
+        assert_eq!(shortened.encode_utf16().count(), 254);
+
+        let compound = format!("{}.FoO.ZST", "a".repeat(250));
+        let numbered_compound = sanitize_numbered(&compound, Rules::Posix, 1).unwrap();
+        assert!(numbered_compound.ends_with(" (1).FoO.ZST"));
+        let user_script = format!("{}.user.js", "a".repeat(250));
+        assert!(sanitize_numbered(&user_script, Rules::Posix, 1)
+            .unwrap()
+            .ends_with(" (1).user.js"));
+        assert_eq!(
+            sanitize_numbered("a.longname.zst", Rules::Posix, 1).unwrap(),
+            "a.longname (1).zst"
+        );
+        assert_eq!(
+            sanitize_numbered("a.tar.bz", Rules::Posix, 1).unwrap(),
+            "a (1).tar.bz"
+        );
     }
 
     #[test]
-    fn test_hfs_counts_canonical_decomposition_without_rewriting_name() {
-        let at_limit = "é".repeat(127); // HFS+ stores each composed character as two NFD units.
-        assert!(is_valid(&at_limit, Rules::Hfs));
-        assert_eq!(sanitize(&at_limit, Rules::Hfs), at_limit);
-
-        let too_long = "é".repeat(128);
-        assert!(!is_valid(&too_long, Rules::Hfs));
-        let sanitized = sanitize(&too_long, Rules::Hfs);
-        assert_eq!(sanitized, at_limit);
-        assert!(is_valid(&sanitized, Rules::Hfs));
-        assert!(is_valid(&too_long, Rules::Windows));
+    fn shared_illegal_set_and_platform_reserved_names() {
+        assert_eq!(
+            sanitize("a\u{200d}b\u{fdd0}c", Rules::Posix).unwrap(),
+            "a_b_c"
+        );
+        assert_eq!(sanitize("a:b?c|d", Rules::Posix).unwrap(), "a_b_c_d");
+        assert_eq!(sanitize("CON.txt", Rules::Windows).unwrap(), "_CON.txt");
+        assert_eq!(sanitize("CON.txt", Rules::Posix).unwrap(), "CON.txt");
+        assert_eq!(sanitize("a~1.txt", Rules::Windows).unwrap(), "a_1.txt");
+        assert_eq!(sanitize("a~1.txt", Rules::Posix).unwrap(), "a~1.txt");
+        assert_eq!(
+            sanitize("CLOCK$.txt", Rules::Windows).unwrap(),
+            "_CLOCK$.txt"
+        );
+        assert_eq!(
+            sanitize("desktop.ini", Rules::Windows).unwrap(),
+            "_desktop.ini"
+        );
+        assert_eq!(sanitize("thumbs.db", Rules::Windows).unwrap(), "_thumbs.db");
+        assert_eq!(sanitize("conin$", Rules::Windows).unwrap(), "_conin$");
+        assert_eq!(sanitize("conout$", Rules::Windows).unwrap(), "_conout$");
+        assert_eq!(
+            sanitize("conin$.txt", Rules::Windows).unwrap(),
+            "conin$.txt"
+        );
+        assert_eq!(
+            sanitize("desktop.ini.txt", Rules::Windows).unwrap(),
+            "desktop.ini.txt"
+        );
     }
 
     #[test]
-    fn test_apfs_preserves_long_composed_name_that_hfs_shortens() {
-        let name = "é".repeat(200);
-        assert_eq!(sanitize(&name, Rules::Apfs), name);
-        assert_eq!(sanitize(&name, Rules::Hfs), "é".repeat(127));
-        assert!(is_valid(&name, Rules::Apfs));
-        assert!(!is_valid(&name, Rules::Hfs));
+    fn tiny_budget_reports_impossible_extension() {
+        let policy = Policy {
+            rules: Rules::Posix,
+            max_len: 8,
+        };
+        assert_eq!(
+            sanitize_impl("longname.mp4", policy, None, &Options::default()),
+            Err(FilenameError::InsufficientSpace)
+        );
+        assert_eq!(
+            sanitize_impl("abcdefghi", policy, None, &Options::default()).unwrap(),
+            "abcdefgh"
+        );
+        let collision = Policy {
+            rules: Rules::Posix,
+            max_len: 12,
+        };
+        assert_eq!(
+            sanitize_impl("longname.mp4", collision, Some(2), &Options::default()),
+            Err(FilenameError::InsufficientSpace)
+        );
     }
 
     #[test]
-    fn test_detected_fat_uses_unicode_units_without_changing_android_default() {
-        let name = "界".repeat(200);
-        assert_eq!(sanitize(&name, Rules::FatVolume), name);
-        assert_eq!(sanitize(&name, Rules::ExFat), name);
-        assert_eq!(sanitize(&name, Rules::Fat), "界".repeat(85));
-        assert_eq!(sanitize("CON.txt", Rules::FatVolume), "_.txt");
-        assert_eq!(sanitize("CON.txt", Rules::ExFat), "_.txt");
-        assert_eq!(sanitize("CON.txt", Rules::Fat), "CON.txt");
-    }
-
-    #[test]
-    fn test_numbered_name_preserves_extension_and_full_length_budget() {
-        let original = format!("{}.jpg", "é".repeat(250));
-        let numbered = sanitize_numbered(&original, Rules::Apfs, 12);
-        assert_eq!(numbered, format!("{} (12).jpg", "é".repeat(246)));
-        assert_eq!(numbered.encode_utf16().count(), MAX_LEN);
-        assert!(is_valid(&numbered, Rules::Apfs));
-
-        let posix = sanitize_numbered(&original, Rules::Posix, 12);
-        assert!(posix.ends_with(" (12).jpg"));
-        assert!(is_valid(&posix, Rules::Posix));
-    }
-
-    #[test]
-    fn test_nearest_existing_directory_ancestor() {
+    fn queries_existing_and_missing_nested_directory() {
         let existing = std::env::temp_dir();
-        let nonexistent = existing
+        let nested = existing
             .join(format!("localsend-missing-{}", std::process::id()))
             .join("nested");
-        assert_eq!(
-            rules_for_directory(&nonexistent),
-            rules_for_directory(&existing)
-        );
-        let relative = Path::new("localsend-missing-relative").join("nested");
-        assert_eq!(
-            rules_for_directory(&relative),
-            rules_for_directory(&std::env::current_dir().unwrap())
-        );
-    }
+        let existing_policy = rules_for_directory(&existing);
+        let nested_policy = rules_for_directory(&nested);
+        assert!(existing_policy.max_len > 0);
+        #[cfg(not(windows))]
+        assert_eq!(existing_policy.max_len, nested_policy.max_len);
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn test_apfs_probe_and_composed_name_on_host_volume() {
-        let directory = std::env::temp_dir();
-        if probe_rules(&directory) == Rules::Apfs {
-            assert_eq!(rules_for_directory(&directory), Rules::Apfs);
-            let name = "é".repeat(200);
-            assert_eq!(sanitize(&name, rules_for_directory(&directory)), name);
-        }
-    }
-
-    #[test]
-    fn test_windows_and_hfs_custom_replacement_and_placeholder_use_utf16_limit() {
-        let options = Options {
-            replacement: "😀",
-            placeholder: &"界".repeat(MAX_LEN),
-        };
-        let name = format!("{}/b", "a".repeat(252));
-        let empty_replacement = Options {
-            replacement: "",
-            ..options
-        };
-        for rules in [Rules::Windows, Rules::Hfs] {
+            // Both paths query the same existing volume, but the intended
+            // nested directory consumes more of Win32's full-path budget.
+            let component_limit = query_component_limit(&existing).unwrap_or(FALLBACK_LIMIT);
+            let prefix = nested.as_os_str().encode_wide().count() + 1;
             assert_eq!(
-                sanitize_with(&name, rules, &options),
-                format!("{}😀b", "a".repeat(252)),
-                "{rules:?}"
+                nested_policy.max_len,
+                component_limit.min(259usize.saturating_sub(prefix))
             );
-
-            let placeholder = sanitize_with("/", rules, &empty_replacement);
-            assert_eq!(placeholder.encode_utf16().count(), MAX_LEN, "{rules:?}");
-            assert_eq!(placeholder, options.placeholder, "{rules:?}");
-            assert!(is_valid(&placeholder, rules), "{rules:?}");
+            assert!(nested_policy.max_len <= existing_policy.max_len);
         }
     }
 
-    /// Truncation must not leave a trailing `.` or ` ` behind on Windows-like
-    /// rules — the cut can land right after one.
     #[test]
-    fn test_truncation_does_not_expose_trailing_run() {
-        let dot = format!("{}.{}", "a".repeat(254), "b".repeat(10));
-        let sanitized = sanitize(&dot, Rules::Windows);
-        assert_eq!(sanitized, format!("{}_", "a".repeat(254)));
-        assert!(is_valid(&sanitized, Rules::Windows));
-
-        let space = format!("{} {}", "a".repeat(254), "b".repeat(10));
+    fn path_component_and_endpoint_rules() {
+        assert_eq!(final_component("../folder/photo.jpg"), "photo.jpg");
         assert_eq!(
-            sanitize(&space, Rules::Windows),
-            format!("{}_", "a".repeat(254))
+            sanitize_path("../folder/photo.jpg", Rules::Posix).unwrap(),
+            "photo.jpg"
         );
-
-        // POSIX allows trailing dots, so the cut stays as-is there.
+        assert_eq!(sanitize(".hidden", Rules::Posix).unwrap(), "hidden");
+        assert_eq!(sanitize("file.", Rules::Posix).unwrap(), "file");
+        assert_eq!(sanitize("...", Rules::Posix).unwrap(), "untitled");
+        assert_eq!(sanitize("---", Rules::Posix).unwrap(), "untitled");
+        assert_eq!(sanitize("file.", Rules::Windows).unwrap(), "file_");
         assert_eq!(
-            sanitize(&dot, Rules::Posix),
-            format!("{}.", "a".repeat(254))
+            sanitize("evil.exe. ", Rules::Windows).unwrap(),
+            "evil.exe__"
         );
-    }
-
-    #[test]
-    fn test_sanitize_path_collapses_directories() {
-        assert_eq!(sanitize_path("../../etc/passwd", Rules::Posix), "passwd");
-        assert_eq!(sanitize_path("a/b/c.txt", Rules::Posix), "c.txt");
-        assert_eq!(
-            sanitize_path("C:\\Windows\\evil.exe", Rules::Windows),
-            "evil.exe"
-        );
-        assert_eq!(sanitize_path("dir/", Rules::Posix), "dir");
-        assert_eq!(sanitize_path("..", Rules::Posix), "untitled");
-        assert_eq!(sanitize_path("/", Rules::Posix), "untitled");
-    }
-
-    #[test]
-    fn test_is_valid() {
-        assert!(is_valid("photo.jpg", Rules::Windows));
-        assert!(!is_valid("", Rules::Windows));
-        assert!(!is_valid("a:b", Rules::Windows));
-        assert!(!is_valid("a:b", Rules::Hfs));
-        assert!(is_valid("a:b", Rules::Posix));
-        assert!(!is_valid("con.txt", Rules::Windows));
-        assert!(is_valid("con.txt", Rules::Posix));
-        assert!(!is_valid("trailing.", Rules::Windows));
-        assert!(!is_valid("..", Rules::Posix));
-        assert!(!is_valid(&"a".repeat(256), Rules::Posix));
-        assert!(is_valid(&"a".repeat(255), Rules::Posix));
-    }
-
-    /// `is_valid` must agree with `sanitize` — otherwise a name the UI accepts
-    /// still gets rewritten on save, or vice versa.
-    #[test]
-    fn test_is_valid_matches_sanitize() {
-        let names = [
-            "photo.jpg",
-            "",
-            ".",
-            "..",
-            "a:b",
-            "a/b",
-            "a\\b",
-            "a\u{0}b",
-            "a\u{1f}b",
-            "con",
-            "con.txt",
-            "console",
-            "lpt9.tar.gz",
-            "trailing.",
-            "trailing ",
-            "trailing...",
-            " leading",
-            "Ünïcödé.txt",
-            "文件.txt",
-            &"a".repeat(255),
-            &"a".repeat(256),
-        ];
-
-        for rules in [
-            Rules::Windows,
-            Rules::Hfs,
-            Rules::Fat,
-            Rules::Posix,
-            Rules::Universal,
-        ] {
-            for name in names {
-                assert_eq!(
-                    is_valid(name, rules),
-                    sanitize(name, rules) == name,
-                    "mismatch for {name:?} under {rules:?}"
-                );
-            }
-        }
+        assert_eq!(sanitize(".hidden", Rules::Windows).unwrap(), "hidden");
+        assert_eq!(sanitize(" file ", Rules::Posix).unwrap(), "_file_");
     }
 }

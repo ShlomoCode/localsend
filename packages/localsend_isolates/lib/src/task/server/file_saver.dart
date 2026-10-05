@@ -146,8 +146,7 @@ Future<(bool, String?)> saveCachedFileToGallery({
 /// The peer chooses them, so they get the same treatment as the base name:
 /// `..` and absolute names are refused outright rather than rewritten, since a
 /// name that tries to leave the destination is not a name to guess at, and
-/// every remaining component is sanitized for the filesystem containing its
-/// parent directory.
+/// every remaining component is sanitized using its parent directory's limits.
 ///
 /// Throws `'Path traversal detected'` when the name tries to leave the
 /// destination.
@@ -189,8 +188,7 @@ Future<(String, String?, String)> digestFilePathAndPrepareDirectory({
   final components = <String>[];
 
   // Each directory component may cross a mount boundary. Create it before
-  // choosing the rules for the next component, so detection sees its actual
-  // parent filesystem. SAF and Android SD paths remain opaque to this check.
+  // querying the next component's parent. SAF and Android SD paths remain opaque.
   var parent = parentDirectory;
   if (!isContentUri) {
     Directory(parent).createSync(recursive: true);
@@ -253,9 +251,9 @@ Future<(String, String?, String)> digestFilePathAndPrepareDirectory({
   Directory(dir).createSync(recursive: true);
 
   String destinationPath;
-  int counter = 1;
+  int counter = 0;
   do {
-    final candidate = counter == 1
+    final candidate = counter == 0
         ? actualFileName
         : rust_filename.sanitizeFileNameForDirectory(name: sourceComponents.last, directory: dir, counter: counter, conservative: conservativeNames);
     destinationPath = p.join(dir, candidate);

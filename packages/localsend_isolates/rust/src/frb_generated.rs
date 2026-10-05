@@ -3197,11 +3197,12 @@ fn wire__crate__api__filename__sanitize_file_name_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_name = <String>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::filename::sanitize_file_name(api_name))?;
-                Ok(output_ok)
-            })())
+            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                (move || {
+                    let output_ok = crate::api::filename::sanitize_file_name(api_name)?;
+                    Ok(output_ok)
+                })(),
+            )
         },
     )
 }
@@ -3231,16 +3232,17 @@ fn wire__crate__api__filename__sanitize_file_name_for_directory_impl(
             let api_counter = <Option<u32>>::sse_decode(&mut deserializer);
             let api_conservative = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::filename::sanitize_file_name_for_directory(
+            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                (move || {
+                    let output_ok = crate::api::filename::sanitize_file_name_for_directory(
                         api_name,
                         api_directory,
                         api_counter,
                         api_conservative,
-                    ))?;
-                Ok(output_ok)
-            })())
+                    )?;
+                    Ok(output_ok)
+                })(),
+            )
         },
     )
 }

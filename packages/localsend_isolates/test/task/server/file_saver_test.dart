@@ -52,7 +52,7 @@ void main() {
 
     final path = await digest(tempDir.path, 'file.txt');
 
-    expect(path, p.join(tempDir.path, 'file (2).txt'));
+    expect(path, p.join(tempDir.path, 'file (1).txt'));
     expect(File(p.join(tempDir.path, 'file.txt')).readAsStringSync(), 'hello');
   });
 
@@ -63,12 +63,12 @@ void main() {
   test('saves under an alternative name when a directory occupies the incoming name', () async {
     final existingDirectory = Directory(p.join(tempDir.path, 'file.txt'))..createSync();
     final existingContent = File(p.join(existingDirectory.path, 'keep.txt'))..writeAsStringSync('keep');
-    final existingFile = File(p.join(tempDir.path, 'file (2).txt'))..writeAsStringSync('existing');
+    final existingFile = File(p.join(tempDir.path, 'file (1).txt'))..writeAsStringSync('existing');
 
     final path = await digest(tempDir.path, 'file.txt');
     await File(path).writeAsString('received');
 
-    expect(path, p.join(tempDir.path, 'file (3).txt'));
+    expect(path, p.join(tempDir.path, 'file (2).txt'));
     expect(File(path).readAsStringSync(), 'received');
     expect(existingContent.readAsStringSync(), 'keep');
     expect(existingFile.readAsStringSync(), 'existing');
@@ -91,7 +91,7 @@ void main() {
     final secondPath = await digest(tempDir.path, name);
     File(secondPath).writeAsStringSync('second');
 
-    expect(p.basename(secondPath), endsWith(' (2).txt'));
+    expect(p.basename(secondPath), endsWith(' (1).txt'));
     expect(p.basename(secondPath).length, lessThanOrEqualTo(255));
     expect(secondPath, isNot(firstPath));
   });
