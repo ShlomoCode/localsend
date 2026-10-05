@@ -14,7 +14,11 @@ permissions:
 
 jobs:
   picker:
-    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +62,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: picker-2784-windows-2022
+          name: picker-2784-${{ matrix.os }}
           path: picker-2784-artifacts/
           if-no-files-found: warn

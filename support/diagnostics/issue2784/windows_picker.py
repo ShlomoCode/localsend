@@ -13,6 +13,7 @@ import ctypes
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ from pywinauto import Desktop
 from pywinauto.findwindows import ElementNotFoundError
 
 
-CASES = ("folder_cancel", "folder_select", "file_cancel", "file_select")
+CASES = ("folder_cancel", "folder_select", "file_cancel", "file_select", "file_multi")
 STEP_TIMEOUT = 25.0
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.15
@@ -149,7 +150,7 @@ def click_flutter_control(pid: int, label: str, app, case_log: dict):
     rect = app.rectangle()
     # Fixed 1000x700 app window, derived from the 1.17 SendTab/NavigationRail
     # layout. Each click is accepted only if the expected native dialog follows.
-    points = {"Send": (85, 210), "File": (335, 122), "Folder": (455, 122)}
+    points = {"Send": (85, 210), "File": (335, 122), "Folder": (455, 122), "Edit": (754, 262)}
     x, y = points[label]
     pyautogui.click(rect.left + x, rect.top + y)
     case_log.setdefault("clicks", []).append({"label": label, "method": "geometry", "relative_point": [x, y]})
@@ -159,7 +160,20 @@ def dialog_select_file(dialog, fixture: Path):
     # Alt+N focuses the Windows common dialog's File name field.
     dialog.set_focus()
     pyautogui.hotkey("alt", "n")
+    pyautogui.hotkey("ctrl", "a")
     pyautogui.write(str(fixture), interval=0.005)
+    pyautogui.press("enter")
+
+
+def dialog_select_multiple_files(dialog, fixtures: tuple[Path, Path]):
+    dialog.set_focus()
+    pyautogui.hotkey("ctrl", "l")
+    pyautogui.write(str(fixtures[0].parent), interval=0.005)
+    pyautogui.press("enter")
+    time.sleep(0.5)
+    pyautogui.hotkey("alt", "n")
+    pyautogui.hotkey("ctrl", "a")
+    pyautogui.write(" ".join(f'"{fixture.name}"' for fixture in fixtures), interval=0.02)
     pyautogui.press("enter")
 
 
@@ -205,7 +219,7 @@ def desktop_environment():
     }
 
 
-def run_case(name: str, exe: Path, output: Path, fixture: Path) -> dict:
+def run_case(name: str, exe: Path, output: Path, fixture: Path, multi_fixtures: tuple[Path, Path]) -> dict:
     case_dir = output / name
     case_dir.mkdir()
     result = {"case": name, "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "events": []}
@@ -236,6 +250,9 @@ def run_case(name: str, exe: Path, output: Path, fixture: Path) -> dict:
                 dialog.set_focus()
                 pyautogui.press("esc")
                 event("cancel_pressed")
+            elif name == "file_multi":
+                dialog_select_multiple_files(dialog, multi_fixtures)
+                event("multiple_files_selected", paths=[str(p) for p in multi_fixtures])
             elif name.startswith("file"):
                 dialog_select_file(dialog, fixture)
                 event("file_selected", path=str(fixture))
@@ -257,10 +274,28 @@ def run_case(name: str, exe: Path, output: Path, fixture: Path) -> dict:
             uia_lines = dump_uia(proc.pid, case_dir / "after_uia.txt")
             ocr_text, ocr_errors = ocr_screenshot(case_dir / "after.png")
             (case_dir / "after_ocr.txt").write_text(ocr_text + "\n--- OCR stderr ---\n" + ocr_errors, encoding="utf-8")
-            selected_uia = any("1 file" in line.lower() or fixture.name.lower() in line.lower() for line in uia_lines)
-            selected_ocr = "1 file" in ocr_text.lower() or fixture.name.lower() in ocr_text.lower()
-            result["flutter_selection_uia_observed"] = selected_uia if name.endswith("select") else None
-            result["flutter_selection_ocr_observed"] = selected_ocr if name.endswith("select") else None
+            expected_count = 2 if name == "file_multi" else 1
+            count_pattern = re.compile(rf"\bFiles:\s*{expected_count}\b", re.IGNORECASE)
+            selected_uia = any(count_pattern.search(line) for line in uia_lines)
+            selected_ocr = bool(count_pattern.search(ocr_text))
+            result["expected_selected_files"] = expected_count if not name.endswith("cancel") else 0
+            result["flutter_selection_uia_observed"] = selected_uia if not name.endswith("cancel") else None
+            result["flutter_selection_ocr_observed"] = selected_ocr if not name.endswith("cancel") else None
+            if not name.endswith("cancel"):
+                click_flutter_control(proc.pid, "Edit", app, result)
+                time.sleep(1)
+                event("selected_files_view_screenshot", **save_screenshot(case_dir / "selected_files.png"))
+                selected_lines = dump_uia(proc.pid, case_dir / "selected_files_uia.txt")
+                selected_ocr_text, selected_ocr_errors = ocr_screenshot(case_dir / "selected_files.png")
+                (case_dir / "selected_files_ocr.txt").write_text(
+                    selected_ocr_text + "\n--- OCR stderr ---\n" + selected_ocr_errors, encoding="utf-8"
+                )
+                expected_names = [p.name for p in multi_fixtures] if name == "file_multi" else [fixture.name]
+                selected_view_text = "\n".join(selected_lines) + "\n" + selected_ocr_text
+                result["selected_files_view_names_observed"] = {
+                    filename: filename.lower() in selected_view_text.lower() for filename in expected_names
+                }
+                event("selected_files_view_opened")
             if name.endswith("cancel"):
                 result["classification"] = "native_picker_cancelled"
             elif selected_uia or selected_ocr:
@@ -281,6 +316,7 @@ def run_case(name: str, exe: Path, output: Path, fixture: Path) -> dict:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=10)
             result["process_exit_code"] = proc.poll()
     (case_dir / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(f"{name}: {result['classification']} {result.get('error', '')}", flush=True)
     return result
 
 
@@ -299,11 +335,16 @@ def main():
     fixture_dir.mkdir()
     fixture = fixture_dir / "picker-2784-sample.txt"
     fixture.write_text("LocalSend issue 2784 Windows native picker diagnostic\n", encoding="utf-8")
+    multi_dir = args.output / "multi-fixture"
+    multi_dir.mkdir()
+    multi_fixtures = (multi_dir / "first.txt", multi_dir / "second.txt")
+    for index, path in enumerate(multi_fixtures, start=1):
+        path.write_text(f"LocalSend issue 2784 multi file {index}\n", encoding="utf-8")
     exe_matches = list(args.release.rglob("localsend_app.exe"))
     report["release_executables"] = [str(p) for p in exe_matches]
     if len(exe_matches) == 1:
         for name in CASES:
-            report["cases"].append(run_case(name, exe_matches[0], args.output, fixture))
+            report["cases"].append(run_case(name, exe_matches[0], args.output, fixture, multi_fixtures))
             (args.output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     else:
         report["error"] = "Expected exactly one localsend_app.exe in verified release"
