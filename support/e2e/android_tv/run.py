@@ -31,14 +31,17 @@ def main():
         if not condition:
             raise AssertionError(message)
 
-    def adb(*command):
-        return subprocess.check_output([args.adb, '-s', args.serial, *command], timeout=20, stderr=subprocess.STDOUT)
+    def adb(*command, timeout=20):
+        return subprocess.check_output([args.adb, '-s', args.serial, *command], timeout=timeout, stderr=subprocess.STDOUT)
 
     def read_ui_nodes():
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline:
             adb('shell', 'rm', '-f', UI_XML)
-            dump = adb('shell', 'uiautomator', 'dump', UI_XML)
+            try:
+                dump = adb('shell', 'uiautomator', 'dump', UI_XML)
+            except subprocess.TimeoutExpired:
+                continue
             if b'ERROR:' not in dump:
                 return list(ET.fromstring(adb('shell', 'cat', UI_XML)).iter('node'))
         raise RuntimeError('UiAutomator did not produce a fresh snapshot')
@@ -52,13 +55,21 @@ def main():
         time.sleep(1)
 
     def open_settings_tab():
-        # Leave the animated Receive page before UiAutomator waits for idle.
-        adb('shell', 'input', 'touchscreen', 'tap', str(width // 10), str(height * 4 // 9))
-        time.sleep(1)
-        settings = next((node for node in read_ui_nodes()
-                         if node.get('content-desc', '').startswith('Settings\nTab')), None)
-        check(settings is not None, 'Settings tab not found; use English LocalSend')
-        tap_node(settings)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            # The first tap may land during startup; it also leaves the animated Receive page.
+            adb('shell', 'input', 'touchscreen', 'tap', str(width // 10), str(height * 4 // 9))
+            time.sleep(1)
+            try:
+                nodes = read_ui_nodes()
+            except RuntimeError:
+                continue
+            settings = next((node for node in nodes
+                             if node.get('content-desc', '').startswith('Settings\nTab')), None)
+            if settings is not None:
+                tap_node(settings)
+                return
+        raise AssertionError('Settings tab not found; use English LocalSend')
 
     def get_device_name():
         fields = [n for n in read_ui_nodes() if n.get('class') == 'android.widget.EditText']
@@ -127,7 +138,7 @@ def main():
 
             # Given this APK opens the same saved Device name in the real Settings dialog.
             adb('shell', 'am', 'force-stop', PACKAGE)
-            adb('install', '-r', str(apk.resolve()))
+            adb('install', '-r', str(apk.resolve()), timeout=300)
             adb('shell', 'am', 'start', '-n', f'{PACKAGE}/{ACTIVITY}')
             time.sleep(5)
             open_settings_tab()
