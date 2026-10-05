@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 # TODO: Merge this focused test into a generic E2E runner when more tests are added.
 PACKAGE = 'org.localsend.localsend_app.debug'
 ACTIVITY = 'org.localsend.localsend_app.MainActivity'
-UI_XML = '/sdcard/localsend-e2e.xml'
+UI_XML = '/data/local/tmp/localsend-e2e.xml'
 
 
 def main():
@@ -139,6 +139,7 @@ def main():
             # Given this APK opens the same saved Device name in the real Settings dialog.
             adb('shell', 'am', 'force-stop', PACKAGE)
             adb('install', '-r', str(apk.resolve()), timeout=300)
+            adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
             adb('shell', 'am', 'start', '-n', f'{PACKAGE}/{ACTIVITY}')
             time.sleep(5)
             open_settings_tab()
