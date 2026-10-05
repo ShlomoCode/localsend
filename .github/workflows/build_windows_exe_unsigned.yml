@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           git rev-parse HEAD
-          shasum -a 256 support/native_filename_validation/src/filename.rs
+          python -c "import hashlib; print(hashlib.sha256(open('support/native_filename_validation/src/filename.rs', 'rb').read()).hexdigest())"
           rustc --version
           uname -a
       - name: Source unit tests
