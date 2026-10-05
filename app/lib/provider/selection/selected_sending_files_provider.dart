@@ -27,8 +27,50 @@ final selectedSendingFilesProvider = ReduxProvider<SelectedSendingFilesNotifier,
 });
 
 class SelectedSendingFilesNotifier extends ReduxNotifier<List<CrossFile>> {
+  final _sentFiles = Set<CrossFile>.identity();
+  int _externalShareRevision = 0;
+
+  int get externalShareRevision => _externalShareRevision;
+
   @override
   List<CrossFile> init() => [];
+}
+
+/// Records successful sends while keeping the selection available for another recipient.
+class MarkSelectedFilesSentAction extends ReduxAction<SelectedSendingFilesNotifier, List<CrossFile>> {
+  final Iterable<CrossFile> files;
+  final int externalShareRevision;
+
+  MarkSelectedFilesSentAction(this.files, {required this.externalShareRevision});
+
+  @override
+  List<CrossFile> reduce() {
+    final sentFiles = notifier._sentFiles;
+    sentFiles.retainAll(state);
+    if (externalShareRevision < notifier.externalShareRevision) {
+      // A new share arrived during this transfer. Remove its delivered entries now.
+      final finishedFiles = Set<CrossFile>.identity()..addAll(files);
+      sentFiles.removeAll(finishedFiles);
+      return List<CrossFile>.unmodifiable(state.where((file) => !finishedFiles.contains(file)));
+    }
+    sentFiles.addAll(files);
+    sentFiles.retainAll(state);
+    return state;
+  }
+}
+
+/// A new external share replaces sent entries, preserving additions that have not been sent.
+class BeginExternalShareAction extends ReduxAction<SelectedSendingFilesNotifier, List<CrossFile>> {
+  @override
+  List<CrossFile> reduce() {
+    notifier._externalShareRevision++;
+    final sentFiles = notifier._sentFiles;
+    sentFiles.retainAll(state);
+    final remaining = List<CrossFile>.unmodifiable(state.where((file) => !sentFiles.contains(file)));
+    sentFiles.clear();
+    // Shared files and active uploads may still use the cache, so do not clear it here.
+    return remaining;
+  }
 }
 
 /// Adds a message.
@@ -272,6 +314,7 @@ class RemoveSelectedFileAction extends ReduxAction<SelectedSendingFilesNotifier,
 
   @override
   List<CrossFile> reduce() {
+    notifier._sentFiles.remove(state[index]);
     return List<CrossFile>.unmodifiable([...state]..removeAt(index));
   }
 
@@ -358,6 +401,7 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
 class ClearSelectionAction extends ReduxAction<SelectedSendingFilesNotifier, List<CrossFile>> with GlobalActions {
   @override
   List<CrossFile> reduce() {
+    notifier._sentFiles.clear();
     return const [];
   }
 

@@ -59,6 +59,9 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
   /// Session ID -> Cancel token
   final _prepareUploadCancelTokens = <String, rust_cancel.RsCancellationToken>{};
 
+  /// Original selection entries keyed by the protocol IDs of each session.
+  final _selectedFilesBySession = <String, ({Map<String, CrossFile> files, int externalShareRevision})>{};
+
   @override
   Map<String, SendSessionState> init() {
     return {};
@@ -99,6 +102,10 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     // The ids are assigned upfront, so the checksums calculated below
     // can be mapped back to the corresponding file.
     final selectedFiles = files.map((file) => (id: _uuid.v4(), file: file)).toList();
+    _selectedFilesBySession[sessionId] = (
+      files: {for (final (:id, :file) in selectedFiles) id: file},
+      externalShareRevision: ref.notifier(selectedSendingFilesProvider).externalShareRevision,
+    );
 
     state = state.updateSession(
       sessionId: sessionId,
@@ -502,6 +509,29 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     _finish(sessionId: sessionId);
   }
 
+  void _recordFinishedSelection(String sessionId) {
+    final selection = _selectedFilesBySession[sessionId];
+    if (selection == null) {
+      return;
+    }
+    final transfer = ref.read(fileTransferProvider);
+    final finishedFiles = {
+      for (final entry in selection.files.entries)
+        if (transfer.getStatus(sessionId: sessionId, fileId: entry.key) == FileStatus.finished) entry.key: entry.value,
+    };
+    if (finishedFiles.isEmpty) {
+      return;
+    }
+    ref
+        .redux(selectedSendingFilesProvider)
+        .dispatch(
+          MarkSelectedFilesSentAction(finishedFiles.values, externalShareRevision: selection.externalShareRevision),
+        );
+    for (final fileId in finishedFiles.keys) {
+      selection.files.remove(fileId);
+    }
+  }
+
   void _finish({required String sessionId}) {
     final sessionState = state[sessionId];
     if (sessionState == null) {
@@ -511,6 +541,9 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     // The transfer is over, the process no longer needs to be kept alive for it.
     TransferNotification.stop(sessionId);
 
+    if (ref.read(settingsProvider).sendMode == SendMode.multiple) {
+      _recordFinishedSelection(sessionId);
+    }
     if (state[sessionId]!.status != SessionStatus.sending) {
       _logger.info('Transfer was canceled.');
     } else {
@@ -663,6 +696,9 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
                 );
             _updateForegroundServiceProgress(sessionId);
             ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.finished);
+            if (ref.read(settingsProvider).sendMode == SendMode.multiple) {
+              _recordFinishedSelection(sessionId);
+            }
           case HttpUploadFileFailedEvent():
             _logger.warning('Error while sending file ${state[sessionId]?.files[event.fileId]?.file.fileName}: ${event.error}');
             ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.failed);
@@ -776,6 +812,10 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
 
   /// Closes the session
   void closeSession(String sessionId) {
+    if (ref.read(settingsProvider).sendMode == SendMode.multiple) {
+      _recordFinishedSelection(sessionId);
+    }
+    _selectedFilesBySession.remove(sessionId);
     final sessionState = state[sessionId];
     if (sessionState == null) {
       return;
@@ -792,6 +832,9 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
 
   void clearAllSessions() {
     for (final sessionId in state.keys) {
+      if (ref.read(settingsProvider).sendMode == SendMode.multiple) {
+        _recordFinishedSelection(sessionId);
+      }
       TransferNotification.stop(sessionId);
     }
     for (final cancelToken in _hashCancelTokens.values) {
@@ -802,6 +845,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
       cancelToken.cancel();
     }
     _prepareUploadCancelTokens.clear();
+    _selectedFilesBySession.clear();
     state = {};
     ref.notifier(fileTransferProvider).removeAllSessions();
   }

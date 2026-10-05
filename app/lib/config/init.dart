@@ -339,14 +339,19 @@ class _HandleShareIntentAction extends AsyncGlobalAction {
   @override
   Future<void> reduce() async {
     final message = payload.content;
-    if (message != null && message.trim().isNotEmpty) {
+    final hasMessage = message != null && message.trim().isNotEmpty;
+    final attachments = payload.attachments?.where((a) => a != null).cast<SharedAttachment>().toList() ?? <SharedAttachment>[];
+    if (hasMessage || attachments.isNotEmpty) {
+      ref.redux(selectedSendingFilesProvider).dispatch(BeginExternalShareAction());
+    }
+    if (hasMessage) {
       ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: message));
     }
     await ref
         .redux(selectedSendingFilesProvider)
         .dispatchAsync(
           AddFilesAction(
-            files: payload.attachments?.where((a) => a != null).cast<SharedAttachment>() ?? <SharedAttachment>[],
+            files: attachments,
             converter: CrossFileConverters.convertSharedAttachment,
           ),
         );
