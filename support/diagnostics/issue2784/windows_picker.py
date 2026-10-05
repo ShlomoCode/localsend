@@ -26,7 +26,7 @@ from pywinauto import Desktop
 from pywinauto.findwindows import ElementNotFoundError
 
 
-CASES = ("file_cancel", "file_select", "folder_cancel", "folder_select")
+CASES = ("folder_cancel", "folder_select", "file_cancel", "file_select")
 STEP_TIMEOUT = 25.0
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.15
@@ -51,7 +51,7 @@ def windows_for_pid(pid: int):
 
 
 def app_window(pid: int):
-    candidates = [w for w in windows_for_pid(pid) if w.class_name() != "#32770" and w.rectangle().width() >= 500]
+    candidates = [w for w in windows_for_pid(pid) if w.class_name() != "#32770" and w.rectangle().width() >= 200]
     return max(candidates, key=lambda w: w.rectangle().width() * w.rectangle().height(), default=None)
 
 
@@ -136,13 +136,16 @@ def click_label(pid: int, label: str):
 
 
 def click_flutter_control(pid: int, label: str, app, case_log: dict):
-    method = click_label(pid, label)
-    if method:
-        case_log.setdefault("clicks", []).append({"label": label, "method": method})
-        return
-    if click_ocr_label(label, app):
-        case_log.setdefault("clicks", []).append({"label": label, "method": "screenshot_ocr"})
-        return
+    aliases = {"File": ("File", "Files"), "Folder": ("Folder", "Folders")}.get(label, (label,))
+    for candidate in aliases:
+        method = click_label(pid, candidate)
+        if method:
+            case_log.setdefault("clicks", []).append({"label": candidate, "method": method})
+            return
+    for candidate in aliases:
+        if click_ocr_label(candidate, app):
+            case_log.setdefault("clicks", []).append({"label": candidate, "method": "screenshot_ocr"})
+            return
     rect = app.rectangle()
     # Fixed 1000x700 app window, derived from the 1.17 SendTab/NavigationRail
     # layout. Each click is accepted only if the expected native dialog follows.
@@ -216,7 +219,7 @@ def run_case(name: str, exe: Path, output: Path, fixture: Path) -> dict:
         try:
             app = wait_for(lambda: app_window(proc.pid), STEP_TIMEOUT, "LocalSend main window")
             app.set_focus()
-            app.move_window(x=100, y=100, width=1000, height=700, repaint=True)
+            app.move_window(x=0, y=0, width=1000, height=700, repaint=True)
             time.sleep(1)
             event("main_window", rectangle=str(app.rectangle()))
             event("initial_screenshot", **save_screenshot(case_dir / "initial.png"))
