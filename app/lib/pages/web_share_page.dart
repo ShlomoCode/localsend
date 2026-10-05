@@ -209,7 +209,7 @@ class _WebSharePageState extends State<WebSharePage> with Refena {
                                 InkWell(
                                   onTap: () async {
                                     await Clipboard.setData(ClipboardData(text: url));
-                                    if (context.mounted && checkPlatformIsDesktop()) {
+                                    if (context.mounted && checkPlatformIsDesktop(platform: Theme.of(context).platform)) {
                                       context.showSnackBar(t.general.copiedToClipboard);
                                     }
                                   },

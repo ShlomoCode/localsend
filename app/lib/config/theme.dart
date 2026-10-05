@@ -88,7 +88,7 @@ Future<void> updateSystemOverlayStyle(BuildContext context) async {
 }
 
 Future<void> updateSystemOverlayStyleWithBrightness(Brightness brightness) async {
-  if (checkPlatform([TargetPlatform.android])) {
+  if (checkNativePlatform([TargetPlatform.android])) {
     // See https://github.com/flutter/flutter/issues/90098
     final darkMode = brightness == Brightness.dark;
     final androidSdkInt = RefenaScope.defaultRef.read(deviceInfoProvider).androidSdkInt ?? 0;

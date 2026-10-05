@@ -18,10 +18,10 @@ Future<void> openFolder({
     return;
   }
 
-  if (fileName != null && checkPlatform([TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS])) {
+  if (fileName != null && checkNativePlatform([TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS])) {
     // open folder and select file
 
-    if (defaultTargetPlatform == TargetPlatform.windows) {
+    if (Platform.isWindows) {
       folderPath = folderPath.replaceAll('/', '\\');
     }
 
@@ -44,22 +44,22 @@ Future<void> openFolder({
 /// Opens [folderPath] in the platform's file manager with [fileName] selected.
 /// Arguments are passed as a list (no shell), so file names received from remote devices cannot inject commands.
 Future<bool> _showInFileManager({required String folderPath, required String fileName}) async {
-  final separator = defaultTargetPlatform == TargetPlatform.windows ? '\\' : '/';
+  final separator = Platform.isWindows ? '\\' : '/';
   final filePath = folderPath.endsWith(separator) ? '$folderPath$fileName' : '$folderPath$separator$fileName';
   if (!File(filePath).existsSync()) {
     return false;
   }
 
   try {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.macOS:
+    switch (Platform.operatingSystem) {
+      case 'macos':
         final result = await Process.run('open', ['-R', filePath]);
         return result.exitCode == 0;
-      case TargetPlatform.windows:
+      case 'windows':
         // explorer.exe exit codes are meaningless (it usually returns 1 even on success)
         await Process.run('explorer.exe', ['/select,', filePath]);
         return true;
-      case TargetPlatform.linux:
+      case 'linux':
         final result = await Process.run('dbus-send', [
           '--session',
           '--print-reply',

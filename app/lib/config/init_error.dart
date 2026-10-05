@@ -15,7 +15,7 @@ void showInitErrorApp({
 }) async {
   _logger.severe('Error during init', error, stackTrace);
 
-  if (checkPlatformIsDesktop()) {
+  if (checkNativePlatformIsDesktop()) {
     await WindowManager.instance.ensureInitialized();
     await WindowManager.instance.show();
   }

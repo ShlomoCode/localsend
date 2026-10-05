@@ -22,12 +22,12 @@ Future<void> initTray() async {
     return;
   }
   try {
-    if (checkPlatform([TargetPlatform.windows])) {
+    if (checkNativePlatform([TargetPlatform.windows])) {
       await tm.trayManager.setIcon(Assets.img.logo);
-    } else if (checkPlatform([TargetPlatform.macOS])) {
+    } else if (checkNativePlatform([TargetPlatform.macOS])) {
       // The menu bar icon will created in AppDelegate.swift
       return;
-    } else if (checkPlatform([TargetPlatform.linux])) {
+    } else if (checkNativePlatform([TargetPlatform.linux])) {
       String icon;
       if (await File('/.flatpak-info').exists()) {
         // Icon for Flatpak, which must exist in /app/share/icons/hicolor/*x*/apps.
@@ -48,13 +48,13 @@ Future<void> initTray() async {
       ),
       tm.MenuItem(
         key: TrayEntry.close.name,
-        label: defaultTargetPlatform == TargetPlatform.windows ? t.tray.closeWindows : t.tray.close,
+        label: checkNativePlatform([TargetPlatform.windows]) ? t.tray.closeWindows : t.tray.close,
       ),
     ];
     await tm.trayManager.setContextMenu(tm.Menu(items: items));
     // No Linux implementation for setToolTip available as of tray_manager 0.2.2
     // https://pub.dev/packages/tray_manager#api
-    if (!checkPlatform([TargetPlatform.linux])) {
+    if (!checkNativePlatform([TargetPlatform.linux])) {
       await tm.trayManager.setToolTip(t.appName);
     }
   } catch (e) {
@@ -64,7 +64,7 @@ Future<void> initTray() async {
 
 Future<void> hideToTray() async {
   await windowManager.hide();
-  if (checkPlatform([TargetPlatform.macOS])) {
+  if (checkNativePlatform([TargetPlatform.macOS])) {
     // This will crash on Windows
     // https://github.com/localsend/localsend/issues/32
     await windowManager.setSkipTaskbar(true);
@@ -81,7 +81,7 @@ Future<void> hideToTray() async {
 Future<void> showFromTray() async {
   await windowManager.show();
   await windowManager.focus();
-  if (checkPlatform([TargetPlatform.macOS])) {
+  if (checkNativePlatform([TargetPlatform.macOS])) {
     // This will crash on Windows
     // https://github.com/localsend/localsend/issues/32
     await windowManager.setSkipTaskbar(false);
@@ -96,7 +96,7 @@ Future<void> showFromTray() async {
 }
 
 Future<void> destroyTray() async {
-  if (!checkPlatform([TargetPlatform.linux])) {
+  if (!checkNativePlatform([TargetPlatform.linux])) {
     await tm.trayManager.destroy();
   }
 }

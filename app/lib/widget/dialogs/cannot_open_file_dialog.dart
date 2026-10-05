@@ -10,7 +10,7 @@ class CannotOpenFileDialog extends StatelessWidget {
   const CannotOpenFileDialog({required this.path, super.key});
 
   static Future<void> open(BuildContext context, String path, void Function()? onDeleteTap) async {
-    if (checkPlatformIsDesktop()) {
+    if (checkPlatformIsDesktop(platform: Theme.of(context).platform)) {
       await showDialog(
         context: context,
         builder: (_) => AlertDialog(

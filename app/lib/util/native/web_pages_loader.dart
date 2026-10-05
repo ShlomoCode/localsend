@@ -13,7 +13,7 @@ final _logger = Logger('WebPagesLoader');
 /// embedded in the Rust server (also on mobile platforms where there is no
 /// folder next to the executable).
 Future<WebPages> loadCustomWebPages() async {
-  if (!checkPlatformIsDesktop()) {
+  if (!checkNativePlatformIsDesktop()) {
     return const WebPages();
   }
 

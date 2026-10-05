@@ -62,12 +62,12 @@ class LocalSendApp extends StatelessWidget {
             switch (state) {
               case AppLifecycleState.resumed:
                 ref.redux(localIpProvider).dispatch(InitLocalIpAction());
-                if (checkPlatform([TargetPlatform.iOS, TargetPlatform.android])) {
+                if (checkNativePlatform([TargetPlatform.iOS, TargetPlatform.android])) {
                   // The OS may have invalidated the sockets of the suspended app without any error ever reaching the accept loop.
                   // ignore: discarded_futures
                   ref.notifier(serverProvider).ensureRunning();
                 }
-                if (checkPlatform([TargetPlatform.iOS])) {
+                if (checkNativePlatform([TargetPlatform.iOS])) {
                   // The multicast sockets die the same silent way but cannot be probed, so always rebind them.
                   ref.redux(parentIsolateProvider).dispatch(IsolateDiscoveryRestartAction());
                 }

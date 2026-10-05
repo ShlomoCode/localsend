@@ -34,7 +34,7 @@ Future<void> _clear(RootIsolateToken token) async {
   final futures = (
     FilePicker.clearTemporaryFiles(),
     PhotoManager.clearFileCache(),
-    checkPlatform([TargetPlatform.iOS, TargetPlatform.android])
+    checkNativePlatform([TargetPlatform.iOS, TargetPlatform.android])
         ? getTemporaryDirectory().then((cacheDir) {
             cacheDir.list().listen((event) {
               if (event is File) {
@@ -45,7 +45,7 @@ Future<void> _clear(RootIsolateToken token) async {
             });
           })
         : Future.value(),
-    checkPlatform([TargetPlatform.iOS])
+    checkNativePlatform([TargetPlatform.iOS])
         ? PathProviderFoundation()
               .getContainerPath(
                 appGroupIdentifier: 'group.org.localsend.localsendApp',

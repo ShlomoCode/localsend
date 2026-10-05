@@ -230,7 +230,7 @@ class _ReceivePageState extends State<ReceivePage> with Refena {
                                                     unawaited(
                                                       Clipboard.setData(ClipboardData(text: vm.message!)),
                                                     );
-                                                    if (checkPlatformIsDesktop()) {
+                                                    if (checkPlatformIsDesktop(platform: Theme.of(context).platform)) {
                                                       context.showSnackBar(t.general.copiedToClipboard);
                                                     }
                                                     vm.onAccept();

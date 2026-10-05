@@ -24,43 +24,65 @@ bool checkPlatformIsNot(List<TargetPlatform> platforms, {bool web = false}) {
   return !checkPlatform(platforms, web: web);
 }
 
+/// Checks the host OS before calling native APIs, independently of Flutter's target platform.
+bool checkNativePlatform(List<TargetPlatform> platforms) {
+  if (kIsWeb) {
+    return false;
+  }
+  return platforms.any(
+    (platform) => switch (platform) {
+      TargetPlatform.android => Platform.isAndroid,
+      TargetPlatform.iOS => Platform.isIOS,
+      TargetPlatform.linux => Platform.isLinux,
+      TargetPlatform.macOS => Platform.isMacOS,
+      TargetPlatform.windows => Platform.isWindows,
+      TargetPlatform.fuchsia => Platform.isFuchsia,
+    },
+  );
+}
+
 /// This platform runs on a "traditional" computer
-bool checkPlatformIsDesktop() {
-  return checkPlatform([TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.macOS]);
+bool checkPlatformIsDesktop({TargetPlatform? platform}) {
+  return [TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.macOS].contains(platform ?? defaultTargetPlatform);
+}
+
+/// The host OS supports desktop native APIs.
+bool checkNativePlatformIsDesktop() {
+  return checkNativePlatform([TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.macOS]);
 }
 
 /// This platform supports tray
 bool checkPlatformHasTray() {
-  return checkPlatform([TargetPlatform.windows, TargetPlatform.macOS, TargetPlatform.linux]);
+  return checkNativePlatform([TargetPlatform.windows, TargetPlatform.macOS, TargetPlatform.linux]);
 }
 
 /// This platform can receive share intents
 bool checkPlatformCanReceiveShareIntent() {
-  return checkPlatform([TargetPlatform.android, TargetPlatform.iOS]);
+  return checkNativePlatform([TargetPlatform.android, TargetPlatform.iOS]);
 }
 
 /// This platform can select folders
 bool checkPlatformWithFolderSelect() {
-  return checkPlatform([TargetPlatform.android, TargetPlatform.iOS, TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.macOS]);
+  return checkNativePlatform([TargetPlatform.android, TargetPlatform.iOS, TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.macOS]);
 }
 
 /// This platform has a gallery
 bool checkPlatformWithGallery() {
-  return checkPlatform([TargetPlatform.android, TargetPlatform.iOS]);
+  return checkNativePlatform([TargetPlatform.android, TargetPlatform.iOS]);
 }
 
 /// This platform has access to file system
 /// On android, do not allow to change
 bool checkPlatformWithFileSystem() {
-  return checkPlatform([TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.android, TargetPlatform.macOS]);
+  return checkNativePlatform([TargetPlatform.linux, TargetPlatform.windows, TargetPlatform.android, TargetPlatform.macOS]);
 }
 
 /// Convenience function to check if the app is not running on a Linux device with the Wayland display manager
 bool checkPlatformIsNotWaylandDesktop() {
-  return !checkPlatform([TargetPlatform.linux]) || !_isWayland;
+  return !checkNativePlatform([TargetPlatform.linux]) || !_isWayland;
 }
 
 /// This platform supports payment (in-app purchase)
 bool checkPlatformSupportPayment() {
-  return checkPlatform([TargetPlatform.android, TargetPlatform.iOS, TargetPlatform.macOS]);
+  return checkNativePlatform([TargetPlatform.android, TargetPlatform.iOS, TargetPlatform.macOS]);
 }

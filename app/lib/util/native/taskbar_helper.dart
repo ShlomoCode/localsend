@@ -7,8 +7,8 @@ import 'package:windows_taskbar/windows_taskbar.dart';
 enum TaskbarIcon { regular, error, success }
 
 class TaskbarHelper {
-  static final _isWindows = checkPlatform([TargetPlatform.windows]);
-  static final _isMacos = checkPlatform([TargetPlatform.macOS]);
+  static final _isWindows = checkNativePlatform([TargetPlatform.windows]);
+  static final _isMacos = checkNativePlatform([TargetPlatform.macOS]);
 
   static Future<void> clearProgressBar() async {
     if (_isWindows) {

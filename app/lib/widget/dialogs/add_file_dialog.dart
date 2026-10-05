@@ -14,7 +14,7 @@ class AddFileDialog extends StatelessWidget {
   const AddFileDialog({required this.options});
 
   static Future<void> open({required BuildContext context, required List<FilePickerOption> options}) async {
-    if (checkPlatformIsDesktop()) {
+    if (checkPlatformIsDesktop(platform: Theme.of(context).platform)) {
       await showDialog(
         context: context,
         builder: (_) => AlertDialog(

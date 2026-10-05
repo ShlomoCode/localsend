@@ -11,10 +11,11 @@ const startHiddenFlag = '--hidden';
 final _logger = Logger('AutoStartHelper');
 
 Future<bool> enableAutoStart({required bool startHidden}) async {
+  if (kIsWeb) return false;
   try {
     final packageInfo = await PackageInfo.fromPlatform();
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.linux:
+    switch (Platform.operatingSystem) {
+      case 'linux':
         String contents =
             '''
 [Desktop Entry]
@@ -31,11 +32,11 @@ Terminal=false
         }
         file.writeAsStringSync(contents);
         return true;
-      case TargetPlatform.macOS:
+      case 'macos':
         await setLaunchAtLogin(true);
         await setLaunchAtLoginMinimized(startHidden);
         return true;
-      case TargetPlatform.windows:
+      case 'windows':
         _getWindowsRegistryKey().createValue(
           RegistryValue.string(
             _windowsRegistryKeyValue,
@@ -53,16 +54,17 @@ Terminal=false
 }
 
 Future<bool> disableAutoStart() async {
+  if (kIsWeb) return false;
   try {
     final packageInfo = await PackageInfo.fromPlatform();
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.linux:
+    switch (Platform.operatingSystem) {
+      case 'linux':
         File(_getLinuxFilePath(packageInfo.packageName)).deleteSync();
         break;
-      case TargetPlatform.macOS:
+      case 'macos':
         await setLaunchAtLogin(false);
         break;
-      case TargetPlatform.windows:
+      case 'windows':
         _getWindowsRegistryKey().deleteValue(_windowsRegistryKeyValue);
         break;
       default:
@@ -76,13 +78,14 @@ Future<bool> disableAutoStart() async {
 }
 
 Future<bool> isAutoStartEnabled() async {
+  if (kIsWeb) return false;
   final packageInfo = await PackageInfo.fromPlatform();
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.linux:
+  switch (Platform.operatingSystem) {
+    case 'linux':
       return File(_getLinuxFilePath(packageInfo.packageName)).existsSync();
-    case TargetPlatform.macOS:
+    case 'macos':
       return await getLaunchAtLogin();
-    case TargetPlatform.windows:
+    case 'windows':
       return _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue)?.contains(Platform.resolvedExecutable) ?? false;
     default:
       return false;
@@ -90,17 +93,18 @@ Future<bool> isAutoStartEnabled() async {
 }
 
 Future<bool> isAutoStartHidden() async {
+  if (kIsWeb) return false;
   final packageInfo = await PackageInfo.fromPlatform();
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.linux:
+  switch (Platform.operatingSystem) {
+    case 'linux':
       final file = File(_getLinuxFilePath(packageInfo.packageName));
       if (!file.existsSync()) {
         return false;
       }
       return file.readAsStringSync().contains(startHiddenFlag);
-    case TargetPlatform.macOS:
+    case 'macos':
       return await getLaunchAtLoginMinimized();
-    case TargetPlatform.windows:
+    case 'windows':
       return _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue)?.contains(startHiddenFlag) ?? false;
     default:
       return false;

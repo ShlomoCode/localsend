@@ -8,7 +8,7 @@ class EncryptionDisabledNotice extends StatelessWidget {
   const EncryptionDisabledNotice({super.key});
 
   static Future<void> open(BuildContext context) async {
-    if (checkPlatformIsDesktop()) {
+    if (checkPlatformIsDesktop(platform: Theme.of(context).platform)) {
       await showDialog(
         context: context,
         builder: (_) => AlertDialog(

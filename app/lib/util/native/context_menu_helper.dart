@@ -1,12 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:logging/logging.dart';
 
 final _logger = Logger('ContextMenuHelper');
 
 Future<bool> enableContextMenu() async {
-  if (defaultTargetPlatform != TargetPlatform.windows) {
+  if (!checkNativePlatform([TargetPlatform.windows])) {
     return false;
   }
 
@@ -33,28 +34,24 @@ Future<bool> enableContextMenu() async {
 
 Future<bool> disableContextMenu() async {
   try {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.windows:
-        final file = File(_getWindowsFilePath(_windowsFileName));
-        if (await file.exists()) {
-          await file.delete();
-        }
-        return true;
-      default:
-        return false;
+    if (!checkNativePlatform([TargetPlatform.windows])) {
+      return false;
     }
+    final file = File(_getWindowsFilePath(_windowsFileName));
+    if (await file.exists()) {
+      await file.delete();
+    }
+    return true;
   } catch (e) {
     return false;
   }
 }
 
 Future<bool> isContextMenuEnabled() async {
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.windows:
-      return await File(_getWindowsFilePath(_windowsFileName)).exists();
-    default:
-      return false;
+  if (!checkNativePlatform([TargetPlatform.windows])) {
+    return false;
   }
+  return await File(_getWindowsFilePath(_windowsFileName)).exists();
 }
 
 const _windowsFileName = 'LocalSend';

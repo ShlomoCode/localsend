@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
@@ -88,7 +87,7 @@ class SettingsTab extends StatelessWidget {
                   buttonLabel: vm.settings.locale?.getLocaleName() ?? t.settingsTab.general.languageOptions.system,
                   onTap: () => vm.onTapLanguage(context),
                 ),
-                if (checkPlatformIsDesktop()) ...[
+                if (checkNativePlatformIsDesktop()) ...[
                   _BooleanEntry(
                     label: t.settingsTab.general.alwaysOnTop,
                     value: checkPlatformIsNotWaylandDesktop() && vm.settings.alwaysOnTop,
@@ -103,7 +102,7 @@ class SettingsTab extends StatelessWidget {
                   /// Wayland does window position handling, so there's no need for it. See [https://github.com/localsend/localsend/issues/544]
                   if (vm.advanced && checkPlatformIsNotWaylandDesktop())
                     _BooleanEntry(
-                      label: defaultTargetPlatform == TargetPlatform.windows
+                      label: checkNativePlatform([TargetPlatform.windows])
                           ? t.settingsTab.general.saveWindowPlacementWindows
                           : t.settingsTab.general.saveWindowPlacement,
                       value: vm.settings.saveWindowPlacement,
@@ -120,7 +119,7 @@ class SettingsTab extends StatelessWidget {
                       },
                     ),
                   ],
-                  if (checkPlatformIsDesktop()) ...[
+                  if (checkNativePlatformIsDesktop()) ...[
                     _BooleanEntry(
                       label: t.settingsTab.general.launchAtStartup,
                       value: vm.autoStart,
@@ -141,7 +140,7 @@ class SettingsTab extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (vm.advanced && checkPlatform([TargetPlatform.windows])) ...[
+                  if (vm.advanced && checkNativePlatform([TargetPlatform.windows])) ...[
                     _BooleanEntry(
                       label: t.settingsTab.general.showInContextMenu,
                       value: vm.showInContextMenu,
@@ -228,7 +227,7 @@ class SettingsTab extends StatelessWidget {
                       onPressed: () async {
                         if (vm.settings.destination != null) {
                           await ref.notifier(settingsProvider).setDestination(null);
-                          if (defaultTargetPlatform == TargetPlatform.macOS) {
+                          if (checkNativePlatform([TargetPlatform.macOS])) {
                             await removeExistingDestinationAccess();
                           }
                           return;
@@ -236,7 +235,7 @@ class SettingsTab extends StatelessWidget {
 
                         final directory = await pickDirectoryPath();
                         if (directory != null) {
-                          if (defaultTargetPlatform == TargetPlatform.macOS) {
+                          if (checkNativePlatform([TargetPlatform.macOS])) {
                             await persistDestinationFolderAccess(directory);
                           }
                           await ref.notifier(settingsProvider).setDestination(directory);
@@ -394,7 +393,7 @@ class SettingsTab extends StatelessWidget {
                         child: IconButton(
                           onPressed: () async {
                             final String newAlias;
-                            if (Platform.isMacOS) {
+                            if (checkNativePlatform([TargetPlatform.macOS])) {
                               final result = await Process.run('scutil', ['--get', 'ComputerName']);
                               newAlias = result.stdout.toString().trim();
                             } else {
@@ -556,7 +555,7 @@ class SettingsTab extends StatelessWidget {
                     );
                   },
                 ),
-                if (checkPlatform([TargetPlatform.iOS, TargetPlatform.macOS]))
+                if (checkNativePlatform([TargetPlatform.iOS, TargetPlatform.macOS]))
                   _ButtonEntry(
                     label: t.settingsTab.other.termsOfUse,
                     buttonLabel: t.general.open,

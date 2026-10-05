@@ -46,7 +46,7 @@ class _WindowWatcherState extends State<WindowWatcher> with WindowListener, Refe
   void initState() {
     super.initState();
     windowManager.addListener(this);
-    if (checkPlatformIsDesktop()) {
+    if (checkNativePlatformIsDesktop()) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
           // always handle close actions manually
@@ -67,7 +67,7 @@ class _WindowWatcherState extends State<WindowWatcher> with WindowListener, Refe
   //Linux alternative for onWindowMoved and onWindowResized
   @override
   Future<void> onWindowMove() async {
-    if (checkPlatform([TargetPlatform.linux]) && s.elapsedMilliseconds >= 600) {
+    if (checkNativePlatform([TargetPlatform.linux]) && s.elapsedMilliseconds >= 600) {
       s.reset();
       final windowOffset = await windowManager.getPosition();
       final windowSize = await windowManager.getSize();
@@ -93,7 +93,7 @@ class _WindowWatcherState extends State<WindowWatcher> with WindowListener, Refe
     final windowSize = await windowManager.getSize();
     await _dimensionsController?.storeDimensions(windowOffset: windowOffset, windowSize: windowSize);
 
-    if (!checkPlatformIsDesktop()) {
+    if (!checkNativePlatformIsDesktop()) {
       return;
     }
 

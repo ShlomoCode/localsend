@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
@@ -27,7 +26,7 @@ class TroubleshootPage extends StatelessWidget {
         children: [
           Text(t.troubleshootPage.subTitle, textAlign: TextAlign.center),
           const SizedBox(height: 5),
-          if (checkPlatformIsDesktop())
+          if (checkNativePlatformIsDesktop())
             _TroubleshootItem(
               symptomText: t.troubleshootPage.firewall.symptom,
               solutionText: t.troubleshootPage.firewall.solution(port: settings.port),
@@ -157,7 +156,7 @@ class _FixButton extends StatelessWidget {
   _FixButton({
     required this.label,
     required this.onTapMap,
-  }) : onTap = onTapMap[defaultTargetPlatform];
+  }) : onTap = onTapMap.entries.where((entry) => checkNativePlatform([entry.key])).firstOrNull?.value;
 
   @override
   Widget build(BuildContext context) {
@@ -201,7 +200,7 @@ class _CommandFixAction extends _FixAction {
   @override
   void runFix() async {
     if (adminPrivileges) {
-      if (checkPlatform([TargetPlatform.windows])) {
+      if (checkNativePlatform([TargetPlatform.windows])) {
         await runWindowsCommandAsAdmin(commands);
       } else {
         throw 'Admin privileges are only implemented on Windows.';

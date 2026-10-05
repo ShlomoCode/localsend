@@ -67,7 +67,7 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
 
   /// On Android the foreground service keeps the process and the connection alive,
   /// so there is no reason to also keep the screen on.
-  bool get _useWakelock => checkPlatformIsNot([TargetPlatform.android]);
+  bool get _useWakelock => !checkNativePlatform([TargetPlatform.android]);
 
   @override
   void initState() {
@@ -305,9 +305,9 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
                                   TextSpan(
                                     text: receiveSession.destinationDirectory,
                                     style: TextStyle(
-                                      color: checkPlatform([TargetPlatform.iOS]) ? Colors.grey : Theme.of(context).colorScheme.primary,
+                                      color: checkNativePlatform([TargetPlatform.iOS]) ? Colors.grey : Theme.of(context).colorScheme.primary,
                                     ),
-                                    recognizer: checkPlatform([TargetPlatform.iOS])
+                                    recognizer: checkNativePlatform([TargetPlatform.iOS])
                                         ? null
                                         : (TapGestureRecognizer()
                                             ..onTap = () async {

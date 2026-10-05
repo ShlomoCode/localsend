@@ -46,7 +46,7 @@ class InitLocalIpAction extends ReduxAction<LocalIpService, NetworkState> {
       // ignore: discarded_futures
       _subscription?.cancel();
 
-      if (checkPlatform([TargetPlatform.windows])) {
+      if (checkNativePlatform([TargetPlatform.windows])) {
         // https://github.com/localsend/localsend/issues/12
         // https://github.com/localsend/localsend/issues/78
       } else {

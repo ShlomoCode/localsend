@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:localsend_app/model/state/server/receive_session_state.dart';
 import 'package:localsend_app/model/state/server/receiving_file.dart';
 import 'package:localsend_app/pages/home_page.dart';
@@ -499,7 +498,7 @@ class ReceiveController {
   /// Another application instance requested the running application to show itself.
   /// The show token has already been checked by the Rust server.
   void onShow(HttpServerShowEvent event) {
-    if (!checkPlatformIsDesktop()) {
+    if (!checkNativePlatformIsDesktop()) {
       return;
     }
 
@@ -577,7 +576,7 @@ class ReceiveController {
     // auto-deny the request, but the round trip through the system permission activity
     // still blocks the UI noticeably.
     final androidSdkInt = server.ref.read(deviceInfoProvider).androidSdkInt;
-    if (checkPlatform([TargetPlatform.android]) && androidSdkInt != null && androidSdkInt < 33) {
+    if (checkNativePlatform([TargetPlatform.android]) && androidSdkInt != null && androidSdkInt < 33) {
       try {
         final result = await Permission.storage.request();
         _logger.info('storage permission: $result');

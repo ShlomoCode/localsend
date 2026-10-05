@@ -252,7 +252,7 @@ class SettingsService extends PureNotifier<SettingsState> {
 
   Future<void> setAlwaysOnTop(bool alwaysOnTop) async {
     if (!checkPlatformIsNotWaylandDesktop()) return;
-    if (checkPlatformIsDesktop()) {
+    if (checkNativePlatformIsDesktop()) {
       await windowManager.setAlwaysOnTop(alwaysOnTop);
     }
     await _persistence.setAlwaysOnTop(alwaysOnTop);

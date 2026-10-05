@@ -1,5 +1,6 @@
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/model/device_info_result.dart';
 // ignore: implementation_imports
@@ -18,41 +19,23 @@ Future<DeviceInfoResult> getDeviceInfo() async {
     final deviceInfo = await plugin.webBrowserInfo;
     deviceModel = deviceInfo.browserName.humanName;
   } else {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-      case TargetPlatform.iOS:
-        deviceType = DeviceType.mobile;
-        break;
-      case TargetPlatform.linux:
-      case TargetPlatform.macOS:
-      case TargetPlatform.windows:
-      case TargetPlatform.fuchsia:
-        deviceType = DeviceType.desktop;
-        break;
-    }
+    deviceType = checkNativePlatform([TargetPlatform.android, TargetPlatform.iOS]) ? DeviceType.mobile : DeviceType.desktop;
 
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        final deviceInfo = await plugin.androidInfo;
-        deviceModel = deviceInfo.brand.toCase(CaseStyle.pascal);
-        androidSdkInt = deviceInfo.version.sdkInt;
-        break;
-      case TargetPlatform.iOS:
-        final deviceInfo = await plugin.iosInfo;
-        deviceModel = deviceInfo.localizedModel;
-        break;
-      case TargetPlatform.linux:
-        deviceModel = 'Linux';
-        break;
-      case TargetPlatform.macOS:
-        deviceModel = 'macOS';
-        break;
-      case TargetPlatform.windows:
-        deviceModel = 'Windows';
-        break;
-      case TargetPlatform.fuchsia:
-        deviceModel = 'Fuchsia';
-        break;
+    if (checkNativePlatform([TargetPlatform.android])) {
+      final deviceInfo = await plugin.androidInfo;
+      deviceModel = deviceInfo.brand.toCase(CaseStyle.pascal);
+      androidSdkInt = deviceInfo.version.sdkInt;
+    } else if (checkNativePlatform([TargetPlatform.iOS])) {
+      final deviceInfo = await plugin.iosInfo;
+      deviceModel = deviceInfo.localizedModel;
+    } else if (checkNativePlatform([TargetPlatform.linux])) {
+      deviceModel = 'Linux';
+    } else if (checkNativePlatform([TargetPlatform.macOS])) {
+      deviceModel = 'macOS';
+    } else if (checkNativePlatform([TargetPlatform.windows])) {
+      deviceModel = 'Windows';
+    } else {
+      deviceModel = 'Fuchsia';
     }
   }
 

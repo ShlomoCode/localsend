@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:localsend_app/config/theme.dart';
@@ -66,7 +65,7 @@ enum FilePickerOption {
 
   /// Returns the options for the current platform.
   static List<FilePickerOption> getOptionsForPlatform() {
-    if (checkPlatform([TargetPlatform.iOS])) {
+    if (checkNativePlatform([TargetPlatform.iOS])) {
       // On iOS, picking from media is most common.
       // The file app is very limited.
       return [
@@ -76,7 +75,7 @@ enum FilePickerOption {
         FilePickerOption.file,
         FilePickerOption.folder,
       ];
-    } else if (checkPlatform([TargetPlatform.android])) {
+    } else if (checkNativePlatform([TargetPlatform.android])) {
       // On android, the file app is most powerful.
       // It actually also allows to pick media files.
       return [
@@ -144,7 +143,7 @@ class PickFileAction extends AsyncGlobalAction {
 }
 
 Future<void> _pickFiles(BuildContext context, Ref ref) async {
-  if (checkPlatform([TargetPlatform.android])) {
+  if (checkNativePlatform([TargetPlatform.android])) {
     // On android, the files are copied to the cache which takes some time.
     // ignore: unawaited_futures
     showDialog(
@@ -154,7 +153,7 @@ Future<void> _pickFiles(BuildContext context, Ref ref) async {
     );
   }
   try {
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    if (checkNativePlatform([TargetPlatform.android])) {
       final result = await android_channel.pickFilesAndroid();
       if (result != null) {
         await ref
@@ -194,7 +193,7 @@ Future<void> _pickFiles(BuildContext context, Ref ref) async {
 }
 
 Future<void> _pickFolder(BuildContext context, Ref ref) async {
-  if (checkPlatform([TargetPlatform.android])) {
+  if (checkNativePlatform([TargetPlatform.android])) {
     try {
       await Permission.storage.request();
     } catch (e) {
@@ -214,7 +213,7 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
   );
   await sleepAsync(200); // Wait for the dialog to be shown
   try {
-    if (defaultTargetPlatform == TargetPlatform.android && (ref.read(deviceInfoProvider).androidSdkInt ?? 0) >= android_channel.contentUriMinSdk) {
+    if (checkNativePlatform([TargetPlatform.android]) && (ref.read(deviceInfoProvider).androidSdkInt ?? 0) >= android_channel.contentUriMinSdk) {
       // Android 8 and above have more predictable content URIs that we can parse.
       final result = await android_channel.pickDirectoryAndroid();
       if (result != null) {
@@ -243,7 +242,7 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
 }
 
 Future<void> _pickMedia(BuildContext context, Ref ref) async {
-  if (checkPlatform([TargetPlatform.android])) {
+  if (checkNativePlatform([TargetPlatform.android])) {
     await PhotoManager.requestPermissionExtend(
       requestOption: const PermissionRequestOption(
         androidPermission: AndroidPermission(

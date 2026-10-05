@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:localsend_isolates/util/future_queue.dart';
@@ -29,7 +31,7 @@ class ForegroundService {
 
   /// The service exists on Android only. On iOS the app keeps running in the background anyway,
   /// and on desktop there is nothing to keep alive.
-  static bool get _isSupported => defaultTargetPlatform == TargetPlatform.android;
+  static bool get _isSupported => !kIsWeb && Platform.isAndroid;
 
   /// Whether the service is currently keeping the process alive.
   static bool get isRunning => _running;

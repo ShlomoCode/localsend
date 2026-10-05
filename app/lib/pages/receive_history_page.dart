@@ -81,7 +81,7 @@ class ReceiveHistoryPage extends StatelessWidget {
                     backgroundColor: Theme.of(context).colorScheme.secondaryContainerIfDark,
                     foregroundColor: Theme.of(context).colorScheme.onSecondaryContainerIfDark,
                   ),
-                  onPressed: checkPlatform([TargetPlatform.iOS])
+                  onPressed: checkNativePlatform([TargetPlatform.iOS])
                       ? null
                       : () async {
                           // ignore: use_build_context_synchronously
