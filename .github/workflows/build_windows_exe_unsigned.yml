@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           git rev-parse HEAD
-          python -c "import hashlib; print(hashlib.sha256(open('support/native_filename_validation/src/filename.rs', 'rb').read()).hexdigest())"
+          python -c "from pathlib import Path; import hashlib; p=Path('support/native_filename_validation/src/filename.rs'); b=p.read_bytes().replace(b'\r\n', b'\n'); p.write_bytes(b); print(hashlib.sha256(b).hexdigest())"
           rustc --version
           uname -a
       - name: Source unit tests
