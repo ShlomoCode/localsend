@@ -89,7 +89,7 @@ def ocr_screenshot(image: Path):
     if not executable:
         return "", "Tesseract unavailable"
     completed = subprocess.run([executable, str(image), "stdout", "-l", "eng"], capture_output=True, text=True, timeout=15)
-    return completed.stdout, completed.stderr
+    return completed.stdout or "", (completed.stderr or "") + f"\nOCR exit code: {completed.returncode}"
 
 
 def tesseract_executable():
@@ -111,7 +111,7 @@ def click_ocr_label(label: str, app) -> bool:
     if completed.returncode:
         return False
     matches = []
-    for row in csv.DictReader(completed.stdout.splitlines(), delimiter="\t"):
+    for row in csv.DictReader((completed.stdout or "").splitlines(), delimiter="\t"):
         if row.get("text", "").strip().lower() == label.lower():
             try:
                 matches.append((float(row["conf"]), int(row["left"]), int(row["top"]), int(row["width"]), int(row["height"])))
@@ -275,7 +275,7 @@ def run_case(name: str, exe: Path, output: Path, fixture: Path, multi_fixtures: 
             ocr_text, ocr_errors = ocr_screenshot(case_dir / "after.png")
             (case_dir / "after_ocr.txt").write_text(ocr_text + "\n--- OCR stderr ---\n" + ocr_errors, encoding="utf-8")
             expected_count = 2 if name == "file_multi" else 1
-            count_pattern = re.compile(rf"\bFiles:\s*{expected_count}\b", re.IGNORECASE)
+            count_pattern = re.compile(rf"Files:\s*{expected_count}(?!\d)", re.IGNORECASE)
             selected_uia = any(count_pattern.search(line) for line in uia_lines)
             selected_ocr = bool(count_pattern.search(ocr_text))
             result["expected_selected_files"] = expected_count if not name.endswith("cancel") else 0
