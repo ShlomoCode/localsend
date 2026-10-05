@@ -44,6 +44,7 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Leanback indicates support for the Android TV interface and remote navigation.
         if (packageManager.hasSystemFeature("android.software.leanback")) {
             val flutterView = findViewById<View>(FLUTTER_VIEW_ID) as? ViewGroup
             if (flutterView != null) {
