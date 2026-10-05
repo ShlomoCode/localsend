@@ -1,6 +1,6 @@
 # Android TV keyboard E2E
 
-Checks that D-pad input fails without the proxy, works with it, and still works after reopening Device name.
+Checks that D-pad input fails without the proxy, works with it, and still works after reopening Device name input.
 
 Use a disposable landscape TV emulator with English LocalSend, English TV Gboard, and
 `config_preventImeStartupUnlessTextEditor=true` at boot. Build both debug APKs from the same source and Flutter version, disabling only the proxy in the control.
