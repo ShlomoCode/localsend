@@ -44,7 +44,7 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Leanback indicates Android TV support; install the keyboard workaround on these devices.
+        // Leanback indicates Android TV so we install the keyboard workaround
         if (packageManager.hasSystemFeature("android.software.leanback")) {
             val flutterView = findViewById<View>(FLUTTER_VIEW_ID) as? ViewGroup
             if (flutterView != null) {
