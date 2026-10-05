@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the TV keyboard through real Android remote events, without mocks."""
-
+"""Compare the existing Device name dialog with and without the TV editor proxy."""
 import argparse
 import hashlib
 import json
@@ -10,150 +9,131 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 
-# TODO: Fold this focused TV harness into a shared E2E runner when we add more scenarios.
-PACKAGE = 'org.localsend.localsend_app.tv_e2e'
+# TODO: Merge this focused test into a generic E2E runner when more tests are added.
+PACKAGE = 'org.localsend.localsend_app.debug'
 ACTIVITY = 'org.localsend.localsend_app.MainActivity'
-
-
-class Device:
-    def __init__(self, adb, serial, output):
-        self.command = [adb, '-s', serial]
-        self.output = output
-
-    def adb(self, *args):
-        return subprocess.check_output([*self.command, *args], timeout=30)
-
-    def nodes(self):
-        # Never accept a stale dump when UiAutomator fails to become idle.
-        path = '/sdcard/localsend-tv-e2e.xml'
-        self.adb('shell', 'rm', '-f', path)
-        dump = self.adb('shell', 'uiautomator', 'dump', path)
-        if b'ERROR:' in dump:
-            raise RuntimeError(dump.decode())
-        xml = self.adb('shell', 'cat', path)
-        return list(ET.fromstring(xml).iter('node')), xml
-
-    def wait_for(self, predicate, description):
-        deadline = time.monotonic() + 45
-        last_error = None
-        while time.monotonic() < deadline:
-            try:
-                nodes, xml = self.nodes()
-                if predicate(nodes):
-                    return nodes, xml
-            except (RuntimeError, subprocess.SubprocessError, ET.ParseError) as error:
-                last_error = error
-            time.sleep(0.5)
-        raise AssertionError(f'Timed out waiting for {description}; last UI error: {last_error}')
-
-    def open_editor(self, value):
-        nodes, _ = self.wait_for(
-            lambda ns: any(n.get('class') == 'android.widget.Button' and n.get('content-desc') == value for n in ns),
-            f'name button {value!r}',
-        )
-        button = next(n for n in nodes if n.get('class') == 'android.widget.Button' and n.get('content-desc') == value)
-        x1, y1, x2, y2 = map(int, re.findall(r'\d+', button.get('bounds')))
-        self.adb('shell', 'input', 'tap', str((x1 + x2) // 2), str((y1 + y2) // 2))
-        self.wait_for(lambda ns: any(n.get('class') == 'android.widget.EditText' and n.get('focused') == 'true' for n in ns),
-                      'focused editor')
-        time.sleep(2)  # TV Gboard is a separate window and is not always in the app's UI XML.
-
-    def type_we(self):
-        for key in ('KEYCODE_DPAD_RIGHT', 'KEYCODE_DPAD_CENTER') * 2:
-            self.adb('shell', 'input', 'dpad', 'keyevent', key)
-            time.sleep(0.5)
-
-    def snapshot(self, name):
-        folder = self.output / name
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / 'screen.png').write_bytes(self.adb('exec-out', 'screencap', '-p'))
-        nodes, xml = self.wait_for(lambda ns: any(n.get('class') == 'android.widget.EditText' for n in ns), 'editor snapshot')
-        (folder / 'ui.xml').write_bytes(xml)
-        (folder / 'input_method.txt').write_bytes(self.adb('shell', 'dumpsys', 'input_method'))
-        values = [n.get('text') for n in nodes if n.get('class') == 'android.widget.EditText']
-        if len(values) != 1:
-            raise AssertionError(f'Expected one editor, got {values}')
-        return values[0]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--adb', default='adb')
-    parser.add_argument('--serial', required=True, help='Dedicated emulator, never selected implicitly')
-    parser.add_argument('--pair', type=Path, required=True, help='Directory produced by build_pair.py')
+    parser.add_argument('--serial', required=True)
+    parser.add_argument('--control', type=Path, required=True)
+    parser.add_argument('--fixed', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if not args.serial.startswith('emulator-'):
-        parser.error('Use a dedicated emulator; this test installs and clears its fixture package')
-    output = args.output.resolve()
-    if output.exists() and any(output.iterdir()):
-        parser.error('Output must be empty; use a new directory for each run')
-    output.mkdir(parents=True, exist_ok=True)
-    device = Device(args.adb, args.serial, output)
-    features = device.adb('shell', 'pm', 'list', 'features').decode()
-    ime = device.adb('shell', 'settings', 'get', 'secure', 'default_input_method').decode().strip()
-    gate = device.adb('shell', 'cmd', 'overlay', 'lookup', 'android',
-                      'android:bool/config_preventImeStartupUnlessTextEditor').decode().strip()
-    if 'feature:android.software.leanback\n' not in features or not gate.endswith('true'):
-        raise RuntimeError('Requires a TV emulator with config_preventImeStartupUnlessTextEditor=true; see README')
-    if ime != 'com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME':
-        raise RuntimeError(f'Requires TV Gboard as the selected IME, got {ime}')
-    keyboard = device.adb('shell', 'dumpsys', 'package', 'com.google.android.inputmethod.latin').decode()
-    if not re.search(r'versionName=.*tv_release', keyboard):
-        raise RuntimeError('Selected Gboard is not the TV release; see README')
-    environment = {
-        'fingerprint': device.adb('shell', 'getprop', 'ro.build.fingerprint').decode().strip(),
-        'features': features.splitlines(), 'ime': ime, 'ime_startup_gate': gate,
-        'keyboard': keyboard,
-    }
-    (output / 'environment.json').write_text(json.dumps(environment, indent=2) + '\n')
-    pair = args.pair.resolve()
-    metadata = json.loads((pair / 'pair.json').read_text())
-    if metadata['package'] != PACKAGE:
-        raise RuntimeError('Unexpected fixture package')
-    for case in ('control', 'fixed'):
-        apk = pair / metadata['artifacts'][case]['apk']
-        if hashlib.sha256(apk.read_bytes()).hexdigest() != metadata['artifacts'][case]['sha256']:
-            raise RuntimeError(f'{case} APK does not match pair.json')
-    results = {'pair': metadata, 'cases': {}}
+        parser.error('Use a disposable emulator: this test replaces its debug LocalSend APK')
+    args.output.mkdir(parents=True, exist_ok=False)
+
+    def check(condition, message):
+        if not condition:
+            raise AssertionError(message)
+
+    def adb(*command):
+        return subprocess.check_output([args.adb, '-s', args.serial, *command], timeout=20, stderr=subprocess.STDOUT)
+
+    def ui(open_settings=False):
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline:
+            if open_settings:
+                # Leave the animated Receive page before UiAutomator waits for idle.
+                adb('shell', 'input', 'touchscreen', 'tap', str(width // 10), str(height * 4 // 9))
+                time.sleep(1)
+            adb('shell', 'rm', '-f', '/sdcard/localsend-e2e.xml')
+            dump = adb('shell', 'uiautomator', 'dump', '/sdcard/localsend-e2e.xml')
+            if b'ERROR:' not in dump:
+                return list(ET.fromstring(adb('shell', 'cat', '/sdcard/localsend-e2e.xml')).iter('node'))
+        raise RuntimeError('UiAutomator did not produce a fresh snapshot')
+
+    def bounds(node):
+        return list(map(int, re.findall(r'\d+', node.get('bounds'))))
+
+    def tap(node):
+        x1, y1, x2, y2 = bounds(node)
+        adb('shell', 'input', 'touchscreen', 'tap', str((x1 + x2) // 2), str((y1 + y2) // 2))
+        time.sleep(1)
+
+    def open_editor(start=False, name=None):
+        nodes = ui(open_settings=start)
+        if not any(n.get('class') == 'android.widget.EditText' for n in nodes):
+            # Reuse the actual Settings screen instead of a second test app or widget.
+            settings = next((n for n in nodes if n.get('content-desc', '').startswith('Settings\nTab')), None)
+            check(settings is not None, 'Settings tab not found; use English LocalSend')
+            tap(settings)
+            for _ in range(8):
+                nodes = ui()
+                section = next((n for n in nodes if 'Network' in n.get('content-desc', '')
+                                and 'Device name' in n.get('content-desc', '')), None)
+                if section is not None:
+                    _, top, _, bottom = bounds(section)
+                    buttons = [n for n in nodes if n.get('class') == 'android.widget.Button'
+                               and top <= bounds(n)[1] and bounds(n)[3] <= bottom
+                               and bounds(n)[3] - bounds(n)[1] > 70
+                               and (name is None or n.get('content-desc') == name)]
+                    if buttons:
+                        tap(buttons[-1])
+                        break
+                adb('shell', 'input', 'touchscreen', 'swipe', str(width * 3 // 4), str(height * 4 // 5),
+                    str(width * 3 // 4), str(height // 4), '800')
+            else:
+                raise AssertionError('Device name button not found')
+        time.sleep(2)
+        return editor_value()
+
+    def editor_value():
+        fields = [n for n in ui() if n.get('class') == 'android.widget.EditText']
+        check(len(fields) == 1 and fields[0].get('focused') == 'true', 'Expected one focused editor')
+        return fields[0].get('text')
+
+    def press(*keys):
+        for key in keys:
+            adb('shell', 'input', 'dpad', 'keyevent', key)
+            time.sleep(0.5)
+
+    gate = adb('shell', 'cmd', 'overlay', 'lookup', 'android',
+               'android:bool/config_preventImeStartupUnlessTextEditor').decode().strip()
+    keyboard = adb('shell', 'dumpsys', 'package', 'com.google.android.inputmethod.latin').decode()
+    check(gate == 'true' and 'tv_release' in keyboard, 'Requires the reproducing TV/Gboard environment')
+    check(adb('shell', 'settings', 'get', 'secure', 'default_input_method').decode().strip() == (
+        'com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME'), 'Select TV Gboard')
+    check('android.software.leanback' in adb('shell', 'pm', 'list', 'features').decode(), 'Requires TV features')
+    width, height = map(int, re.findall(r'\d+', adb('shell', 'wm', 'size').decode())[-2:])
+    check(width > height, 'Use a landscape TV emulator')
+    results = {'device': adb('shell', 'getprop', 'ro.build.fingerprint').decode().strip(), 'cases': {}}
+    initial = None
     try:
-        for case in ('control', 'fixed'):
-            apk = pair / metadata['artifacts'][case]['apk']
+        for case, apk in [('control', args.control), ('fixed', args.fixed)]:
             print(f'Running {case}', flush=True)
-            device.adb('shell', 'am', 'force-stop', PACKAGE)
-            device.adb('install', '-r', str(apk))
-            if device.adb('shell', 'pm', 'clear', PACKAGE).strip() != b'Success':
-                raise RuntimeError('Could not reset the fixture package')
-            device.adb('shell', 'am', 'start', '-n', f'{PACKAGE}/{ACTIVITY}')
-            device.open_editor('Nice Grape')
-            before = device.snapshot(f'{case}-before')
-            if before != 'Nice Grape':
-                raise AssertionError(f'{case}: unexpected initial value {before!r}')
-            device.type_we()
-            after = device.snapshot(f'{case}-after')
-            expected = 'Nice Grape' if case == 'control' else 'Nice Grapewe'
-            results['cases'][case] = {'before': before, 'after': after, 'expected': expected}
-            if after != expected:
-                raise AssertionError(f'{case}: expected {expected!r}, got {after!r}')
+            adb('shell', 'am', 'force-stop', PACKAGE)
+            adb('install', '-r', str(apk.resolve()))
+            adb('shell', 'am', 'start', '-n', f'{PACKAGE}/{ACTIVITY}')
+            time.sleep(5)
+            before = open_editor(start=True)
+            if initial is None:
+                initial = before
+            check(before == initial, 'Both APKs must start with the same saved name')
+            press('KEYCODE_DPAD_RIGHT', 'KEYCODE_DPAD_CENTER', 'KEYCODE_DPAD_RIGHT', 'KEYCODE_DPAD_CENTER')
+            after = editor_value()
+            (args.output / f'{case}.png').write_bytes(adb('exec-out', 'screencap', '-p'))
+            results['cases'][case] = {'before': before, 'after': after,
+                                      'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest()}
+            expected = initial if case == 'control' else initial + 'we'
+            check(after == expected, f'{case}: expected {expected!r}, got {after!r}')
             if case == 'fixed':
-                device.adb('shell', 'input', 'dpad', 'keyevent', 'KEYCODE_ENTER')
-                device.wait_for(lambda ns: not any(n.get('class') == 'android.widget.EditText' for n in ns), 'closed dialog')
-                device.open_editor('Nice Grapewe')
-                device.adb('shell', 'input', 'dpad', 'keyevent', 'KEYCODE_DPAD_RIGHT')
-                device.adb('shell', 'input', 'dpad', 'keyevent', 'KEYCODE_DPAD_CENTER')
-                reopened = device.snapshot('fixed-reopened')
-                results['cases'][case]['reopened'] = reopened
-                if reopened != 'Nice Grapewew':
-                    raise AssertionError(f'fixed reentry: expected Nice Grapewew, got {reopened!r}')
+                press('KEYCODE_ENTER')
+                check(not any(n.get('class') == 'android.widget.EditText' for n in ui()), 'Dialog did not close')
+                check(open_editor(name=after) == after, 'Reopened name changed')
+                press('KEYCODE_DPAD_RIGHT', 'KEYCODE_DPAD_CENTER')
+                check(editor_value() == after + 'w', 'Reopened editor rejected or duplicated input')
         results['passed'] = True
-        print('PASS: control rejected remote input; LocalSend accepted it without duplicate words', flush=True)
+        print('PASS: plain Flutter input fails; LocalSend proxy works, including reentry', flush=True)
     except Exception as error:
-        results['passed'] = False
-        results['error'] = str(error)
+        results.update(passed=False, error=str(error))
         raise
     finally:
-        (output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
-        device.adb('shell', 'am', 'force-stop', PACKAGE)
+        (args.output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+        adb('shell', 'am', 'force-stop', PACKAGE)
 
 
 if __name__ == '__main__':
