@@ -279,7 +279,9 @@ fn prepare_generated_name(name: &str, rules: Rules) -> String {
             .len();
         let removed = prepared[trimmed..].chars().count();
         prepared.truncate(trimmed);
-        prepared.extend(std::iter::repeat('_').take(removed));
+        for _ in 0..removed {
+            prepared.push('_');
+        }
     }
     prepared.trim_matches('.').to_string()
 }
@@ -525,11 +527,25 @@ mod tests {
         let nested = existing
             .join(format!("localsend-missing-{}", std::process::id()))
             .join("nested");
-        assert_eq!(
-            rules_for_directory(&existing).max_len,
-            rules_for_directory(&nested).max_len
-        );
-        assert!(rules_for_directory(&existing).max_len > 0);
+        let existing_policy = rules_for_directory(&existing);
+        let nested_policy = rules_for_directory(&nested);
+        assert!(existing_policy.max_len > 0);
+        #[cfg(not(windows))]
+        assert_eq!(existing_policy.max_len, nested_policy.max_len);
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+
+            // Both paths query the same existing volume, but the intended
+            // nested directory consumes more of Win32's full-path budget.
+            let component_limit = query_component_limit(&existing).unwrap_or(FALLBACK_LIMIT);
+            let prefix = nested.as_os_str().encode_wide().count() + 1;
+            assert_eq!(
+                nested_policy.max_len,
+                component_limit.min(259usize.saturating_sub(prefix))
+            );
+            assert!(nested_policy.max_len <= existing_policy.max_len);
+        }
     }
 
     #[test]
