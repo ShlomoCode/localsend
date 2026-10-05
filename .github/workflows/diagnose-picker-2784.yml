@@ -1,0 +1,63 @@
+name: Diagnose Windows picker (issue 2784)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/diagnose-picker-2784
+    paths:
+      - .github/workflows/diagnose-picker-2784.yml
+      - support/diagnostics/issue2784/**
+
+permissions:
+  contents: read
+
+jobs:
+  picker:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install desktop automation dependencies
+        run: python -m pip install --disable-pip-version-check pywinauto==0.6.9 pyautogui==0.9.54 Pillow==11.3.0
+
+      - name: Install screenshot OCR
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          & 'C:\Program Files\Tesseract-OCR\tesseract.exe' --version
+
+      - name: Download and verify official LocalSend 1.17.0 portable release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'LocalSend-1.17.0-windows-x86-64.zip'
+          Invoke-WebRequest 'https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip' -OutFile $zip
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = 'a4ffb41fcbc3bd0f2f0cbd30b62a58d9a478eaf1da63eb410886886064abe70c'
+          if ($actual -ne $expected) { throw "Release SHA256 mismatch: $actual" }
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'localsend-1.17.0')
+          "release_sha256=$actual" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      - name: Exercise native file and folder pickers
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          python support/diagnostics/issue2784/windows_picker.py `
+            --release "$env:RUNNER_TEMP\localsend-1.17.0" `
+            --output "$env:GITHUB_WORKSPACE\picker-2784-artifacts"
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: picker-2784-windows-2022
+          path: picker-2784-artifacts/
+          if-no-files-found: warn
