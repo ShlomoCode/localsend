@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/native/tray_helper.dart';
 import 'package:tray_manager/tray_manager.dart';
 
@@ -35,7 +35,7 @@ class _TrayWatcherState extends State<TrayWatcher> with TrayListener {
 
   @override
   void onTrayIconMouseDown() async {
-    if (checkNativePlatform([TargetPlatform.macOS])) {
+    if (!kIsWeb && Platform.isMacOS) {
       await trayManager.popUpContextMenu();
     } else {
       await showFromTray();

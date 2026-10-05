@@ -1,6 +1,8 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/widget/dialogs/cannot_open_file_dialog.dart';
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:open_file/open_file.dart';
@@ -13,7 +15,7 @@ Future<void> openFile(
   String filePath, {
   void Function()? onDeleteTap,
 }) async {
-  if ((fileType == FileType.apk || filePath.toLowerCase().endsWith('.apk')) && checkNativePlatform([TargetPlatform.android])) {
+  if ((fileType == FileType.apk || filePath.toLowerCase().endsWith('.apk')) && !kIsWeb && Platform.isAndroid) {
     await Permission.requestInstallPackages.request();
   }
 

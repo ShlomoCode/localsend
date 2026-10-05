@@ -1,6 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/model/device_info_result.dart';
 // ignore: implementation_imports
@@ -19,20 +20,20 @@ Future<DeviceInfoResult> getDeviceInfo() async {
     final deviceInfo = await plugin.webBrowserInfo;
     deviceModel = deviceInfo.browserName.humanName;
   } else {
-    deviceType = checkNativePlatform([TargetPlatform.android, TargetPlatform.iOS]) ? DeviceType.mobile : DeviceType.desktop;
+    deviceType = Platform.isAndroid || Platform.isIOS ? DeviceType.mobile : DeviceType.desktop;
 
-    if (checkNativePlatform([TargetPlatform.android])) {
+    if (Platform.isAndroid) {
       final deviceInfo = await plugin.androidInfo;
       deviceModel = deviceInfo.brand.toCase(CaseStyle.pascal);
       androidSdkInt = deviceInfo.version.sdkInt;
-    } else if (checkNativePlatform([TargetPlatform.iOS])) {
+    } else if (Platform.isIOS) {
       final deviceInfo = await plugin.iosInfo;
       deviceModel = deviceInfo.localizedModel;
-    } else if (checkNativePlatform([TargetPlatform.linux])) {
+    } else if (Platform.isLinux) {
       deviceModel = 'Linux';
-    } else if (checkNativePlatform([TargetPlatform.macOS])) {
+    } else if (Platform.isMacOS) {
       deviceModel = 'macOS';
-    } else if (checkNativePlatform([TargetPlatform.windows])) {
+    } else if (Platform.isWindows) {
       deviceModel = 'Windows';
     } else {
       deviceModel = 'Fuchsia';

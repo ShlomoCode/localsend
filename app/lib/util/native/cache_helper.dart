@@ -4,8 +4,8 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_isolates/util/file_path_helper.dart';
 import 'package:localsend_isolates/util/logger.dart';
 import 'package:logging/logging.dart';
@@ -34,7 +34,7 @@ Future<void> _clear(RootIsolateToken token) async {
   final futures = (
     FilePicker.clearTemporaryFiles(),
     PhotoManager.clearFileCache(),
-    checkNativePlatform([TargetPlatform.iOS, TargetPlatform.android])
+    (!kIsWeb && (Platform.isIOS || Platform.isAndroid))
         ? getTemporaryDirectory().then((cacheDir) {
             cacheDir.list().listen((event) {
               if (event is File) {
@@ -45,7 +45,7 @@ Future<void> _clear(RootIsolateToken token) async {
             });
           })
         : Future.value(),
-    checkNativePlatform([TargetPlatform.iOS])
+    (!kIsWeb && Platform.isIOS)
         ? PathProviderFoundation()
               .getContainerPath(
                 appGroupIdentifier: 'group.org.localsend.localsendApp',

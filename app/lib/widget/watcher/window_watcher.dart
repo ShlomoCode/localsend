@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/provider/animation_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/provider/window_dimensions_provider.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/native/tray_helper.dart';
 import 'package:logging/logging.dart';
 import 'package:refena_flutter/refena_flutter.dart';
@@ -46,7 +46,7 @@ class _WindowWatcherState extends State<WindowWatcher> with WindowListener, Refe
   void initState() {
     super.initState();
     windowManager.addListener(this);
-    if (checkNativePlatformIsDesktop()) {
+    if (!kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
           // always handle close actions manually
@@ -67,7 +67,7 @@ class _WindowWatcherState extends State<WindowWatcher> with WindowListener, Refe
   //Linux alternative for onWindowMoved and onWindowResized
   @override
   Future<void> onWindowMove() async {
-    if (checkNativePlatform([TargetPlatform.linux]) && s.elapsedMilliseconds >= 600) {
+    if (!kIsWeb && Platform.isLinux && s.elapsedMilliseconds >= 600) {
       s.reset();
       final windowOffset = await windowManager.getPosition();
       final windowSize = await windowManager.getSize();
@@ -93,7 +93,7 @@ class _WindowWatcherState extends State<WindowWatcher> with WindowListener, Refe
     final windowSize = await windowManager.getSize();
     await _dimensionsController?.storeDimensions(windowOffset: windowOffset, windowSize: windowSize);
 
-    if (!checkNativePlatformIsDesktop()) {
+    if (kIsWeb || !(Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
       return;
     }
 

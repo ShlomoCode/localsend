@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:localsend_app/gen/strings.g.dart';
@@ -88,7 +91,7 @@ Future<void> updateSystemOverlayStyle(BuildContext context) async {
 }
 
 Future<void> updateSystemOverlayStyleWithBrightness(Brightness brightness) async {
-  if (checkNativePlatform([TargetPlatform.android])) {
+  if (!kIsWeb && Platform.isAndroid) {
     // See https://github.com/flutter/flutter/issues/90098
     final darkMode = brightness == Brightness.dark;
     final androidSdkInt = RefenaScope.defaultRef.read(deviceInfoProvider).androidSdkInt ?? 0;

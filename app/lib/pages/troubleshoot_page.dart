@@ -1,11 +1,11 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/native/cmd_helper.dart';
 import 'package:localsend_app/util/native/macos_channel.dart' as macos_channel;
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/widget/custom_icon_button.dart';
 import 'package:localsend_app/widget/dialogs/not_available_on_platform_dialog.dart';
 import 'package:localsend_app/widget/responsive_list_view.dart';
@@ -26,7 +26,7 @@ class TroubleshootPage extends StatelessWidget {
         children: [
           Text(t.troubleshootPage.subTitle, textAlign: TextAlign.center),
           const SizedBox(height: 5),
-          if (checkNativePlatformIsDesktop())
+          if (!kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS))
             _TroubleshootItem(
               symptomText: t.troubleshootPage.firewall.symptom,
               solutionText: t.troubleshootPage.firewall.solution(port: settings.port),
@@ -156,7 +156,14 @@ class _FixButton extends StatelessWidget {
   _FixButton({
     required this.label,
     required this.onTapMap,
-  }) : onTap = onTapMap.entries.where((entry) => checkNativePlatform([entry.key])).firstOrNull?.value;
+  }) : onTap =
+           onTapMap[kIsWeb
+               ? null
+               : Platform.isWindows
+               ? TargetPlatform.windows
+               : Platform.isMacOS
+               ? TargetPlatform.macOS
+               : null];
 
   @override
   Widget build(BuildContext context) {
@@ -200,7 +207,7 @@ class _CommandFixAction extends _FixAction {
   @override
   void runFix() async {
     if (adminPrivileges) {
-      if (checkNativePlatform([TargetPlatform.windows])) {
+      if (!kIsWeb && Platform.isWindows) {
         await runWindowsCommandAsAdmin(commands);
       } else {
         throw 'Admin privileges are only implemented on Windows.';

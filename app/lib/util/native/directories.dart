@@ -2,20 +2,19 @@ import 'dart:io' show Directory, FileSystemException, Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:path_provider/path_provider.dart' as path;
 
 Future<String> getDefaultDestinationDirectory() async {
-  if (checkNativePlatform([TargetPlatform.android])) {
+  if (!kIsWeb && Platform.isAndroid) {
     return await getDownloadsDirectoryAndroid() ?? '/storage/emulated/0/Download';
   }
-  if (checkNativePlatform([TargetPlatform.iOS])) {
+  if (!kIsWeb && Platform.isIOS) {
     return (await path.getApplicationDocumentsDirectory()).path;
   }
 
   var downloadDir = await path.getDownloadsDirectory();
   if (downloadDir == null) {
-    if (checkNativePlatform([TargetPlatform.windows])) {
+    if (!kIsWeb && Platform.isWindows) {
       downloadDir = Directory('${Platform.environment['HOMEPATH']}/Downloads');
       if (!downloadDir.existsSync()) {
         downloadDir = Directory(Platform.environment['HOMEPATH']!);

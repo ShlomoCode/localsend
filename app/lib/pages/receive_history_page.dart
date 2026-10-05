@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
@@ -10,7 +11,6 @@ import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/native/directories.dart';
 import 'package:localsend_app/util/native/open_file.dart';
 import 'package:localsend_app/util/native/open_folder.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/widget/dialogs/file_info_dialog.dart';
 import 'package:localsend_app/widget/dialogs/history_clear_dialog.dart';
 import 'package:localsend_app/widget/file_thumbnail.dart';
@@ -81,7 +81,7 @@ class ReceiveHistoryPage extends StatelessWidget {
                     backgroundColor: Theme.of(context).colorScheme.secondaryContainerIfDark,
                     foregroundColor: Theme.of(context).colorScheme.onSecondaryContainerIfDark,
                   ),
-                  onPressed: checkNativePlatform([TargetPlatform.iOS])
+                  onPressed: !kIsWeb && Platform.isIOS
                       ? null
                       : () async {
                           // ignore: use_build_context_synchronously

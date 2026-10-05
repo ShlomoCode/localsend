@@ -1,6 +1,7 @@
+import 'dart:io';
+
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:flutter/foundation.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 
 part 'purchase_state.mapper.dart';
 
@@ -31,7 +32,7 @@ enum PurchaseItem {
   final String androidId;
   final String iosId;
 
-  String get platformProductId => checkNativePlatform([TargetPlatform.android]) ? androidId : iosId;
+  String get platformProductId => !kIsWeb && Platform.isAndroid ? androidId : iosId;
 }
 
 @MappableClass()

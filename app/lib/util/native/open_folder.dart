@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:logging/logging.dart';
 import 'package:open_file/open_file.dart';
 
@@ -18,7 +17,7 @@ Future<void> openFolder({
     return;
   }
 
-  if (fileName != null && checkNativePlatform([TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS])) {
+  if (fileName != null && !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     // open folder and select file
 
     if (Platform.isWindows) {

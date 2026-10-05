@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:localsend_app/util/native/platform_check.dart';
+import 'package:flutter/foundation.dart';
 import 'package:localsend_isolates/rust/api/server.dart' show WebPages;
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
@@ -13,7 +13,7 @@ final _logger = Logger('WebPagesLoader');
 /// embedded in the Rust server (also on mobile platforms where there is no
 /// folder next to the executable).
 Future<WebPages> loadCustomWebPages() async {
-  if (!checkNativePlatformIsDesktop()) {
+  if (kIsWeb || !(Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
     return const WebPages();
   }
 

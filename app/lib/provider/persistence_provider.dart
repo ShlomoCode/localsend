@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/persistence/color_mode.dart';
@@ -114,10 +115,10 @@ class PersistenceService {
 
     final portableStore = SharedPreferencesPortable();
     bool usingLegacyStore = false;
-    if (checkNativePlatform(const [TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS]) && portableStore.exists()) {
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS) && portableStore.exists()) {
       _logger.info('Using portable settings.');
       SharedPreferencesStorePlatform.instance = portableStore;
-    } else if (checkNativePlatform([TargetPlatform.windows])) {
+    } else if (!kIsWeb && Platform.isWindows) {
       final legacyStore = SharedPreferencesFile(filePath: _windowsLegacyFile);
       if (legacyStore.exists()) {
         _logger.info('Using legacy settings. Will migrate in the next step.');
@@ -145,7 +146,7 @@ class PersistenceService {
     try {
       prefs = await SharedPreferences.getInstance();
     } catch (e) {
-      if (checkNativePlatform([TargetPlatform.windows])) {
+      if (!kIsWeb && Platform.isWindows) {
         _logger.info('Could not initialize SharedPreferences, trying to delete corrupted settings file', e);
         File(_windowsFile).deleteSync();
         prefs = await SharedPreferences.getInstance();
@@ -209,7 +210,7 @@ class PersistenceService {
   static Future<void> _initColorSetting(SharedPreferences prefs, bool supportsDynamicColors) async {
     await prefs.setString(
       _colorKey,
-      checkNativePlatform([TargetPlatform.android]) && supportsDynamicColors ? ColorMode.system.name : ColorMode.localsend.name,
+      !kIsWeb && Platform.isAndroid && supportsDynamicColors ? ColorMode.system.name : ColorMode.localsend.name,
     );
   }
 

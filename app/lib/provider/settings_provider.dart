@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/persistence/color_mode.dart';
@@ -252,7 +255,7 @@ class SettingsService extends PureNotifier<SettingsState> {
 
   Future<void> setAlwaysOnTop(bool alwaysOnTop) async {
     if (!checkPlatformIsNotWaylandDesktop()) return;
-    if (checkNativePlatformIsDesktop()) {
+    if (!kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
       await windowManager.setAlwaysOnTop(alwaysOnTop);
     }
     await _persistence.setAlwaysOnTop(alwaysOnTop);

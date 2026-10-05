@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:localsend_app/config/theme.dart';
@@ -14,7 +16,6 @@ import 'package:localsend_app/util/image_converter.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
 import 'package:localsend_app/util/native/cross_file_converters.dart';
 import 'package:localsend_app/util/native/pick_directory_path.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/ui/asset_picker_translated_text_delegate.dart';
 import 'package:localsend_app/widget/dialogs/loading_dialog.dart';
 import 'package:localsend_app/widget/dialogs/message_input_dialog.dart';
@@ -65,7 +66,7 @@ enum FilePickerOption {
 
   /// Returns the options for the current platform.
   static List<FilePickerOption> getOptionsForPlatform() {
-    if (checkNativePlatform([TargetPlatform.iOS])) {
+    if (!kIsWeb && Platform.isIOS) {
       // On iOS, picking from media is most common.
       // The file app is very limited.
       return [
@@ -75,7 +76,7 @@ enum FilePickerOption {
         FilePickerOption.file,
         FilePickerOption.folder,
       ];
-    } else if (checkNativePlatform([TargetPlatform.android])) {
+    } else if (!kIsWeb && Platform.isAndroid) {
       // On android, the file app is most powerful.
       // It actually also allows to pick media files.
       return [
@@ -143,7 +144,7 @@ class PickFileAction extends AsyncGlobalAction {
 }
 
 Future<void> _pickFiles(BuildContext context, Ref ref) async {
-  if (checkNativePlatform([TargetPlatform.android])) {
+  if (!kIsWeb && Platform.isAndroid) {
     // On android, the files are copied to the cache which takes some time.
     // ignore: unawaited_futures
     showDialog(
@@ -153,7 +154,7 @@ Future<void> _pickFiles(BuildContext context, Ref ref) async {
     );
   }
   try {
-    if (checkNativePlatform([TargetPlatform.android])) {
+    if (!kIsWeb && Platform.isAndroid) {
       final result = await android_channel.pickFilesAndroid();
       if (result != null) {
         await ref
@@ -193,7 +194,7 @@ Future<void> _pickFiles(BuildContext context, Ref ref) async {
 }
 
 Future<void> _pickFolder(BuildContext context, Ref ref) async {
-  if (checkNativePlatform([TargetPlatform.android])) {
+  if (!kIsWeb && Platform.isAndroid) {
     try {
       await Permission.storage.request();
     } catch (e) {
@@ -213,7 +214,7 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
   );
   await sleepAsync(200); // Wait for the dialog to be shown
   try {
-    if (checkNativePlatform([TargetPlatform.android]) && (ref.read(deviceInfoProvider).androidSdkInt ?? 0) >= android_channel.contentUriMinSdk) {
+    if (!kIsWeb && Platform.isAndroid && (ref.read(deviceInfoProvider).androidSdkInt ?? 0) >= android_channel.contentUriMinSdk) {
       // Android 8 and above have more predictable content URIs that we can parse.
       final result = await android_channel.pickDirectoryAndroid();
       if (result != null) {
@@ -242,7 +243,7 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
 }
 
 Future<void> _pickMedia(BuildContext context, Ref ref) async {
-  if (checkNativePlatform([TargetPlatform.android])) {
+  if (!kIsWeb && Platform.isAndroid) {
     await PhotoManager.requestPermissionExtend(
       requestOption: const PermissionRequestOption(
         androidPermission: AndroidPermission(

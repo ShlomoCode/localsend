@@ -63,7 +63,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
 
   initLogger(args.contains('-v') || args.contains('--verbose') ? Level.ALL : Level.INFO);
 
-  if (checkNativePlatform([TargetPlatform.linux])) {
+  if (!kIsWeb && Platform.isLinux) {
     try {
       cacheWaylandStatus(await isWaylandDisplay());
     } catch (e) {
@@ -98,7 +98,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
   TransferNotification.init(notificationStrings);
 
   bool startHidden = false;
-  if (checkNativePlatformIsDesktop()) {
+  if (!kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
     // Check if this app is already open and let it "show up".
     // If this is the case, then exit the current instance.
 
@@ -129,7 +129,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
     if (args.contains(startHiddenFlag)) {
       // keep this app hidden
       startHidden = true;
-    } else if (checkNativePlatform([TargetPlatform.macOS])) {
+    } else if (Platform.isMacOS) {
       startHidden = await isLaunchedAsLoginItem() && await getLaunchAtLoginMinimized();
     }
 
@@ -139,7 +139,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
       unawaited(showFromTray());
     }
 
-    if (checkNativePlatform([TargetPlatform.macOS])) {
+    if (Platform.isMacOS) {
       await setupStatusBar();
     }
   }
@@ -198,7 +198,7 @@ StreamSubscription? _sharedMediaSubscription;
 Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
   await updateSystemOverlayStyle(context);
 
-  if (checkNativePlatform([TargetPlatform.android])) {
+  if (!kIsWeb && Platform.isAndroid) {
     // On some TVs, requesting a high refresh rate can trigger HDMI resync and blank the display when entering or leaving the app.
     // https://github.com/localsend/localsend/issues/3452
     if (!ref.read(tvProvider)) {
@@ -240,7 +240,7 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
   }
 
   if (appStart) {
-    if (checkNativePlatform([TargetPlatform.macOS])) {
+    if (!kIsWeb && Platform.isMacOS) {
       // handle dropped files
       pendingFilesStream.listen((files) async {
         await ref.global.dispatchAsync(
@@ -296,7 +296,7 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
       );
     });
 
-    if (checkNativePlatform([TargetPlatform.android])) {
+    if (!kIsWeb && Platform.isAndroid) {
       // Both messages above travel through the same messenger in order, so the stream is
       // guaranteed to be attached natively before MainActivity replays held-back intents.
       await flushPendingShareIntentsAndroid();

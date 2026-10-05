@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
@@ -67,7 +68,7 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
 
   /// On Android the foreground service keeps the process and the connection alive,
   /// so there is no reason to also keep the screen on.
-  bool get _useWakelock => !checkNativePlatform([TargetPlatform.android]);
+  bool get _useWakelock => kIsWeb || !Platform.isAndroid;
 
   @override
   void initState() {
@@ -305,9 +306,9 @@ class _ProgressPageState extends State<ProgressPage> with Refena {
                                   TextSpan(
                                     text: receiveSession.destinationDirectory,
                                     style: TextStyle(
-                                      color: checkNativePlatform([TargetPlatform.iOS]) ? Colors.grey : Theme.of(context).colorScheme.primary,
+                                      color: !kIsWeb && Platform.isIOS ? Colors.grey : Theme.of(context).colorScheme.primary,
                                     ),
-                                    recognizer: checkNativePlatform([TargetPlatform.iOS])
+                                    recognizer: !kIsWeb && Platform.isIOS
                                         ? null
                                         : (TapGestureRecognizer()
                                             ..onTap = () async {

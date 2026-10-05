@@ -18,7 +18,7 @@ Future<void> _migrate2() async {
   if (SharedPreferencesStorePlatform.instance is! SharedPreferencesPortable) {
     await enableContextMenu();
 
-    if (checkNativePlatform([TargetPlatform.windows])) {
+    if (!kIsWeb && Platform.isWindows) {
       final newFolder = File(_windowsFile).parent;
       if (!newFolder.existsSync()) {
         newFolder.createSync(recursive: true);

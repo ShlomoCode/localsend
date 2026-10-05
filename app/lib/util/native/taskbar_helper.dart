@@ -1,14 +1,15 @@
-import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:localsend_app/util/native/macos_channel.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_isolates/model/session_status.dart';
 import 'package:windows_taskbar/windows_taskbar.dart';
 
 enum TaskbarIcon { regular, error, success }
 
 class TaskbarHelper {
-  static final _isWindows = checkNativePlatform([TargetPlatform.windows]);
-  static final _isMacos = checkNativePlatform([TargetPlatform.macOS]);
+  static final _isWindows = !kIsWeb && Platform.isWindows;
+  static final _isMacos = !kIsWeb && Platform.isMacOS;
 
   static Future<void> clearProgressBar() async {
     if (_isWindows) {

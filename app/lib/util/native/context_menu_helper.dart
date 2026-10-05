@@ -1,13 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:logging/logging.dart';
 
 final _logger = Logger('ContextMenuHelper');
 
 Future<bool> enableContextMenu() async {
-  if (!checkNativePlatform([TargetPlatform.windows])) {
+  if (kIsWeb || !Platform.isWindows) {
     return false;
   }
 
@@ -34,7 +33,7 @@ Future<bool> enableContextMenu() async {
 
 Future<bool> disableContextMenu() async {
   try {
-    if (!checkNativePlatform([TargetPlatform.windows])) {
+    if (kIsWeb || !Platform.isWindows) {
       return false;
     }
     final file = File(_getWindowsFilePath(_windowsFileName));
@@ -48,7 +47,7 @@ Future<bool> disableContextMenu() async {
 }
 
 Future<bool> isContextMenuEnabled() async {
-  if (!checkNativePlatform([TargetPlatform.windows])) {
+  if (kIsWeb || !Platform.isWindows) {
     return false;
   }
   return await File(_getWindowsFilePath(_windowsFileName)).exists();
