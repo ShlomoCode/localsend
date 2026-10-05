@@ -1,0 +1,11 @@
+[package]
+name = "localsend-native-filename-check"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+icu_properties = "=2.2.0"
+thiserror = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
