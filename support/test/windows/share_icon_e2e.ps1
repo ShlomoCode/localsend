@@ -191,30 +191,46 @@ function Find-SharePickerTarget {
     if (-not $env:UIA3_INTEROP_PATH -or -not (Test-Path $env:UIA3_INTEROP_PATH)) {
         throw 'UIA3_INTEROP_PATH must point to the generated UIAutomationCore interop assembly'
     }
-    if (-not $script:Uia3Automation) {
-        $assembly = [Reflection.Assembly]::LoadFrom($env:UIA3_INTEROP_PATH)
-        $class = $assembly.GetType('LocalSend.UIA3.CUIAutomation8Class')
-        if (-not $class) { throw 'Generated interop assembly lacks LocalSend.UIA3.CUIAutomation8Class' }
-        $elementType = $assembly.GetType('LocalSend.UIA3.IUIAutomationElement')
-        if (-not $elementType) { throw 'Generated interop assembly lacks LocalSend.UIA3.IUIAutomationElement' }
-        $script:Uia3ScopeType = $elementType.GetMethod('FindFirst').GetParameters()[0].ParameterType
-        $script:Uia3Automation = [Activator]::CreateInstance($class)
-        try { $script:Uia3Automation.ConnectionTimeout = 5000 } catch { }
+    if (-not ('LocalSendSharePickerLocator' -as [type])) {
+        [Reflection.Assembly]::LoadFrom($env:UIA3_INTEROP_PATH) | Out-Null
+        Add-Type -ReferencedAssemblies $env:UIA3_INTEROP_PATH -TypeDefinition @'
+using LocalSend.UIA3;
+
+public sealed class LocalSendSharePickerResult {
+    public string Name, ClassName;
+    public int ControlType, Left, Top, Right, Bottom;
+}
+
+public static class LocalSendSharePickerLocator {
+    public static LocalSendSharePickerResult Find() {
+        var instance = new CUIAutomation8Class();
+        var newer = (IUIAutomation2)instance;
+        newer.ConnectionTimeout = 5000;
+        newer.TransactionTimeout = 5000;
+        var uia = (IUIAutomation)instance;
+        var frame = uia.GetRootElement().FindFirst((TreeScope)2,
+            uia.CreatePropertyCondition(30012, "ApplicationFrameWindow"));
+        if (frame == null) return null;
+        var target = frame.FindFirst((TreeScope)4, uia.CreateAndCondition(
+            uia.CreatePropertyCondition(30005, "LocalSend"),
+            uia.CreatePropertyCondition(30003, 50007)));
+        if (target == null) return null;
+        var r = target.CurrentBoundingRectangle;
+        return new LocalSendSharePickerResult {
+            Name = target.CurrentName, ClassName = target.CurrentClassName,
+            ControlType = target.CurrentControlType,
+            Left = r.left, Top = r.top, Right = r.right, Bottom = r.bottom
+        };
     }
-    $uia = $script:Uia3Automation
-    $children = [Enum]::ToObject($script:Uia3ScopeType, 2)
-    $descendants = [Enum]::ToObject($script:Uia3ScopeType, 4)
-    $frame = $uia.GetRootElement().FindFirst($children, $uia.CreatePropertyCondition(30012, 'ApplicationFrameWindow'))
-    if (-not $frame) { return $null }
-    $name = $uia.CreatePropertyCondition(30005, 'LocalSend')
-    $listItem = $uia.CreatePropertyCondition(30003, 50007)
-    $target = $frame.FindFirst($descendants, $uia.CreateAndCondition($name, $listItem))
+}
+'@
+    }
+    $target = [LocalSendSharePickerLocator]::Find()
     if (-not $target) { return $null }
-    $rect = $target.CurrentBoundingRectangle
-    $bounds = [System.Windows.Rect]::new($rect.left, $rect.top, $rect.right - $rect.left, $rect.bottom - $rect.top)
+    $bounds = [System.Windows.Rect]::new($target.Left, $target.Top, $target.Right - $target.Left, $target.Bottom - $target.Top)
     if ($bounds.Width -le 0 -or $bounds.Height -le 0) { return $null }
-    ('Name={0}; ControlType={1}; ClassName={2}; Bounds={3}' -f $target.CurrentName,
-        $target.CurrentControlType, $target.CurrentClassName, $bounds) |
+    ('Name={0}; ControlType={1}; ClassName={2}; Bounds={3}' -f $target.Name,
+        $target.ControlType, $target.ClassName, $bounds) |
         Set-Content (Join-Path $EvidenceDirectory 'picker-target-uia3.txt')
     return [pscustomobject]@{ Current = [pscustomobject]@{ BoundingRectangle = $bounds } }
 }
