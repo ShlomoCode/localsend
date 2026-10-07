@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:localsend_app/config/init.dart';
 import 'package:localsend_app/config/init_error.dart';
 import 'package:localsend_app/config/theme.dart';
+import 'package:localsend_app/daemon/daemon_app.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/persistence/color_mode.dart';
 import 'package:localsend_app/pages/home_page.dart';
@@ -23,6 +24,11 @@ import 'package:routerino/routerino.dart';
 import 'package:system_date_time_format/system_date_time_format.dart';
 
 Future<void> main(List<String> args) async {
+  if (args.contains('--daemon-mode')) {
+    await runDaemonApp(args);
+    return;
+  }
+
   final RefenaContainer container;
   try {
     container = await preInit(args);

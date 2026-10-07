@@ -12,6 +12,7 @@ enum DockIcon: CaseIterable {
 
 @main
 class AppDelegate: FlutterAppDelegate {
+    private var daemonMode: Bool { ProcessInfo.processInfo.arguments.contains("--daemon-mode") }
     private var statusItem: NSStatusItem?
     private var channel: FlutterMethodChannel?
     private var pendingFilesObservation: Defaults.Observation?
@@ -24,6 +25,7 @@ class AppDelegate: FlutterAppDelegate {
     }
     
     override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        if daemonMode { return true }
         // LocalSend handles the close event manually
         return false
     }
@@ -34,6 +36,11 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
+        if daemonMode {
+            mainFlutterWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         NSApplication.shared.servicesProvider = self
         
         let localsendBrandColor = NSColor(red: 0, green: 0.392, blue: 0.353, alpha: 0.8) // #00645a
@@ -49,6 +56,11 @@ class AppDelegate: FlutterAppDelegate {
     }
     
     override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if daemonMode {
+            mainFlutterWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return true
+        }
         showLocalSendFromMenuBar()
         return false
     }

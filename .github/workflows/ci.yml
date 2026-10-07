@@ -86,6 +86,10 @@ jobs:
       - name: Test (core)
         working-directory: packages/core
         run: cargo test --features full
+      - name: Clippy (background daemon)
+        run: cargo clippy --package localsend-daemon --all-targets
+      - name: Test (background daemon)
+        run: cargo test --package localsend-daemon
       - name: Test (signaling server)
         run: cargo test --package server
       - name: Check (plugin crate, CLI)
