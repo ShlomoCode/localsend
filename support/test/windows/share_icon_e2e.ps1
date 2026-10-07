@@ -14,6 +14,7 @@ public static class LocalSendShareInput {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
 }
 '@
@@ -192,25 +193,44 @@ function Assert-Surface {
 
 function Open-ExplorerShareMenu {
     param([string] $FolderPath)
+    Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
     $desktop = [System.Windows.Automation.AutomationElement]::RootElement
     $window = Wait-VisibleElement -Root $desktop -Names @('ShareIconFixture - File Explorer') -Types @([System.Windows.Automation.ControlType]::Window)
     $handle = [IntPtr] $window.Current.NativeWindowHandle
-    [LocalSendShareInput]::ShowWindow($handle, 9) | Out-Null
-    if (-not [LocalSendShareInput]::SetForegroundWindow($handle)) { throw 'Could not foreground File Explorer' }
     $file = Wait-VisibleElement -Root $window -Names @('share-me', 'share-me.txt') -Types @(
         [System.Windows.Automation.ControlType]::ListItem,
         [System.Windows.Automation.ControlType]::DataItem
     )
-    Click-Element $file
-    $file.SetFocus()
-    Start-Sleep -Milliseconds 500
-    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
-    Start-Sleep -Seconds 1
-    $contextBitmap = Save-Screenshot (Join-Path $EvidenceDirectory 'context.png')
-    $contextBitmap.Dispose()
-    $share = Wait-VisibleElement -Root $desktop -Names @('Share with', 'Share') -Types @([System.Windows.Automation.ControlType]::MenuItem)
-    Click-Element $share
-    return $desktop
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        # The disposable GitHub Windows image can show a WSL update prompt while
+        # Explorer initializes Linux navigation. It can take keyboard focus.
+        Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
+        [LocalSendShareInput]::ShowWindow($handle, 9) | Out-Null
+        if (-not [LocalSendShareInput]::SetForegroundWindow($handle)) { throw 'Could not foreground File Explorer' }
+        Click-Element $file
+        $file.SetFocus()
+        Start-Sleep -Milliseconds 500
+        Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
+        [LocalSendShareInput]::SetForegroundWindow($handle) | Out-Null
+        if ([LocalSendShareInput]::GetForegroundWindow() -ne $handle) {
+            Write-Host "Explorer lost foreground before context menu (attempt $attempt)."
+            continue
+        }
+        [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+        Start-Sleep -Seconds 1
+        $contextBitmap = Save-Screenshot (Join-Path $EvidenceDirectory "context-attempt-$attempt.png")
+        $contextBitmap.Dispose()
+        try {
+            $share = Wait-VisibleElement -Root $desktop -Names @('Share with', 'Share') -Types @([System.Windows.Automation.ControlType]::MenuItem) -TimeoutSeconds 5
+            Click-Element $share
+            return $desktop
+        } catch {
+            if ($_.Exception.Message -notlike 'Visible UI element not found:*') { throw }
+            Write-Host "Explorer context menu was interrupted (attempt $attempt): $($_.Exception.Message)"
+            [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        }
+    }
+    throw 'Explorer Share with context menu did not open after three foreground retries'
 }
 
 try {
@@ -237,6 +257,7 @@ try {
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
     Start-Process explorer.exe
     Start-Sleep -Seconds 3
+    Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
     $fixtureDir = Join-Path $env:TEMP 'ShareIconFixture'
     New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
     Set-Content -Path (Join-Path $fixtureDir 'share-me.txt') -Value 'LocalSend share icon regression fixture'
