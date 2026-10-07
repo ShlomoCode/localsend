@@ -1,11 +1,184 @@
+# Windows Share with must render the LocalSend logo in the picker and recent menu.
+# Issue: https://github.com/localsend/localsend/issues/3495
+# Given a signed LocalSend install and a file in Explorer, when the file is
+# shared, then both rendered icons match the LocalSend logo. A baseline installer
+# missing the logo resources must fail both icon assertions.
 param(
-    [Parameter(Mandatory = $true)] [string] $InstallerPath,
-    [string] $EvidenceDirectory = (Join-Path $PWD 'share-icon-evidence')
+    [string] $InstallerPath,
+    [string] $EvidenceDirectory = (Join-Path $PWD 'windows-e2e-evidence/share_icon')
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$EvidenceDirectory = [System.IO.Path]::GetFullPath($EvidenceDirectory)
+New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
+
+function Invoke-ShareIconLifecycle {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+    $runnerTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+    $work = Join-Path $runnerTemp ("localsend-share-icon-" + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $work | Out-Null
+    $pri = Join-Path $repoRoot 'support/build/msix/content/resources.pri'
+    $hadPri = Test-Path $pri
+    $priBackup = Join-Path $work 'original-resources.pri'
+    if ($hadPri) { Copy-Item $pri $priBackup }
+    $baselineScript = Join-Path $repoRoot 'support/scripts/share-icon-baseline.iss'
+    $createdBaselineScript = $false
+    $summary = [ordered]@{
+        Test = 'share_icon'
+        Issue = 'https://github.com/localsend/localsend/issues/3495'
+        Passed = $false
+        Phases = @()
+        Error = $null
+    }
+    try {
+        if (Test-Path $baselineScript) { throw "Temporary baseline script already exists: $baselineScript" }
+        Set-Location $repoRoot
+        Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture |
+            ConvertTo-Json | Set-Content (Join-Path $EvidenceDirectory 'environment.json')
+
+        # Prepare the hosted interactive desktop before touching Explorer.
+        Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
+        Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class ShareIconDesktopInput {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+}
+'@
+        $root = [System.Windows.Automation.AutomationElement]::RootElement
+        $oobeCondition = [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Shell_OOBEProxy')
+        for ($i = 0; $i -lt 4; $i++) {
+            if (-not $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { break }
+            $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            if ($screen.Width -ne 1024 -or $screen.Height -ne 768) { throw 'Unexpected first-login wizard desktop size' }
+            [ShareIconDesktopInput]::SetCursorPos(867, 657) | Out-Null
+            [ShareIconDesktopInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+            [ShareIconDesktopInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Seconds 3
+        }
+        if ($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) {
+            throw 'First-login wizard still covers the desktop'
+        }
+        $wslSetup = Join-Path $work 'wsl.arm64.msi'
+        Invoke-WebRequest 'https://github.com/microsoft/WSL/releases/download/3.0.1/wsl.3.0.1.0.arm64.msi' -OutFile $wslSetup
+        if ((Get-FileHash $wslSetup).Hash -ne '857DDBB335EC7D05FFA71D0FD2203750C0E8FC29BB164F8A95DB92BD7BBA4263') {
+            throw 'Unexpected WSL installer hash'
+        }
+        $wslInstall = Start-Process msiexec.exe -ArgumentList @('/i', $wslSetup, '/qn', '/norestart') -Wait -PassThru
+        if ($wslInstall.ExitCode -ne 0 -and $wslInstall.ExitCode -ne 3010) { throw 'Runner WSL setup failed' }
+        Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
+        (New-Object -ComObject Shell.Application).MinimizeAll()
+
+        # UIA3 gives the Windows Share picker a native COM automation client.
+        $tlbimp = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows" -Filter TlbImp.exe -Recurse | Select-Object -First 1
+        if (-not $tlbimp) { throw 'Windows SDK type-library importer missing' }
+        $env:UIA3_INTEROP_PATH = Join-Path $work 'LocalSend.UIA3.dll'
+        & $tlbimp.FullName "$env:WINDIR\System32\UIAutomationCore.dll" /namespace:LocalSend.UIA3 "/out:$env:UIA3_INTEROP_PATH" /silent
+        if ($LASTEXITCODE -ne 0) { throw 'UI Automation interop import failed' }
+
+        $compilerSetup = Join-Path $work 'innosetup.exe'
+        Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $compilerSetup
+        if ((Get-FileHash $compilerSetup).Hash -ne '0362A383ED217D4C4239B5933866DD96D3EB2102737DA92F80F6057A4B40DF2F') {
+            throw 'Unexpected Inno Setup hash'
+        }
+        $compilerDir = Join-Path $work 'InnoShareIcon'
+        $process = Start-Process $compilerSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$compilerDir`"") -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed' }
+        $release = Join-Path $work 'localsend-release.exe'
+        Invoke-WebRequest 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.exe' -OutFile $release
+        if ((Get-FileHash $release).Hash -ne '122783E6ABB4B0A1F1603D896F46A03AEDA3004479EBD3175CAB4DDAC6B60919') {
+            throw 'Unexpected LocalSend release hash'
+        }
+        $payload = Join-Path $work 'payload'
+        $process = Start-Process $release -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$payload`"") -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw 'Payload installation failed' }
+        $packageDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            if (Get-AppxPackage LocalSend.App) { break }
+            Start-Sleep -Milliseconds 500
+        } while ([DateTime]::UtcNow -lt $packageDeadline)
+        if (-not (Get-AppxPackage LocalSend.App)) { throw 'Release helper package was not registered' }
+        Get-AppxPackage LocalSend.App | Remove-AppxPackage
+        Copy-Item (Join-Path $repoRoot 'app/assets/packaging/logo.ico') $payload
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $unpack = Join-Path $work 'unpacked-helper'
+        [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $payload 'localsend_msix_helper.msix'), $unpack)
+        Copy-Item (Join-Path $unpack 'resources.pri') $pri
+        Get-ChildItem $payload -File | Get-FileHash | Select-Object Path, Hash | ConvertTo-Json |
+            Set-Content (Join-Path $EvidenceDirectory 'payload-hashes.json')
+
+        $candidate = Join-Path $work 'candidate'
+        $baseline = Join-Path $work 'baseline'
+        New-Item -ItemType Directory -Force $candidate, $baseline | Out-Null
+        $innoSource = Join-Path $repoRoot 'support/scripts/compile_windows_exe-inno.iss'
+        $scriptLines = Get-Content $innoSource
+        $baselineLines = $scriptLines | Where-Object { $_ -notmatch '^Source: "\.\.\\build\\msix\\content\\(Images\\\*|resources\.pri)"' }
+        if ($scriptLines.Count - $baselineLines.Count -ne 2) {
+            throw 'Negative control must remove exactly the two resource deployment lines'
+        }
+        $baselineLines | Set-Content $baselineScript
+        $createdBaselineScript = $true
+        & "$compilerDir\ISCC.exe" /DSkipSignTool "/DPayloadDir=$payload" "/DResultDir=$baseline" $baselineScript
+        if ($LASTEXITCODE -ne 0) { throw 'Baseline installer build failed' }
+        & "$compilerDir\ISCC.exe" /DSkipSignTool "/DPayloadDir=$payload" "/DResultDir=$candidate" $innoSource
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate installer build failed' }
+
+        foreach ($phase in @(
+            @{ Name = 'control'; Installer = (Join-Path $candidate 'localsend.exe'); ExpectIcons = $true },
+            @{ Name = 'baseline'; Installer = (Join-Path $baseline 'localsend.exe'); ExpectIcons = $false },
+            @{ Name = 'fixed'; Installer = (Join-Path $candidate 'localsend.exe'); ExpectIcons = $true }
+        )) {
+            Write-Host "GWT phase: $($phase.Name)"
+            $phaseEvidence = Join-Path $EvidenceDirectory $phase.Name
+            & powershell.exe -NoProfile -MTA -ExecutionPolicy Bypass -File $PSCommandPath -InstallerPath $phase.Installer -EvidenceDirectory $phaseEvidence
+            $phaseExit = $LASTEXITCODE
+            $resultPath = Join-Path $phaseEvidence 'result.json'
+            if (-not (Test-Path $resultPath)) { throw "$($phase.Name) did not write result.json" }
+            $phaseResult = Get-Content $resultPath -Raw | ConvertFrom-Json
+            $summary.Phases += [ordered]@{ Name = $phase.Name; ExitCode = $phaseExit; Result = $phaseResult }
+            if ($phase.ExpectIcons) {
+                if ($phaseExit -ne 0 -or -not $phaseResult.Passed -or $phaseResult.Error -or $phaseResult.Assertions.Count -ne 2) {
+                    throw "$($phase.Name) did not render both LocalSend icons"
+                }
+            } else {
+                if ($phaseExit -eq 0 -or $phaseResult.Error -or $phaseResult.Assertions.Count -ne 2) {
+                    throw 'Baseline did not expose exactly two icon failures'
+                }
+                $surfaces = @($phaseResult.Assertions | ForEach-Object { $_.Surface } | Sort-Object)
+                if (($surfaces -join ',') -ne 'Dialog,Menu') { throw 'Baseline did not check both share surfaces' }
+                foreach ($assertion in $phaseResult.Assertions) {
+                    if ($assertion.Passed -or $assertion.Error -ne 'icon not rendered' -or $assertion.Score -ge 0.75) {
+                        throw 'Baseline failed for a reason other than the missing rendered icons'
+                    }
+                }
+            }
+        }
+        $summary.Passed = $true
+    } catch {
+        $summary.Error = $_.Exception.Message
+        Write-Error $summary.Error -ErrorAction Continue
+    } finally {
+        try {
+            Stop-Process -Name localsend_app -Force -ErrorAction SilentlyContinue
+            Get-AppxPackage LocalSend.App | Remove-AppxPackage -ErrorAction SilentlyContinue
+            Remove-Item (Join-Path $env:LOCALAPPDATA 'LocalSendShareIconE2E') -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item (Join-Path $env:TEMP 'ShareIconFixture') -Recurse -Force -ErrorAction SilentlyContinue
+            if ($createdBaselineScript) { Remove-Item $baselineScript -Force -ErrorAction SilentlyContinue }
+            if ($hadPri) { Copy-Item $priBackup $pri -Force } else { Remove-Item $pri -Force -ErrorAction SilentlyContinue }
+            Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+        } catch { Write-Warning "Cleanup failed: $($_.Exception.Message)" }
+        $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'summary.json')
+    }
+    if (-not $summary.Passed) { exit 1 }
+}
+
+if (-not $InstallerPath) { Invoke-ShareIconLifecycle; exit 0 }
+
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
-. (Join-Path $PSScriptRoot 'share_icon_assertions.ps1')
+. (Join-Path $PSScriptRoot '..\helpers\share_icon_assertions.ps1')
 
 Add-Type @'
 using System;
@@ -19,8 +192,6 @@ public static class LocalSendShareInput {
 }
 '@
 
-$EvidenceDirectory = [System.IO.Path]::GetFullPath($EvidenceDirectory)
-New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
 $result = [ordered]@{
     Given = 'LocalSend installed and registered as a Windows share target; a real text file is selected in File Explorer'
     When = 'Open Share with, inspect More options, select LocalSend once, then reopen Share with'

@@ -97,7 +97,7 @@ function Assert-LocalSendShareIcon {
         [ValidateRange(0.1, 1.0)] [double] $MinimumScore = 0.75
     )
 
-    $referencePath = Join-Path $PSScriptRoot '..\..\build\msix\content\Images\Square44x44Logo.targetsize-48.png'
+    $referencePath = Join-Path $PSScriptRoot '..\..\..\build\msix\content\Images\Square44x44Logo.targetsize-48.png'
     $reference = [System.Drawing.Bitmap]::new($referencePath)
     $crop = $null
     try {
