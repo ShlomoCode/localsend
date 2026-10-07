@@ -340,7 +340,6 @@ try {
     $more = Wait-VisibleElement -Root $desktop -Names @('More options') -Types @([System.Windows.Automation.ControlType]::MenuItem)
     Click-Element $more
     $pickerTarget = Wait-SharePickerTarget
-    Save-PickerUiTree (Join-Path $EvidenceDirectory 'dialog-picker-uia.txt')
     Save-RelevantUiTree 'dialog' $desktop
     Write-Host 'THEN: inspect the rendered LocalSend picker icon.'
     $result.Assertions += (Assert-Surface Dialog $pickerTarget)
