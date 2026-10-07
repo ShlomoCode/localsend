@@ -19,6 +19,7 @@ class CrossFileConverters {
     final file = (await asset.originFile)!;
     final metadata = await readFileMetadata(path: file.path);
     var lastModified = metadata?.modified;
+    // photo_manager currently exposes the original modification time only in whole seconds.
     final originalFileModifiedSeconds = asset.modifiedDateSecond;
     if (defaultTargetPlatform == TargetPlatform.android &&
         originalFileModifiedSeconds != null &&
