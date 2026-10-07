@@ -21,6 +21,7 @@ jobs:
       - name: Prepare interactive desktop
         shell: powershell
         run: |
+          $ProgressPreference = 'SilentlyContinue'
           Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
           Add-Type @'
           using System;
@@ -62,6 +63,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           New-Item -ItemType Directory -Force share-icon-evidence | Out-Null
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture | ConvertTo-Json | Set-Content share-icon-evidence/environment.json
           $compilerSetup = Join-Path $env:TEMP 'innosetup.exe'
