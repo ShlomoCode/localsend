@@ -43,9 +43,12 @@ jobs:
             Start-Sleep 3
           }
           if ($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { throw 'First-login wizard still covers the desktop' }
-          # Explorer queries WSL; finish its setup so it cannot open update prompts.
-          & wsl.exe --install --no-distribution --web-download
-          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw 'Runner WSL setup failed' }
+          # Remove the unused Linux namespace from this disposable runner. Unpinning
+          # it still lets Explorer activate WSL's unfinished first-run setup.
+          foreach ($hive in @('HKLM:\SOFTWARE', 'HKLM:\SOFTWARE\WOW6432Node', 'HKCU:\SOFTWARE')) {
+            $linux = "$hive\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{B2B4A4D1-2754-4140-A2EB-9A76D9D7CDC6}"
+            if (Test-Path $linux) { Remove-Item $linux -Recurse -Force }
+          }
           Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
           (New-Object -ComObject Shell.Application).MinimizeAll()
           # Import Windows' native UI Automation API for the UWP share picker.
