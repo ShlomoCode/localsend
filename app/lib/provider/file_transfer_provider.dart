@@ -18,23 +18,55 @@ class FileTransfer {
 
 class FileTransferNotifier extends ChangeNotifier {
   final _sessionMap = <String, Map<String, FileTransfer>>{}; // session id -> (file id -> live transfer state)
+  final _totals = <String, _TransferTotals>{};
+
+  /// Registers file sizes once so progress updates can update the displayed total in constant time.
+  void trackTotals(String sessionId, Map<String, int> fileSizes) {
+    final files = _sessionMap[sessionId];
+    _totals[sessionId] = _TransferTotals(
+      fileSizes: fileSizes,
+      bytes: files?.entries.fold<int>(0, (sum, entry) => sum + ((entry.value.progress * (fileSizes[entry.key] ?? 0)).round())) ?? 0,
+      finishedCount: files?.values.where((file) => file.status == FileStatus.finished).length ?? 0,
+    );
+  }
+
+  ({int bytes, int finishedCount}) getTotals(String sessionId) {
+    final totals = _totals[sessionId];
+    return (bytes: totals?.bytes ?? 0, finishedCount: totals?.finishedCount ?? 0);
+  }
 
   void setStatus({required String sessionId, required String fileId, required FileStatus status}) {
-    _sessionMap.putIfAbsent(sessionId, () => {}).putIfAbsent(fileId, () => FileTransfer(status)).status = status;
+    final file = _sessionMap.putIfAbsent(sessionId, () => {}).putIfAbsent(fileId, () => FileTransfer(FileStatus.queue));
+    final totals = _totals[sessionId];
+    if (totals != null) {
+      totals.finishedCount += (status == FileStatus.finished ? 1 : 0) - (file.status == FileStatus.finished ? 1 : 0);
+    }
+    file.status = status;
     notifyListeners();
   }
 
   /// Sets the status of multiple files at once, notifying listeners only once.
   void setStatuses({required String sessionId, required Map<String, FileStatus> statuses}) {
     final files = _sessionMap.putIfAbsent(sessionId, () => {});
+    final totals = _totals[sessionId];
     for (final entry in statuses.entries) {
-      files.putIfAbsent(entry.key, () => FileTransfer(entry.value)).status = entry.value;
+      final file = files.putIfAbsent(entry.key, () => FileTransfer(FileStatus.queue));
+      if (totals != null) {
+        totals.finishedCount += (entry.value == FileStatus.finished ? 1 : 0) - (file.status == FileStatus.finished ? 1 : 0);
+      }
+      file.status = entry.value;
     }
     notifyListeners();
   }
 
   void setProgress({required String sessionId, required String fileId, required double progress}) {
-    _sessionMap.putIfAbsent(sessionId, () => {}).putIfAbsent(fileId, () => FileTransfer(FileStatus.queue)).progress = progress;
+    final file = _sessionMap.putIfAbsent(sessionId, () => {}).putIfAbsent(fileId, () => FileTransfer(FileStatus.queue));
+    final totals = _totals[sessionId];
+    if (totals != null) {
+      final size = totals.fileSizes[fileId] ?? 0;
+      totals.bytes += (progress * size).round() - (file.progress * size).round();
+    }
+    file.progress = progress;
     notifyListeners();
   }
 
@@ -52,11 +84,13 @@ class FileTransferNotifier extends ChangeNotifier {
 
   void removeSession(String sessionId) {
     _sessionMap.remove(sessionId);
+    _totals.remove(sessionId);
     notifyListeners();
   }
 
   void removeAllSessions() {
     _sessionMap.clear();
+    _totals.clear();
     notifyListeners();
   }
 
@@ -64,4 +98,12 @@ class FileTransferNotifier extends ChangeNotifier {
   Map<String, Map<String, FileTransfer>> getData() {
     return _sessionMap;
   }
+}
+
+class _TransferTotals {
+  final Map<String, int> fileSizes;
+  int bytes;
+  int finishedCount;
+
+  _TransferTotals({required this.fileSizes, required this.bytes, required this.finishedCount});
 }
