@@ -76,6 +76,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "org.localsend.localsend_app/tv_text_field",
+            TvTextFieldFactory(flutterEngine.dartExecutor.binaryMessenger)
+        )
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             CHANNEL
