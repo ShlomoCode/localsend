@@ -30,7 +30,7 @@ $cards = foreach ($file in $media) {
     } else {
         "<a href=`"$url`"><img src=`"$url`" alt=`"$label`" loading=`"lazy`"></a>"
     }
-    $extra = if ($details) { "<details><summary>Details</summary><p>$details</p></details>" } else { '' }
+    $extra = if ($details) { "<p>$details</p>" } else { '' }
     "<li><figure><h2>$label</h2>$preview<figcaption>$extra<a href=`"$url`">Open original</a></figcaption></figure></li>"
 }
 @"
@@ -44,7 +44,7 @@ body { font: 16px system-ui; margin: 24px auto; padding: 0 20px; max-width: 880p
 ol { padding-left: 24px; } li { margin-bottom: 32px; }
 figure { margin: 0; } h2 { font-size: 18px; }
 img, video { display: block; max-width: 100%; max-height: 480px; height: auto; }
-figcaption { margin-top: 12px; overflow-wrap: anywhere; } details { margin-bottom: 8px; }
+figcaption { margin-top: 12px; overflow-wrap: anywhere; }
 </style>
 <h1>$title</h1>
 <p>$description</p>
