@@ -49,6 +49,13 @@ jobs:
           New-ItemProperty $linux -Name System.IsPinnedToNameSpaceTree -PropertyType DWord -Value 0 -Force | Out-Null
           Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
           (New-Object -ComObject Shell.Application).MinimizeAll()
+          # Import Windows' native UI Automation API for the UWP share picker.
+          $tlbimp = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows" -Filter TlbImp.exe -Recurse | Select-Object -First 1
+          if (-not $tlbimp) { throw 'Windows SDK type-library importer missing' }
+          $interop = Join-Path $env:RUNNER_TEMP 'LocalSend.UIA3.dll'
+          & $tlbimp.FullName "$env:WINDIR\System32\UIAutomationCore.dll" /namespace:LocalSend.UIA3 "/out:$interop" /silent
+          if ($LASTEXITCODE -ne 0) { throw 'UI Automation interop import failed' }
+          "UIA3_INTEROP_PATH=$interop" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - name: Build baseline and candidate installers from identical signed app binaries
         shell: powershell
         run: |

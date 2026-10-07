@@ -104,7 +104,7 @@ function Wait-VisibleElement {
 }
 
 function Click-Element {
-    param([System.Windows.Automation.AutomationElement] $Element)
+    param($Element)
     $bounds = $Element.Current.BoundingRectangle
     $x = [int][Math]::Round($bounds.X + $bounds.Width / 2)
     $y = [int][Math]::Round($bounds.Y + $bounds.Height / 2)
@@ -188,24 +188,35 @@ function Get-SharePickerWindow {
 }
 
 function Find-SharePickerTarget {
-    $picker = Get-SharePickerWindow
-    if (-not $picker) { return $null }
-    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'LocalSend')
-    $matches = $picker.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
-    for ($i = 0; $i -lt $matches.Count; $i++) {
-        $candidate = $matches.Item($i)
-        # The picker can expose the name on its text child rather than its tile.
-        # Walk to a compact clickable container without relying on a class name.
-        for ($depth = 0; $depth -lt 4 -and $candidate; $depth++) {
-            $current = $candidate.Current
-            $bounds = $current.BoundingRectangle
-            if ($current.ControlType -ne [System.Windows.Automation.ControlType]::Text -and
-                $bounds.Width -ge 60 -and $bounds.Width -le 160 -and
-                $bounds.Height -ge 60 -and $bounds.Height -le 150) { return $candidate }
-            $candidate = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($candidate)
-        }
+    if (-not $env:UIA3_INTEROP_PATH -or -not (Test-Path $env:UIA3_INTEROP_PATH)) {
+        throw 'UIA3_INTEROP_PATH must point to the generated UIAutomationCore interop assembly'
     }
-    return $null
+    if (-not $script:Uia3Automation) {
+        $assembly = [Reflection.Assembly]::LoadFrom($env:UIA3_INTEROP_PATH)
+        $class = $assembly.GetType('LocalSend.UIA3.CUIAutomation8Class')
+        if (-not $class) { throw 'Generated interop assembly lacks LocalSend.UIA3.CUIAutomation8Class' }
+        $elementType = $assembly.GetType('LocalSend.UIA3.IUIAutomationElement')
+        if (-not $elementType) { throw 'Generated interop assembly lacks LocalSend.UIA3.IUIAutomationElement' }
+        $script:Uia3ScopeType = $elementType.GetMethod('FindFirst').GetParameters()[0].ParameterType
+        $script:Uia3Automation = [Activator]::CreateInstance($class)
+        try { $script:Uia3Automation.ConnectionTimeout = 5000 } catch { }
+    }
+    $uia = $script:Uia3Automation
+    $children = [Enum]::ToObject($script:Uia3ScopeType, 2)
+    $descendants = [Enum]::ToObject($script:Uia3ScopeType, 4)
+    $frame = $uia.GetRootElement().FindFirst($children, $uia.CreatePropertyCondition(30012, 'ApplicationFrameWindow'))
+    if (-not $frame) { return $null }
+    $name = $uia.CreatePropertyCondition(30005, 'LocalSend')
+    $listItem = $uia.CreatePropertyCondition(30003, 50007)
+    $target = $frame.FindFirst($descendants, $uia.CreateAndCondition($name, $listItem))
+    if (-not $target) { return $null }
+    $rect = $target.CurrentBoundingRectangle
+    $bounds = [System.Windows.Rect]::new($rect.left, $rect.top, $rect.right - $rect.left, $rect.bottom - $rect.top)
+    if ($bounds.Width -le 0 -or $bounds.Height -le 0) { return $null }
+    ('Name={0}; ControlType={1}; ClassName={2}; Bounds={3}' -f $target.CurrentName,
+        $target.CurrentControlType, $target.CurrentClassName, $bounds) |
+        Set-Content (Join-Path $EvidenceDirectory 'picker-target-uia3.txt')
+    return [pscustomobject]@{ Current = [pscustomobject]@{ BoundingRectangle = $bounds } }
 }
 
 function Wait-SharePickerTarget {
