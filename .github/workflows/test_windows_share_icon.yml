@@ -43,10 +43,9 @@ jobs:
             Start-Sleep 3
           }
           if ($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { throw 'First-login wizard still covers the desktop' }
-          # Keep Explorer from launching the runner's unfinished WSL setup.
-          $linux = 'HKCU:\Software\Classes\CLSID\{B2B4A4D1-2754-4140-A2EB-9A76D9D7CDC6}'
-          New-Item $linux -Force | Out-Null
-          New-ItemProperty $linux -Name System.IsPinnedToNameSpaceTree -PropertyType DWord -Value 0 -Force | Out-Null
+          # Explorer queries WSL; finish its setup so it cannot open update prompts.
+          & wsl.exe --update --web-download
+          if ($LASTEXITCODE -ne 0) { throw 'Runner WSL update failed' }
           Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
           (New-Object -ComObject Shell.Application).MinimizeAll()
           # Import Windows' native UI Automation API for the UWP share picker.
