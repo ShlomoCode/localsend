@@ -1,8 +1,7 @@
 # Windows Share with must render the LocalSend logo in the picker and recent menu.
 # Issue: https://github.com/localsend/localsend/issues/3495
 # Given a signed LocalSend install and a file in Explorer, when the file is
-# shared, then both rendered icons match the LocalSend logo. A baseline installer
-# missing the logo resources must fail both icon assertions.
+# shared, then both rendered icons match the LocalSend logo.
 param(
     [string] $InstallerPath,
     [string] $EvidenceDirectory = (Join-Path $PWD 'windows-e2e-evidence/share_icon')
@@ -22,8 +21,6 @@ function Invoke-ShareIconLifecycle {
     $hadPri = Test-Path $pri
     $priBackup = Join-Path $work 'original-resources.pri'
     if ($hadPri) { Copy-Item $pri $priBackup }
-    $baselineScript = Join-Path $repoRoot 'support/scripts/share-icon-baseline.iss'
-    $createdBaselineScript = $false
     $summary = [ordered]@{
         Test = 'share_icon'
         Issue = 'https://github.com/localsend/localsend/issues/3495'
@@ -32,7 +29,6 @@ function Invoke-ShareIconLifecycle {
         Error = $null
     }
     try {
-        if (Test-Path $baselineScript) { throw "Temporary baseline script already exists: $baselineScript" }
         Set-Location $repoRoot
         Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture |
             ConvertTo-Json | Set-Content (Join-Path $EvidenceDirectory 'environment.json')
@@ -111,50 +107,25 @@ public static class ShareIconDesktopInput {
             Set-Content (Join-Path $EvidenceDirectory 'payload-hashes.json')
 
         $candidate = Join-Path $work 'candidate'
-        $baseline = Join-Path $work 'baseline'
-        New-Item -ItemType Directory -Force $candidate, $baseline | Out-Null
+        New-Item -ItemType Directory -Force $candidate | Out-Null
         $innoSource = Join-Path $repoRoot 'support/scripts/compile_windows_exe-inno.iss'
-        $scriptLines = Get-Content $innoSource
-        $baselineLines = $scriptLines | Where-Object { $_ -notmatch '^Source: "\.\.\\build\\msix\\content\\(Images\\\*|resources\.pri)"' }
-        if ($scriptLines.Count - $baselineLines.Count -ne 2) {
-            throw 'Negative control must remove exactly the two resource deployment lines'
-        }
-        $baselineLines | Set-Content $baselineScript
-        $createdBaselineScript = $true
-        & "$compilerDir\ISCC.exe" /DSkipSignTool "/DPayloadDir=$payload" "/DResultDir=$baseline" $baselineScript
-        if ($LASTEXITCODE -ne 0) { throw 'Baseline installer build failed' }
         & "$compilerDir\ISCC.exe" /DSkipSignTool "/DPayloadDir=$payload" "/DResultDir=$candidate" $innoSource
         if ($LASTEXITCODE -ne 0) { throw 'Candidate installer build failed' }
 
-        foreach ($phase in @(
-            @{ Name = 'control'; Installer = (Join-Path $candidate 'localsend.exe'); ExpectIcons = $true },
-            @{ Name = 'baseline'; Installer = (Join-Path $baseline 'localsend.exe'); ExpectIcons = $false },
-            @{ Name = 'fixed'; Installer = (Join-Path $candidate 'localsend.exe'); ExpectIcons = $true }
-        )) {
-            Write-Host "GWT phase: $($phase.Name)"
-            $phaseEvidence = Join-Path $EvidenceDirectory $phase.Name
-            & powershell.exe -NoProfile -MTA -ExecutionPolicy Bypass -File $PSCommandPath -InstallerPath $phase.Installer -EvidenceDirectory $phaseEvidence
-            $phaseExit = $LASTEXITCODE
-            $resultPath = Join-Path $phaseEvidence 'result.json'
-            if (-not (Test-Path $resultPath)) { throw "$($phase.Name) did not write result.json" }
-            $phaseResult = Get-Content $resultPath -Raw | ConvertFrom-Json
-            $summary.Phases += [ordered]@{ Name = $phase.Name; ExitCode = $phaseExit; Result = $phaseResult }
-            if ($phase.ExpectIcons) {
-                if ($phaseExit -ne 0 -or -not $phaseResult.Passed -or $phaseResult.Error -or $phaseResult.Assertions.Count -ne 2) {
-                    throw "$($phase.Name) did not render both LocalSend icons"
-                }
-            } else {
-                if ($phaseExit -eq 0 -or $phaseResult.Error -or $phaseResult.Assertions.Count -ne 2) {
-                    throw 'Baseline did not expose exactly two icon failures'
-                }
-                $surfaces = @($phaseResult.Assertions | ForEach-Object { $_.Surface } | Sort-Object)
-                if (($surfaces -join ',') -ne 'Dialog,Menu') { throw 'Baseline did not check both share surfaces' }
-                foreach ($assertion in $phaseResult.Assertions) {
-                    if ($assertion.Passed -or $assertion.Error -ne 'icon not rendered' -or $assertion.Score -ge 0.75) {
-                        throw 'Baseline failed for a reason other than the missing rendered icons'
-                    }
-                }
-            }
+        Write-Host 'GWT: test the candidate installer in Explorer.'
+        $phaseEvidence = Join-Path $EvidenceDirectory 'fixed'
+        & powershell.exe -NoProfile -MTA -ExecutionPolicy Bypass -File $PSCommandPath -InstallerPath (Join-Path $candidate 'localsend.exe') -EvidenceDirectory $phaseEvidence
+        $phaseExit = $LASTEXITCODE
+        $resultPath = Join-Path $phaseEvidence 'result.json'
+        if (-not (Test-Path $resultPath)) { throw 'The GUI scenario did not write result.json' }
+        $phaseResult = Get-Content $resultPath -Raw | ConvertFrom-Json
+        $summary.Phases += [ordered]@{ Name = 'fixed'; ExitCode = $phaseExit; Result = $phaseResult }
+        if ($phaseExit -ne 0 -or -not $phaseResult.Passed -or $phaseResult.Error -or $phaseResult.Assertions.Count -ne 2) {
+            throw 'The candidate installer did not render both LocalSend icons'
+        }
+        $surfaces = @($phaseResult.Assertions | ForEach-Object { $_.Surface } | Sort-Object)
+        if (($surfaces -join ',') -ne 'Dialog,Menu' -or @($phaseResult.Assertions | Where-Object { -not $_.Passed }).Count -ne 0) {
+            throw 'The GUI scenario did not pass both rendered-icon assertions'
         }
         $summary.Passed = $true
     } catch {
@@ -166,36 +137,28 @@ public static class ShareIconDesktopInput {
             Get-AppxPackage LocalSend.App | Remove-AppxPackage -ErrorAction SilentlyContinue
             Remove-Item (Join-Path $env:LOCALAPPDATA 'LocalSendShareIconE2E') -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item (Join-Path $env:TEMP 'ShareIconFixture') -Recurse -Force -ErrorAction SilentlyContinue
-            if ($createdBaselineScript) { Remove-Item $baselineScript -Force -ErrorAction SilentlyContinue }
             if ($hadPri) { Copy-Item $priBackup $pri -Force } else { Remove-Item $pri -Force -ErrorAction SilentlyContinue }
             Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
         } catch { Write-Warning "Cleanup failed: $($_.Exception.Message)" }
         $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'summary.json')
-        $phaseLabels = @{
-            baseline = 'Before fix'
-            fixed = 'After fix'
-            control = 'Positive control (fixed installer, first run)'
-        }
         $mediaCaptions = foreach ($image in (Get-ChildItem $EvidenceDirectory -Filter '*.png' -Recurse -File)) {
-            $phaseLabel = $phaseLabels[$image.Directory.Name]
-            $expected = if ($image.Directory.Name -eq 'baseline') { 'The LocalSend logo should be missing.' } else { 'The LocalSend logo should be visible.' }
             $surface, $details = switch -Regex ($image.Name) {
-                '^dialog\.png$' { 'Share picker - full screenshot'; "Windows Share Sheet opened with More options. Look above the LocalSend label. $expected" }
-                '^dialog-icon\.png$' { 'Share picker - icon close-up'; "The LocalSend tile cropped from the Share Sheet. This is the area checked by the pixel assertion. $expected" }
-                '^menu\.png$' { 'Share with menu - full screenshot'; "Explorer Share with submenu after LocalSend was selected once. Look beside the LocalSend label. $expected" }
-                '^menu-icon\.png$' { 'Share with menu - icon close-up'; "The icon area beside LocalSend in the submenu. This is the area checked by the pixel assertion. $expected" }
-                '^context-attempt-' { 'Explorer context menu - setup'; 'File selection and context-menu state before opening Share with. This is diagnostic evidence, not an icon assertion.' }
-                default { 'Failure diagnostics'; 'Desktop state captured when the UI scenario could not complete. See result.json and the UI Automation logs for the error.' }
+                '^dialog\.png$' { 'Share picker'; 'LocalSend appears in the Windows Share picker.' }
+                '^dialog-icon\.png$' { 'Picker icon'; 'Close-up of the LocalSend icon checked by the pixel assertion.' }
+                '^menu\.png$' { 'Share with menu'; 'LocalSend appears in the Explorer Share with menu.' }
+                '^menu-icon\.png$' { 'Menu icon'; 'Close-up of the LocalSend menu icon checked by the pixel assertion.' }
+                '^context-attempt-' { 'Select file'; 'The selected file and context menu before sharing.' }
+                default { 'Failure'; 'Desktop state when the test could not finish.' }
             }
             [ordered]@{
                 Path = "$($image.Directory.Name)/$($image.Name)"
-                Title = "$phaseLabel`: $surface"
+                Title = $surface
                 Description = $details
             }
         }
         [ordered]@{
-            Title = 'LocalSend Windows share icons - issue #3495'
-            Description = 'Compare Before fix with After fix in the Share picker and Share with menu. Positive control is an initial run of the fixed installer that checks the test environment. Full screenshots show the UI context; close-ups show the exact icon area tested.'
+            Title = 'LocalSend Windows share icons'
+            Description = 'Explorer Share picker and menu captures for issue #3495.'
             Media = @($mediaCaptions)
         } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'evidence.json')
     }

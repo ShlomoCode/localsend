@@ -18,20 +18,20 @@ $description = [System.Net.WebUtility]::HtmlEncode($description)
 $imageExtensions = @('.png', '.jpg', '.jpeg', '.gif', '.webp')
 $videoExtensions = @('.mp4', '.webm')
 $media = @(Get-ChildItem $directory -File -Recurse |
-    Where-Object { $_.Extension.ToLowerInvariant() -in ($imageExtensions + $videoExtensions) } | Sort-Object FullName)
+    Where-Object { $_.Extension.ToLowerInvariant() -in ($imageExtensions + $videoExtensions) } | Sort-Object LastWriteTimeUtc, FullName)
 $cards = foreach ($file in $media) {
     $relative = $file.FullName.Substring($directory.Length + 1).Replace('\', '/')
     $caption = $captions[$relative]
     $label = [System.Net.WebUtility]::HtmlEncode($(if ($caption.Title) { $caption.Title } else { $relative }))
     $details = [System.Net.WebUtility]::HtmlEncode($caption.Description)
-    $filename = [System.Net.WebUtility]::HtmlEncode($relative)
     $url = (($relative.Split('/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/')
     $preview = if ($file.Extension.ToLowerInvariant() -in $videoExtensions) {
         "<video controls preload=`"none`" src=`"$url`" aria-label=`"$label`"></video>"
     } else {
         "<a href=`"$url`"><img src=`"$url`" alt=`"$label`" loading=`"lazy`"></a>"
     }
-    "<figure><h2>$label</h2>$preview<figcaption><p>$details</p><a href=`"$url`">Open original: $filename</a></figcaption></figure>"
+    $extra = if ($details) { "<details><summary>Details</summary><p>$details</p></details>" } else { '' }
+    "<li><figure><h2>$label</h2>$preview<figcaption>$extra<a href=`"$url`">Open original</a></figcaption></figure></li>"
 }
 @"
 <!doctype html>
@@ -40,15 +40,14 @@ $cards = foreach ($file in $media) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$title</title>
 <style>
-body { font: 16px system-ui; margin: 24px; background: #f5f5f5; color: #222; }
-main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
-figure { margin: 0; padding: 16px; background: white; border: 1px solid #ddd; border-radius: 8px; }
-img, video { max-width: 100%; height: auto; } figcaption { margin-top: 12px; overflow-wrap: anywhere; }
-h2 { font-size: 18px; margin: 0 0 16px; } figcaption p { line-height: 1.5; }
+body { font: 16px system-ui; margin: 24px auto; padding: 0 20px; max-width: 880px; }
+ol { padding-left: 24px; } li { margin-bottom: 32px; }
+figure { margin: 0; } h2 { font-size: 18px; }
+img, video { display: block; max-width: 100%; max-height: 480px; height: auto; }
+figcaption { margin-top: 12px; overflow-wrap: anywhere; } details { margin-bottom: 8px; }
 </style>
 <h1>$title</h1>
 <p>$description</p>
-<p>$($media.Count) images and videos. Select a filename to open the original file. Test results and logs are in this artifact.</p>
-<main>$($cards -join "`n")</main>
+<main><ol aria-label="Capture timeline">$($cards -join "`n")</ol></main>
 </html>
 "@ | Set-Content -Encoding UTF8 (Join-Path $directory 'index.html')
