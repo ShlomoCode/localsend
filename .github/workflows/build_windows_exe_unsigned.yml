@@ -29,7 +29,13 @@ jobs:
           cache: true
       - name: Install screen recorder
         run: choco install ffmpeg --yes --no-progress
+      - uses: actions/cache/restore@v4
+        id: builds
+        with:
+          path: binaries
+          key: windows-placement-pair-9cdfebd-v1
       - name: Prepare Windows build
+        if: steps.builds.outputs.cache-hit != 'true'
         run: |
           git config --system core.longpaths true
           rustup show
@@ -39,8 +45,9 @@ jobs:
           & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
           if ($LASTEXITCODE -ne 0) { throw 'makeappx failed' }
           New-Item -ItemType Directory -Force evidence, binaries\before, binaries\after | Out-Null
-          @{ candidate = (git rev-parse HEAD); productBase = '9cdfebd7134bfda7478281ff809eed919e50f884'; baseline = 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244'; harness = $env:GITHUB_SHA; runnerImage = $env:ImageVersion; runnerOS = $env:RUNNER_OS } | ConvertTo-Json | Set-Content evidence\builds.json
+          @{ candidate = (git rev-parse HEAD); productBase = '9cdfebd7134bfda7478281ff809eed919e50f884'; baseline = 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244'; buildRunnerImage = $env:ImageVersion; runnerOS = $env:RUNNER_OS } | ConvertTo-Json | Set-Content binaries\builds.json
       - name: Build actual candidate application
+        if: steps.builds.outputs.cache-hit != 'true'
         working-directory: app
         run: |
           flutter pub get
@@ -49,16 +56,28 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'candidate build failed' }
           Copy-Item build\windows\x64\runner\Debug\* ..\binaries\after -Recurse
       - name: Remove only the Windows placement fix for negative control
+        if: steps.builds.outputs.cache-hit != 'true'
         run: |
           git restore --source=c1ce322fb3acf08e44f329b8b7208b8b0d91e244 -- app/lib/provider/persistence_provider.dart app/lib/provider/window_dimensions_provider.dart app/windows/runner/CMakeLists.txt app/windows/runner/flutter_window.cpp app/windows/runner/flutter_window.h
           if ($LASTEXITCODE -ne 0) { throw 'baseline preparation failed' }
-          git diff --binary > evidence\negative-control.patch
+          git diff --binary > binaries\negative-control.patch
       - name: Build actual baseline application
+        if: steps.builds.outputs.cache-hit != 'true'
         working-directory: app
         run: |
           flutter build windows --debug
           if ($LASTEXITCODE -ne 0) { throw 'baseline build failed' }
           Copy-Item build\windows\x64\runner\Debug\* ..\binaries\before -Recurse
+      - uses: actions/cache/save@v4
+        if: steps.builds.outputs.cache-hit != 'true'
+        with:
+          path: binaries
+          key: windows-placement-pair-9cdfebd-v1
+      - name: Retain binary and recording provenance
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          Copy-Item binaries\builds.json,binaries\negative-control.patch evidence
+          @{ harness = $env:GITHUB_SHA; runnerImage = $env:ImageVersion; run = $env:GITHUB_RUN_ID } | ConvertTo-Json | Set-Content evidence\recording-run.json
       - name: Record matched baseline scenarios
         run: ./support/scripts/windows-placement-recording.ps1 -AppPath binaries/before/localsend_app.exe -OutputDirectory evidence/before -Label BEFORE
       - name: Record matched candidate scenarios

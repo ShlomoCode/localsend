@@ -28,7 +28,14 @@ public class PlacementCaptureBanner : System.Windows.Forms.Form {
     get { var p = base.CreateParams; p.ExStyle |= 0x08000000; return p; }
   }
 }
-'@ -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing')
+'@ -ReferencedAssemblies @(
+  [System.Windows.Forms.Form].Assembly.Location,
+  [System.Drawing.Graphics].Assembly.Location,
+  [System.Drawing.Point].Assembly.Location,
+  [System.ComponentModel.Component].Assembly.Location,
+  'System.Windows.Forms.Primitives',
+  'System.Runtime'
+)
 
 $app = (Resolve-Path -LiteralPath $AppPath).Path
 if ([IO.Path]::GetExtension($app) -ne '.exe') { throw 'AppPath must point to the built Windows .exe.' }
