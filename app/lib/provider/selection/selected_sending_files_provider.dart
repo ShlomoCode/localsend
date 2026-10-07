@@ -295,16 +295,34 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
     bool filesAdded = false;
     bool nextShare = false;
     bool nextText = false;
+    final pendingFiles = <File>[];
+    final pendingPaths = <String>{};
+
+    Future<void> addPendingFiles() async {
+      if (pendingFiles.isEmpty) return;
+      await dispatchAsync(
+        AddFilesAction(
+          files: pendingFiles.toList(),
+          converter: CrossFileConverters.convertFile,
+        ),
+      );
+      pendingFiles.clear();
+      pendingPaths.clear();
+    }
+
     for (final arg in args) {
       if (arg == '--share') {
+        await addPendingFiles();
         nextShare = true;
         continue;
       }
       if (arg == '--text' || arg == '-t') {
+        await addPendingFiles();
         nextText = true;
         continue;
       }
       if (nextShare) {
+        await addPendingFiles();
         nextShare = false;
         final json = jsonDecode(arg);
         final SharedMedia payload = SharedMedia.decode(json);
@@ -322,6 +340,7 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
         continue;
       }
       if (nextText) {
+        await addPendingFiles();
         nextText = false;
         if (arg.trim().isNotEmpty) {
           dispatch(AddMessageAction(message: arg.trim()));
@@ -330,6 +349,7 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
         continue;
       }
       if (arg.startsWith('-')) {
+        await addPendingFiles();
         continue;
       }
 
@@ -337,18 +357,20 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
       final directory = Directory(arg);
 
       if (file.existsSync()) {
-        await dispatchAsync(
-          AddFilesAction(
-            files: [file],
-            converter: CrossFileConverters.convertFile,
-          ),
-        );
+        // AddFilesAction compares with state, so commit repeated paths before batching more.
+        if (pendingPaths.contains(file.path)) await addPendingFiles();
+        pendingFiles.add(file);
+        pendingPaths.add(file.path);
         filesAdded = true;
-      } else if (directory.existsSync()) {
-        await dispatchAsync(AddDirectoryAction(arg));
-        filesAdded = true;
+      } else {
+        await addPendingFiles();
+        if (directory.existsSync()) {
+          await dispatchAsync(AddDirectoryAction(arg));
+          filesAdded = true;
+        }
       }
     }
+    await addPendingFiles();
 
     return (state, filesAdded);
   }
