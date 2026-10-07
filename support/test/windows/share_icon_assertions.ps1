@@ -94,7 +94,7 @@ function Assert-LocalSendShareIcon {
         [Parameter(Mandatory = $true)] $TargetBounds,
         [Parameter(Mandatory = $true)] [ValidateSet('Menu', 'Dialog')] [string] $Surface,
         [Parameter(Mandatory = $true)] [string] $CropPath,
-        [ValidateRange(0.1, 1.0)] [double] $MinimumScore = 0.58
+        [ValidateRange(0.1, 1.0)] [double] $MinimumScore = 0.75
     )
 
     $referencePath = Join-Path $PSScriptRoot '..\..\build\msix\content\Images\Square44x44Logo.targetsize-48.png'

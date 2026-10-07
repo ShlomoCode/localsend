@@ -14,11 +14,7 @@ permissions:
 
 jobs:
   share-icon:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-11-arm, windows-2025]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-11-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -111,6 +107,6 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: share-icon-e2e-${{ matrix.os }}
+          name: share-icon-e2e-windows-11-arm
           path: share-icon-evidence
           if-no-files-found: error

@@ -16,4 +16,4 @@ To test an installer locally, use a disposable Windows VM with an English UI and
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File support/test/windows/share_icon_e2e.ps1 -InstallerPath C:\build\localsend.exe -EvidenceDirectory C:\evidence
 ```
 
-The installer must include a trusted, signed MSIX helper. The workflow reuses the official signed helper; it does not need signing credentials. Windows 11 ARM runs the x64 installer through emulation. Windows Server 2025 provides an additional x64 check.
+The installer must include a trusted, signed MSIX helper. The workflow reuses the official signed helper; it does not need signing credentials. Windows 11 ARM runs the x64 installer through emulation. The logo similarity threshold is 0.75; verified fixed menu and picker scores are 0.806 and 0.899.

@@ -214,7 +214,7 @@ function Open-ExplorerShareMenu {
 }
 
 try {
-    Write-Host 'GIVEN: install signed LocalSend and register its real Windows share target.'
+    Write-Host 'GIVEN: install LocalSend with its signed helper and register its real Windows share target.'
     $installer = (Resolve-Path $InstallerPath).Path
     $installDir = Join-Path $env:LOCALAPPDATA 'LocalSendShareIconE2E'
     Stop-Process -Name localsend_app -Force -ErrorAction SilentlyContinue
