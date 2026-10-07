@@ -1,75 +1,76 @@
-name: Build windows exe (unsigned)
+name: Windows placement before and after recording
+
+# Temporary diagnostic branch only; do not merge this replacement workflow.
+# Reuse the registered dispatch filename so GitHub can run the branch workflow.
 
 on:
   workflow_dispatch:
 
-env:
-  FLUTTER_VERSION: "3.41.9"
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Get version from pubspec.yaml
-        id: get_version
-        run: |
-          VERSION=$(sed -n 's/^version: \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' app/pubspec.yaml)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-  build_windows_exe_x86_64:
-    needs: build
+  record:
     runs-on: windows-latest
-
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Fix long file paths
+      - name: Enable long paths before checkout
         run: git config --system core.longpaths true
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-
-      # Required by the CMake install step (app/windows/CMakeLists.txt installs localsend_msix_helper.msix)
-      - name: Build MSIX helper
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - name: Install screen recorder
+        run: choco install ffmpeg --yes --no-progress
+      - name: Prepare Windows build
         run: |
+          git config --system core.longpaths true
+          rustup show
           $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
           & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
+          if ($LASTEXITCODE -ne 0) { throw 'makepri failed' }
           & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
-
-      - name: Dependencies
+          if ($LASTEXITCODE -ne 0) { throw 'makeappx failed' }
+          New-Item -ItemType Directory -Force evidence, binaries\before, binaries\after | Out-Null
+          @{ candidate = (git rev-parse HEAD); productBase = '9cdfebd7134bfda7478281ff809eed919e50f884'; baseline = 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244'; harness = $env:GITHUB_SHA; runnerImage = $env:ImageVersion; runnerOS = $env:RUNNER_OS } | ConvertTo-Json | Set-Content evidence\builds.json
+      - name: Build actual candidate application
         working-directory: app
-        run: flutter pub get
-
-      - name: Compile for Windows
-        working-directory: app
-        run: flutter build windows
-
-      - name: Prepare Inno Setup payload
         run: |
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno" | Out-Null
-          Copy-Item -Path "app\build\windows\x64\runner\Release\*" -Destination "${{ runner.temp }}\inno" -Recurse
-          Copy-Item -Path "app\assets\packaging\logo.ico" -Destination "${{ runner.temp }}\inno"
-          Copy-Item -Path "support\build\windows\x64\*" -Destination "${{ runner.temp }}\inno" -Recurse
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno-result" | Out-Null
-
-      # SkipMsixHelper: the helper would be unsigned and Add-AppxPackage rejects unsigned packages
-      - name: Compile installer (unsigned)
-        run: iscc /DSkipSignTool /DSkipMsixHelper "/DPayloadDir=${{ runner.temp }}\inno" "/DResultDir=${{ runner.temp }}\inno-result" support\scripts\compile_windows_exe-inno.iss
-
-      - name: Rename installer
-        run: Rename-Item -Path "${{ runner.temp }}\inno-result\localsend.exe" -NewName "LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe"
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v6
+          flutter pub get
+          if ($LASTEXITCODE -ne 0) { throw 'pub get failed' }
+          flutter build windows --debug
+          if ($LASTEXITCODE -ne 0) { throw 'candidate build failed' }
+          Copy-Item build\windows\x64\runner\Debug\* ..\binaries\after -Recurse
+      - name: Remove only the Windows placement fix for negative control
+        run: |
+          git restore --source=c1ce322fb3acf08e44f329b8b7208b8b0d91e244 -- app/lib/provider/persistence_provider.dart app/lib/provider/window_dimensions_provider.dart app/windows/runner/CMakeLists.txt app/windows/runner/flutter_window.cpp app/windows/runner/flutter_window.h
+          if ($LASTEXITCODE -ne 0) { throw 'baseline preparation failed' }
+          git diff --binary > evidence\negative-control.patch
+      - name: Build actual baseline application
+        working-directory: app
+        run: |
+          flutter build windows --debug
+          if ($LASTEXITCODE -ne 0) { throw 'baseline build failed' }
+          Copy-Item build\windows\x64\runner\Debug\* ..\binaries\before -Recurse
+      - name: Record matched baseline scenarios
+        run: ./support/scripts/windows-placement-recording.ps1 -AppPath binaries/before/localsend_app.exe -OutputDirectory evidence/before -Label BEFORE
+      - name: Record matched candidate scenarios
+        run: ./support/scripts/windows-placement-recording.ps1 -AppPath binaries/after/localsend_app.exe -OutputDirectory evidence/after -Label AFTER -ExpectedNative
+      - name: Compose synchronized comparison
+        run: |
+          ffmpeg -y -i evidence/before/recording.mp4 -i evidence/after/recording.mp4 -filter_complex "[0:v]scale=960:-2,setsar=1[a];[1:v]scale=960:-2,setsar=1[b];[a][b]hstack=inputs=2[v]" -map '[v]' -t 30 -c:v libx264 -crf 20 -pix_fmt yuv420p -movflags +faststart evidence/comparison.mp4
+          if ($LASTEXITCODE -ne 0) { throw 'comparison encoding failed' }
+          ffprobe -v error -show_entries format=duration:stream=width,height -of json evidence/comparison.mp4 | Set-Content evidence\video-validation.json
+      - uses: actions/upload-artifact@v6
+        if: always()
         with:
-          name: windows-exe-x86-64-unsigned
-          path: ${{ runner.temp }}\inno-result\LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe
+          name: windows-placement-before-after
+          path: evidence
           if-no-files-found: error
