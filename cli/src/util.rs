@@ -1,3 +1,4 @@
+use anyhow::Context;
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{cursor, execute};
 use localsend::util::filename;
@@ -92,22 +93,27 @@ pub fn progress_bar(fraction: f64, width: usize) -> String {
 /// `file_name` comes from the sender and is untrusted: it is collapsed to its
 /// final path component and sanitized for the local filesystem, so it can
 /// neither escape the target directory nor carry illegal characters.
-pub fn unique_path(dir: &Path, file_name: &str) -> PathBuf {
-    let name = filename::sanitize_path(file_name, filename::Rules::current());
-
-    let candidate = dir.join(&name);
-    if !candidate.exists() {
-        return candidate;
+pub fn unique_path(dir: &Path, file_name: &str) -> anyhow::Result<PathBuf> {
+    let original_name = filename::final_component(file_name);
+    let mut counter = None;
+    loop {
+        let name = filename::sanitize_for_directory(original_name, dir, counter, false)?;
+        let candidate = dir.join(name);
+        match std::fs::symlink_metadata(&candidate) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(candidate),
+            Ok(_) => {}
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("Could not inspect {}", candidate.display()));
+            }
+        }
+        counter = Some(match counter {
+            None => 1,
+            Some(value) => value
+                .checked_add(1)
+                .context("Filename collision counter exhausted")?,
+        });
     }
-
-    let (stem, extension) = match name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
-        _ => (name.as_str(), String::new()),
-    };
-    (1..)
-        .map(|i| dir.join(format!("{stem} ({i}){extension}")))
-        .find(|candidate| !candidate.exists())
-        .unwrap()
 }
 
 /// Estimates the transfer speed from cumulative byte counts, smoothed with an
@@ -141,5 +147,72 @@ impl SpeedMeter {
         self.last_bytes = bytes_now;
         self.last_time = now;
         self.ema
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collision_at_filename_limit_remains_writable_and_keeps_extension() {
+        let dir = std::env::temp_dir().join(format!("localsend-cli-name-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let name = format!("{}.mp4", "a".repeat(251));
+        let first = unique_path(&dir, &name).unwrap();
+        std::fs::write(&first, b"first").unwrap();
+        let second = unique_path(&dir, &name).unwrap();
+        assert_ne!(first, second);
+        assert!(
+            second
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(" (1).mp4")
+        );
+        std::fs::write(&second, b"second").unwrap();
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn compound_extension_collision_uses_original_final_component() {
+        let dir =
+            std::env::temp_dir().join(format!("localsend-cli-compound-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let name = format!("{}.tar.gz", "a".repeat(248));
+        let first = unique_path(&dir, &format!("../../folder/{name}")).unwrap();
+        std::fs::write(&first, b"first").unwrap();
+        let second = unique_path(&dir, &format!("..\\folder\\{name}")).unwrap();
+        assert!(second.starts_with(&dir));
+        assert!(
+            second
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(" (1).tar.gz")
+        );
+        std::fs::write(&second, b"second").unwrap();
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_is_a_collision() {
+        let dir =
+            std::env::temp_dir().join(format!("localsend-cli-symlink-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let link = dir.join("archive.tar.gz");
+        std::os::unix::fs::symlink("missing-target", &link).unwrap();
+        let second = unique_path(&dir, "archive.tar.gz").unwrap();
+        assert_eq!(second.file_name().unwrap(), "archive (1).tar.gz");
+        assert_eq!(
+            std::fs::read_link(&link).unwrap(),
+            std::path::Path::new("missing-target")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
