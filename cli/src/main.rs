@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Send one or more files or directories
+    /// Send one or more files or directories, or a text message
     Send {
         /// Destination device: an exact alias or IP address
         #[arg(long, value_name = "TARGET")]
@@ -32,8 +32,12 @@ pub enum Command {
         #[arg(long, requires = "to")]
         json: bool,
 
+        /// Send this text as a message instead of files; `-` reads it from stdin
+        #[arg(long, value_name = "TEXT", requires = "to", conflicts_with = "paths")]
+        text: Option<String>,
+
         /// Files or directories to send (directories are collected recursively)
-        #[arg(value_name = "PATH", required = true, num_args = 1..)]
+        #[arg(value_name = "PATH", required_unless_present = "text", num_args = 1..)]
         paths: Vec<PathBuf>,
     },
     /// Discover nearby devices and print one snapshot
@@ -173,6 +177,79 @@ mod tests {
     #[test]
     fn requires_at_least_one_send_path() {
         assert!(Args::try_parse_from(["localsend-cli", "send"]).is_err());
+    }
+
+    #[test]
+    fn accepts_a_text_message() {
+        let args =
+            Args::try_parse_from(["localsend-cli", "send", "--to", "Phone", "--text", "hello"])
+                .unwrap();
+
+        let Some(Command::Send {
+            to, text, paths, ..
+        }) = args.command
+        else {
+            panic!("expected the send command");
+        };
+        assert_eq!(to.as_deref(), Some("Phone"));
+        assert_eq!(text.as_deref(), Some("hello"));
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn accepts_text_with_automation_send_options() {
+        let args = Args::try_parse_from([
+            "localsend-cli",
+            "send",
+            "--to",
+            "192.0.2.5",
+            "--text",
+            "hello",
+            "--target-port",
+            "53318",
+            "--timeout",
+            "10",
+            "--json",
+        ])
+        .unwrap();
+
+        let Some(Command::Send {
+            text,
+            paths,
+            target_port,
+            timeout,
+            json,
+            ..
+        }) = args.command
+        else {
+            panic!("expected the send command");
+        };
+        assert_eq!(text.as_deref(), Some("hello"));
+        assert!(paths.is_empty());
+        assert_eq!(target_port, Some(53318));
+        assert_eq!(timeout, Some(10));
+        assert!(json);
+    }
+
+    #[test]
+    fn rejects_text_together_with_paths() {
+        assert!(
+            Args::try_parse_from([
+                "localsend-cli",
+                "send",
+                "--to",
+                "Phone",
+                "--text",
+                "hello",
+                "one.txt"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn requires_a_destination_for_text() {
+        assert!(Args::try_parse_from(["localsend-cli", "send", "--text", "hello"]).is_err());
     }
 
     #[test]

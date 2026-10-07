@@ -3,10 +3,11 @@
 
 use super::discovery;
 use super::sending;
+use super::sending::Payload;
 use super::target::TargetSelector;
 use super::{AppEvent, Network, spawn_staged_discovery, start_network, stop_network};
 use crate::sanitize;
-use crate::send_task::{self, SendCancel};
+use crate::send_task::{self, FileSource, SendCancel};
 use crate::storage::Repository;
 use crate::util;
 use anyhow::{Context, anyhow};
@@ -195,7 +196,7 @@ impl Machine {
         &mut self,
         target: &TargetSelector,
         target_port: Option<u16>,
-        paths: Vec<PathBuf>,
+        payload: Payload,
         transfer_id: String,
         deadline: Option<Instant>,
     ) -> anyhow::Result<()> {
@@ -214,13 +215,13 @@ impl Machine {
         target
             .restrict_device(&mut device, target_port.unwrap_or(53317))
             .map_err(|e| anyhow!(e))?;
-        self.send_to_device(device, paths, transfer_id, deadline)
+        self.send_to_device(device, payload, transfer_id, deadline)
     }
 
     fn send_to_device(
         &mut self,
         device: StatefulDevice,
-        paths: Vec<PathBuf>,
+        payload: Payload,
         transfer_id: String,
         deadline: Option<Instant>,
     ) -> anyhow::Result<()> {
@@ -230,8 +231,24 @@ impl Machine {
             .ok_or_else(|| anyhow!("Destination has no dialable address"))?
             .host
             .clone();
-        let (files, paths, _) =
-            sending::collect_files_with_log(paths, |message| eprintln!("{message}"));
+        let (files, sources) = match payload {
+            Payload::Files(paths) => {
+                let (files, paths, _) =
+                    sending::collect_files_with_log(paths, |message| eprintln!("{message}"));
+                (
+                    files,
+                    paths
+                        .into_iter()
+                        .map(|(id, path)| (id, FileSource::Path(path)))
+                        .collect(),
+                )
+            }
+            Payload::Text(text) => {
+                let (files, sources, _) =
+                    sending::text_transfer_with_log(text, |message| eprintln!("{message}"));
+                (files, sources)
+            }
+        };
         anyhow::ensure!(!files.is_empty(), "No readable files selected");
         let sent = Arc::new(AtomicU64::new(0));
         let cancel = SendCancel::new();
@@ -249,7 +266,7 @@ impl Machine {
             self.storage.identity.clone(),
             device,
             files,
-            paths,
+            sources,
             sent,
             cancel,
             self.events_tx.clone(),
@@ -480,7 +497,7 @@ impl Machine {
                     && let Err(error) = self.start_send(
                         &pending.target,
                         pending.target_port,
-                        pending.paths,
+                        Payload::Files(pending.paths),
                         pending.transfer_id.clone(),
                         Some(pending.deadline),
                     )
@@ -632,7 +649,7 @@ pub(super) async fn send(
     target_port: Option<u16>,
     timeout: Option<u64>,
     json: bool,
-    paths: Vec<PathBuf>,
+    payload: Payload,
 ) -> anyhow::Result<()> {
     let mut machine = Machine::start(storage, ReceivePolicy::Disabled, false, json).await?;
     machine.start_discovery(match target_port {
@@ -648,7 +665,7 @@ pub(super) async fn send(
             Some(_) = machine.network.discovery_rx.recv() => {},
             Some(event) = machine.events_rx.recv() => {
                 if matches!(event, AppEvent::DiscoveryFinished) && !started {
-                    machine.start_send(&target, target_port, paths.clone(), Uuid::new_v4().to_string(), None)?;
+                    machine.start_send(&target, target_port, payload.clone(), Uuid::new_v4().to_string(), None)?;
                     started = true;
                 } else { machine.handle_app(event)?; }
             }

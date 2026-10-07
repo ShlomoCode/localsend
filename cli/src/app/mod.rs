@@ -27,7 +27,7 @@ use localsend::model::discovery::ProtocolType;
 use localsend::multicast::{DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
 use localsend::util::interface::{InterfaceFilter, local_interface_addresses};
 use receive::{Answer, PendingReceive, ReceiveSession};
-use sending::SendState;
+use sending::{Payload, SendState};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -75,19 +75,29 @@ pub enum AppEvent {
 }
 
 pub async fn run(args: Args) -> anyhow::Result<()> {
-    let (preselected, target) = match &args.command {
-        Some(Command::Send { to, paths, .. }) => (
-            paths.clone(),
-            to.as_deref().map(TargetSelector::parse).transpose()?,
-        ),
-        _ => (Vec::new(), None),
+    let (payload, target) = match &args.command {
+        Some(Command::Send {
+            to, text, paths, ..
+        }) => {
+            let payload = match text {
+                Some(text) => Payload::Text(sending::read_text(text)?),
+                None => Payload::Files(paths.clone()),
+            };
+            (
+                payload,
+                to.as_deref().map(TargetSelector::parse).transpose()?,
+            )
+        }
+        _ => (Payload::Files(Vec::new()), None),
     };
-    for path in &preselected {
-        anyhow::ensure!(
-            path.is_file() || path.is_dir(),
-            "Not a file or directory: {}",
-            path.display()
-        );
+    if let Payload::Files(paths) = &payload {
+        for path in paths {
+            anyhow::ensure!(
+                path.is_file() || path.is_dir(),
+                "Not a file or directory: {}",
+                path.display()
+            );
+        }
     }
     let storage = storage::Repository::load(&args)?;
     match args.command {
@@ -114,13 +124,16 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 target_port,
                 timeout,
                 json,
-                preselected,
+                payload,
             )
             .await
         }
-        _ => match target {
-            Some(target) => machine::send(storage, target, None, None, false, preselected).await,
-            None => run_interactive(storage, preselected).await,
+        _ => match (target, payload) {
+            (Some(target), payload) => {
+                machine::send(storage, target, None, None, false, payload).await
+            }
+            (None, Payload::Files(preselected)) => run_interactive(storage, preselected).await,
+            (None, Payload::Text(_)) => unreachable!("--text requires --to"),
         },
     }
 }
