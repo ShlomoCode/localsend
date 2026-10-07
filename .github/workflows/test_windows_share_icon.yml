@@ -44,8 +44,8 @@ jobs:
           }
           if ($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { throw 'First-login wizard still covers the desktop' }
           # Explorer queries WSL; finish its setup so it cannot open update prompts.
-          & wsl.exe --update --web-download
-          if ($LASTEXITCODE -ne 0) { throw 'Runner WSL update failed' }
+          & wsl.exe --install --no-distribution --web-download
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw 'Runner WSL setup failed' }
           Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
           (New-Object -ComObject Shell.Application).MinimizeAll()
           # Import Windows' native UI Automation API for the UWP share picker.
