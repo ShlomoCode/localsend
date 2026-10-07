@@ -43,12 +43,12 @@ jobs:
             Start-Sleep 3
           }
           if ($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { throw 'First-login wizard still covers the desktop' }
-          # Remove the unused Linux namespace from this disposable runner. Unpinning
-          # it still lets Explorer activate WSL's unfinished first-run setup.
-          foreach ($hive in @('HKLM:\SOFTWARE', 'HKLM:\SOFTWARE\WOW6432Node', 'HKCU:\SOFTWARE')) {
-            $linux = "$hive\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{B2B4A4D1-2754-4140-A2EB-9A76D9D7CDC6}"
-            if (Test-Path $linux) { Remove-Item $linux -Recurse -Force }
-          }
+          # Complete WSL's runner setup so Explorer cannot open installation prompts.
+          $wslSetup = Join-Path $env:RUNNER_TEMP 'wsl.arm64.msi'
+          Invoke-WebRequest 'https://github.com/microsoft/WSL/releases/download/3.0.1/wsl.3.0.1.0.arm64.msi' -OutFile $wslSetup
+          if ((Get-FileHash $wslSetup).Hash -ne '857DDBB335EC7D05FFA71D0FD2203750C0E8FC29BB164F8A95DB92BD7BBA4263') { throw 'Unexpected WSL installer hash' }
+          $wslInstall = Start-Process msiexec.exe -ArgumentList @('/i', $wslSetup, '/qn', '/norestart') -Wait -PassThru
+          if ($wslInstall.ExitCode -ne 0 -and $wslInstall.ExitCode -ne 3010) { throw 'Runner WSL setup failed' }
           Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
           (New-Object -ComObject Shell.Application).MinimizeAll()
           # Import Windows' native UI Automation API for the UWP share picker.

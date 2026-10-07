@@ -308,7 +308,6 @@ function Open-ExplorerShareMenu {
         [LocalSendShareInput]::ShowWindow($handle, 9) | Out-Null
         if (-not [LocalSendShareInput]::SetForegroundWindow($handle)) { throw 'Could not foreground File Explorer' }
         Click-Element $file
-        $file.SetFocus()
         Start-Sleep -Milliseconds 500
         Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
         [LocalSendShareInput]::SetForegroundWindow($handle) | Out-Null
