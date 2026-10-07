@@ -13,8 +13,11 @@ using System.Runtime.InteropServices;
 public static class ShareIconInput {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
 }
 '@
+. (Join-Path $PSScriptRoot '..\test\windows\share_icon_assertions.ps1')
 function Find-Element([string] $name) {
     $condition = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::NameProperty), $name
     [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
@@ -86,6 +89,15 @@ Start-Sleep 5
 $item = $shell.NameSpace($fixtureDir.FullName).ParseName('share-me.txt')
 $item.Verbs() | ForEach-Object { $_.Name } | Set-Content (Join-Path $evidence 'verbs.txt')
 function Capture-Share([string] $phase) {
+    Write-Host "Starting $phase"
+    Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+    Start-Process explorer.exe
+    Start-Sleep 5
+    Start-Process explorer.exe -ArgumentList $fixtureDir.FullName
+    Start-Sleep 5
+    $window = Find-Element 'ShareIconFixture - File Explorer'
+    [ShareIconInput]::ShowWindow([IntPtr]$window.Current.NativeWindowHandle, 9) | Out-Null
+    [ShareIconInput]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
     $file = Find-Element 'share-me'
     if (-not $file) { $file = Find-Element 'share-me.txt' }
     Click-Element $file
@@ -97,15 +109,36 @@ function Capture-Share([string] $phase) {
     if (-not $share) { $share = Find-Element 'Share' }
     Click-Element $share
     Start-Sleep 5
-    Save-Desktop "$phase-share"
+    Save-Desktop "$phase-share-before-recent"
     $more = Find-Element 'More options'
     if (-not $more) { throw 'Share With submenu did not open' }
     Click-Element $more
     Start-Sleep 5
     Save-Desktop "$phase-more-options"
-    $closeCondition = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::AutomationIdProperty), 'SharePickerCloseButtonTabStop'
-    $close = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $closeCondition)
-    Click-Element $close
+    $localSend = Find-Element 'LocalSend'
+    if (-not $localSend) { throw 'LocalSend absent from Windows Share picker' }
+    $bitmap = [System.Drawing.Bitmap]::new((Join-Path $evidence "$phase-more-options.png"))
+    try { Assert-LocalSendShareIcon $bitmap $localSend.Current.BoundingRectangle Dialog (Join-Path $evidence "$phase-dialog-icon.png") | Format-List }
+    catch { Write-Host $_ }
+    finally { $bitmap.Dispose() }
+    Click-Element $localSend
+    Start-Sleep 10
+    Stop-Process -Name localsend_app -Force -ErrorAction SilentlyContinue
+    [ShareIconInput]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
+    Click-Element (Find-Element 'share-me')
+    (Find-Element 'share-me').SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+    Start-Sleep 3
+    Click-Element (Find-Element 'Share with')
+    Start-Sleep 5
+    Save-Desktop "$phase-share"
+    $localSend = Find-Element 'LocalSend'
+    if (-not $localSend) { throw 'LocalSend absent from Share With after recent use' }
+    $bitmap = [System.Drawing.Bitmap]::new((Join-Path $evidence "$phase-share.png"))
+    try { Assert-LocalSendShareIcon $bitmap $localSend.Current.BoundingRectangle Menu (Join-Path $evidence "$phase-menu-icon.png") | Format-List }
+    catch { Write-Host $_ }
+    finally { $bitmap.Dispose() }
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
 }
 Capture-Share 'baseline'
 
