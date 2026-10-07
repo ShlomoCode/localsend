@@ -1,0 +1,29 @@
+name: Diagnose Windows share icon
+
+on:
+  push:
+    branches: [codex/windows-share-icon]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Probe real Explorer sharing with the released installer
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File support/scripts/diagnose_windows_share_icon.ps1
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: share-icon-${{ matrix.os }}
+          path: share-icon-evidence
+          if-no-files-found: error
