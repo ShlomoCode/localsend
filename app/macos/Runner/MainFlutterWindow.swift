@@ -7,6 +7,12 @@ class MainFlutterWindow: NSWindow {
     let project = FlutterDartProject()
     project.dartEntrypointArguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
     let flutterViewController = FlutterViewController(project: project)
+
+    // Register before installing the view controller: Dart can start before `applicationDidFinishLaunching`
+    // and call this channel, causing MissingPluginException if registration waits until then.
+    let appDelegate = NSApplication.shared.delegate as! AppDelegate
+    appDelegate.registerMethodChannel(binaryMessenger: flutterViewController.engine.binaryMessenger)
+
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
