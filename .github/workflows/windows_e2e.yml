@@ -48,7 +48,7 @@ jobs:
           $evidence = Join-Path 'windows-e2e-evidence' $env:E2E_TEST_ID
           powershell.exe -NoProfile -MTA -ExecutionPolicy Bypass -File $test -EvidenceDirectory $evidence
           if ($LASTEXITCODE -ne 0) { throw "Windows E2E failed: $env:E2E_TEST_ID" }
-      - name: Build screenshot evidence gallery
+      - name: Build visual evidence gallery
         if: always()
         shell: powershell
         run: |
@@ -60,7 +60,7 @@ jobs:
           name: windows-e2e-${{ matrix.id }}
           path: windows-e2e-evidence/${{ matrix.id }}
           if-no-files-found: error
-      - name: Link screenshot evidence
+      - name: Link visual evidence
         if: always() && steps.evidence.outputs.artifact-url != ''
         shell: powershell
         env:
@@ -69,7 +69,7 @@ jobs:
           @"
           ### Windows E2E evidence: $env:E2E_TEST_ID
 
-          [Download screenshots, test results, and logs]($env:E2E_ARTIFACT_URL).
+          [Download screenshots, recordings, test results, and logs]($env:E2E_ARTIFACT_URL).
 
-          Extract the artifact and open ``index.html`` to browse screenshots at full size.
+          Extract the artifact and open ``index.html`` to browse images and play videos.
           "@ | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
