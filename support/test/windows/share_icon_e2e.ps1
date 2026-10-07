@@ -36,21 +36,40 @@ function Find-VisibleElement {
         [Parameter(Mandatory = $true)] [System.Windows.Automation.ControlType[]] $Types,
         [string] $ClassName
     )
+    $searchRoots = @($Root)
+    if ($Root.Current.ClassName -eq '#32769') {
+        # Menus and the Share picker are separate top-level UIA windows. Search
+        # each window rather than asking the desktop provider for all descendants.
+        $searchRoots = @()
+        $topLevels = $Root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($topLevel in $topLevels) {
+            try {
+                $current = $topLevel.Current
+                if ($current.BoundingRectangle.Width -gt 0 -and $current.BoundingRectangle.Height -gt 0 -and
+                    $current.ClassName -ne 'Progman' -and $current.ClassName -ne 'Shell_TrayWnd') {
+                    $searchRoots += $topLevel
+                }
+            } catch { }
+        }
+    }
     foreach ($name in $Names) {
         foreach ($type in $Types) {
             $conditions = @(
                 [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $name),
-                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type),
-                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::IsOffscreenProperty, $false)
+                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
             )
             if ($ClassName) {
                 $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, $ClassName)
             }
             $condition = [System.Windows.Automation.AndCondition]::new([System.Windows.Automation.Condition[]] $conditions)
-            $element = $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
-            if ($element) {
-                $bounds = $element.Current.BoundingRectangle
-                if ($bounds.Width -gt 0 -and $bounds.Height -gt 0) { return $element }
+            foreach ($searchRoot in $searchRoots) {
+                try {
+                    $element = $searchRoot.FindFirst([System.Windows.Automation.TreeScope]::Subtree, $condition)
+                    if ($element) {
+                        $bounds = $element.Current.BoundingRectangle
+                        if ($bounds.Width -gt 0 -and $bounds.Height -gt 0) { return $element }
+                    }
+                } catch [System.TimeoutException], [System.Runtime.InteropServices.COMException] { }
             }
         }
     }
@@ -67,7 +86,16 @@ function Wait-VisibleElement {
     )
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $element = Find-VisibleElement -Root $Root -Names $Names -Types $Types -ClassName $ClassName
+        try {
+            # Shell UIA providers can time out while a XAML menu is opening.
+            # Retry within the deadline and refresh the desktop root.
+            $searchRoot = if ($Root -eq [System.Windows.Automation.AutomationElement]::RootElement) {
+                [System.Windows.Automation.AutomationElement]::RootElement
+            } else { $Root }
+            $element = Find-VisibleElement -Root $searchRoot -Names $Names -Types $Types -ClassName $ClassName
+        } catch [System.TimeoutException], [System.Runtime.InteropServices.COMException] {
+            $element = $null
+        }
         if ($element) { return $element }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -82,6 +110,7 @@ function Click-Element {
     if (-not [LocalSendShareInput]::SetCursorPos($x, $y)) { throw "Cannot move pointer to $x,$y" }
     [LocalSendShareInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
     [LocalSendShareInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 500
 }
 
 function Save-Screenshot {
@@ -105,22 +134,39 @@ function Get-CaptureBounds {
 
 function Save-RelevantUiTree {
     param([string] $Name, [System.Windows.Automation.AutomationElement] $Root)
-    $conditions = [System.Windows.Automation.OrCondition]::new([System.Windows.Automation.Condition[]] @(
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem),
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem),
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::DataItem),
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)
-    ))
-    $elements = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $conditions)
-    $lines = foreach ($element in $elements) {
+    Save-ShallowUiTree (Join-Path $EvidenceDirectory "$Name-uia.txt")
+}
+
+function Save-ShallowUiTree {
+    param([string] $Path)
+    # A shallow desktop snapshot remains useful when a deep UIA query hangs.
+    # Limit traversal to top-level shell windows and their immediate children.
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $topLevels = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($topLevel in $topLevels) {
         try {
-            $current = $element.Current
-            if (-not $current.IsOffscreen -and $current.BoundingRectangle.Width -gt 0) {
-                '{0} | {1} | {2} | {3}' -f $current.Name, $current.ControlType.ProgrammaticName, $current.ClassName, $current.BoundingRectangle
+            $current = $topLevel.Current
+            if ($current.BoundingRectangle.Width -le 0) { continue }
+            $lines.Add(('{0} | {1} | {2} | {3}' -f $current.Name, $current.ControlType.ProgrammaticName, $current.ClassName, $current.BoundingRectangle))
+            if ($current.Name -notlike '*ShareIconFixture*' -and $current.ControlType -ne [System.Windows.Automation.ControlType]::Menu -and
+                $current.ClassName -notlike '*Popup*' -and $current.ClassName -ne '#32768') { continue }
+            $children = $topLevel.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($child in $children) {
+                $c = $child.Current
+                $lines.Add(('  {0} | {1} | {2} | {3}' -f $c.Name, $c.ControlType.ProgrammaticName, $c.ClassName, $c.BoundingRectangle))
             }
-        } catch { }
+        } catch { $lines.Add("UIA snapshot error: $($_.Exception.Message)") }
     }
-    $lines | Set-Content (Join-Path $EvidenceDirectory "$Name-uia.txt")
+    $lines | Set-Content $Path
+}
+
+function Save-FailureEvidence {
+    $path = Join-Path $EvidenceDirectory 'failure.png'
+    $bitmap = Save-Screenshot $path
+    $bitmap.Dispose()
+    try { Save-ShallowUiTree (Join-Path $EvidenceDirectory 'failure-uia.txt') }
+    catch { Write-Warning "Shallow UIA snapshot failed: $($_.Exception.Message)" }
 }
 
 function Assert-Surface {
@@ -157,13 +203,18 @@ function Open-ExplorerShareMenu {
     )
     Click-Element $file
     $file.SetFocus()
+    Start-Sleep -Milliseconds 500
     [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+    Start-Sleep -Seconds 1
+    $contextBitmap = Save-Screenshot (Join-Path $EvidenceDirectory 'context.png')
+    $contextBitmap.Dispose()
     $share = Wait-VisibleElement -Root $desktop -Names @('Share with', 'Share') -Types @([System.Windows.Automation.ControlType]::MenuItem)
     Click-Element $share
     return $desktop
 }
 
 try {
+    Write-Host 'GIVEN: install signed LocalSend and register its real Windows share target.'
     $installer = (Resolve-Path $InstallerPath).Path
     $installDir = Join-Path $env:LOCALAPPDATA 'LocalSendShareIconE2E'
     Stop-Process -Name localsend_app -Force -ErrorAction SilentlyContinue
@@ -185,10 +236,12 @@ try {
     # Force Explorer to reload shell extension/icon state after installation.
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
     Start-Process explorer.exe
+    Start-Sleep -Seconds 3
     $fixtureDir = Join-Path $env:TEMP 'ShareIconFixture'
     New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
     Set-Content -Path (Join-Path $fixtureDir 'share-me.txt') -Value 'LocalSend share icon regression fixture'
     Start-Process explorer.exe -ArgumentList $fixtureDir
+    Write-Host 'WHEN: select the fixture in Explorer and open Share with > More options.'
     $desktop = Open-ExplorerShareMenu $fixtureDir
     $more = Wait-VisibleElement -Root $desktop -Names @('More options') -Types @([System.Windows.Automation.ControlType]::MenuItem)
     Click-Element $more
@@ -197,6 +250,7 @@ try {
         [System.Windows.Automation.ControlType]::DataItem
     ) -ClassName 'GridViewItem'
     Save-RelevantUiTree 'dialog' $desktop
+    Write-Host 'THEN: inspect the rendered LocalSend picker icon.'
     $result.Assertions += (Assert-Surface Dialog $pickerTarget)
 
     # Selecting the target once puts it in Explorer's recent Share with submenu.
@@ -212,11 +266,13 @@ try {
     $desktop = Open-ExplorerShareMenu $fixtureDir
     $recentTarget = Wait-VisibleElement -Root $desktop -Names @('LocalSend') -Types @([System.Windows.Automation.ControlType]::MenuItem)
     Save-RelevantUiTree 'menu' $desktop
+    Write-Host 'THEN: inspect the rendered LocalSend recent-target menu icon.'
     $result.Assertions += (Assert-Surface Menu $recentTarget)
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
     $result.Passed = @($result.Assertions | Where-Object { -not $_.Passed }).Count -eq 0
 } catch {
     $result.Error = $_.Exception.Message
+    try { Save-FailureEvidence } catch { Write-Warning "Failure evidence capture also failed: $($_.Exception.Message)" }
     Write-Error $result.Error -ErrorAction Continue
 } finally {
     $result | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'result.json')

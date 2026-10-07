@@ -1,8 +1,12 @@
 name: Windows share icon E2E
 
 on:
-  push:
-    branches: [codex/windows-share-icon]
+  pull_request:
+    paths:
+      - support/scripts/compile_windows_exe-inno.iss
+      - support/build/msix/**
+      - support/test/windows/**
+      - .github/workflows/test_windows_share_icon.yml
   workflow_dispatch:
 
 permissions:
