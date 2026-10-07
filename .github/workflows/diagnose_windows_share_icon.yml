@@ -1,8 +1,6 @@
 name: Diagnose Windows share icon
 
 on:
-  push:
-    branches: [codex/windows-share-icon]
   workflow_dispatch:
 
 permissions:

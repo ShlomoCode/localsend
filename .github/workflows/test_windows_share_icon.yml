@@ -1,0 +1,112 @@
+name: Windows share icon E2E
+
+on:
+  push:
+    branches: [codex/windows-share-icon]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  share-icon:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-11-arm, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare interactive desktop
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class DesktopInput {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+          }
+          '@
+          $root = [System.Windows.Automation.AutomationElement]::RootElement
+          $oobeCondition = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::ClassNameProperty), 'Shell_OOBEProxy'
+          for ($i = 0; $i -lt 4; $i++) {
+            if (-not $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { break }
+            # First-login wizard on the hosted Windows 11 image, outside the tested UI.
+            $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            if ($screen.Width -ne 1024 -or $screen.Height -ne 768) { throw 'Unexpected first-login wizard desktop size' }
+            [DesktopInput]::SetCursorPos(867, 657) | Out-Null
+            [DesktopInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+            [DesktopInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep 3
+          }
+          if ($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $oobeCondition)) { throw 'First-login wizard still covers the desktop' }
+          Get-Process wsl -ErrorAction SilentlyContinue | Stop-Process -Force
+          (New-Object -ComObject Shell.Application).MinimizeAll()
+      - name: Build baseline and candidate installers from identical signed app binaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force share-icon-evidence | Out-Null
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture | ConvertTo-Json | Set-Content share-icon-evidence/environment.json
+          $compilerSetup = Join-Path $env:TEMP 'innosetup.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $compilerSetup
+          if ((Get-FileHash $compilerSetup).Hash -ne '0362A383ED217D4C4239B5933866DD96D3EB2102737DA92F80F6057A4B40DF2F') { throw 'Unexpected Inno Setup hash' }
+          $compilerDir = Join-Path $env:TEMP 'InnoShareIcon'
+          $process = Start-Process $compilerSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$compilerDir`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed' }
+          $release = Join-Path $env:TEMP 'localsend-release.exe'
+          Invoke-WebRequest 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.exe' -OutFile $release
+          if ((Get-FileHash $release).Hash -ne '122783E6ABB4B0A1F1603D896F46A03AEDA3004479EBD3175CAB4DDAC6B60919') { throw 'Unexpected LocalSend release hash' }
+          $payload = Join-Path $env:TEMP 'LocalSendSharePayload'
+          $process = Start-Process $release -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$payload`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Payload installation failed' }
+          Start-Sleep 15
+          Get-AppxPackage LocalSend.App | Remove-AppxPackage
+          Copy-Item app/assets/packaging/logo.ico $payload
+          # Use the exact PRI and images shipped inside the signed helper. The
+          # production change only deploys them beside the executable.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $unpack = Join-Path $env:TEMP 'LocalSendShareResources'
+          [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $payload 'localsend_msix_helper.msix'), $unpack)
+          Copy-Item (Join-Path $unpack 'resources.pri') support/build/msix/content/resources.pri
+          Get-ChildItem $payload -File | Get-FileHash | Select-Object Path, Hash | ConvertTo-Json | Set-Content share-icon-evidence/payload-hashes.json
+          $candidate = Join-Path $env:TEMP 'share-icon-candidate'
+          $baseline = Join-Path $env:TEMP 'share-icon-baseline'
+          New-Item -ItemType Directory -Force $candidate, $baseline | Out-Null
+          # Negative control: the same installer recipe with just this fix removed.
+          $script = Get-Content support/scripts/compile_windows_exe-inno.iss
+          $baselineScript = $script | Where-Object { $_ -notmatch '^Source: "\.\.\\build\\msix\\content\\(Images\\\*|resources\.pri)"' }
+          if ($script.Count - $baselineScript.Count -ne 2) { throw 'Negative control must remove exactly the two resource deployment lines' }
+          $baselineScript | Set-Content support/scripts/share-icon-baseline.iss
+          & "$compilerDir\ISCC.exe" /DSkipSignTool "/DPayloadDir=$payload" "/DResultDir=$baseline" support/scripts/share-icon-baseline.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline installer build failed' }
+          & "$compilerDir\ISCC.exe" /DSkipSignTool "/DPayloadDir=$payload" "/DResultDir=$candidate" support/scripts/compile_windows_exe-inno.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate installer build failed' }
+          "BASELINE_INSTALLER=$baseline\localsend.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_INSTALLER=$candidate\localsend.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Given a working control, when Explorer shares, then both icons render
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File support/test/windows/share_icon_e2e.ps1 -InstallerPath "$env:CANDIDATE_INSTALLER" -EvidenceDirectory share-icon-evidence/control
+      - name: Given the baseline, when Explorer shares, then the regression test fails on both icons
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File support/test/windows/share_icon_e2e.ps1 -InstallerPath "$env:BASELINE_INSTALLER" -EvidenceDirectory share-icon-evidence/baseline
+          $baselineExit = $LASTEXITCODE
+          $result = Get-Content share-icon-evidence/baseline/result.json -Raw | ConvertFrom-Json
+          if ($baselineExit -eq 0 -or $result.Assertions.Count -ne 2) { throw 'Baseline did not expose the icon regression' }
+          foreach ($assertion in $result.Assertions) {
+            if ($assertion.Passed -or $assertion.Error -notmatch 'icon not rendered') { throw 'Baseline failed for a different reason' }
+          }
+          $global:LASTEXITCODE = 0
+      - name: Given the fixed installer, when Explorer shares, then both LocalSend icons render
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File support/test/windows/share_icon_e2e.ps1 -InstallerPath "$env:CANDIDATE_INSTALLER" -EvidenceDirectory share-icon-evidence/fixed
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: share-icon-e2e-${{ matrix.os }}
+          path: share-icon-evidence
+          if-no-files-found: error
