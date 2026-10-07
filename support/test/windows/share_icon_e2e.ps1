@@ -135,7 +135,9 @@ function Get-CaptureBounds {
 
 function Save-RelevantUiTree {
     param([string] $Name, [System.Windows.Automation.AutomationElement] $Root)
-    Save-ShallowUiTree (Join-Path $EvidenceDirectory "$Name-uia.txt")
+    $path = Join-Path $EvidenceDirectory "$Name-uia.txt"
+    if ($Name -eq 'dialog') { Save-PickerUiTree $path }
+    else { Save-ShallowUiTree $path }
 }
 
 function Save-ShallowUiTree {
@@ -168,6 +170,77 @@ function Save-FailureEvidence {
     $bitmap.Dispose()
     try { Save-ShallowUiTree (Join-Path $EvidenceDirectory 'failure-uia.txt') }
     catch { Write-Warning "Shallow UIA snapshot failed: $($_.Exception.Message)" }
+    try { Save-PickerUiTree (Join-Path $EvidenceDirectory 'failure-picker-uia.txt') }
+    catch { Write-Warning "Picker UIA snapshot failed: $($_.Exception.Message)" }
+}
+
+function Get-SharePickerWindow {
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($window in $windows) {
+        try {
+            $current = $window.Current
+            if ($current.ClassName -eq 'ApplicationFrameWindow' -and $current.BoundingRectangle.Width -gt 0 -and
+                $current.BoundingRectangle.Height -gt 0) { return $window }
+        } catch { }
+    }
+    return $null
+}
+
+function Find-SharePickerTarget {
+    $picker = Get-SharePickerWindow
+    if (-not $picker) { return $null }
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'LocalSend')
+    $matches = $picker.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    for ($i = 0; $i -lt $matches.Count; $i++) {
+        $candidate = $matches.Item($i)
+        # The picker can expose the name on its text child rather than its tile.
+        # Walk to a compact clickable container without relying on a class name.
+        for ($depth = 0; $depth -lt 4 -and $candidate; $depth++) {
+            $current = $candidate.Current
+            $bounds = $current.BoundingRectangle
+            if ($current.ControlType -ne [System.Windows.Automation.ControlType]::Text -and
+                $bounds.Width -ge 60 -and $bounds.Width -le 160 -and
+                $bounds.Height -ge 60 -and $bounds.Height -le 150) { return $candidate }
+            $candidate = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($candidate)
+        }
+    }
+    return $null
+}
+
+function Wait-SharePickerTarget {
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        try {
+            $target = Find-SharePickerTarget
+            if ($target) { return $target }
+        } catch [System.TimeoutException], [System.Runtime.InteropServices.COMException] { }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'LocalSend share picker tile not found in ApplicationFrameWindow'
+}
+
+function Save-PickerUiTree {
+    param([string] $Path)
+    $picker = Get-SharePickerWindow
+    if (-not $picker) { return }
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $queue = New-Object System.Collections.Queue
+    $queue.Enqueue(@($picker, 0))
+    while ($queue.Count -gt 0 -and $lines.Count -lt 200) {
+        $entry = $queue.Dequeue()
+        $element = $entry[0]
+        $depth = [int] $entry[1]
+        try {
+            $current = $element.Current
+            $lines.Add(('{0}{1} | {2} | {3} | {4}' -f ('  ' * $depth), $current.Name,
+                $current.ControlType.ProgrammaticName, $current.ClassName, $current.BoundingRectangle))
+            if ($depth -ge 7) { continue }
+            $children = $element.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+            for ($i = 0; $i -lt $children.Count; $i++) { $queue.Enqueue(@($children.Item($i), $depth + 1)) }
+        } catch { $lines.Add(('UIA error at depth {0}: {1}' -f $depth, $_.Exception.Message)) }
+    }
+    $lines | Set-Content $Path
 }
 
 function Assert-Surface {
@@ -266,10 +339,8 @@ try {
     $desktop = Open-ExplorerShareMenu $fixtureDir
     $more = Wait-VisibleElement -Root $desktop -Names @('More options') -Types @([System.Windows.Automation.ControlType]::MenuItem)
     Click-Element $more
-    $pickerTarget = Wait-VisibleElement -Root $desktop -Names @('LocalSend') -Types @(
-        [System.Windows.Automation.ControlType]::ListItem,
-        [System.Windows.Automation.ControlType]::DataItem
-    ) -ClassName 'GridViewItem'
+    $pickerTarget = Wait-SharePickerTarget
+    Save-PickerUiTree (Join-Path $EvidenceDirectory 'dialog-picker-uia.txt')
     Save-RelevantUiTree 'dialog' $desktop
     Write-Host 'THEN: inspect the rendered LocalSend picker icon.'
     $result.Assertions += (Assert-Surface Dialog $pickerTarget)
