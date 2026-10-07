@@ -1,7 +1,7 @@
 mod devices;
 mod discovery;
-mod headless;
 mod keys;
+mod machine;
 mod receive;
 mod sending;
 mod status;
@@ -76,7 +76,9 @@ pub enum AppEvent {
 
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let (payload, target) = match &args.command {
-        Some(Command::Send { to, text, paths }) => {
+        Some(Command::Send {
+            to, text, paths, ..
+        }) => {
             let payload = match text {
                 Some(text) => Payload::Text(sending::read_text(text)?),
                 None => Payload::Files(paths.clone()),
@@ -86,7 +88,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 to.as_deref().map(TargetSelector::parse).transpose()?,
             )
         }
-        None => (Payload::Files(Vec::new()), None),
+        _ => (Payload::Files(Vec::new()), None),
     };
     if let Payload::Files(paths) = &payload {
         for path in paths {
@@ -98,11 +100,41 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         }
     }
     let storage = storage::Repository::load(&args)?;
-    match (target, payload) {
-        (Some(target), payload) => headless::run(storage, target, payload).await,
-        (None, Payload::Files(preselected)) => run_interactive(storage, preselected).await,
-        // clap only accepts `--text` together with `--to`.
-        (None, Payload::Text(_)) => unreachable!("--text requires --to"),
+    match args.command {
+        Some(Command::Discover { timeout, json }) => {
+            machine::discover(storage, timeout, json).await
+        }
+        Some(Command::Receive {
+            auto_accept,
+            once,
+            timeout,
+            json,
+        }) => machine::receive(storage, auto_accept, once, timeout, json).await,
+        Some(Command::Serve { stdio: true }) => machine::serve(storage).await,
+        Some(Command::Send {
+            to: Some(_),
+            target_port,
+            timeout,
+            json,
+            ..
+        }) => {
+            machine::send(
+                storage,
+                target.unwrap(),
+                target_port,
+                timeout,
+                json,
+                payload,
+            )
+            .await
+        }
+        _ => match (target, payload) {
+            (Some(target), payload) => {
+                machine::send(storage, target, None, None, false, payload).await
+            }
+            (None, Payload::Files(preselected)) => run_interactive(storage, preselected).await,
+            (None, Payload::Text(_)) => unreachable!("--text requires --to"),
+        },
     }
 }
 
@@ -421,7 +453,7 @@ impl App {
                 // In `send` mode the transfer is the whole program.
                 return !self.preselected.is_empty();
             }
-            // Only the headless mode acts on the end of the startup discovery.
+            // Only machine modes act on the end of startup discovery.
             AppEvent::DiscoveryFinished => {}
             AppEvent::Log { category, text } => self.ui.log(category, &text),
         }

@@ -34,7 +34,8 @@ const MAX_MESSAGE_BYTES: usize = 64_000;
 /// Largest input read from stdin, which is held in memory until sent.
 const MAX_STDIN_BYTES: u64 = 16_000_000;
 
-/// What the headless mode sends.
+/// What the terminal-free send mode sends.
+#[derive(Clone)]
 pub(super) enum Payload {
     Files(Vec<PathBuf>),
     Text(Bytes),
@@ -90,16 +91,13 @@ fn strip_trailing_line_break(text: &mut Vec<u8>) {
 /// is too long becomes a `.txt` file instead.
 ///
 /// `text` is UTF-8, as checked by [`read_text`].
-fn text_transfer(ui: &mut Ui, text: Bytes) -> Transfer {
+pub(super) fn text_transfer_with_log(text: Bytes, mut log: impl FnMut(String)) -> Transfer {
     let id = Uuid::new_v4().to_string();
     let size = text.len() as u64;
     let preview = match text.len() <= MAX_MESSAGE_BYTES {
         true => Some(String::from_utf8_lossy(&text).into_owned()),
         false => {
-            ui.log(
-                Category::Send,
-                "Text too long for a message, sending it as a file",
-            );
+            log("Text too long for a message, sending it as a file".to_string());
             None
         }
     };
@@ -232,21 +230,6 @@ pub(super) fn spawn_send(
     )
 }
 
-/// Spawns the send task delivering `text` to `device`, as a message when it
-/// fits. Returns the state tracking the transfer, or the reason the transfer
-/// could not start.
-pub(super) fn spawn_send_text(
-    ui: &mut Ui,
-    identity: Arc<Identity>,
-    device: StatefulDevice,
-    text: Bytes,
-    events_tx: mpsc::Sender<AppEvent>,
-) -> Result<SendState, String> {
-    let host = dialable_host(&device)?;
-    let transfer = text_transfer(ui, text);
-    spawn_transfer(identity, device, host, transfer, events_tx)
-}
-
 fn dialable_host(device: &StatefulDevice) -> Result<String, String> {
     device
         .get_best_channel()
@@ -291,6 +274,13 @@ pub(super) fn collect_files(
     ui: &mut Ui,
     picked: Vec<PathBuf>,
 ) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
+    collect_files_with_log(picked, |message| ui.log(Category::Send, &message))
+}
+
+pub(super) fn collect_files_with_log(
+    picked: Vec<PathBuf>,
+    mut log: impl FnMut(String),
+) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
     let mut files = HashMap::new();
     let mut paths = HashMap::new();
     let mut total_bytes = 0u64;
@@ -298,20 +288,17 @@ pub(super) fn collect_files(
         let (path, file_name) = match collected {
             Ok(collected) => collected,
             Err((path, error)) => {
-                ui.log(
-                    Category::Send,
-                    &format!("Skipping unreadable path: {} ({error})", path.display()),
-                );
+                log(format!(
+                    "Skipping unreadable path: {} ({error})",
+                    path.display()
+                ));
                 continue;
             }
         };
         let metadata = match std::fs::metadata(&path) {
             Ok(metadata) if metadata.is_file() => metadata,
             _ => {
-                ui.log(
-                    Category::Send,
-                    &format!("Skipping unreadable file: {}", path.display()),
-                );
+                log(format!("Skipping unreadable file: {}", path.display()));
                 continue;
             }
         };
@@ -444,9 +431,8 @@ impl App {
 mod tests {
     use super::{
         MAX_MESSAGE_BYTES, MAX_STDIN_BYTES, collect_path, read_stdin, strip_trailing_line_break,
-        text_transfer,
+        text_transfer_with_log,
     };
-    use crate::ui::Ui;
     use bytes::Bytes;
     use std::fs;
     use std::io::Read;
@@ -551,7 +537,7 @@ mod tests {
     #[test]
     fn sends_short_text_as_a_message() {
         let (files, sources, total_bytes) =
-            text_transfer(&mut Ui::new(), Bytes::from_static(b"hello"));
+            text_transfer_with_log(Bytes::from_static(b"hello"), |_| {});
 
         assert_eq!(files.len(), 1);
         let file = files.values().next().unwrap();
@@ -564,7 +550,8 @@ mod tests {
 
     #[test]
     fn sends_long_text_as_a_file() {
-        let (files, _, _) = text_transfer(&mut Ui::new(), vec![b'a'; MAX_MESSAGE_BYTES + 1].into());
+        let (files, _, _) =
+            text_transfer_with_log(vec![b'a'; MAX_MESSAGE_BYTES + 1].into(), |_| {});
 
         let file = files.values().next().unwrap();
         assert_eq!(file.file_type, "text/plain");
