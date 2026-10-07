@@ -38,57 +38,57 @@ void main() {
   });
 
   test('Media cache copies use the original asset modification time', () async {
-    // Given
+    // Given a cached copy with a newer modification time than the original file.
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
     final asset = _Asset(file, originalModifiedSecond);
 
-    // When
+    // When converting the selected media to a CrossFile.
     final converted = await CrossFileConverters.convertAssetEntity(asset);
 
-    // Then
+    // Then use the original modification time and keep the cached file's path and size.
     expect(converted.lastModified, '2020-01-02T03:04:05.000Z');
     expect(converted.path, file.path);
     expect(converted.size, 3);
   });
 
-  test('Original media files retain nanoseconds even when their path starts with the cache path', () async {
-    // Given
+  test('Files in cache-original are outside cache and retain nanosecond precision', () async {
+    // Given an original file in cache-original, a sibling of cache, with a timestamp that includes nanoseconds.
     final source = await Directory('${cache.path}-original').create();
     final file = await File('${source.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = originalModified;
     final asset = _Asset(file, originalModifiedSecond);
 
-    // When
+    // When converting the selected media to a CrossFile.
     final converted = await CrossFileConverters.convertAssetEntity(asset);
 
-    // Then
+    // Then keep the file's precise timestamp instead of the asset's whole-second timestamp.
     expect(converted.lastModified, originalModified);
   });
 
   test('Missing asset modification time preserves the available file timestamp', () async {
-    // Given
+    // Given a cached copy whose asset has no original modification time.
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
     final asset = _Asset(file, null);
 
-    // When
+    // When converting the selected media to a CrossFile.
     final converted = await CrossFileConverters.convertAssetEntity(asset);
 
-    // Then
+    // Then keep the cached file's timestamp because the original timestamp is unavailable.
     expect(converted.lastModified, copiedModified);
   });
 
   test('An original asset modification time of zero is preserved for cached media', () async {
-    // Given
+    // Given a cached copy whose original modification time is the Unix epoch (zero seconds).
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
     final asset = _Asset(file, 0);
 
-    // When
+    // When converting the selected media to a CrossFile.
     final converted = await CrossFileConverters.convertAssetEntity(asset);
 
-    // Then
+    // Then use the original timestamp even though its value is zero.
     expect(converted.lastModified, '1970-01-01T00:00:00.000Z');
   });
 }
