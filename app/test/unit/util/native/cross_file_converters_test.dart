@@ -38,41 +38,57 @@ void main() {
   });
 
   test('Media cache copies use the original asset modification time', () async {
+    // Given
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
+    final asset = _Asset(file, originalModifiedSecond);
 
-    final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, originalModifiedSecond));
+    // When
+    final converted = await CrossFileConverters.convertAssetEntity(asset);
 
+    // Then
     expect(converted.lastModified, '2020-01-02T03:04:05.000Z');
     expect(converted.path, file.path);
     expect(converted.size, 3);
   });
 
   test('Original media files retain nanoseconds even when their path starts with the cache path', () async {
+    // Given
     final source = await Directory('${cache.path}-original').create();
     final file = await File('${source.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = originalModified;
+    final asset = _Asset(file, originalModifiedSecond);
 
-    final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, originalModifiedSecond));
+    // When
+    final converted = await CrossFileConverters.convertAssetEntity(asset);
 
+    // Then
     expect(converted.lastModified, originalModified);
   });
 
   test('Missing asset modification time preserves the available file timestamp', () async {
+    // Given
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
+    final asset = _Asset(file, null);
 
-    final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, null));
+    // When
+    final converted = await CrossFileConverters.convertAssetEntity(asset);
 
+    // Then
     expect(converted.lastModified, copiedModified);
   });
 
   test('An original asset modification time of zero is preserved for cached media', () async {
+    // Given
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
+    final asset = _Asset(file, 0);
 
-    final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, 0));
+    // When
+    final converted = await CrossFileConverters.convertAssetEntity(asset);
 
+    // Then
     expect(converted.lastModified, '1970-01-01T00:00:00.000Z');
   });
 }
