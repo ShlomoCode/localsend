@@ -1,21 +1,21 @@
 # Windows E2E tests
 
-The [workflow](../../../.github/workflows/windows_e2e.yml) runs on every pull request and push to `main`, and supports manual runs. It discovers `e2e/*.e2e.ps1` and runs each file in a separate Windows 11 ARM job. Adding a test requires no workflow change. Helpers belong in `helpers/` and are not discovered as tests.
+These tests verify real Windows desktop behavior and preserve evidence of regressions. See the [workflow](../../../.github/workflows/windows_e2e.yml) for execution settings and the [test files](e2e/) for scenarios and setup requirements.
 
-Each test starts with a short explanation and links to the issues it guards. The file owns its full lifecycle: environment preparation, fixtures and builds, Given–When–Then actions, assertions, evidence, and cleanup. It accepts `-EvidenceDirectory` and exits nonzero on a setup or assertion failure. Keep helpers limited to reusable mechanics; the test file owns its scenario and verdict.
+## Write a regression test
 
-Save images (PNG, JPEG, GIF, WebP) and recordings (MP4, WebM) anywhere inside the evidence directory. The workflow adds an `index.html` gallery with video players and links the downloadable artifact from the run summary, including when a test fails. Extract the artifact and open the gallery to browse screenshots, play recordings, and open original media files alongside the test results and logs. Each test decides what to capture and when; the gallery discovers media without test-specific configuration.
+Start each test with a short explanation and links to the issues it guards. Use Given–When–Then to describe the setup, user action, and observable result. The test owns its full lifecycle, including environment preparation, fixtures, assertions, evidence, and cleanup. Keep reusable mechanics in helpers and scenario decisions in the test.
 
-To explain the evidence, write an optional `evidence.json` in the evidence directory. Set `Title` and `Description` for the report, and a `Media` array with `Path` (relative to the evidence directory), `Title`, and `Description` for each image or video. Use captions that explain the scenario, what the viewer should inspect, and whether the file is an assertion capture or a diagnostic. Files without captions still appear with their relative filename.
+Verify that the test catches the reported defect, not a setup or automation failure. Where possible, compare a failing baseline with a working control under the same conditions.
 
-Run a test from the repository root on a disposable Windows VM with an English UI, an interactive desktop, and the Windows SDK:
+Run tests in a disposable Windows environment. They can change installed applications and desktop state. Read the test's setup requirements before running it locally.
 
-```powershell
-powershell.exe -NoProfile -MTA -ExecutionPolicy Bypass -File support/test/windows/e2e/share_icon.e2e.ps1 -EvidenceDirectory C:\evidence\share_icon
-```
+## Review evidence
+
+Download the evidence artifact from the run summary, extract it, and open `index.html`. Review the captures alongside the test results and logs.
+
+Give screenshots and recordings captions that explain the scenario, what the viewer should inspect, and whether the capture shows an assertion or a diagnostic. Clearly distinguish the baseline, the corrected version, and any control run. See the [report helper](helpers/write_evidence_report.ps1) for the caption format and supported media.
 
 ## Share icons
 
-`e2e/share_icon.e2e.ps1` guards issue 3495. It builds baseline and candidate installers from identical signed LocalSend 1.18.2 binaries. Only the two visual-resource deployment directives differ. It verifies a working candidate, requires both baseline icon assertions to fail, then verifies the candidate again. Windows 11 ARM runs the x64 installer through emulation.
-
-The test installs runner prerequisites, replaces its LocalSend test installation, and restarts Explorer. It reuses the official signed MSIX helper without signing credentials. Evidence includes screenshots, icon crops, match scores, UI Automation data, installer logs, environment details, and the lifecycle result. The logo similarity threshold is 0.75; verified fixed menu and picker scores are 0.806 and 0.899.
+The [share-icon regression test](e2e/share_icon.e2e.ps1) checks the LocalSend logo in Explorer's Share with menu and the Windows Share picker. It requires the baseline to fail specifically on the missing icons and the corrected installer to render both logos.
