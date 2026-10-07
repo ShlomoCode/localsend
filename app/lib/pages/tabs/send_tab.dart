@@ -392,9 +392,10 @@ class _RotatingSyncIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scanningIps = context.ref.watch(nearbyDevicesProvider.select((s) => s.runningIps));
+    final animations = context.ref.watch(animationProvider);
     return RotatingWidget(
       duration: const Duration(seconds: 2),
-      spinning: scanningIps.contains(ip),
+      spinning: scanningIps.contains(ip) && animations,
       reverse: true,
       child: const Icon(Icons.sync),
     );
