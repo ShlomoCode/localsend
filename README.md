@@ -313,6 +313,8 @@ Instructions in [localsend/snap/README.md](https://github.com/localsend/snap/blo
 
 ## Contributors
 
+LocalSend is maintained by [Tienisto](https://github.com/Tienisto) and [ShlomoCode](https://github.com/ShlomoCode), with contributions from our community:
+
 <a href="https://github.com/localsend/localsend/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=localsend/localsend"  alt="Localsend Contributors"/>
 </a>
