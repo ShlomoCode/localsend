@@ -23,7 +23,7 @@ class CrossFileConverters {
     if (defaultTargetPlatform == TargetPlatform.android &&
         originalFileModifiedSeconds != null &&
         p.isWithin((await getTemporaryDirectory()).path, file.path)) {
-      // Cached media has the copy's mtime; keep the original file's nanoseconds when it is directly accessible.
+      // Reapply the original file's modification time to the cached copy.
       lastModified = DateTime.fromMillisecondsSinceEpoch(originalFileModifiedSeconds * 1000, isUtc: true).toIso8601String();
     }
     return CrossFile(
