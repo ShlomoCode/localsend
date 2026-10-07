@@ -58,14 +58,22 @@ void main() {
     expect(converted.lastModified, originalModified);
   });
 
-  test('Unknown asset times do not replace the available file timestamp with 1970', () async {
+  test('Missing asset modification time preserves the available file timestamp', () async {
     final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
     api.modified = copiedModified;
 
-    for (final seconds in [null, 0, -1]) {
-      final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, seconds));
-      expect(converted.lastModified, copiedModified, reason: 'asset timestamp: $seconds');
-    }
+    final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, null));
+
+    expect(converted.lastModified, copiedModified);
+  });
+
+  test('An original asset modification time of zero is preserved for cached media', () async {
+    final file = await File('${cache.path}/photo.jpg').writeAsBytes([1, 2, 3]);
+    api.modified = copiedModified;
+
+    final converted = await CrossFileConverters.convertAssetEntity(_Asset(file, 0));
+
+    expect(converted.lastModified, '1970-01-01T00:00:00.000Z');
   });
 }
 

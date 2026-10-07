@@ -19,13 +19,12 @@ class CrossFileConverters {
     final file = (await asset.originFile)!;
     final metadata = await readFileMetadata(path: file.path);
     var lastModified = metadata?.modified;
-    final modifiedSeconds = asset.modifiedDateSecond;
+    final originalFileModifiedSeconds = asset.modifiedDateSecond;
     if (defaultTargetPlatform == TargetPlatform.android &&
-        modifiedSeconds != null &&
-        modifiedSeconds > 0 &&
+        originalFileModifiedSeconds != null &&
         p.isWithin((await getTemporaryDirectory()).path, file.path)) {
       // Cached media has the copy's mtime; keep the original file's nanoseconds when it is directly accessible.
-      lastModified = DateTime.fromMillisecondsSinceEpoch(modifiedSeconds * 1000, isUtc: true).toIso8601String();
+      lastModified = DateTime.fromMillisecondsSinceEpoch(originalFileModifiedSeconds * 1000, isUtc: true).toIso8601String();
     }
     return CrossFile(
       name: await asset.titleAsync,
