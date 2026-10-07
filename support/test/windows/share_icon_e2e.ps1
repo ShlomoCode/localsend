@@ -135,9 +135,7 @@ function Get-CaptureBounds {
 
 function Save-RelevantUiTree {
     param([string] $Name, [System.Windows.Automation.AutomationElement] $Root)
-    $path = Join-Path $EvidenceDirectory "$Name-uia.txt"
-    if ($Name -eq 'dialog') { Save-PickerUiTree $path }
-    else { Save-ShallowUiTree $path }
+    Save-ShallowUiTree (Join-Path $EvidenceDirectory "$Name-uia.txt")
 }
 
 function Save-ShallowUiTree {
@@ -170,21 +168,6 @@ function Save-FailureEvidence {
     $bitmap.Dispose()
     try { Save-ShallowUiTree (Join-Path $EvidenceDirectory 'failure-uia.txt') }
     catch { Write-Warning "Shallow UIA snapshot failed: $($_.Exception.Message)" }
-    try { Save-PickerUiTree (Join-Path $EvidenceDirectory 'failure-picker-uia.txt') }
-    catch { Write-Warning "Picker UIA snapshot failed: $($_.Exception.Message)" }
-}
-
-function Get-SharePickerWindow {
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-    $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($window in $windows) {
-        try {
-            $current = $window.Current
-            if ($current.ClassName -eq 'ApplicationFrameWindow' -and $current.BoundingRectangle.Width -gt 0 -and
-                $current.BoundingRectangle.Height -gt 0) { return $window }
-        } catch { }
-    }
-    return $null
 }
 
 function Find-SharePickerTarget {
@@ -247,29 +230,6 @@ function Wait-SharePickerTarget {
     throw 'LocalSend share picker tile not found in ApplicationFrameWindow'
 }
 
-function Save-PickerUiTree {
-    param([string] $Path)
-    $picker = Get-SharePickerWindow
-    if (-not $picker) { return }
-    $lines = New-Object 'System.Collections.Generic.List[string]'
-    $queue = New-Object System.Collections.Queue
-    $queue.Enqueue(@($picker, 0))
-    while ($queue.Count -gt 0 -and $lines.Count -lt 200) {
-        $entry = $queue.Dequeue()
-        $element = $entry[0]
-        $depth = [int] $entry[1]
-        try {
-            $current = $element.Current
-            $lines.Add(('{0}{1} | {2} | {3} | {4}' -f ('  ' * $depth), $current.Name,
-                $current.ControlType.ProgrammaticName, $current.ClassName, $current.BoundingRectangle))
-            if ($depth -ge 7) { continue }
-            $children = $element.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
-            for ($i = 0; $i -lt $children.Count; $i++) { $queue.Enqueue(@($children.Item($i), $depth + 1)) }
-        } catch { $lines.Add(('UIA error at depth {0}: {1}' -f $depth, $_.Exception.Message)) }
-    }
-    $lines | Set-Content $Path
-}
-
 function Assert-Surface {
     param([string] $Surface, $Element)
     $base = $Surface.ToLowerInvariant()
@@ -293,7 +253,6 @@ function Assert-Surface {
 
 function Open-ExplorerShareMenu {
     param([string] $FolderPath)
-    Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
     $desktop = [System.Windows.Automation.AutomationElement]::RootElement
     $window = Wait-VisibleElement -Root $desktop -Names @('ShareIconFixture - File Explorer') -Types @([System.Windows.Automation.ControlType]::Window)
     $handle = [IntPtr] $window.Current.NativeWindowHandle
@@ -302,14 +261,11 @@ function Open-ExplorerShareMenu {
         [System.Windows.Automation.ControlType]::DataItem
     )
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        # The disposable GitHub Windows image can show a WSL update prompt while
-        # Explorer initializes Linux navigation. It can take keyboard focus.
-        Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
+        # Verify foreground before sending keyboard input to Explorer.
         [LocalSendShareInput]::ShowWindow($handle, 9) | Out-Null
         if (-not [LocalSendShareInput]::SetForegroundWindow($handle)) { throw 'Could not foreground File Explorer' }
         Click-Element $file
         Start-Sleep -Milliseconds 500
-        Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
         [LocalSendShareInput]::SetForegroundWindow($handle) | Out-Null
         if ([LocalSendShareInput]::GetForegroundWindow() -ne $handle) {
             Write-Host "Explorer lost foreground before context menu (attempt $attempt)."
@@ -356,7 +312,6 @@ try {
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
     Start-Process explorer.exe
     Start-Sleep -Seconds 3
-    Stop-Process -Name wsl, wslhost -Force -ErrorAction SilentlyContinue
     $fixtureDir = Join-Path $env:TEMP 'ShareIconFixture'
     New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
     Set-Content -Path (Join-Path $fixtureDir 'share-me.txt') -Value 'LocalSend share icon regression fixture'
