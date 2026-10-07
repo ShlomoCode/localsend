@@ -91,7 +91,7 @@ Source: "{#PayloadDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recu
 #ifndef SkipMsixHelper
 Source: "{#PayloadDir}\{#MyAppExeName}.manifest"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\{#MyAppMsixHelper}"; DestDir: "{app}"; Flags: ignoreversion
-; Sparse-package visual resources are resolved from the external location.
+; Windows reads the share icons from the app's install folder. Copy their images and resource index (resources.pri) there.
 Source: "..\build\msix\content\Images\*"; DestDir: "{app}\Images"; Flags: ignoreversion
 Source: "..\build\msix\content\resources.pri"; DestDir: "{app}"; Flags: ignoreversion
 #endif
