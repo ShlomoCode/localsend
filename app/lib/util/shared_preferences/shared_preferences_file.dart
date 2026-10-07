@@ -11,11 +11,10 @@ const _encoder = JsonEncoder();
 class SharedPreferencesFile extends SharedPreferencesStorePlatform {
   final File _file;
   final bool beautify;
+  Future<void>? _pendingWrite;
+  int _revision = 0;
 
-  SharedPreferencesFile({
-    required String filePath,
-    this.beautify = false,
-  }) : _file = File(filePath);
+  SharedPreferencesFile({required String filePath, this.beautify = false}) : _file = File(filePath);
 
   late final Map<String, Object> _cache = _getAll();
 
@@ -29,8 +28,8 @@ class SharedPreferencesFile extends SharedPreferencesStorePlatform {
 
   @override
   Future<bool> clear() {
-    _write({});
-    return Future.value(true);
+    _cache.clear();
+    return _write();
   }
 
   @override
@@ -53,22 +52,35 @@ class SharedPreferencesFile extends SharedPreferencesStorePlatform {
   @override
   Future<bool> remove(String key) {
     _cache.remove(key);
-    _write(_cache);
-    return Future.value(true);
+    return _write();
   }
 
   @override
   Future<bool> setValue(String valueType, String key, Object value) {
     _cache[key] = value;
-    _write(_cache);
-    return Future.value(true);
+    return _write();
   }
 
-  void _write(Map<String, dynamic> data) {
-    if (!_file.existsSync()) {
-      _file.createSync(recursive: true);
-    }
+  Future<bool> _write() async {
+    _revision++;
+    await (_pendingWrite ??= _flush());
+    return true;
+  }
 
-    _file.writeAsStringSync((beautify ? _beautyEncoder : _encoder).convert(data));
+  Future<void> _flush() async {
+    try {
+      await Future<void>.delayed(Duration.zero);
+      while (true) {
+        final revision = _revision;
+        final data = (beautify ? _beautyEncoder : _encoder).convert(_cache);
+        if (!await _file.exists()) {
+          await _file.create(recursive: true);
+        }
+        await _file.writeAsString(data);
+        if (revision == _revision) break;
+      }
+    } finally {
+      _pendingWrite = null;
+    }
   }
 }
