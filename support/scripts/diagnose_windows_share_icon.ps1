@@ -7,6 +7,26 @@ query session
 Get-Process explorer -ErrorAction SilentlyContinue | Select-Object Id, SessionId
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class ShareIconInput {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+}
+'@
+function Find-Element([string] $name) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::NameProperty), $name
+    [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+function Click-Element($element) {
+    if (-not $element) { throw 'UI element not found' }
+    $r = $element.Current.BoundingRectangle
+    [ShareIconInput]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+    [ShareIconInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+    [ShareIconInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep 2
+}
 function Save-Desktop([string] $name) {
     $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
@@ -27,6 +47,15 @@ function Save-Desktop([string] $name) {
 }
 
 Save-Desktop 'initial'
+# Hosted Windows 11 images may still show the first-login privacy wizard.
+$oobe = Find-Element 'Microsoft account'
+if ($oobe -and $oobe.Current.ClassName -eq 'Shell_OOBEProxy') {
+    Stop-Process -Id $oobe.Current.ProcessId -Force
+    Start-Sleep 3
+}
+$paging = Find-Element 'System Properties'
+if ($paging) { Click-Element (Find-Element 'OK') }
+Save-Desktop 'ready'
 $installer = Join-Path $env:TEMP 'localsend-release.exe'
 Invoke-WebRequest 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.exe' -OutFile $installer
 Get-FileHash $installer
@@ -50,7 +79,22 @@ Start-Process explorer.exe -ArgumentList $fixtureDir.FullName
 Start-Sleep 5
 $item = $shell.NameSpace($fixtureDir.FullName).ParseName('share-me.txt')
 $item.Verbs() | ForEach-Object { $_.Name } | Set-Content (Join-Path $evidence 'verbs.txt')
-$item.InvokeVerb('Windows.ModernShare')
-Start-Sleep 10
+$file = Find-Element 'share-me'
+if (-not $file) { $file = Find-Element 'share-me.txt' }
+Click-Element $file
+$file.SetFocus()
+[System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+Start-Sleep 3
+Save-Desktop 'baseline-context'
+$share = Find-Element 'Share with'
+if (-not $share) { $share = Find-Element 'Share' }
+Click-Element $share
+Start-Sleep 5
 Save-Desktop 'baseline-share'
+$more = Find-Element 'More options'
+if ($more) {
+    Click-Element $more
+    Start-Sleep 5
+    Save-Desktop 'baseline-more-options'
+}
 Stop-Transcript
