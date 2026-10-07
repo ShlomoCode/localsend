@@ -50,8 +50,14 @@ Save-Desktop 'initial'
 # Hosted Windows 11 images may still show the first-login privacy wizard.
 $oobe = Find-Element 'Microsoft account'
 if ($oobe -and $oobe.Current.ClassName -eq 'Shell_OOBEProxy') {
-    Stop-Process -Id $oobe.Current.ProcessId -Force
-    Start-Sleep 3
+    # The wizard's XAML is absent from UIA on this runner image. Advance its
+    # bottom-right Next/Accept button on the captured 1024x768 desktop.
+    for ($i = 0; $i -lt 4; $i++) {
+        [ShareIconInput]::SetCursorPos(867, 657) | Out-Null
+        [ShareIconInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+        [ShareIconInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep 3
+    }
 }
 $paging = Find-Element 'System Properties'
 if ($paging) { Click-Element (Find-Element 'OK') }
@@ -79,22 +85,42 @@ Start-Process explorer.exe -ArgumentList $fixtureDir.FullName
 Start-Sleep 5
 $item = $shell.NameSpace($fixtureDir.FullName).ParseName('share-me.txt')
 $item.Verbs() | ForEach-Object { $_.Name } | Set-Content (Join-Path $evidence 'verbs.txt')
-$file = Find-Element 'share-me'
-if (-not $file) { $file = Find-Element 'share-me.txt' }
-Click-Element $file
-$file.SetFocus()
-[System.Windows.Forms.SendKeys]::SendWait('+{F10}')
-Start-Sleep 3
-Save-Desktop 'baseline-context'
-$share = Find-Element 'Share with'
-if (-not $share) { $share = Find-Element 'Share' }
-Click-Element $share
-Start-Sleep 5
-Save-Desktop 'baseline-share'
-$more = Find-Element 'More options'
-if ($more) {
+function Capture-Share([string] $phase) {
+    $file = Find-Element 'share-me'
+    if (-not $file) { $file = Find-Element 'share-me.txt' }
+    Click-Element $file
+    $file.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+    Start-Sleep 3
+    Save-Desktop "$phase-context"
+    $share = Find-Element 'Share with'
+    if (-not $share) { $share = Find-Element 'Share' }
+    Click-Element $share
+    Start-Sleep 5
+    Save-Desktop "$phase-share"
+    $more = Find-Element 'More options'
+    if (-not $more) { throw 'Share With submenu did not open' }
     Click-Element $more
     Start-Sleep 5
-    Save-Desktop 'baseline-more-options'
+    Save-Desktop "$phase-more-options"
+    $closeCondition = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::AutomationIdProperty), 'SharePickerCloseButtonTabStop'
+    $close = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $closeCondition)
+    Click-Element $close
 }
+Capture-Share 'baseline'
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$unpack = Join-Path $env:TEMP 'LocalSendSharePackage'
+[System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $installDir 'localsend_msix_helper.msix'), $unpack)
+Copy-Item (Join-Path $unpack 'Images') $installDir -Recurse -Force
+Get-AppxPackage LocalSend.App | Remove-AppxPackage
+Add-AppxPackage (Join-Path $installDir 'localsend_msix_helper.msix') -ExternalLocation $installDir
+Start-Sleep 5
+Capture-Share 'images-only'
+
+Copy-Item (Join-Path $unpack 'resources.pri') $installDir -Force
+Get-AppxPackage LocalSend.App | Remove-AppxPackage
+Add-AppxPackage (Join-Path $installDir 'localsend_msix_helper.msix') -ExternalLocation $installDir
+Start-Sleep 5
+Capture-Share 'images-and-pri'
 Stop-Transcript
