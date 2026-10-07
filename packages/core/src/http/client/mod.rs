@@ -1,9 +1,11 @@
+mod endpoint;
 mod scoped_host;
 mod server_cert_verifier;
 mod url;
 pub mod v2;
 pub mod v3;
 
+pub use endpoint::HttpEndpoint;
 pub use v2::LsHttpClientV2;
 pub use v3::LsHttpClientV3;
 
