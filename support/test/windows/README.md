@@ -4,6 +4,8 @@ The [workflow](../../../.github/workflows/windows_e2e.yml) runs on every pull re
 
 Each test starts with a short explanation and links to the issues it guards. The file owns its full lifecycle: environment preparation, fixtures and builds, Given–When–Then actions, assertions, evidence, and cleanup. It accepts `-EvidenceDirectory` and exits nonzero on a setup or assertion failure. Keep helpers limited to reusable mechanics; the test file owns its scenario and verdict.
 
+Save screenshots as PNG files anywhere inside the evidence directory. The workflow adds an `index.html` gallery and links the downloadable artifact from the run summary, including when a test fails. Extract the artifact and open the gallery to browse full screenshots and icon crops alongside the test results and logs.
+
 Run a test from the repository root on a disposable Windows VM with an English UI, an interactive desktop, and the Windows SDK:
 
 ```powershell

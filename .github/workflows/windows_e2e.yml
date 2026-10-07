@@ -48,9 +48,28 @@ jobs:
           $evidence = Join-Path 'windows-e2e-evidence' $env:E2E_TEST_ID
           powershell.exe -NoProfile -MTA -ExecutionPolicy Bypass -File $test -EvidenceDirectory $evidence
           if ($LASTEXITCODE -ne 0) { throw "Windows E2E failed: $env:E2E_TEST_ID" }
+      - name: Build screenshot evidence gallery
+        if: always()
+        shell: powershell
+        run: |
+          & support/test/windows/helpers/write_evidence_report.ps1 -EvidenceDirectory (Join-Path 'windows-e2e-evidence' $env:E2E_TEST_ID)
       - uses: actions/upload-artifact@v6
+        id: evidence
         if: always()
         with:
           name: windows-e2e-${{ matrix.id }}
           path: windows-e2e-evidence/${{ matrix.id }}
           if-no-files-found: error
+      - name: Link screenshot evidence
+        if: always() && steps.evidence.outputs.artifact-url != ''
+        shell: powershell
+        env:
+          E2E_ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          @"
+          ### Windows E2E evidence: $env:E2E_TEST_ID
+
+          [Download screenshots, test results, and logs]($env:E2E_ARTIFACT_URL).
+
+          Extract the artifact and open ``index.html`` to browse screenshots at full size.
+          "@ | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
