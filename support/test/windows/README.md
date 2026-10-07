@@ -6,6 +6,8 @@ Each test starts with a short explanation and links to the issues it guards. The
 
 Save images (PNG, JPEG, GIF, WebP) and recordings (MP4, WebM) anywhere inside the evidence directory. The workflow adds an `index.html` gallery with video players and links the downloadable artifact from the run summary, including when a test fails. Extract the artifact and open the gallery to browse screenshots, play recordings, and open original media files alongside the test results and logs. Each test decides what to capture and when; the gallery discovers media without test-specific configuration.
 
+To explain the evidence, write an optional `evidence.json` in the evidence directory. Set `Title` and `Description` for the report, and a `Media` array with `Path` (relative to the evidence directory), `Title`, and `Description` for each image or video. Use captions that explain the scenario, what the viewer should inspect, and whether the file is an assertion capture or a diagnostic. Files without captions still appear with their relative filename.
+
 Run a test from the repository root on a disposable Windows VM with an English UI, an interactive desktop, and the Windows SDK:
 
 ```powershell

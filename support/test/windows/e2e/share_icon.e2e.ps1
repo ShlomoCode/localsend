@@ -171,6 +171,33 @@ public static class ShareIconDesktopInput {
             Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
         } catch { Write-Warning "Cleanup failed: $($_.Exception.Message)" }
         $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'summary.json')
+        $phaseLabels = @{
+            baseline = 'Before fix'
+            fixed = 'After fix'
+            control = 'Positive control (fixed installer, first run)'
+        }
+        $mediaCaptions = foreach ($image in (Get-ChildItem $EvidenceDirectory -Filter '*.png' -Recurse -File)) {
+            $phaseLabel = $phaseLabels[$image.Directory.Name]
+            $expected = if ($image.Directory.Name -eq 'baseline') { 'The LocalSend logo should be missing.' } else { 'The LocalSend logo should be visible.' }
+            $surface, $details = switch -Regex ($image.Name) {
+                '^dialog\.png$' { 'Share picker - full screenshot'; "Windows Share Sheet opened with More options. Look above the LocalSend label. $expected" }
+                '^dialog-icon\.png$' { 'Share picker - icon close-up'; "The LocalSend tile cropped from the Share Sheet. This is the area checked by the pixel assertion. $expected" }
+                '^menu\.png$' { 'Share with menu - full screenshot'; "Explorer Share with submenu after LocalSend was selected once. Look beside the LocalSend label. $expected" }
+                '^menu-icon\.png$' { 'Share with menu - icon close-up'; "The icon area beside LocalSend in the submenu. This is the area checked by the pixel assertion. $expected" }
+                '^context-attempt-' { 'Explorer context menu - setup'; 'File selection and context-menu state before opening Share with. This is diagnostic evidence, not an icon assertion.' }
+                default { 'Failure diagnostics'; 'Desktop state captured when the UI scenario could not complete. See result.json and the UI Automation logs for the error.' }
+            }
+            [ordered]@{
+                Path = "$($image.Directory.Name)/$($image.Name)"
+                Title = "$phaseLabel`: $surface"
+                Description = $details
+            }
+        }
+        [ordered]@{
+            Title = 'LocalSend Windows share icons - issue #3495'
+            Description = 'Compare Before fix with After fix in the Share picker and Share with menu. Positive control is an initial run of the fixed installer that checks the test environment. Full screenshots show the UI context; close-ups show the exact icon area tested.'
+            Media = @($mediaCaptions)
+        } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'evidence.json')
     }
     if (-not $summary.Passed) { exit 1 }
 }
