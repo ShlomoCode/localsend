@@ -80,14 +80,13 @@ jobs:
 
       - name: Compare startup on nested GNOME Wayland
         run: |
-          sudo apt-get install -y gnome-shell
+          sudo apt-get install -y gnome-shell mutter-dev-bin
           mkdir -p evidence/gnome
           cat > /tmp/diagnose-gnome.sh <<'EOF'
           set -u
           export DISPLAY=:100
-          export XDG_RUNTIME_DIR=/tmp/localsend-gnome-runtime
-          mkdir -p "$XDG_RUNTIME_DIR"
-          chmod 700 "$XDG_RUNTIME_DIR"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" "$XDG_RUNTIME_DIR"
           Xvfb :100 -screen 0 1280x800x24 > evidence/gnome/xvfb.log 2>&1 &
           sleep 2
           openbox > evidence/gnome/openbox.log 2>&1 &
