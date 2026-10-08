@@ -93,8 +93,11 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
     $windowBounds = Save-WindowScreenshot $process.MainWindowHandle (Join-Path $caseDirectory 'app-window.png')
     $tesseract = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
     if (-not (Test-Path $tesseract)) { throw 'Tesseract installation missing' }
-    $ocrText = (& $tesseract (Join-Path $caseDirectory 'app-window.png') stdout -l eng --psm 11 2>$null) -join "`n"
-    $ocrText | Set-Content -Encoding UTF8 (Join-Path $caseDirectory 'app-window-ocr.txt')
+    $ocrOutput = Join-Path $caseDirectory 'app-window-ocr.txt'
+    $ocrError = Join-Path $caseDirectory 'app-window-ocr-stderr.txt'
+    $ocrProcess = Start-Process -FilePath $tesseract -ArgumentList @((Join-Path $caseDirectory 'app-window.png'), 'stdout', '-l', 'eng', '--psm', '11') -RedirectStandardOutput $ocrOutput -RedirectStandardError $ocrError -NoNewWindow -Wait -PassThru
+    if ($ocrProcess.ExitCode -ne 0) { throw "Tesseract failed in $name with exit code $($ocrProcess.ExitCode)" }
+    $ocrText = Get-Content $ocrOutput -Raw
     $settingsFile = Join-Path $settingsDirectory 'settings.json'
     $stored = if (Test-Path $settingsFile) { Get-Content $settingsFile -Raw | ConvertFrom-Json } else { $null }
     $storedQuickSave = if ($stored) { $stored.'flutter.ls_quick_save' } else { $null }

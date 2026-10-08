@@ -36,6 +36,7 @@ jobs:
           if-no-files-found: warn
 
   current-source:
+    if: false # Compiled binaries are retained from run 37762502666; use verify-built below.
     name: Current source ${{ matrix.variant }}
     runs-on: windows-latest
     timeout-minutes: 60
@@ -95,5 +96,37 @@ jobs:
         if: always()
         with:
           name: quick-save-current-${{ matrix.variant }}-evidence
+          path: ${{ runner.temp }}/quick-save-evidence
+          if-no-files-found: warn
+
+  verify-built:
+    name: Verify retained ${{ matrix.variant }} binary
+    runs-on: windows-latest
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, fixed]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: quick-save-current-${{ matrix.variant }}-app
+          run-id: 37762502666
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: app-binary
+      - name: Install screenshot OCR
+        shell: pwsh
+        run: choco install tesseract --no-progress -y
+      - name: Exercise retained Windows app startup
+        shell: powershell
+        run: |
+          & .\support\test\windows\diagnose_quick_save_startup.ps1 -Executable .\app-binary\localsend_app.exe -EvidenceDirectory "$env:RUNNER_TEMP\quick-save-evidence" -ExpectLegacyError ([bool]::Parse('${{ matrix.variant == 'baseline' }}'))
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: quick-save-reverified-${{ matrix.variant }}-evidence
           path: ${{ runner.temp }}/quick-save-evidence
           if-no-files-found: warn
