@@ -84,12 +84,12 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
     $windowBounds = Save-WindowScreenshot $process.MainWindowHandle (Join-Path $caseDirectory 'app-window.png')
     $tesseract = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
     if (-not (Test-Path $tesseract)) { throw 'Tesseract installation missing' }
-    $ocrText = (& $tesseract (Join-Path $caseDirectory 'app-window.png') stdout -l eng 2>$null) -join "`n"
+    $ocrText = (& $tesseract (Join-Path $caseDirectory 'app-window.png') stdout -l eng --psm 11 2>$null) -join "`n"
     $ocrText | Set-Content -Encoding UTF8 (Join-Path $caseDirectory 'app-window-ocr.txt')
     $settingsFile = Join-Path $settingsDirectory 'settings.json'
     $stored = if (Test-Path $settingsFile) { Get-Content $settingsFile -Raw | ConvertFrom-Json } else { $null }
     $storedQuickSave = if ($stored) { $stored.'flutter.ls_quick_save' } else { $null }
-    $errorVisible = $ocrText -match '(?is)bool.*not a subtype of type'
+    $errorVisible = $ocrText -match '(?is)bool.*not a sub.*type'
     $result = [ordered]@{
       case = $name
       processId = $process.Id
@@ -97,7 +97,7 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
       mainWindowHandle = $process.MainWindowHandle.ToInt64()
       windowBounds = $windowBounds
       errorTextVisibleInOCR = $errorVisible
-      cleanHomeVisibleInOCR = ($ocrText -match '(?is)receive.*send.*settings')
+      cleanHomeVisibleInOCR = ($ocrText -match '(?is)localsend.*receive')
       storedVersion = if ($stored) { $stored.'flutter.ls_version' } else { $null }
       storedQuickSaveType = if ($null -ne $storedQuickSave) { $storedQuickSave.GetType().Name } else { $null }
     }
