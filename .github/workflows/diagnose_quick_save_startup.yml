@@ -1,0 +1,30 @@
+name: Diagnose quick save startup on Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download LocalSend 1.18.2 x64 zip
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.zip'
+          Invoke-WebRequest $url -OutFile "$env:RUNNER_TEMP\localsend-1.18.2.zip"
+          Expand-Archive "$env:RUNNER_TEMP\localsend-1.18.2.zip" "$env:RUNNER_TEMP\localsend-1.18.2"
+          Get-ChildItem "$env:RUNNER_TEMP\localsend-1.18.2" -Recurse -Filter localsend_app.exe | Select-Object -ExpandProperty FullName
+      - name: Exercise startup with clean and legacy quick save profiles
+        shell: powershell
+        run: |
+          $exe = (Get-ChildItem "$env:RUNNER_TEMP\localsend-1.18.2" -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
+          & .\support\test\windows\diagnose_quick_save_startup.ps1 -Executable $exe -EvidenceDirectory "$env:RUNNER_TEMP\quick-save-evidence"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: quick-save-startup-evidence
+          path: ${{ runner.temp }}/quick-save-evidence
+          if-no-files-found: warn
