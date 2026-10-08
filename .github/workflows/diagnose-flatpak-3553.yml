@@ -14,7 +14,7 @@ jobs:
       - name: Install desktop diagnostics
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl libayatana-appindicator3-1
+          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl libayatana-appindicator3-1 libegl1 libgl1
 
       - name: Install released Flatpak and download matching tar build
         run: |
@@ -59,14 +59,20 @@ jobs:
             echo "=== $kind launcher $launcher ===" | tee "evidence/$kind-state.txt"
             ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep | tee -a "evidence/$kind-state.txt" || true
             xwininfo -root -tree | tee -a "evidence/$kind-state.txt"
+            if xwininfo -root -tree | grep -q '"LocalSend"'; then
+              echo 'UI_WINDOW=present' | tee -a "evidence/$kind-state.txt"
+            else
+              echo 'UI_WINDOW=absent' | tee -a "evidence/$kind-state.txt"
+            fi
             ss -lntup | grep 53317 | tee -a "evidence/$kind-state.txt" || true
             scrot "evidence/$kind.png"
-            app_pid=$(pgrep -n -f '/localsend_app( |$)' || true)
+            app_pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true)
             if [ -n "$app_pid" ]; then
-              timeout 15 gdb -q -batch -p "$app_pid" -ex 'thread apply all bt 8' > "evidence/$kind-backtrace.txt" 2>&1 || true
+              timeout 15 sudo gdb -q -batch -p "$app_pid" -ex 'thread apply all bt 8' > "evidence/$kind-backtrace.txt" 2>&1 || true
             fi
             kill "$launcher" 2>/dev/null || true
             pkill -f '/localsend_app( |$)' 2>/dev/null || true
+            pkill -x localsend 2>/dev/null || true
             sleep 2
           done
           EOF
