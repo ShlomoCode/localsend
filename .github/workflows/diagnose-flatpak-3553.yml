@@ -92,7 +92,7 @@ jobs:
           sleep 2
           openbox > evidence/gnome/openbox.log 2>&1 &
           sleep 2
-          gnome-shell --nested --wayland --wayland-display=wayland-1 > evidence/gnome/shell.log 2>&1 &
+          gnome-shell --devkit --wayland --wayland-display=wayland-1 > evidence/gnome/shell.log 2>&1 &
           for i in $(seq 1 30); do
             if [ -S "$XDG_RUNTIME_DIR/wayland-1" ]; then break; fi
             sleep 1
@@ -107,9 +107,9 @@ jobs:
           for kind in deb flatpak; do
             mkdir -p "/tmp/localsend-gnome-home-$kind"
             if [ "$kind" = deb ]; then
-              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
+              HOME="/tmp/localsend-gnome-home-$kind" DISPLAY= WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
             else
-              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
+              HOME="/tmp/localsend-gnome-home-$kind" DISPLAY= WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
             fi
             launcher=$!
             sleep 20
