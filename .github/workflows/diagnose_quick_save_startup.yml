@@ -20,6 +20,9 @@ jobs:
           Invoke-WebRequest $url -OutFile "$env:RUNNER_TEMP\localsend-1.18.2.zip"
           Expand-Archive "$env:RUNNER_TEMP\localsend-1.18.2.zip" "$env:RUNNER_TEMP\localsend-1.18.2"
           Get-ChildItem "$env:RUNNER_TEMP\localsend-1.18.2" -Recurse -Filter localsend_app.exe | Select-Object -ExpandProperty FullName
+      - name: Install screenshot OCR
+        shell: pwsh
+        run: choco install tesseract --no-progress -y
       - name: Exercise startup with clean and legacy quick save profiles
         shell: powershell
         run: |

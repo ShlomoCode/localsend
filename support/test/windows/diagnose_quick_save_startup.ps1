@@ -5,6 +5,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class WindowCapture {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct Rect { public int Left, Top, Right, Bottom; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+}
+'@
 New-Item -ItemType Directory -Force $EvidenceDirectory | Out-Null
 
 function Save-Screenshot([string]$path) {
@@ -18,6 +27,24 @@ function Save-Screenshot([string]$path) {
     $graphics.Dispose()
     $bitmap.Dispose()
   }
+}
+
+function Save-WindowScreenshot([IntPtr]$window, [string]$path) {
+  $bounds = New-Object WindowCapture+Rect
+  if (-not [WindowCapture]::GetWindowRect($window, [ref]$bounds)) { throw 'Could not measure LocalSend window' }
+  $width = $bounds.Right - $bounds.Left
+  $height = $bounds.Bottom - $bounds.Top
+  if ($width -lt 300 -or $height -lt 300) { throw "Unexpected LocalSend window size $width x $height" }
+  $bitmap = New-Object System.Drawing.Bitmap($width, $height)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+    $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+  return [ordered]@{ left = $bounds.Left; top = $bounds.Top; width = $width; height = $height }
 }
 
 function Get-WindowText([int]$processId) {
@@ -53,22 +80,36 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
     $windowText = @(Get-WindowText $process.Id)
     $windowText | Set-Content -Encoding UTF8 (Join-Path $caseDirectory 'window-text.txt')
     Save-Screenshot (Join-Path $caseDirectory 'desktop.png')
+    if (-not $process.MainWindowHandle) { throw "No LocalSend window in $name" }
+    $windowBounds = Save-WindowScreenshot $process.MainWindowHandle (Join-Path $caseDirectory 'app-window.png')
+    $tesseract = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    if (-not (Test-Path $tesseract)) { throw 'Tesseract installation missing' }
+    $ocrText = (& $tesseract (Join-Path $caseDirectory 'app-window.png') stdout -l eng 2>$null) -join "`n"
+    $ocrText | Set-Content -Encoding UTF8 (Join-Path $caseDirectory 'app-window-ocr.txt')
+    $settingsFile = Join-Path $settingsDirectory 'settings.json'
+    $stored = if (Test-Path $settingsFile) { Get-Content $settingsFile -Raw | ConvertFrom-Json } else { $null }
+    $storedQuickSave = if ($stored) { $stored.'flutter.ls_quick_save' } else { $null }
+    $errorVisible = $ocrText -match '(?is)bool.*not a subtype of type'
     $result = [ordered]@{
       case = $name
       processId = $process.Id
       processExited = $process.HasExited
       mainWindowHandle = $process.MainWindowHandle.ToInt64()
-      errorTextVisibleToUIAutomation = (($windowText -join "`n") -match "type 'bool' is not a subtype of type 'String\?'")
-      settings = if (Test-Path (Join-Path $settingsDirectory 'settings.json')) { Get-Content (Join-Path $settingsDirectory 'settings.json') -Raw } else { $null }
+      windowBounds = $windowBounds
+      errorTextVisibleInOCR = $errorVisible
+      cleanHomeVisibleInOCR = ($ocrText -match '(?is)receive.*send.*settings')
+      storedVersion = if ($stored) { $stored.'flutter.ls_version' } else { $null }
+      storedQuickSaveType = if ($null -ne $storedQuickSave) { $storedQuickSave.GetType().Name } else { $null }
     }
     $result | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $caseDirectory 'result.json')
     Write-Host ($result | ConvertTo-Json -Depth 5)
-    if ($result.errorTextVisibleToUIAutomation -ne $expectError) {
+    if ($result.errorTextVisibleInOCR -ne $expectError) {
       throw "Unexpected UI error state in $name"
     }
-    if (-not $result.mainWindowHandle) { throw "No LocalSend window in $name" }
+    if (-not $expectError -and -not $result.cleanHomeVisibleInOCR) { throw "LocalSend home UI not recognized in $name" }
   } finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+    if (Test-Path $appData) { Remove-Item $appData -Recurse -Force }
     $env:APPDATA = $originalAppData
   }
 }
