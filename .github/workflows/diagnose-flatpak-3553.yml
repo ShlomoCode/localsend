@@ -1,0 +1,69 @@
+name: Diagnose Flatpak startup 3553
+
+on:
+  workflow_dispatch:
+
+jobs:
+  startup:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - name: Install desktop diagnostics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl
+
+      - name: Install released Flatpak and download matching tar build
+        run: |
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y flathub org.localsend.localsend_app
+          curl -L --fail --retry 3 -o /tmp/localsend-1.18.2.tar.gz https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz
+          mkdir -p /tmp/localsend-1.18.2
+          tar -xzf /tmp/localsend-1.18.2.tar.gz -C /tmp/localsend-1.18.2
+          flatpak --user info org.localsend.localsend_app
+          sha256sum /tmp/localsend-1.18.2.tar.gz
+
+      - name: Compare startup in one X11 session
+        run: |
+          mkdir -p evidence
+          cat > /tmp/diagnose-startup.sh <<'EOF'
+          set -u
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1280x800x24 > evidence/xvfb.log 2>&1 &
+          sleep 2
+          openbox > evidence/openbox.log 2>&1 &
+          sleep 2
+          echo '=== desktop ===' | tee evidence/environment.txt
+          lsb_release -a 2>&1 | tee -a evidence/environment.txt
+          flatpak --version | tee -a evidence/environment.txt
+          xdpyinfo | sed -n '1,12p' | tee -a evidence/environment.txt
+          for kind in tar flatpak; do
+            mkdir -p "/tmp/localsend-home-$kind"
+            if [ "$kind" = tar ]; then
+              HOME="/tmp/localsend-home-$kind" /tmp/localsend-1.18.2/localsend_app > "evidence/$kind.log" 2>&1 &
+            else
+              HOME="/tmp/localsend-home-$kind" flatpak --user run org.localsend.localsend_app > "evidence/$kind.log" 2>&1 &
+            fi
+            launcher=$!
+            sleep 15
+            echo "=== $kind launcher $launcher ===" | tee "evidence/$kind-state.txt"
+            ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep | tee -a "evidence/$kind-state.txt" || true
+            xwininfo -root -tree | tee -a "evidence/$kind-state.txt"
+            ss -lntup | grep 53317 | tee -a "evidence/$kind-state.txt" || true
+            scrot "evidence/$kind.png"
+            app_pid=$(pgrep -n -f '/localsend_app( |$)' || true)
+            if [ -n "$app_pid" ]; then
+              timeout 15 gdb -q -batch -p "$app_pid" -ex 'thread apply all bt 8' > "evidence/$kind-backtrace.txt" 2>&1 || true
+            fi
+            kill "$launcher" 2>/dev/null || true
+            pkill -f '/localsend_app( |$)' 2>/dev/null || true
+            sleep 2
+          done
+          EOF
+          dbus-run-session -- bash /tmp/diagnose-startup.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flatpak-3553-evidence
+          path: evidence/
