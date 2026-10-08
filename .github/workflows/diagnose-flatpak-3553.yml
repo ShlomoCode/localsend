@@ -80,18 +80,24 @@ jobs:
 
       - name: Compare startup on nested GNOME Wayland
         run: |
-          sudo apt-get install -y gnome-shell mutter-dev-bin
+          sudo apt-get install -y gnome-shell mutter-dev-bin pipewire wireplumber
           mkdir -p evidence/gnome
           cat > /tmp/diagnose-gnome.sh <<'EOF'
           set -u
           export DISPLAY=:100
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" "$XDG_RUNTIME_DIR"
+          sudo chown -R "$(id -u):$(id -g)" "$XDG_RUNTIME_DIR"
+          mkdir -p "$XDG_RUNTIME_DIR/dconf"
           Xvfb :100 -screen 0 1280x800x24 > evidence/gnome/xvfb.log 2>&1 &
           sleep 2
           openbox > evidence/gnome/openbox.log 2>&1 &
           sleep 2
+          pipewire > evidence/gnome/pipewire.log 2>&1 &
+          wireplumber > evidence/gnome/wireplumber.log 2>&1 &
+          sleep 2
           gnome-shell --devkit --wayland --wayland-display=wayland-1 > evidence/gnome/shell.log 2>&1 &
+          shell_pid=$!
           for i in $(seq 1 30); do
             if [ -S "$XDG_RUNTIME_DIR/wayland-1" ]; then break; fi
             sleep 1
@@ -101,14 +107,19 @@ jobs:
             echo 'GNOME_WAYLAND=unavailable' | tee -a evidence/gnome/environment.txt
             exit 1
           fi
+          sleep 3
+          if ! kill -0 "$shell_pid" 2>/dev/null; then
+            echo 'GNOME_WAYLAND=exited' | tee -a evidence/gnome/environment.txt
+            exit 1
+          fi
           echo 'GNOME_WAYLAND=ready' | tee -a evidence/gnome/environment.txt
           deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
           for kind in deb flatpak; do
             mkdir -p "/tmp/localsend-gnome-home-$kind"
             if [ "$kind" = deb ]; then
-              HOME="/tmp/localsend-gnome-home-$kind" DISPLAY= WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
+              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
             else
-              HOME="/tmp/localsend-gnome-home-$kind" DISPLAY= WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
+              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
             fi
             launcher=$!
             sleep 20
