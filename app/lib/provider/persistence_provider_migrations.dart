@@ -59,6 +59,7 @@ Future<void> _migrate4() async {
   final prefs = await SharedPreferencesStorePlatform.instance.getAll();
   final value = prefs['flutter.$_quickSave'];
   if (value is bool) {
+    // Match migration 3 and the favorites-only default announced in What's new in 1.18.0.
     final quickSave = value ? QuickSaveMode.on : QuickSaveMode.paired;
     await SharedPreferencesStorePlatform.instance.setValue('String', 'flutter.$_quickSave', quickSave.name);
   }
