@@ -1,5 +1,7 @@
 name: Diagnostic PR3558 Linux Flatpak x64
 on:
+  push:
+    branches: [codex/pr3558-diagnostic-flatpak]
   workflow_dispatch:
 permissions:
   contents: read
