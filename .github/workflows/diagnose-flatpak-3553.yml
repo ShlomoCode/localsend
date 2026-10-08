@@ -14,7 +14,7 @@ jobs:
       - name: Install desktop diagnostics
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl libayatana-appindicator3-1 libegl1 libgl1
+          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl libayatana-appindicator3-1 libegl1 libgles2 libgl1
 
       - name: Install released Flatpak and download matching tar build
         run: |
@@ -77,6 +77,53 @@ jobs:
           done
           EOF
           dbus-run-session -- bash /tmp/diagnose-startup.sh
+
+      - name: Compare startup on nested GNOME Wayland
+        run: |
+          sudo apt-get install -y gnome-shell
+          mkdir -p evidence/gnome
+          cat > /tmp/diagnose-gnome.sh <<'EOF'
+          set -u
+          export DISPLAY=:100
+          export XDG_RUNTIME_DIR=/tmp/localsend-gnome-runtime
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          Xvfb :100 -screen 0 1280x800x24 > evidence/gnome/xvfb.log 2>&1 &
+          sleep 2
+          openbox > evidence/gnome/openbox.log 2>&1 &
+          sleep 2
+          gnome-shell --nested --wayland --wayland-display=wayland-1 > evidence/gnome/shell.log 2>&1 &
+          for i in $(seq 1 30); do
+            if [ -S "$XDG_RUNTIME_DIR/wayland-1" ]; then break; fi
+            sleep 1
+          done
+          gnome-shell --version > evidence/gnome/environment.txt
+          if [ ! -S "$XDG_RUNTIME_DIR/wayland-1" ]; then
+            echo 'GNOME_WAYLAND=unavailable' | tee -a evidence/gnome/environment.txt
+            exit 1
+          fi
+          echo 'GNOME_WAYLAND=ready' | tee -a evidence/gnome/environment.txt
+          deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
+          for kind in deb flatpak; do
+            mkdir -p "/tmp/localsend-gnome-home-$kind"
+            if [ "$kind" = deb ]; then
+              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
+            else
+              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
+            fi
+            launcher=$!
+            sleep 20
+            echo "=== $kind launcher $launcher ===" | tee "evidence/gnome/$kind-state.txt"
+            ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep | tee -a "evidence/gnome/$kind-state.txt" || true
+            ss -lntup | grep 53317 | tee -a "evidence/gnome/$kind-state.txt" || true
+            scrot "evidence/gnome/$kind.png"
+            kill "$launcher" 2>/dev/null || true
+            pkill -f '/localsend_app( |$)' 2>/dev/null || true
+            pkill -x localsend 2>/dev/null || true
+            sleep 2
+          done
+          EOF
+          dbus-run-session -- bash /tmp/diagnose-gnome.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
