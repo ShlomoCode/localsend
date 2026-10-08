@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$Executable,
-  [Parameter(Mandatory = $true)][string]$EvidenceDirectory
+  [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
+  [bool]$ExpectLegacyError = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,7 +98,7 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
       mainWindowHandle = $process.MainWindowHandle.ToInt64()
       windowBounds = $windowBounds
       errorTextVisibleInOCR = $errorVisible
-      cleanHomeVisibleInOCR = ($ocrText -match '(?is)localsend.*receive')
+      cleanHomeVisibleInOCR = ($ocrText -match '(?i)receive')
       storedVersion = if ($stored) { $stored.'flutter.ls_version' } else { $null }
       storedQuickSaveType = if ($null -ne $storedQuickSave) { $storedQuickSave.GetType().Name } else { $null }
     }
@@ -119,5 +120,5 @@ $environment | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $EvidenceD
 $releaseSettings = Join-Path (Split-Path $Executable) 'settings.json'
 if (Test-Path $releaseSettings) { Remove-Item $releaseSettings }
 Invoke-Case 'clean-control' @{} $false
-Invoke-Case 'legacy-bool-no-version' @{ 'flutter.ls_quick_save' = $true } $true
-Invoke-Case 'legacy-bool-version-3' @{ 'flutter.ls_version' = 3; 'flutter.ls_quick_save' = $true } $true
+Invoke-Case 'legacy-bool-no-version' @{ 'flutter.ls_quick_save' = $true } $ExpectLegacyError
+Invoke-Case 'legacy-bool-version-3' @{ 'flutter.ls_version' = 3; 'flutter.ls_quick_save' = $true } $ExpectLegacyError

@@ -31,6 +31,62 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: quick-save-startup-evidence
+          name: quick-save-release-evidence
+          path: ${{ runner.temp }}/quick-save-evidence
+          if-no-files-found: warn
+
+  current-source:
+    name: Current source ${{ matrix.variant }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: baseline
+            source-ref: main
+            expect-error: 'true'
+          - variant: fixed
+            source-ref: codex/fix-windows-quick-save-startup
+            expect-error: 'false'
+    steps:
+      - name: Check out diagnostic harness
+        uses: actions/checkout@v6
+        with:
+          path: diagnostic
+      - name: Check out app source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.source-ref }}
+          path: source
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Build MSIX helper required by CMake
+        shell: pwsh
+        run: |
+          $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
+          & $makepri.FullName new /pr source\support\build\msix\content /cf source\support\build\msix\priconfig.xml /mn source\support\build\msix\content\AppxManifest.xml /of source\support\build\msix\content\resources.pri /o
+          & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d source\support\build\msix\content /nv /p source\app\windows\localsend_msix_helper.msix
+      - name: Resolve dependencies
+        working-directory: source/app
+        run: flutter pub get
+      - name: Compile Windows app
+        working-directory: source/app
+        run: flutter build windows
+      - name: Install screenshot OCR
+        shell: pwsh
+        run: choco install tesseract --no-progress -y
+      - name: Exercise real app startup
+        shell: powershell
+        run: |
+          & .\diagnostic\support\test\windows\diagnose_quick_save_startup.ps1 -Executable .\source\app\build\windows\x64\runner\Release\localsend_app.exe -EvidenceDirectory "$env:RUNNER_TEMP\quick-save-evidence" -ExpectLegacyError ([bool]::Parse('${{ matrix.expect-error }}'))
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: quick-save-current-${{ matrix.variant }}-evidence
           path: ${{ runner.temp }}/quick-save-evidence
           if-no-files-found: warn
