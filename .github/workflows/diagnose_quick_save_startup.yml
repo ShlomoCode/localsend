@@ -1,6 +1,9 @@
 name: Diagnose quick save startup on Windows
 
 on:
+  push:
+    branches:
+      - codex/diagnose-quick-save-startup
   workflow_dispatch:
 
 jobs:
