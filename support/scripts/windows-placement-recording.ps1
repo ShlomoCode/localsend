@@ -11,6 +11,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class PlacementCaptureWin32 {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr param);
@@ -19,6 +20,7 @@ public static class PlacementCaptureWin32 {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hwnd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int maxCount);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
 }
@@ -83,6 +85,33 @@ function Save-Desktop([string]$path) {
   } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 
+function Hide-ConsoleWindows {
+  $callback = [PlacementCaptureWin32+EnumWindowsProc]{
+    param([IntPtr]$hwnd, [IntPtr]$unused)
+    $name = [Text.StringBuilder]::new(128)
+    [void][PlacementCaptureWin32]::GetClassName($hwnd, $name, $name.Capacity)
+    if ($name.ToString() -in @('ConsoleWindowClass', 'CASCADIA_HOSTING_WINDOW_CLASS')) {
+      [void][PlacementCaptureWin32]::ShowWindow($hwnd, 6)
+    }
+    return $true
+  }
+  [void][PlacementCaptureWin32]::EnumWindows($callback, [IntPtr]::Zero)
+}
+
+function Write-SeedSettings($placement) {
+  $seed = [ordered]@{
+    'flutter.ls_version' = 3
+    'flutter.ls_save_window_placement' = $true
+    'flutter.ls_whats_new' = '1.18.0'
+    'flutter.ls_locale' = 'en'
+    'flutter.ls_window_offset_x' = [double]$placement.x
+    'flutter.ls_window_offset_y' = [double]$placement.y
+    'flutter.ls_window_width' = [double]$placement.width
+    'flutter.ls_window_height' = [double]$placement.height
+  }
+  [IO.File]::WriteAllText($settingsPath, ($seed | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+}
+
 function Wait-Until([Diagnostics.Stopwatch]$clock, [double]$seconds) {
   while ($clock.Elapsed.TotalSeconds -lt $seconds) {
     [System.Windows.Forms.Application]::DoEvents()
@@ -114,6 +143,7 @@ $metadata = [ordered]@{
 $dpiGraphics = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
 try { $metadata.dpi = @{ x = $dpiGraphics.DpiX; y = $dpiGraphics.DpiY } } finally { $dpiGraphics.Dispose() }
 $appProcess = $null
+$warmProcess = $null
 $recorder = $null
 $banner = New-Object PlacementCaptureBanner
 $banner.FormBorderStyle = 'None'
@@ -121,7 +151,7 @@ $banner.ShowInTaskbar = $false
 $banner.TopMost = $true
 $banner.StartPosition = 'Manual'
 $banner.Location = [System.Drawing.Point]::new(($screen.Left + 20), ($screen.Top + 20))
-$banner.Size = [System.Drawing.Size]::new(420, 56)
+$banner.Size = [System.Drawing.Size]::new(650, 56)
 $banner.BackColor = [System.Drawing.Color]::FromArgb(25, 25, 25)
 $bannerLabel = New-Object System.Windows.Forms.Label
 $bannerLabel.Dock = 'Fill'
@@ -130,6 +160,24 @@ $bannerLabel.Font = [System.Drawing.Font]::new('Arial', 16, [System.Drawing.Font
 $bannerLabel.TextAlign = 'MiddleLeft'
 $banner.Controls.Add($bannerLabel)
 try {
+  # Warm the same real app and native libraries before the timed capture.
+  Write-SeedSettings $cases[4]
+  $warmProcess = Start-Process -FilePath $app -WorkingDirectory (Split-Path -Parent $app) -PassThru
+  $warmClock = [Diagnostics.Stopwatch]::StartNew()
+  $warmWindow = [IntPtr]::Zero
+  while ($warmClock.Elapsed.TotalSeconds -lt 20) {
+    if ($warmProcess.HasExited) { throw "Warm-up app exited with code $($warmProcess.ExitCode)." }
+    $warmWindow = Find-AppWindow $warmProcess.Id
+    if ($warmWindow -ne [IntPtr]::Zero) { break }
+    Start-Sleep -Milliseconds 100
+  }
+  if ($warmWindow -eq [IntPtr]::Zero) { throw 'Warm-up window did not appear within 20 seconds.' }
+  Start-Sleep -Seconds 3
+  $metadata.warmup = @{ readySeconds = $warmClock.Elapsed.TotalSeconds - 3; renderedSeconds = $warmClock.Elapsed.TotalSeconds }
+  $warmProcess.Kill()
+  [void]$warmProcess.WaitForExit(2000)
+  Hide-ConsoleWindows
+
   # One raw, full-desktop recording for each build; phase offsets are exact video seconds.
   $ffmpegArgs = @('-hide_banner', '-loglevel', 'error', '-y', '-f', 'gdigrab', '-framerate', '15', '-offset_x', "$($screen.Left)", '-offset_y', "$($screen.Top)", '-video_size', "$($screen.Width)x$($screen.Height)", '-i', 'desktop', '-t', "$recordSeconds", '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', $videoPath)
   $startInfo = New-Object Diagnostics.ProcessStartInfo
@@ -158,15 +206,7 @@ try {
     }
     # SharedPreferencesPortable writes primitive values directly into this JSON map.
     # Reset the native key for every launch so both builds begin from the same legacy state.
-    $seed = [ordered]@{
-      'flutter.ls_version' = 3
-      'flutter.ls_save_window_placement' = $true
-      'flutter.ls_window_offset_x' = [double]$case.x
-      'flutter.ls_window_offset_y' = [double]$case.y
-      'flutter.ls_window_width' = [double]$case.width
-      'flutter.ls_window_height' = [double]$case.height
-    }
-    [IO.File]::WriteAllText($settingsPath, ($seed | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    Write-SeedSettings $case
     $appProcess = Start-Process -FilePath $app -WorkingDirectory (Split-Path -Parent $app) -PassThru
     $hwnd = [IntPtr]::Zero
     while ($clock.Elapsed.TotalSeconds -lt ($startAt + 4.5)) {
@@ -185,7 +225,10 @@ try {
       $phase.actions += @{ atSeconds = $clock.Elapsed.TotalSeconds; action = 'minimize' }
       Wait-Until $clock ($startAt + 4)
       [void][PlacementCaptureWin32]::ShowWindow($hwnd, 9)
-      $phase.actions += @{ atSeconds = $clock.Elapsed.TotalSeconds; action = 'restore' }
+      $phase.actions += @{ atSeconds = $clock.Elapsed.TotalSeconds; action = 'restore-to-maximized' }
+      Wait-Until $clock ($startAt + 4.5)
+      [void][PlacementCaptureWin32]::ShowWindow($hwnd, 1)
+      $phase.actions += @{ atSeconds = $clock.Elapsed.TotalSeconds; action = 'show-normal' }
     }
     Wait-Until $clock ($startAt + 5)
     $phase.actualBounds = Get-Bounds $hwnd
@@ -199,6 +242,7 @@ try {
   $metadata.errors += $_.Exception.Message
   throw
 } finally {
+  if ($warmProcess -and -not $warmProcess.HasExited) { $warmProcess.Kill(); [void]$warmProcess.WaitForExit(2000) }
   if ($appProcess -and -not $appProcess.HasExited) { $appProcess.Kill(); [void]$appProcess.WaitForExit(2000) }
   $banner.Close()
   $banner.Dispose()
