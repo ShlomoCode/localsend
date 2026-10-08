@@ -20,6 +20,7 @@ jobs:
         run: |
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y flathub org.localsend.localsend_app
+          sudo flatpak install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Platform.GL.default//25.08
           curl -L --fail --retry 3 -o /tmp/localsend-1.18.2.tar.gz https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz
           curl -L --fail --retry 3 -o /tmp/localsend-1.18.2.deb https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.deb
           mkdir -p /tmp/localsend-1.18.2
@@ -114,12 +115,14 @@ jobs:
           fi
           echo 'GNOME_WAYLAND=ready' | tee -a evidence/gnome/environment.txt
           deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
-          for kind in deb flatpak; do
+          for kind in deb flatpak flatpak25; do
             mkdir -p "/tmp/localsend-gnome-home-$kind"
             if [ "$kind" = deb ]; then
               HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
-            else
+            elif [ "$kind" = flatpak ]; then
               HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
+            else
+              HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --runtime-version=25.08 --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
             fi
             launcher=$!
             sleep 20
