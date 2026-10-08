@@ -35,7 +35,7 @@ jobs:
           git -C /tmp/flatpak-manifest checkout 1b93d4aed3c0867e95feb2d4022a3f6a6b232e7e
           git -C /tmp/flatpak-manifest submodule update --init --recursive
           tar -czf /tmp/flatpak-manifest/LocalSend.tar.gz -C app/build/linux/x64/release/bundle .
-          ruby -ryaml -e 'path="/tmp/flatpak-manifest/org.localsend.localsend_app.yml"; doc=YAML.load_file(path); mod=doc["modules"].find { |m| m.is_a?(Hash) && m["name"] == "localsend" }; mod["sources"]=[{"type"=>"file", "path"=>"LocalSend.tar.gz"}, {"type"=>"file", "path"=>"org.localsend.localsend_app.metainfo.xml"}, {"type"=>"file", "path"=>"org.localsend.localsend_app.desktop"}]; File.write(path, doc.to_yaml)'
+          ruby -ryaml -e 'path="/tmp/flatpak-manifest/org.localsend.localsend_app.yml"; doc=YAML.load_file(path); mod=doc["modules"].find { |m| m.is_a?(Hash) && m["name"] == "localsend" }; mod["sources"]=[{"type"=>"file", "path"=>"LocalSend.tar.gz"}, {"type"=>"file", "path"=>"org.localsend.localsend_app.metainfo.xml"}, {"type"=>"file", "path"=>"org.localsend.localsend_app.desktop"}]; fix_libdir=lambda { |mods| mods.each { |m| next unless m.is_a?(Hash); m["config-opts"]=(m["config-opts"] || []) + ["-DCMAKE_INSTALL_LIBDIR=lib"] if m["buildsystem"] == "cmake-ninja"; fix_libdir.call(m["modules"] || []) } }; fix_libdir.call(doc["modules"]); File.write(path, doc.to_yaml)'
       - name: Build diagnostic Flatpak
         working-directory: /tmp/flatpak-manifest
         run: |
