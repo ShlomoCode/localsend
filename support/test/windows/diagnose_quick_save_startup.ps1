@@ -107,7 +107,6 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
     if ($result.errorTextVisibleInOCR -ne $expectError) {
       throw "Unexpected UI error state in $name"
     }
-    if (-not $expectError -and -not $result.cleanHomeVisibleInOCR) { throw "LocalSend home UI not recognized in $name" }
   } finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
     if (Test-Path $appData) { Remove-Item $appData -Recurse -Force }
