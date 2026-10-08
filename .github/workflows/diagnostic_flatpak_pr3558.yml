@@ -1,0 +1,78 @@
+name: Diagnostic PR3558 Linux Flatpak x64
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 83fa8b9692d049768631c414f1a007f54c009504
+      - name: Verify source and install dependencies
+        run: |
+          test "$(git rev-parse HEAD)" = 83fa8b9692d049768631c414f1a007f54c009504
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev flatpak flatpak-builder ruby ruby-dev xvfb dbus-x11
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build exact PR source
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build linux --release
+      - name: Prepare pinned Flathub packaging
+        run: |
+          git clone --recurse-submodules https://github.com/flathub/org.localsend.localsend_app.git /tmp/flatpak-manifest
+          git -C /tmp/flatpak-manifest checkout 1b93d4aed3c0867e95feb2d4022a3f6a6b232e7e
+          git -C /tmp/flatpak-manifest submodule update --init --recursive
+          tar -czf /tmp/flatpak-manifest/LocalSend.tar.gz -C app/build/linux/x64/release/bundle .
+          ruby -ryaml -e 'path="/tmp/flatpak-manifest/org.localsend.localsend_app.yml"; doc=YAML.load_file(path); mod=doc["modules"].find { |m| m.is_a?(Hash) && m["name"] == "localsend" }; mod["sources"]=[{"type"=>"file", "path"=>"LocalSend.tar.gz"}, {"type"=>"file", "path"=>"org.localsend.localsend_app.metainfo.xml"}, {"type"=>"file", "path"=>"org.localsend.localsend_app.desktop"}]; File.write(path, doc.to_yaml)'
+      - name: Build diagnostic Flatpak
+        working-directory: /tmp/flatpak-manifest
+        run: |
+          sudo flatpak-builder --install-deps-from=flathub --force-clean --repo=repo build org.localsend.localsend_app.yml
+          mkdir -p "$GITHUB_WORKSPACE/diagnostic-output"
+          sudo flatpak build-bundle repo "$GITHUB_WORKSPACE/diagnostic-output/LocalSend-PR3558-83fa8b9-linux-x86_64-diagnostic.flatpak" org.localsend.localsend_app --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+          sudo chown -R "$USER:$USER" "$GITHUB_WORKSPACE/diagnostic-output"
+          cp org.localsend.localsend_app.yml "$GITHUB_WORKSPACE/diagnostic-output/flatpak-manifest.yml"
+      - name: Smoke install and launch
+        continue-on-error: true
+        run: |
+          sudo flatpak install -y diagnostic-output/*.flatpak
+          flatpak info org.localsend.localsend_app | tee diagnostic-output/flatpak-info.txt
+          set +e
+          timeout 20s xvfb-run -a dbus-run-session -- flatpak run org.localsend.localsend_app >diagnostic-output/smoke-launch.log 2>&1
+          result=$?
+          echo "Launch exit code: $result (124 means app remained running for 20 seconds)" | tee -a diagnostic-output/smoke-launch.log
+          test "$result" = 124
+      - name: Metadata and hashes
+        if: always()
+        run: |
+          mkdir -p diagnostic-output
+          cat >diagnostic-output/BUILD-INFO.txt <<EOF
+          Diagnostic test build for upstream PR 3558; not an official release.
+          Source SHA: 83fa8b9692d049768631c414f1a007f54c009504
+          Architecture: x86_64
+          Flutter: 3.41.9
+          App ID: org.localsend.localsend_app
+          Runtime: org.freedesktop.Platform/x86_64/26.08
+          Flathub packaging SHA: 1b93d4aed3c0867e95feb2d4022a3f6a6b232e7e
+          Workflow: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Same app ID preserves existing Flatpak settings.
+          This build does not establish that issue 3553 is fixed.
+          EOF
+          cd diagnostic-output
+          sha256sum *.flatpak >SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LocalSend-PR3558-linux-x86_64-diagnostic
+          path: diagnostic-output/
+          retention-days: 30
