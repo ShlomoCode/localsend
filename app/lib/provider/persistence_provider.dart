@@ -455,7 +455,10 @@ class PersistenceService {
   }
 
   QuickSaveMode getQuickSave() {
-    final value = _prefs.getString(_quickSave);
+    final value = _prefs.get(_quickSave);
+    if (value is bool) {
+      return value ? QuickSaveMode.on : QuickSaveMode.paired;
+    }
     return QuickSaveMode.values.firstWhereOrNull((mode) => mode.name == value) ?? QuickSaveMode.paired;
   }
 
