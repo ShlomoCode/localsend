@@ -456,6 +456,8 @@ class PersistenceService {
 
   QuickSaveMode getQuickSave() {
     final value = _prefs.get(_quickSave);
+    // Profiles without a storage version are marked as current without running migrations.
+    // They can still contain the old boolean Quick Save value.
     if (value is bool) {
       return value ? QuickSaveMode.on : QuickSaveMode.paired;
     }
