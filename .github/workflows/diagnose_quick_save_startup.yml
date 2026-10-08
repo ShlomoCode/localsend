@@ -77,6 +77,13 @@ jobs:
       - name: Compile Windows app
         working-directory: source/app
         run: flutter build windows
+      - name: Upload compiled Windows app
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: quick-save-current-${{ matrix.variant }}-app
+          path: source/app/build/windows/x64/runner/Release
+          if-no-files-found: warn
       - name: Install screenshot OCR
         shell: pwsh
         run: choco install tesseract --no-progress -y

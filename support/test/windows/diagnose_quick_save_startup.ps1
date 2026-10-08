@@ -41,11 +41,19 @@ function Save-WindowScreenshot([IntPtr]$window, [string]$path) {
   try {
     $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
     $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $homePixel = $bitmap.GetPixel([int]($width / 2), [int]($height / 3))
   } finally {
     $graphics.Dispose()
     $bitmap.Dispose()
   }
-  return [ordered]@{ left = $bounds.Left; top = $bounds.Top; width = $width; height = $height }
+  return [ordered]@{
+    left = $bounds.Left
+    top = $bounds.Top
+    width = $width
+    height = $height
+    homeLogoPixel = [ordered]@{ red = $homePixel.R; green = $homePixel.G; blue = $homePixel.B }
+    homeLogoVisible = ($homePixel.R -lt 80 -and $homePixel.G -lt 150 -and $homePixel.B -lt 150)
+  }
 }
 
 function Get-WindowText([int]$processId) {
@@ -97,6 +105,7 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
       processExited = $process.HasExited
       mainWindowHandle = $process.MainWindowHandle.ToInt64()
       windowBounds = $windowBounds
+      homeLogoVisible = $windowBounds.homeLogoVisible
       errorTextVisibleInOCR = $errorVisible
       cleanHomeVisibleInOCR = ($ocrText -match '(?i)receive')
       storedVersion = if ($stored) { $stored.'flutter.ls_version' } else { $null }
@@ -107,6 +116,7 @@ function Invoke-Case([string]$name, [hashtable]$settings, [bool]$expectError) {
     if ($result.errorTextVisibleInOCR -ne $expectError) {
       throw "Unexpected UI error state in $name"
     }
+    if (-not $expectError -and -not $result.homeLogoVisible) { throw "LocalSend home screen not visible in $name" }
   } finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
     if (Test-Path $appData) { Remove-Item $appData -Recurse -Force }
