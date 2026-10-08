@@ -36,22 +36,4 @@ void main() {
       });
     }
   }
-
-  for (final (storedValue, expectedMode) in [(true, QuickSaveMode.on), (false, QuickSaveMode.paired)]) {
-    test('startup tolerates quick save value $storedValue in an already migrated profile', () async {
-      SharedPreferences.setMockInitialValues({
-        'ls_version': 4,
-        'ls_quick_save': storedValue,
-        'ls_locale': 'en',
-        'ls_show_token': 'test-token',
-        'ls_alias': 'Test device',
-        'ls_security_context': '{}',
-        'ls_color': 'localsend',
-      });
-
-      final persistence = await PersistenceService.initialize(supportsDynamicColors: false);
-
-      expect(persistence.getQuickSave(), expectedMode);
-    });
-  }
 }

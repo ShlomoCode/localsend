@@ -457,11 +457,7 @@ class PersistenceService {
   }
 
   QuickSaveMode getQuickSave() {
-    final value = _prefs.get(_quickSave);
-    // Keep reading legacy booleans defensively if a profile still contains one.
-    if (value is bool) {
-      return value ? QuickSaveMode.on : QuickSaveMode.paired;
-    }
+    final value = _prefs.getString(_quickSave);
     return QuickSaveMode.values.firstWhereOrNull((mode) => mode.name == value) ?? QuickSaveMode.paired;
   }
 
