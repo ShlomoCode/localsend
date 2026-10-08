@@ -14,17 +14,20 @@ jobs:
       - name: Install desktop diagnostics
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl
+          sudo apt-get install -y flatpak xvfb openbox x11-utils scrot gdb curl libayatana-appindicator3-1
 
       - name: Install released Flatpak and download matching tar build
         run: |
-          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak --user install -y flathub org.localsend.localsend_app
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.localsend.localsend_app
           curl -L --fail --retry 3 -o /tmp/localsend-1.18.2.tar.gz https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz
+          curl -L --fail --retry 3 -o /tmp/localsend-1.18.2.deb https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.deb
           mkdir -p /tmp/localsend-1.18.2
           tar -xzf /tmp/localsend-1.18.2.tar.gz -C /tmp/localsend-1.18.2
-          flatpak --user info org.localsend.localsend_app
-          sha256sum /tmp/localsend-1.18.2.tar.gz
+          sudo apt-get install -y /tmp/localsend-1.18.2.deb
+          flatpak info org.localsend.localsend_app
+          sha256sum /tmp/localsend-1.18.2.tar.gz /tmp/localsend-1.18.2.deb
+          find /opt /usr -name localsend_app -type f -print
 
       - name: Compare startup in one X11 session
         run: |
@@ -40,12 +43,16 @@ jobs:
           lsb_release -a 2>&1 | tee -a evidence/environment.txt
           flatpak --version | tee -a evidence/environment.txt
           xdpyinfo | sed -n '1,12p' | tee -a evidence/environment.txt
-          for kind in tar flatpak; do
+          sha256sum /tmp/localsend-1.18.2/localsend_app "$(flatpak info -l org.localsend.localsend_app)/files/localsend_app" | tee evidence/binary-hashes.txt
+          deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
+          for kind in deb tar flatpak; do
             mkdir -p "/tmp/localsend-home-$kind"
-            if [ "$kind" = tar ]; then
+            if [ "$kind" = deb ]; then
+              HOME="/tmp/localsend-home-$kind" "$deb_binary" > "evidence/$kind.log" 2>&1 &
+            elif [ "$kind" = tar ]; then
               HOME="/tmp/localsend-home-$kind" /tmp/localsend-1.18.2/localsend_app > "evidence/$kind.log" 2>&1 &
             else
-              HOME="/tmp/localsend-home-$kind" flatpak --user run org.localsend.localsend_app > "evidence/$kind.log" 2>&1 &
+              HOME="/tmp/localsend-home-$kind" flatpak run org.localsend.localsend_app > "evidence/$kind.log" 2>&1 &
             fi
             launcher=$!
             sleep 15
