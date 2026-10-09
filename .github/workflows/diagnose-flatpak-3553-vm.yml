@@ -184,13 +184,13 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
-          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'uname -r; apt-cache policy linux-image-7.0.0-38-generic linux-modules-extra-7.0.0-38-generic' > evidence/vm/kernel-policy.txt
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'uname -r; apt-cache policy linux-image-7.0.0-38-generic linux-modules-7.0.0-38-generic' > evidence/vm/kernel-policy.txt
           if ! grep -q 'Candidate: 7.0.0-38' evidence/vm/kernel-policy.txt; then
             echo 'KERNEL_38=unavailable' | tee -a evidence/vm/kernel-policy.txt
             exit 0
           fi
           timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
-            'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-7.0.0-38-generic linux-modules-extra-7.0.0-38-generic' \
+            'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-7.0.0-38-generic' \
             > evidence/vm/kernel-install.log 2>&1
           timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo systemctl reboot' >/dev/null 2>&1 || true
           ready=0
