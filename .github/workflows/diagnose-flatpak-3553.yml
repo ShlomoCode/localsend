@@ -30,6 +30,17 @@ jobs:
           sha256sum /tmp/localsend-1.18.2.tar.gz /tmp/localsend-1.18.2.deb
           find /opt /usr -name localsend_app -type f -print
 
+      - name: Record exact Flatpak commits and runner hardware
+        run: |
+          mkdir -p evidence
+          uname -a > evidence/runner-hardware.txt
+          lscpu >> evidence/runner-hardware.txt
+          ls -l /dev/kvm /dev/dri >> evidence/runner-hardware.txt 2>&1 || true
+          flatpak info --show-commit org.localsend.localsend_app > evidence/app-installed-commit.txt
+          flatpak info --show-commit org.freedesktop.Platform//26.08 > evidence/runtime26-installed-commit.txt
+          timeout 40 flatpak remote-info --log flathub org.localsend.localsend_app > evidence/app-remote-history.txt 2>&1 || true
+          timeout 40 flatpak remote-info --log flathub org.freedesktop.Platform//26.08 > evidence/runtime26-remote-history.txt 2>&1 || true
+
       - name: Compare startup in one X11 session
         run: |
           mkdir -p evidence
