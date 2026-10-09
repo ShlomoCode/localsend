@@ -67,6 +67,8 @@ jobs:
             -daemonize
           printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: KVM host model\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
           uname -a >> evidence/vm/host-setup.txt
+          free -m >> evidence/vm/host-setup.txt
+          df -h /tmp >> evidence/vm/host-setup.txt
 
       - name: Wait for a complete GDM login session
         run: |
@@ -104,6 +106,18 @@ jobs:
           for i in $(seq 1 30); do
             sleep 30
             if ! kill -0 "$install_pid" 2>/dev/null; then break; fi
+            {
+              date -u
+              free -m
+              df -h /tmp
+              du -h /tmp/localsend-vm/ubuntu.img
+              ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm,args | grep '[q]emu-system' || true
+              cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
+              sudo journalctl -k --since '-2 minutes' --no-pager | tail -20
+            } >> evidence/vm/host-monitor.log 2>&1
+            if [ "$i" = 2 ] || [ "$i" = 10 ]; then
+              printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/install-$i.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            fi
             timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' >> evidence/vm/install-monitor.log 2>&1 <<'GUEST' || true
           date -u
           df -h /
