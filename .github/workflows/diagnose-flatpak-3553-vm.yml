@@ -18,11 +18,16 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick openssh-client
-          mkdir -p evidence/vm /tmp/localsend-vm
+          mkdir -p evidence/vm /tmp/localsend-vm /home/runner/localsend-vm
+          df -Th /home/runner /tmp | tee evidence/vm/host-filesystems.txt
+          disk_type=$(findmnt -no FSTYPE -T /home/runner)
+          disk_free_kb=$(df -Pk /home/runner | awk 'NR == 2 {print $4}')
+          test "$disk_type" != tmpfs
+          test "$disk_free_kb" -ge 10485760
           curl --fail --location --retry 3 \
-            --output /tmp/localsend-vm/ubuntu.img \
+            --output /home/runner/localsend-vm/ubuntu.img \
             https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
-          qemu-img resize /tmp/localsend-vm/ubuntu.img 24G
+          qemu-img resize /home/runner/localsend-vm/ubuntu.img 24G
           ssh-keygen -q -t ed25519 -N '' -f /tmp/localsend-vm/id_ed25519
           probe_key=$(cat /tmp/localsend-vm/id_ed25519.pub)
           cat > /tmp/localsend-vm/user-data <<EOF
@@ -53,11 +58,11 @@ jobs:
             condition: true
           EOF
           printf 'instance-id: localsend-3553\nlocal-hostname: localsend-3553\n' > /tmp/localsend-vm/meta-data
-          cloud-localds /tmp/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
+          cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
           sudo qemu-system-x86_64 \
             -machine accel=kvm:tcg -cpu host -smp 2 -m 6144 \
-            -drive file=/tmp/localsend-vm/ubuntu.img,if=virtio,format=qcow2 \
-            -drive file=/tmp/localsend-vm/seed.iso,media=cdrom,readonly=on \
+            -drive file=/home/runner/localsend-vm/ubuntu.img,if=virtio,format=qcow2 \
+            -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
             -device virtio-vga -usb -device usb-tablet \
             -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
             -device virtio-net-pci,netdev=net0 \
@@ -68,7 +73,7 @@ jobs:
           printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: KVM host model\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
           uname -a >> evidence/vm/host-setup.txt
           free -m >> evidence/vm/host-setup.txt
-          df -h /tmp >> evidence/vm/host-setup.txt
+          df -Th /home/runner /tmp >> evidence/vm/host-setup.txt
 
       - name: Wait for a complete GDM login session
         run: |
@@ -109,8 +114,8 @@ jobs:
             {
               date -u
               free -m
-              df -h /tmp
-              du -h /tmp/localsend-vm/ubuntu.img
+              df -Th /home/runner /tmp
+              du -h /home/runner/localsend-vm/ubuntu.img
               ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm,args | grep '[q]emu-system' || true
               cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
               sudo journalctl -k --since '-2 minutes' --no-pager | tail -20
@@ -213,8 +218,8 @@ jobs:
             {
               date -u
               free -m
-              df -h /tmp
-              du -h /tmp/localsend-vm/ubuntu.img
+              df -Th /home/runner /tmp
+              du -h /home/runner/localsend-vm/ubuntu.img
               ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm,args | grep '[q]emu-system' || true
               cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
               sudo journalctl -k --since '-2 minutes' --no-pager | tail -20
