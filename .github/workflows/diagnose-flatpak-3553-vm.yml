@@ -60,7 +60,7 @@ jobs:
           printf 'instance-id: localsend-3553\nlocal-hostname: localsend-3553\n' > /tmp/localsend-vm/meta-data
           cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
           sudo qemu-system-x86_64 \
-            -machine accel=kvm:tcg -cpu Skylake-Client,-vmx -smp 2 -m 6144 \
+            -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 6144 \
             -drive file=/home/runner/localsend-vm/ubuntu.img,if=virtio,format=qcow2 \
             -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
             -device virtio-vga -usb -device usb-tablet \
@@ -70,7 +70,7 @@ jobs:
             -monitor unix:/tmp/localsend-vm/monitor,server,nowait \
             -serial file:evidence/vm/serial.log \
             -daemonize 2> evidence/vm/qemu-start.log
-          printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,-vmx on KVM host\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
+          printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
           uname -a >> evidence/vm/host-setup.txt
           lscpu > evidence/vm/host-cpu.txt
           free -m >> evidence/vm/host-setup.txt
