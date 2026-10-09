@@ -115,12 +115,21 @@ jobs:
           fi
           echo 'GNOME_WAYLAND=ready' | tee -a evidence/gnome/environment.txt
           deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
-          for kind in deb flatpak flatpak25; do
-            mkdir -p "/tmp/localsend-gnome-home-$kind"
+          for kind in deb flatpak flatpak-home flatpak25; do
+            if [ "$kind" != flatpak-home ]; then
+              mkdir -p "/tmp/localsend-gnome-home-$kind"
+            fi
             if [ "$kind" = deb ]; then
               HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland "$deb_binary" > "evidence/gnome/$kind.log" 2>&1 &
             elif [ "$kind" = flatpak ]; then
               HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
+            elif [ "$kind" = flatpak-home ]; then
+              echo "host_home=$HOME" > evidence/gnome/flatpak-home-environment.txt
+              echo "xdg_config_home=${XDG_CONFIG_HOME-unset}" >> evidence/gnome/flatpak-home-environment.txt
+              echo "xdg_cache_home=${XDG_CACHE_HOME-unset}" >> evidence/gnome/flatpak-home-environment.txt
+              echo "xdg_data_home=${XDG_DATA_HOME-unset}" >> evidence/gnome/flatpak-home-environment.txt
+              flatpak info --show-runtime org.localsend.localsend_app >> evidence/gnome/flatpak-home-environment.txt
+              WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
             else
               HOME="/tmp/localsend-gnome-home-$kind" WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland XDG_SESSION_TYPE=wayland flatpak run --runtime-version=25.08 --nosocket=fallback-x11 --nosocket=x11 org.localsend.localsend_app > "evidence/gnome/$kind.log" 2>&1 &
             fi
@@ -129,7 +138,12 @@ jobs:
             echo "=== $kind launcher $launcher ===" | tee "evidence/gnome/$kind-state.txt"
             ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep | tee -a "evidence/gnome/$kind-state.txt" || true
             ss -lntup | grep 53317 | tee -a "evidence/gnome/$kind-state.txt" || true
+            echo "log_bytes=$(wc -c < "evidence/gnome/$kind.log")" | tee -a "evidence/gnome/$kind-state.txt"
             scrot "evidence/gnome/$kind.png"
+            app_pid=$(pgrep -n -x localsend_app || true)
+            if [ -n "$app_pid" ] && ! ss -lntup | grep -q 53317; then
+              timeout 12 sudo gdb -q -batch -p "$app_pid" -ex 'thread apply all bt 12' > "evidence/gnome/$kind-backtrace.txt" 2>&1 || true
+            fi
             kill "$launcher" 2>/dev/null || true
             pkill -f '/localsend_app( |$)' 2>/dev/null || true
             pkill -x localsend 2>/dev/null || true
