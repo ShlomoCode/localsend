@@ -203,9 +203,34 @@ jobs:
             echo 'KERNEL_38=unavailable' | tee -a evidence/vm/kernel-policy.txt
             exit 0
           fi
-          timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
-            'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-7.0.0-38-generic' \
-            > evidence/vm/kernel-install.log 2>&1
+          timeout 600 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
+            'sudo DEBIAN_FRONTEND=noninteractive apt-get -t resolute-security -o Acquire::http::Timeout=30 -o Acquire::Retries=2 install -y --no-install-recommends linux-image-7.0.0-38-generic' \
+            > evidence/vm/kernel-install.log 2>&1 &
+          kernel_install_pid=$!
+          for i in $(seq 1 20); do
+            sleep 30
+            if ! kill -0 "$kernel_install_pid" 2>/dev/null; then break; fi
+            {
+              date -u
+              free -m
+              df -h /tmp
+              du -h /tmp/localsend-vm/ubuntu.img
+              ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm,args | grep '[q]emu-system' || true
+              cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
+              sudo journalctl -k --since '-2 minutes' --no-pager | tail -20
+            } >> evidence/vm/kernel-host-monitor.log 2>&1
+            timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'date -u; free -m; df -h /; ps -eo pid,ppid,stat,pcpu,rss,wchan:32,comm,args | grep -E "apt-get|http|dpkg" | grep -v grep || true' \
+              >> evidence/vm/kernel-guest-monitor.log 2>&1 || true
+          done
+          set +e
+          wait "$kernel_install_pid"
+          kernel_install_status=$?
+          set -e
+          if [ "$kernel_install_status" -ne 0 ]; then
+            echo "KERNEL_INSTALL_STATUS=$kernel_install_status"
+            tail -80 evidence/vm/kernel-install.log
+            exit "$kernel_install_status"
+          fi
           timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo systemctl reboot' >/dev/null 2>&1 || true
           ready=0
           for i in $(seq 1 60); do
