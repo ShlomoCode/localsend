@@ -89,9 +89,9 @@ jobs:
 
       - name: Install and compare official deb and released Flatpak in the GDM session
         run: |
-          set -u
+          set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
-          timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' <<'GUEST'
+          timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/install.log 2>&1 <<'GUEST' &
           set -e
           curl --fail --location --retry 3 -o /tmp/localsend.deb https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.deb
           sudo apt-get install -y /tmp/localsend.deb
@@ -100,6 +100,29 @@ jobs:
           flatpak info org.localsend.localsend_app
           sha256sum /tmp/localsend.deb
           GUEST
+          install_pid=$!
+          for i in $(seq 1 30); do
+            sleep 30
+            if ! kill -0 "$install_pid" 2>/dev/null; then break; fi
+            timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' >> evidence/vm/install-monitor.log 2>&1 <<'GUEST' || true
+          date -u
+          df -h /
+          free -m
+          ps -eo pid,ppid,stat,pcpu,rss,wchan:32,comm,args | grep -E 'flatpak|ostree|bwrap|apt-get|dpkg' | grep -v grep || true
+          timeout 5 flatpak list --columns=application,branch,installation || true
+          sudo journalctl -k --since '-1 minute' --no-pager | tail -30
+          GUEST
+          done
+          set +e
+          wait "$install_pid"
+          install_status=$?
+          set -e
+          if [ "$install_status" -ne 0 ]; then
+            echo "INSTALL_STATUS=$install_status"
+            tail -60 evidence/vm/install.log
+            tail -80 evidence/vm/install-monitor.log || true
+            exit "$install_status"
+          fi
           timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/guest-environment.txt 2>&1 <<'GUEST'
           uname -a
           gnome-shell --version
@@ -154,6 +177,10 @@ jobs:
             fi
             sleep 3
           done
+
+      - name: Make VM evidence readable for artifact upload
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" evidence/vm && chmod -R a+rX evidence/vm
 
       - uses: actions/upload-artifact@v4
         if: always()
