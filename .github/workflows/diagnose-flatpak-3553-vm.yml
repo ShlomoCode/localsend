@@ -60,7 +60,7 @@ jobs:
           printf 'instance-id: localsend-3553\nlocal-hostname: localsend-3553\n' > /tmp/localsend-vm/meta-data
           cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
           sudo qemu-system-x86_64 \
-            -machine accel=kvm:tcg -cpu host -smp 2 -m 6144 \
+            -machine accel=kvm:tcg -cpu Skylake-Client,-vmx -smp 2 -m 6144 \
             -drive file=/home/runner/localsend-vm/ubuntu.img,if=virtio,format=qcow2 \
             -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
             -device virtio-vga -usb -device usb-tablet \
@@ -69,9 +69,10 @@ jobs:
             -display none -vnc 127.0.0.1:1 \
             -monitor unix:/tmp/localsend-vm/monitor,server,nowait \
             -serial file:evidence/vm/serial.log \
-            -daemonize
-          printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: KVM host model\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
+            -daemonize 2> evidence/vm/qemu-start.log
+          printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,-vmx on KVM host\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
           uname -a >> evidence/vm/host-setup.txt
+          lscpu > evidence/vm/host-cpu.txt
           free -m >> evidence/vm/host-setup.txt
           df -Th /home/runner /tmp >> evidence/vm/host-setup.txt
 
@@ -93,6 +94,9 @@ jobs:
             printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/setup.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
             exit 1
           fi
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'lscpu' > evidence/vm/guest-cpu.txt
+          grep -q 'GenuineIntel' evidence/vm/guest-cpu.txt
+          grep -q 'Skylake' evidence/vm/guest-cpu.txt
 
       - name: Install and compare official deb and released Flatpak in the GDM session
         run: |
@@ -293,6 +297,21 @@ jobs:
             fi
             sleep 3
           done
+
+      - name: Record guest graphics stack after app comparisons
+        run: |
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 120 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/guest-graphics.txt 2>&1 <<'GUEST' || true
+          uname -r
+          lspci -nn | grep -i -E 'vga|display' || true
+          ls -l /dev/dri || true
+          dpkg-query -W libegl-mesa0 mesa-libgallium mesa-vulkan-drivers 2>&1 || true
+          sudo apt-get install -y --no-install-recommends mesa-utils-bin || true
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export WAYLAND_DISPLAY=wayland-0
+          export EGL_PLATFORM=wayland
+          timeout 15 /usr/bin/eglinfo.x86_64-linux-gnu -B || true
+          GUEST
 
       - name: Make VM evidence readable for artifact upload
         if: always()
