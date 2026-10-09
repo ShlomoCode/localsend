@@ -83,7 +83,7 @@ jobs:
           timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'uname -a; cloud-init status; systemctl status gdm3 --no-pager; loginctl list-sessions; ls -la /run/user/$(id -u)/wayland-* 2>&1' > evidence/vm/guest-session.txt 2>&1 || true
           printf 'GDM_SESSION_READY=%s\n' "$ready" | tee -a evidence/vm/guest-session.txt
           if [ "$ready" != 1 ]; then
-            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/setup.ppm" | socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/setup.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
             exit 1
           fi
 
@@ -153,8 +153,10 @@ jobs:
           echo "launcher=$!"
           GUEST
             sleep 25
-            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$kind.ppm" | socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
-            if [ -f "evidence/vm/$kind.ppm" ]; then convert "evidence/vm/$kind.ppm" "evidence/vm/$kind.png"; fi
+            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$kind.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            test -s "evidence/vm/$kind.ppm"
+            sudo chown "$(id -u):$(id -g)" "evidence/vm/$kind.ppm"
+            convert "evidence/vm/$kind.ppm" "evidence/vm/$kind.png"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind" > "evidence/vm/$kind-state.txt" 2>&1 <<'GUEST'
           set -u
           kind=$1
@@ -173,6 +175,76 @@ jobs:
           GUEST
             if [ "$kind" = deb ] && ! grep -q 'tcp.*LISTEN.*53317' evidence/vm/deb-state.txt; then
               echo 'DEB_CONTROL=failed' | tee -a evidence/vm/deb-state.txt
+              exit 1
+            fi
+            sleep 3
+          done
+
+      - name: Compare the reported generic kernel when available
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'uname -r; apt-cache policy linux-image-7.0.0-38-generic linux-modules-extra-7.0.0-38-generic' > evidence/vm/kernel-policy.txt
+          if ! grep -q 'Candidate: 7.0.0-38' evidence/vm/kernel-policy.txt; then
+            echo 'KERNEL_38=unavailable' | tee -a evidence/vm/kernel-policy.txt
+            exit 0
+          fi
+          timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
+            'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y linux-image-7.0.0-38-generic linux-modules-extra-7.0.0-38-generic' \
+            > evidence/vm/kernel-install.log 2>&1
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo systemctl reboot' >/dev/null 2>&1 || true
+          ready=0
+          for i in $(seq 1 60); do
+            sleep 10
+            if timeout 8 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
+              'test "$(uname -r)" = 7.0.0-38-generic && systemctl is-active --quiet gdm3 && test -S /run/user/$(id -u)/wayland-0' \
+              >/dev/null 2>&1; then ready=1; break; fi
+          done
+          echo "KERNEL_38_READY=$ready" | tee evidence/vm/kernel38-environment.txt
+          timeout 15 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
+            'uname -a; loginctl list-sessions; flatpak info --show-commit org.localsend.localsend_app; flatpak info --show-commit org.freedesktop.Platform//26.08' \
+            >> evidence/vm/kernel38-environment.txt 2>&1 || true
+          test "$ready" = 1
+          for kind in deb flatpak; do
+            label="${kind}38"
+            timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind $label" <<'GUEST'
+          set -u
+          kind=$1
+          label=$2
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          export WAYLAND_DISPLAY=wayland-0
+          export XDG_SESSION_TYPE=wayland
+          export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+          if [ "$kind" = deb ]; then
+            deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
+            nohup "$deb_binary" > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
+          else
+            nohup flatpak run org.localsend.localsend_app > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
+          fi
+          echo "launcher=$!"
+          GUEST
+            sleep 25
+            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$label.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            test -s "evidence/vm/$label.ppm"
+            sudo chown "$(id -u):$(id -g)" "evidence/vm/$label.ppm"
+            convert "evidence/vm/$label.ppm" "evidence/vm/$label.png"
+            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $label" > "evidence/vm/$label-state.txt" 2>&1 <<'GUEST'
+          label=$1
+          ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep || true
+          ss -lntup | grep 53317 || true
+          echo "log_bytes=$(wc -c < "/tmp/localsend-$label.log")"
+          cat "/tmp/localsend-$label.log"
+          app_pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true)
+          if [ -n "$app_pid" ]; then ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm; fi
+          if [ -n "$app_pid" ] && ! ss -lntup | grep -q 53317; then
+            timeout 12 sudo gdb -q -batch -p "$app_pid" -ex 'thread apply all bt 12' || true
+          fi
+          pkill -x localsend_app || true
+          pkill -x localsend || true
+          GUEST
+            if [ "$kind" = deb ] && ! grep -q 'tcp.*LISTEN.*53317' "evidence/vm/$label-state.txt"; then
+              echo 'DEB38_CONTROL=failed' | tee -a "evidence/vm/$label-state.txt"
               exit 1
             fi
             sleep 3
