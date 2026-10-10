@@ -57,6 +57,14 @@ async fn start_tls_server(identity: &Identity) -> TestServer {
 /// Starts a test server over TLS, optionally with the web pages enabled
 /// (which makes the client certificate optional).
 async fn start_tls_server_with_web(identity: &Identity, web: WebConfig) -> TestServer {
+    start_tls_server_with_web_and_delay(identity, web, Duration::ZERO).await
+}
+
+async fn start_tls_server_with_web_and_delay(
+    identity: &Identity,
+    web: WebConfig,
+    prepare_upload_delay: Duration,
+) -> TestServer {
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let prepare_uploads: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let received: Arc<Mutex<Vec<(String, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
@@ -76,6 +84,7 @@ async fn start_tls_server_with_web(identity: &Identity, web: WebConfig) -> TestS
                             .lock()
                             .await
                             .extend(files.keys().cloned().collect::<Vec<_>>());
+                        tokio::time::sleep(prepare_upload_delay).await;
                         let _ = decision_tx.send(PrepareUploadDecisionV2::Accept(
                             files.keys().cloned().collect(),
                         ));
@@ -139,6 +148,90 @@ async fn start_tls_server_with_web(identity: &Identity, web: WebConfig) -> TestS
         received,
         _stop_tx: stop_tx,
     }
+}
+
+/// A connected peer that never completes TLS must not leave the sender waiting indefinitely.
+#[tokio::test]
+async fn sender_times_out_when_peer_stalls_tls_handshake() {
+    let sender = generate_identity();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (accepted_tx, accepted_rx) = oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let _ = accepted_tx.send(());
+        let _socket = socket;
+        std::future::pending::<()>().await;
+    });
+
+    let client = client(&sender, None);
+    let request = tokio::spawn(async move {
+        client
+            .register(
+                ProtocolType::Https,
+                "127.0.0.1",
+                port,
+                sender_info(&sender.fingerprint),
+            )
+            .await
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), accepted_rx)
+        .await
+        .expect("sender never connected to the local peer")
+        .expect("local peer stopped before accepting the connection");
+
+    let result = tokio::time::timeout(Duration::from_secs(12), request)
+        .await
+        .expect("sender kept waiting for TLS beyond the connection timeout")
+        .expect("register task panicked");
+    peer.abort();
+
+    match result {
+        Err(ClientError::Reqwest(error)) => assert!(
+            error.is_timeout(),
+            "expected a connection timeout, got {error}"
+        ),
+        Err(error) => panic!("expected a connection timeout, got {error}"),
+        Ok(_) => panic!("register unexpectedly succeeded without a TLS handshake"),
+    }
+}
+
+/// Receiver approval may take longer than the connection timeout after TLS has connected.
+#[tokio::test]
+async fn sender_waits_for_prepare_upload_approval_after_tls_connects() {
+    let server_identity = generate_identity();
+    let sender = generate_identity();
+    let server = start_tls_server_with_web_and_delay(
+        &server_identity,
+        WebConfig::default(),
+        Duration::from_secs(11),
+    )
+    .await;
+    let client = client(&sender, Some(&server_identity.fingerprint));
+    let files = vec![file_dto("file-1", 10)];
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(14),
+        client.prepare_upload(
+            ProtocolType::Https,
+            "127.0.0.1",
+            server.port,
+            None,
+            prepare_upload_request(&sender, &files),
+            None,
+            CancellationToken::new(),
+        ),
+    )
+    .await
+    .expect("prepare-upload did not finish after receiver approval")
+    .expect("prepare-upload should succeed after receiver approval");
+
+    let response = result
+        .response
+        .expect("expected an accepted upload session");
+    assert!(response.files.contains_key("file-1"));
+    assert_eq!(server.prepare_uploads.lock().await.as_slice(), &["file-1"]);
 }
 
 fn client(sender: &Identity, expected_fingerprint: Option<&str>) -> LsHttpClientV2 {
@@ -307,7 +400,7 @@ async fn idle_tls_connections_are_closed() {
 
     for mut peer in idle_peers {
         let mut byte = [0];
-        let read = tokio::time::timeout(Duration::from_secs(65), peer.read(&mut byte))
+        let read = tokio::time::timeout(Duration::from_secs(12), peer.read(&mut byte))
             .await
             .expect("idle TLS socket was never closed")
             .expect("socket read failed");
