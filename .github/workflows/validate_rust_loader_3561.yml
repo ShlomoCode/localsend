@@ -1,0 +1,76 @@
+name: Validate final Rust loader 3561
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm git curl unzip tar ripgrep
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: flutter-actions/setup-flutter@v4
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: /__t/flutter/3.41.9/stable/flutter
+        with:
+          version: 3.41.9
+          channel: stable
+      - name: Resolve dependencies and record source
+        run: |
+          git config --global --add safe.directory /__t/flutter/3.41.9/stable/flutter
+          flutter pub get
+          mkdir evidence
+          git rev-parse HEAD | tee evidence/source.txt
+          curl -fL https://repo.archlinuxcn.org/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst -o package.tar.zst
+          sha256sum package.tar.zst > evidence/package-sha256.txt
+          mkdir unpacked
+          tar -xf package.tar.zst -C unpacked
+      - name: Compile actual baseline and candidate initializers
+        run: |
+          cat > loader_baseline.dart <<'DART'
+          import 'package:localsend_isolates/rust/frb_generated.dart';
+          Future<void> main() async {
+            await RustLib.init();
+            print('Rust initialized');
+            RustLib.dispose();
+          }
+          DART
+          cat > loader_candidate.dart <<'DART'
+          import 'package:localsend_isolates/rust/frb_generated.dart';
+          import 'package:localsend_isolates/util/rust_init.dart';
+          Future<void> main() async {
+            await initRustLib();
+            print('Rust initialized');
+            RustLib.dispose();
+          }
+          DART
+          dart compile exe loader_baseline.dart -o loader_baseline
+          dart compile exe loader_candidate.dart -o loader_candidate
+      - name: Validate real FFI loading independently of RUNPATH
+        run: |
+          mkdir -p 'installed LocalSend #3561/lib' empty-cwd
+          cp unpacked/usr/lib/localsend/lib/librust_lib_localsend_app.so 'installed LocalSend #3561/lib/'
+          cp loader_baseline loader_candidate 'installed LocalSend #3561/'
+          installation="$PWD/installed LocalSend #3561"
+          cd empty-cwd
+          FRB_DART_LOAD_EXTERNAL_LIBRARY_NATIVE_LIB_DIR="$installation/lib" "$installation/loader_baseline" > ../evidence/control.log 2>&1
+          if "$installation/loader_baseline" > ../evidence/baseline.log 2>&1; then
+            echo 'Baseline unexpectedly passed'; exit 1
+          fi
+          rg "Failed to load dynamic library 'librust_lib_localsend_app.so'" ../evidence/baseline.log
+          "$installation/loader_candidate" > ../evidence/candidate.log 2>&1
+          rg 'Rust initialized' ../evidence/control.log ../evidence/candidate.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: final-rust-loader-evidence
+          path: evidence/
