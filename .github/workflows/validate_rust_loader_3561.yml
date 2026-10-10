@@ -1,5 +1,8 @@
 name: Validate final Rust loader 3561
 on:
+  push:
+    branches: [codex/diagnose-rust-loader-3561]
+    paths: [.github/workflows/validate_rust_loader_3561.yml]
   workflow_dispatch:
     inputs:
       candidate_sha:
@@ -15,7 +18,7 @@ jobs:
       - run: pacman -Syu --noconfirm git curl unzip tar ripgrep
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ inputs.candidate_sha || 'b72c69be' }}
       - uses: flutter-actions/setup-flutter@v4
         env:
           GIT_CONFIG_COUNT: 1
