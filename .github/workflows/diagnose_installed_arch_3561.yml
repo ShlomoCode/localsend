@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Install actual package and KDE runtime
         run: |
-          pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox imagemagick curl iproute2 binutils git dbus plasma-desktop kwin kio-cli procps-ng xdg-user-dirs
+          pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox imagemagick curl iproute2 binutils git dbus plasma-desktop kwin kwin-x11 plasma-x11-session kde-cli-tools procps-ng xdg-user-dirs
           curl -fL https://repo.archlinuxcn.org/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst -o /tmp/localsend.pkg.tar.zst
           pacman -U --noconfirm /tmp/localsend.pkg.tar.zst
           useradd -m -u 1000 tester
