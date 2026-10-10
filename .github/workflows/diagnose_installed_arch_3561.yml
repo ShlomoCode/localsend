@@ -1,0 +1,86 @@
+name: Diagnose installed Arch LocalSend 3561
+on:
+  push:
+    branches: [codex/diagnose-rust-loader-3561]
+    paths: [.github/workflows/diagnose_installed_arch_3561.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installed:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install actual package and KDE runtime
+        run: |
+          pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox imagemagick curl iproute2 binutils git dbus plasma-desktop kwin kio-cli procps-ng xdg-user-dirs
+          curl -fL https://repo.archlinuxcn.org/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst -o /tmp/localsend.pkg.tar.zst
+          pacman -U --noconfirm /tmp/localsend.pkg.tar.zst
+          useradd -m -u 1000 tester
+      - uses: actions/checkout@v6
+      - name: Record unchanged installed artifact
+        run: |
+          mkdir evidence
+          chmod 777 evidence
+          sha256sum /tmp/localsend.pkg.tar.zst > evidence/package-sha256.txt
+          pacman -Q > evidence/packages.txt
+          pacman -Qkk localsend > evidence/package-integrity.txt
+          readlink -f /usr/bin/localsend > evidence/launcher-target.txt
+          cat /usr/share/applications/localsend.desktop > evidence/desktop.txt
+          readelf -d /usr/lib/localsend/localsend_app > evidence/executable-elf.txt
+          readelf -d /usr/lib/localsend/lib/libflutter_linux_gtk.so > evidence/engine-elf.txt
+      - name: Launch real installed application as ordinary user
+        shell: bash
+        run: |
+          Xvfb :99 -screen 0 1280x900x24 -ac > evidence/xvfb.log 2>&1 &
+          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1
+          sleep 2
+          cat > /tmp/run-installed-localsend.sh <<'SH'
+          #!/bin/bash
+          set -eu
+          case_name="$1"
+          out="$2"
+          export XDG_CONFIG_HOME="/home/tester/profile-$case_name"
+          export XDG_DATA_HOME="/home/tester/data-$case_name"
+          export XDG_RUNTIME_DIR="/tmp/runtime-tester-$case_name"
+          mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          cd /home/tester
+          if [ "$case_name" = kde-desktop ]; then
+            export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE KDE_FULL_SESSION=true QT_QPA_PLATFORM=xcb
+            kwin_x11 --replace > "$out/kwin.log" 2>&1 &
+            plasmashell > "$out/plasma.log" 2>&1 &
+            sleep 10
+            kioclient exec /usr/share/applications/localsend.desktop > "$out/launcher.log" 2>&1
+          else
+            openbox > "$out/openbox.log" 2>&1 &
+            sleep 2
+            if [ "$case_name" = installed-absolute ]; then executable=/usr/lib/localsend/localsend_app; else executable=/usr/bin/localsend; fi
+            LD_DEBUG=libs "$executable" > "$out/app.log" 2>&1 &
+          fi
+          sleep 12
+          import -window root "$out/screen.png"
+          ss -ltnp > "$out/listeners.txt"
+          pgrep -u tester -x localsend_app > "$out/pids.txt" || true
+          while read -r app_pid; do
+            readlink "/proc/$app_pid/exe" >> "$out/process-exe.txt"
+            cat "/proc/$app_pid/maps" >> "$out/process-maps.txt"
+          done < "$out/pids.txt"
+          if grep -q ':53317 ' "$out/listeners.txt"; then result=started; else result=no-server; fi
+          echo "$case_name: $result" | tee "$out/result.txt"
+          pkill -u tester -x localsend_app || true
+          pkill -u tester -x plasmashell || true
+          pkill -u tester -x kwin_x11 || true
+          pkill -u tester -x openbox || true
+          SH
+          chmod 755 /tmp/run-installed-localsend.sh
+          for case_name in installed-absolute installed-symlink kde-desktop; do
+            mkdir -p "evidence/$case_name"
+            chmod 777 "evidence/$case_name"
+            runuser -u tester -- dbus-run-session -- /tmp/run-installed-localsend.sh "$case_name" "$PWD/evidence/$case_name"
+          done
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: installed-arch-evidence
+          path: evidence/
