@@ -1,88 +1,59 @@
-//! Resolves application-provided byte sources for uploads and downloads.
+//! Replayable sources of bytes for transfers and hashing.
 
-use super::{
-    macos_app_archive::MacosAppArchive,
-    transfer::{FileContent, FileStream},
-};
+use super::transfer::FileStream;
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use std::{io, path::PathBuf};
-use tokio::sync::mpsc;
+use futures_util::stream;
+use std::{fmt, io, path::PathBuf, sync::Arc};
 
-/// A source of transfer bytes. Generated sources carry an opaque descriptor;
-/// callers do not need to know how a particular source produces its stream.
-#[derive(Debug)]
-pub enum ContentSource {
-    Path { path: String },
-    Bytes { bytes: Vec<u8> },
-    FileDescriptor { fd: i32 },
-    Generated { descriptor: String },
+/// Opens an independent stream each time it is called.
+pub trait ContentSource: fmt::Debug + Send + Sync {
+    fn open_stream(&self) -> io::Result<FileStream>;
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "kind", content = "source", rename_all = "camelCase")]
-enum Generator {
-    MacosAppArchive(MacosAppArchive),
+#[derive(Debug, Clone)]
+pub struct FileSource {
+    pub path: PathBuf,
 }
 
-impl ContentSource {
-    /// Wrap a measured archive in the private generated-source format.
-    pub fn from_macos_app_archive(archive: MacosAppArchive) -> io::Result<Self> {
-        let source = Generator::MacosAppArchive(archive);
-        let descriptor = serde_json::to_string(&source).map_err(invalid_descriptor)?;
-        Ok(Self::Generated { descriptor })
-    }
-
-    /// Resolve the source to content supported by the transfer layer.
-    pub fn into_content(self) -> io::Result<FileContent> {
-        match self {
-            Self::Path { path } => Ok(FileContent::Path(PathBuf::from(path))),
-            Self::Bytes { bytes } => {
-                let (tx, rx) = mpsc::channel(1);
-                tx.try_send(Bytes::from(bytes)).map_err(io::Error::other)?;
-                Ok(FileContent::Stream(rx))
-            }
-            Self::FileDescriptor { fd } => {
-                #[cfg(target_os = "android")]
-                {
-                    if fd < 0 {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "Invalid file descriptor",
-                        ));
-                    }
-                    Ok(FileContent::Fd(fd))
-                }
-                #[cfg(not(target_os = "android"))]
-                {
-                    let _ = fd;
-                    Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        "File descriptors are only supported on Android",
-                    ))
-                }
-            }
-            Self::Generated { descriptor } => {
-                let generator: Generator =
-                    serde_json::from_str(&descriptor).map_err(invalid_descriptor)?;
-                match generator {
-                    Generator::MacosAppArchive(archive) => {
-                        Ok(FileContent::MacosAppArchive(archive))
-                    }
-                }
-            }
-        }
-    }
-
-    /// Open this source using the same stream path as a transfer.
-    pub fn open_read(self) -> io::Result<FileStream> {
-        Ok(self.into_content()?.into_stream())
+impl ContentSource for FileSource {
+    fn open_stream(&self) -> io::Result<FileStream> {
+        Ok(super::transfer::FileContent::Path(self.path.clone()).into_stream())
     }
 }
 
-fn invalid_descriptor(error: serde_json::Error) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("Invalid generated source: {error}"),
-    )
+#[derive(Debug, Clone)]
+pub struct BytesSource {
+    pub bytes: Bytes,
+}
+
+impl ContentSource for BytesSource {
+    fn open_stream(&self) -> io::Result<FileStream> {
+        Ok(Box::pin(stream::once(std::future::ready(Ok(self
+            .bytes
+            .clone())))))
+    }
+}
+
+/// A replayable source backed by a factory, such as a platform archive.
+#[derive(Clone)]
+pub struct StreamSource {
+    factory: Arc<dyn Fn() -> io::Result<FileStream> + Send + Sync>,
+}
+
+impl StreamSource {
+    pub fn new(factory: Arc<dyn Fn() -> io::Result<FileStream> + Send + Sync>) -> Self {
+        Self { factory }
+    }
+}
+
+impl fmt::Debug for StreamSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StreamSource")
+    }
+}
+
+impl ContentSource for StreamSource {
+    fn open_stream(&self) -> io::Result<FileStream> {
+        (self.factory)()
+    }
 }

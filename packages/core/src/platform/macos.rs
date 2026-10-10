@@ -2,12 +2,12 @@
 //! `ditto` writes the archive to stdout; only ZIP headers are retained while
 //! preparing the size and checksum used by the transfer protocol.
 
-use super::transfer::FileStream;
+use crate::model::{content_source::StreamSource, transfer::FileStream};
 use bytes::Bytes;
 use flate2::{Decompress, FlushDecompress, Status};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{io, path::PathBuf};
+use std::{io, path::PathBuf, sync::Arc};
 use tokio::{io::AsyncReadExt, process::Command, sync::mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -78,6 +78,22 @@ impl MacosAppArchive {
         });
         Box::pin(ReceiverStream::new(rx))
     }
+
+    /// Build a repeatable transfer source from the measured archive plan.
+    pub fn into_source(self) -> StreamSource {
+        StreamSource::new(Arc::new(move || Ok(self.clone().into_stream())))
+    }
+}
+
+/// Prepare a macOS application bundle as a repeatable transfer source.
+pub async fn app_bundle_source(
+    path: PathBuf,
+    cancel: CancellationToken,
+) -> io::Result<(StreamSource, u64, String)> {
+    let archive = MacosAppArchive::prepare(path, cancel).await?;
+    let size = archive.size();
+    let sha256 = archive.sha256();
+    Ok((archive.into_source(), size, sha256))
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {

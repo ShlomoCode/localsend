@@ -39,8 +39,8 @@ pub async fn sha256_file_content(
     let mut hasher = Sha256::new();
     match content {
         #[cfg(feature = "http")]
-        FileContent::MacosAppArchive(archive) => {
-            let mut stream = archive.into_stream();
+        FileContent::Source(source) => {
+            let mut stream = source.open_stream()?;
             let mut hashed = 0_u64;
             loop {
                 let chunk = tokio::select! {

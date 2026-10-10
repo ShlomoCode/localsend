@@ -1,6 +1,13 @@
-use crate::api::content_source::ContentSource;
 use crate::api::cancel::RsCancellationToken;
-use localsend::model::macos_app_archive::MacosAppArchive;
+use crate::api::content_source::ContentSource;
+use localsend::model::transfer::FileContent;
+use localsend::platform::macos::MacosAppArchive;
+use std::{io, sync::Arc};
+
+pub(crate) fn decode_source(descriptor: &str) -> io::Result<FileContent> {
+    let archive = MacosAppArchive::decode(descriptor)?;
+    Ok(FileContent::Source(Arc::new(archive.into_source())))
+}
 
 pub struct RsMacosAppArchiveInfo {
     pub source: ContentSource,
@@ -17,7 +24,9 @@ pub async fn prepare_macos_app_archive(
     let size = archive.size();
     let sha256 = archive.sha256();
     Ok(RsMacosAppArchiveInfo {
-        source: ContentSource::from_macos_app_archive(archive)?,
+        source: ContentSource::Generated {
+            descriptor: archive.encode()?,
+        },
         size,
         sha256,
     })

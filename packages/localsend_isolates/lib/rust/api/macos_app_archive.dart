@@ -8,6 +8,8 @@ import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/content_source.dart';
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `decode_source`
+
 /// Measures a replayable application ZIP without storing the archive.
 Future<RsMacosAppArchiveInfo> prepareMacosAppArchive({required String path, required RsCancellationToken cancelToken}) =>
     RustLib.instance.api.crateApiMacosAppArchivePrepareMacosAppArchive(path: path, cancelToken: cancelToken);

@@ -3674,20 +3674,6 @@ const _: fn() = || {
         let _: Option<crate::api::model::DeviceType> = ClientInfoWithoutId.device_type;
         let _: String = ClientInfoWithoutId.token;
     }
-    match None::<crate::api::content_source::ContentSource>.unwrap() {
-        crate::api::content_source::ContentSource::Path { path } => {
-            let _: String = path;
-        }
-        crate::api::content_source::ContentSource::Bytes { bytes } => {
-            let _: Vec<u8> = bytes;
-        }
-        crate::api::content_source::ContentSource::FileDescriptor { fd } => {
-            let _: i32 = fd;
-        }
-        crate::api::content_source::ContentSource::Generated { descriptor } => {
-            let _: String = descriptor;
-        }
-    }
     {
         let FileDto = None::<crate::api::model::FileDto>.unwrap();
         let _: String = FileDto.id;
@@ -6020,9 +6006,9 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::api::webrtc::ClientInfo
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::api::content_source::ContentSource> {
+impl flutter_rust_bridge::IntoDart for crate::api::content_source::ContentSource {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self.0 {
+        match self {
             crate::api::content_source::ContentSource::Path { path } => {
                 [0.into_dart(), path.into_into_dart().into_dart()].into_dart()
             }
@@ -6042,14 +6028,14 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::api::content_source::Co
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for FrbWrapper<crate::api::content_source::ContentSource>
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::api::content_source::ContentSource>>
     for crate::api::content_source::ContentSource
 {
-    fn into_into_dart(self) -> FrbWrapper<crate::api::content_source::ContentSource> {
-        self.into()
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::content_source::ContentSource>
+    for crate::api::content_source::ContentSource
+{
+    fn into_into_dart(self) -> crate::api::content_source::ContentSource {
+        self
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs

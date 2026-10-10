@@ -10,6 +10,7 @@ import 'package:localsend_isolates/rust/frb_generated.dart';
 
 part 'content_source.freezed.dart';
 
+// These functions are ignored because they are not marked as `pub`: `into_content`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `into_content`
 
 @freezed
