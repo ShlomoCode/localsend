@@ -140,12 +140,14 @@ class HttpServerFileDownloadTargetTask implements BaseHttpServerTask {
   final String fileId;
   final String? path;
   final int? fileDescriptor;
+  final String? archiveSource;
 
   HttpServerFileDownloadTargetTask({
     required this.sessionId,
     required this.fileId,
     required this.path,
     required this.fileDescriptor,
+    this.archiveSource,
   });
 }
 
@@ -595,6 +597,7 @@ Future<void> setupHttpServerIsolate(
                 fileId: targetTask.fileId,
                 path: targetTask.path,
                 fileDescriptor: targetTask.fileDescriptor,
+                archiveSource: targetTask.archiveSource,
               );
           return;
         case HttpServerFailFileDownloadTask failTask:

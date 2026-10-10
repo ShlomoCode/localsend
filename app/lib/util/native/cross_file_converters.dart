@@ -7,6 +7,8 @@ import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
 import 'package:localsend_app/util/native/macos_app_archive.dart';
 import 'package:localsend_isolates/model/file_type.dart';
+import 'package:localsend_isolates/rust/api/cancel.dart' as rust_cancel;
+import 'package:localsend_isolates/rust/api/macos_app_archive.dart' as rust_archive;
 import 'package:localsend_isolates/rust/api/metadata.dart';
 import 'package:localsend_isolates/util/file_path_helper.dart';
 import 'package:logging/logging.dart';
@@ -158,13 +160,11 @@ class CrossFileConverters {
       return file;
     }
 
-    final archive = await archiveMacosApp(Directory(file.path!), await macosAppArchiveCache());
-    try {
-      return file.copyWith(path: archive.path, size: await archive.length());
-    } catch (_) {
-      await archive.parent.delete(recursive: true);
-      rethrow;
-    }
+    final archive = await rust_archive.prepareMacosAppArchive(
+      path: file.path!,
+      cancelToken: rust_cancel.createCancellationToken(),
+    );
+    return file.copyWith(path: null, archiveSource: archive.source, archiveSha256: archive.sha256, size: archive.size.toInt());
   }
 
   static Future<PreparedSendingFiles> prepareFilesForSending(List<CrossFile> files) async {
@@ -174,9 +174,6 @@ class CrossFileConverters {
       for (final file in files) {
         final preparedFile = await prepareMacosAppForSending(file);
         prepared.add(preparedFile);
-        if (isPendingMacosAppArchive(file)) {
-          archiveDirectories.add(File(preparedFile.path!).parent);
-        }
       }
     } catch (_) {
       await PreparedSendingFiles(prepared, archiveDirectories).dispose();

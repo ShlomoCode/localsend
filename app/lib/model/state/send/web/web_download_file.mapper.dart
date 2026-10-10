@@ -31,6 +31,12 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
   );
   static String? _$path(WebDownloadFile v) => v.path;
   static const Field<WebDownloadFile, String> _f$path = Field('path', _$path);
+  static String? _$archiveSource(WebDownloadFile v) => v.archiveSource;
+  static const Field<WebDownloadFile, String> _f$archiveSource = Field(
+    'archiveSource',
+    _$archiveSource,
+    opt: true,
+  );
   static List<int>? _$bytes(WebDownloadFile v) => v.bytes;
   static const Field<WebDownloadFile, List<int>> _f$bytes = Field(
     'bytes',
@@ -42,6 +48,7 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
     #file: _f$file,
     #asset: _f$asset,
     #path: _f$path,
+    #archiveSource: _f$archiveSource,
     #bytes: _f$bytes,
   };
 
@@ -50,6 +57,7 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
       file: data.dec(_f$file),
       asset: data.dec(_f$asset),
       path: data.dec(_f$path),
+      archiveSource: data.dec(_f$archiveSource),
       bytes: data.dec(_f$bytes),
     );
   }
@@ -117,7 +125,13 @@ extension WebDownloadFileValueCopy<$R, $Out>
 abstract class WebDownloadFileCopyWith<$R, $In extends WebDownloadFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes;
-  $R call({FileDto? file, AssetEntity? asset, String? path, List<int>? bytes});
+  $R call({
+    FileDto? file,
+    AssetEntity? asset,
+    String? path,
+    String? archiveSource,
+    List<int>? bytes,
+  });
   WebDownloadFileCopyWith<$R2, $In, $Out2> $chain<$R2, $Out2>(
     Then<$Out2, $R2> t,
   );
@@ -145,12 +159,14 @@ class _WebDownloadFileCopyWithImpl<$R, $Out>
     FileDto? file,
     Object? asset = $none,
     Object? path = $none,
+    Object? archiveSource = $none,
     Object? bytes = $none,
   }) => $apply(
     FieldCopyWithData({
       if (file != null) #file: file,
       if (asset != $none) #asset: asset,
       if (path != $none) #path: path,
+      if (archiveSource != $none) #archiveSource: archiveSource,
       if (bytes != $none) #bytes: bytes,
     }),
   );
@@ -159,6 +175,7 @@ class _WebDownloadFileCopyWithImpl<$R, $Out>
     file: data.get(#file, or: $value.file),
     asset: data.get(#asset, or: $value.asset),
     path: data.get(#path, or: $value.path),
+    archiveSource: data.get(#archiveSource, or: $value.archiveSource),
     bytes: data.get(#bytes, or: $value.bytes),
   );
 

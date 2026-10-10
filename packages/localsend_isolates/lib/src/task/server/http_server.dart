@@ -106,12 +106,14 @@ class HttpServerService {
     required String fileId,
     required String? path,
     required int? fileDescriptor,
+    String? archiveSource,
   }) async {
     await _requireServer().respondFileDownload(
       sessionId: sessionId,
       fileId: fileId,
       path: path,
       fileDescriptor: fileDescriptor,
+      archiveSource: archiveSource,
     );
   }
 

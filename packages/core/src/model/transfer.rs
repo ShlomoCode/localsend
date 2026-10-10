@@ -24,9 +24,13 @@ pub type FileStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> +
 ///
 /// Shared by the HTTP client (upload) and server (download API) so both can
 /// obtain a file's content as an in-memory stream of chunks, from a regular
-/// file path, or, on Android, directly from a raw file descriptor.
+/// file path, a replayable application archive, or, on Android, directly from
+/// a raw file descriptor.
 #[derive(Debug)]
 pub enum FileContent {
+    /// A macOS application ZIP measured before transfer and generated on demand.
+    #[cfg(feature = "http")]
+    MacosAppArchive(super::macos_app_archive::MacosAppArchive),
     /// A stream of binary chunks. The channel is closed once the file has been
     /// fully provided.
     Stream(mpsc::Receiver<Bytes>),
@@ -42,7 +46,8 @@ pub enum FileContent {
 impl FileContent {
     /// Normalizes the content into a stream of binary chunks.
     ///
-    /// [`FileContent::Stream`] is forwarded as-is. For [`FileContent::Path`] and
+    /// [`FileContent::Stream`] is forwarded as-is. Application archives are
+    /// generated on demand. For [`FileContent::Path`] and
     /// [`FileContent::Fd`], a background task reads the file and forwards the
     /// chunks; the stream ends after the last chunk on EOF.
     ///
@@ -53,6 +58,8 @@ impl FileContent {
     /// look successful on this side.
     pub fn into_stream(self) -> FileStream {
         match self {
+            #[cfg(feature = "http")]
+            FileContent::MacosAppArchive(archive) => archive.into_stream(),
             FileContent::Stream(rx) => {
                 tracing::info!("Reading file content via byte stream from application");
                 Box::pin(ReceiverStream::new(rx).map(Ok))

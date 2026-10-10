@@ -8,7 +8,7 @@ use localsend::http::server::internal::{InternalConfig, InternalEvent};
 pub use localsend::http::server::v2::SessionEndReasonV2;
 use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
 use localsend::http::server::web::{
-    WebConfig, WebMode as CoreWebMode, WebDownloadConfig, WebDownloadEvent,
+    WebConfig, WebDownloadConfig, WebDownloadEvent, WebMode as CoreWebMode,
 };
 pub use localsend::http::server::web::{WebI18n, WebPages};
 use localsend::http::state::ClientInfo;
@@ -626,6 +626,7 @@ impl RsHttpServer {
         file_id: String,
         path: Option<String>,
         file_descriptor: Option<i32>,
+        archive_source: Option<String>,
     ) -> anyhow::Result<()> {
         let Some(content_tx) = self
             .pending_downloads
@@ -636,7 +637,7 @@ impl RsHttpServer {
             return Err(anyhow::anyhow!("No pending file download for this file"));
         };
 
-        let content = resolve_file_content(path, file_descriptor)?;
+        let content = resolve_file_content(path, file_descriptor, archive_source)?;
 
         content_tx
             .send(content)
@@ -738,10 +739,14 @@ fn resolve_upload_target(
 fn resolve_file_content(
     path: Option<String>,
     file_descriptor: Option<i32>,
+    archive_source: Option<String>,
 ) -> anyhow::Result<FileContent> {
-    match (path, file_descriptor) {
-        (Some(path), None) => Ok(FileContent::Path(path.into())),
-        (None, Some(file_descriptor)) => {
+    match (path, file_descriptor, archive_source) {
+        (Some(path), None, None) => Ok(FileContent::Path(path.into())),
+        (None, None, Some(source)) => Ok(FileContent::MacosAppArchive(
+            localsend::model::macos_app_archive::MacosAppArchive::decode(&source)?,
+        )),
+        (None, Some(file_descriptor), None) => {
             #[cfg(target_os = "android")]
             {
                 Ok(FileContent::Fd(file_descriptor))

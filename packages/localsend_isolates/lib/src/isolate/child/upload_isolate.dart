@@ -28,6 +28,7 @@ class HttpUploadFile {
   final String remoteFileToken;
   final String fileId;
   final String? filePath;
+  final String? archiveSource;
   final List<int>? fileBytes;
   final int fileSize;
 
@@ -35,6 +36,7 @@ class HttpUploadFile {
     required this.remoteFileToken,
     required this.fileId,
     required this.filePath,
+    this.archiveSource,
     required this.fileBytes,
     required this.fileSize,
   });
@@ -172,6 +174,7 @@ Future<void> setupHttpUploadIsolate(
                       client: client,
                       stream: filePath == null && file.fileBytes != null ? Stream.value(file.fileBytes!) : null,
                       path: !isContentUri ? filePath : null,
+                      archiveSource: file.archiveSource,
                       fileDescriptor: fileDescriptor,
                       contentLength: file.fileSize,
                       target: uploadTask.device,

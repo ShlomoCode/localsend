@@ -16,6 +16,8 @@ class CrossFile with CrossFileMappable {
   final Uint8List? thumbnail;
   final AssetEntity? asset; // for thumbnails
   final String? path;
+  final String? archiveSource; // replayable macOS app archive source
+  final String? archiveSha256;
   final List<int>? bytes; // if type message, then UTF-8 encoded
   final String? lastModified; // RFC 3339; a string because DateTime would truncate to microseconds
   final String? lastAccessed; // RFC 3339
@@ -27,6 +29,8 @@ class CrossFile with CrossFileMappable {
     required this.thumbnail,
     required this.asset,
     required this.path,
+    this.archiveSource,
+    this.archiveSha256,
     required this.bytes,
     required this.lastModified,
     required this.lastAccessed,

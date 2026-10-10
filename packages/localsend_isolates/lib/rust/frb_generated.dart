@@ -13,6 +13,7 @@ import 'package:localsend_isolates/rust/api/discovery.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
 import 'package:localsend_isolates/rust/api/logging.dart';
+import 'package:localsend_isolates/rust/api/macos_app_archive.dart';
 import 'package:localsend_isolates/rust/api/metadata.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/rust/api/server.dart';
@@ -76,7 +77,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1979579466;
+  int get rustContentHash => -1970643444;
 
   static const kDefaultExternalLibraryLoaderConfig = ExternalLibraryLoaderConfig(
     stem: 'rust_lib_localsend_app',
@@ -183,6 +184,7 @@ abstract class RustLibApi extends BaseApi {
     Dart2RustStreamReceiver? binary,
     String? path,
     int? fileDescriptor,
+    String? archiveSource,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   });
@@ -201,6 +203,7 @@ abstract class RustLibApi extends BaseApi {
     required String fileId,
     String? path,
     int? fileDescriptor,
+    String? archiveSource,
   });
 
   Stream<double> crateApiServerRsHttpServerRespondFileUpload({
@@ -278,6 +281,8 @@ abstract class RustLibApi extends BaseApi {
   Stream<RsHashFileEvent> crateApiCryptoHashFile({String? path, int? fileDescriptor, Uint8List? bytes, required RsCancellationToken cancelToken});
 
   bool crateApiFilenameIsValidFileName({required String name});
+
+  Future<RsMacosAppArchiveInfo> crateApiMacosAppArchivePrepareMacosAppArchive({required String path, required RsCancellationToken cancelToken});
 
   Future<FileMetadata?> crateApiMetadataReadFileMetadata({required String path});
 
@@ -946,6 +951,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     Dart2RustStreamReceiver? binary,
     String? path,
     int? fileDescriptor,
+    String? archiveSource,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   }) {
@@ -970,6 +976,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             );
             sse_encode_opt_String(path, serializer);
             sse_encode_opt_box_autoadd_i_32(fileDescriptor, serializer);
+            sse_encode_opt_String(archiveSource, serializer);
             sse_encode_u_64(contentLength, serializer);
             sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(cancelToken, serializer);
             pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19, port: port_);
@@ -979,7 +986,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             decodeErrorData: null,
           ),
           constMeta: kCrateApiHttpRsHttpClientUploadConstMeta,
-          argValues: [that, sink, protocol, ip, port, publicKey, sessionId, fileId, token, binary, path, fileDescriptor, contentLength, cancelToken],
+          argValues: [
+            that,
+            sink,
+            protocol,
+            ip,
+            port,
+            publicKey,
+            sessionId,
+            fileId,
+            token,
+            binary,
+            path,
+            fileDescriptor,
+            archiveSource,
+            contentLength,
+            cancelToken,
+          ],
           apiImpl: this,
         ),
       ),
@@ -1002,6 +1025,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       'binary',
       'path',
       'fileDescriptor',
+      'archiveSource',
       'contentLength',
       'cancelToken',
     ],
@@ -1124,6 +1148,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String fileId,
     String? path,
     int? fileDescriptor,
+    String? archiveSource,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1134,6 +1159,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(fileId, serializer);
           sse_encode_opt_String(path, serializer);
           sse_encode_opt_box_autoadd_i_32(fileDescriptor, serializer);
+          sse_encode_opt_String(archiveSource, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 24, port: port_);
         },
         codec: SseCodec(
@@ -1141,7 +1167,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiServerRsHttpServerRespondFileDownloadConstMeta,
-        argValues: [that, sessionId, fileId, path, fileDescriptor],
+        argValues: [that, sessionId, fileId, path, fileDescriptor, archiveSource],
         apiImpl: this,
       ),
     );
@@ -1149,7 +1175,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiServerRsHttpServerRespondFileDownloadConstMeta => const TaskConstMeta(
     debugName: 'RsHttpServer_respond_file_download',
-    argNames: ['that', 'sessionId', 'fileId', 'path', 'fileDescriptor'],
+    argNames: ['that', 'sessionId', 'fileId', 'path', 'fileDescriptor', 'archiveSource'],
   );
 
   @override
@@ -1964,13 +1990,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<RsMacosAppArchiveInfo> crateApiMacosAppArchivePrepareMacosAppArchive({required String path, required RsCancellationToken cancelToken}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(cancelToken, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 54, port: port_);
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_rs_macos_app_archive_info,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiMacosAppArchivePrepareMacosAppArchiveConstMeta,
+        argValues: [path, cancelToken],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMacosAppArchivePrepareMacosAppArchiveConstMeta => const TaskConstMeta(
+    debugName: 'prepare_macos_app_archive',
+    argNames: ['path', 'cancelToken'],
+  );
+
+  @override
   Future<FileMetadata?> crateApiMetadataReadFileMetadata({required String path}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(path, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 54, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55, port: port_);
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_box_autoadd_file_metadata,
@@ -1995,7 +2047,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(name, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 56)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -2048,7 +2100,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(certPem, serializer);
           sse_encode_String(privateKeyPem, serializer);
           sse_encode_u_64(timeoutMs, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 56, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 57, port: port_);
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery,
@@ -2125,7 +2177,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(verifyChecksums, serializer);
           sse_encode_box_autoadd_web_params(web, serializer);
           sse_encode_opt_String(showToken, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 57, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58, port: port_);
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsHttpServer,
@@ -2151,7 +2203,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(cert, serializer);
           sse_encode_String(publicKey, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59, port: port_);
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -3205,6 +3257,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       default:
         throw Exception('unreachable');
     }
+  }
+
+  @protected
+  RsMacosAppArchiveInfo dco_decode_rs_macos_app_archive_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3) throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return RsMacosAppArchiveInfo(
+      source: dco_decode_String(arr[0]),
+      size: dco_decode_u_64(arr[1]),
+      sha256: dco_decode_String(arr[2]),
+    );
   }
 
   @protected
@@ -4573,6 +4637,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       default:
         throw UnimplementedError('');
     }
+  }
+
+  @protected
+  RsMacosAppArchiveInfo sse_decode_rs_macos_app_archive_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_source = sse_decode_String(deserializer);
+    var var_size = sse_decode_u_64(deserializer);
+    var var_sha256 = sse_decode_String(deserializer);
+    return RsMacosAppArchiveInfo(source: var_source, size: var_size, sha256: var_sha256);
   }
 
   @protected
@@ -5951,6 +6024,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_rs_macos_app_archive_info(RsMacosAppArchiveInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.source, serializer);
+    sse_encode_u_64(self.size, serializer);
+    sse_encode_String(self.sha256, serializer);
+  }
+
+  @protected
   void sse_encode_rs_server_event(RsServerEvent self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     switch (self) {
@@ -6492,6 +6573,7 @@ class RsHttpClientImpl extends RustOpaque implements RsHttpClient {
     Dart2RustStreamReceiver? binary,
     String? path,
     int? fileDescriptor,
+    String? archiveSource,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   }) => RustLib.instance.api.crateApiHttpRsHttpClientUpload(
@@ -6506,6 +6588,7 @@ class RsHttpClientImpl extends RustOpaque implements RsHttpClient {
     binary: binary,
     path: path,
     fileDescriptor: fileDescriptor,
+    archiveSource: archiveSource,
     contentLength: contentLength,
     cancelToken: cancelToken,
   );
@@ -6567,8 +6650,15 @@ class RsHttpServerImpl extends RustOpaque implements RsHttpServer {
   /// the file content should be read from (either a path or a file descriptor).
   ///
   /// The server reads the content and streams it to the web client.
-  Future<void> respondFileDownload({required String sessionId, required String fileId, String? path, int? fileDescriptor}) => RustLib.instance.api
-      .crateApiServerRsHttpServerRespondFileDownload(that: this, sessionId: sessionId, fileId: fileId, path: path, fileDescriptor: fileDescriptor);
+  Future<void> respondFileDownload({required String sessionId, required String fileId, String? path, int? fileDescriptor, String? archiveSource}) =>
+      RustLib.instance.api.crateApiServerRsHttpServerRespondFileDownload(
+        that: this,
+        sessionId: sessionId,
+        fileId: fileId,
+        path: path,
+        fileDescriptor: fileDescriptor,
+        archiveSource: archiveSource,
+      );
 
   /// Answers the pending [RsServerEvent::FileUpload] event with the target
   /// the file should be saved to (either a path or a file descriptor)

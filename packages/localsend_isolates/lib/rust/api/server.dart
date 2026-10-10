@@ -91,7 +91,7 @@ abstract class RsHttpServer implements RustOpaqueInterface {
   /// the file content should be read from (either a path or a file descriptor).
   ///
   /// The server reads the content and streams it to the web client.
-  Future<void> respondFileDownload({required String sessionId, required String fileId, String? path, int? fileDescriptor});
+  Future<void> respondFileDownload({required String sessionId, required String fileId, String? path, int? fileDescriptor, String? archiveSource});
 
   /// Answers the pending [RsServerEvent::FileUpload] event with the target
   /// the file should be saved to (either a path or a file descriptor)

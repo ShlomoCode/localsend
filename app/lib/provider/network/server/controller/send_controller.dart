@@ -76,6 +76,7 @@ class SendController {
                   ),
                   asset: file.asset,
                   path: path,
+                  archiveSource: file.archiveSource,
                   bytes: file.bytes,
                 ),
               );
@@ -129,16 +130,19 @@ class SendController {
   Future<void> onFileDownload(HttpServerWebFileDownloadEvent event) async {
     final String? filePath;
     final int? fileDescriptor;
+    final String? archiveSource;
     try {
-      final path = server.getStateOrNull()?.webDownloadState?.files[event.fileId]?.path;
-      if (path == null) {
+      final file = server.getStateOrNull()?.webDownloadState?.files[event.fileId];
+      final path = file?.path;
+      archiveSource = file?.archiveSource;
+      if (path == null && archiveSource == null) {
         // should not happen: the Rust server only emits events for offered files
         throw StateError('No path for web download file ${event.fileId}');
       }
 
-      if (path.startsWith('content://')) {
+      if (path?.startsWith('content://') ?? false) {
         filePath = null;
-        fileDescriptor = await isolate_android_channel.getFileDescriptorAndroid(uri: path);
+        fileDescriptor = await isolate_android_channel.getFileDescriptorAndroid(uri: path!);
       } else {
         filePath = path;
         fileDescriptor = null;
@@ -158,6 +162,7 @@ class SendController {
             fileId: event.fileId,
             path: filePath,
             fileDescriptor: fileDescriptor,
+            archiveSource: archiveSource,
           ),
         );
   }

@@ -14,6 +14,7 @@ import 'package:localsend_isolates/rust/api/discovery.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
 import 'package:localsend_isolates/rust/api/logging.dart';
+import 'package:localsend_isolates/rust/api/macos_app_archive.dart';
 import 'package:localsend_isolates/rust/api/metadata.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/rust/api/server.dart';
@@ -445,6 +446,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RsHttpClientError dco_decode_rs_http_client_error(dynamic raw);
+
+  @protected
+  RsMacosAppArchiveInfo dco_decode_rs_macos_app_archive_info(dynamic raw);
 
   @protected
   RsServerEvent dco_decode_rs_server_event(dynamic raw);
@@ -911,6 +915,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RsHttpClientError sse_decode_rs_http_client_error(SseDeserializer deserializer);
+
+  @protected
+  RsMacosAppArchiveInfo sse_decode_rs_macos_app_archive_info(SseDeserializer deserializer);
 
   @protected
   RsServerEvent sse_decode_rs_server_event(SseDeserializer deserializer);
@@ -1423,6 +1430,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_rs_http_client_error(RsHttpClientError self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rs_macos_app_archive_info(RsMacosAppArchiveInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_rs_server_event(RsServerEvent self, SseSerializer serializer);

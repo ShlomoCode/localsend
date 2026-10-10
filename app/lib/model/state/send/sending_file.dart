@@ -13,6 +13,7 @@ class SendingFile with SendingFileMappable {
   final Uint8List? thumbnail;
   final AssetEntity? asset; // for thumbnails
   final String? path; // android, iOS, desktop
+  final String? archiveSource;
   final List<int>? bytes; // web
   final String? errorMessage; // when failed; the live status is tracked in fileTransferProvider
 
@@ -22,6 +23,7 @@ class SendingFile with SendingFileMappable {
     required this.thumbnail,
     required this.asset,
     required this.path,
+    this.archiveSource,
     required this.bytes,
     required this.errorMessage,
   });

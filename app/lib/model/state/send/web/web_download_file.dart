@@ -9,12 +9,14 @@ class WebDownloadFile with WebDownloadFileMappable {
   final FileDto file;
   final AssetEntity? asset; // for thumbnails
   final String? path; // android, iOS, desktop
+  final String? archiveSource;
   final List<int>? bytes; // web
 
   const WebDownloadFile({
     required this.file,
     required this.asset,
     required this.path,
+    this.archiveSource,
     required this.bytes,
   });
 }

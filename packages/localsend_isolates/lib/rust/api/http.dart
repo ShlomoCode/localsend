@@ -73,6 +73,7 @@ abstract class RsHttpClient implements RustOpaqueInterface {
     Dart2RustStreamReceiver? binary,
     String? path,
     int? fileDescriptor,
+    String? archiveSource,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   });

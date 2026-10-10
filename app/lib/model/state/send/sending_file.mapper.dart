@@ -38,6 +38,12 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
   );
   static String? _$path(SendingFile v) => v.path;
   static const Field<SendingFile, String> _f$path = Field('path', _$path);
+  static String? _$archiveSource(SendingFile v) => v.archiveSource;
+  static const Field<SendingFile, String> _f$archiveSource = Field(
+    'archiveSource',
+    _$archiveSource,
+    opt: true,
+  );
   static List<int>? _$bytes(SendingFile v) => v.bytes;
   static const Field<SendingFile, List<int>> _f$bytes = Field('bytes', _$bytes);
   static String? _$errorMessage(SendingFile v) => v.errorMessage;
@@ -53,6 +59,7 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
     #thumbnail: _f$thumbnail,
     #asset: _f$asset,
     #path: _f$path,
+    #archiveSource: _f$archiveSource,
     #bytes: _f$bytes,
     #errorMessage: _f$errorMessage,
   };
@@ -64,6 +71,7 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
       thumbnail: data.dec(_f$thumbnail),
       asset: data.dec(_f$asset),
       path: data.dec(_f$path),
+      archiveSource: data.dec(_f$archiveSource),
       bytes: data.dec(_f$bytes),
       errorMessage: data.dec(_f$errorMessage),
     );
@@ -136,6 +144,7 @@ abstract class SendingFileCopyWith<$R, $In extends SendingFile, $Out>
     Uint8List? thumbnail,
     AssetEntity? asset,
     String? path,
+    String? archiveSource,
     List<int>? bytes,
     String? errorMessage,
   });
@@ -166,6 +175,7 @@ class _SendingFileCopyWithImpl<$R, $Out>
     Object? thumbnail = $none,
     Object? asset = $none,
     Object? path = $none,
+    Object? archiveSource = $none,
     Object? bytes = $none,
     Object? errorMessage = $none,
   }) => $apply(
@@ -175,6 +185,7 @@ class _SendingFileCopyWithImpl<$R, $Out>
       if (thumbnail != $none) #thumbnail: thumbnail,
       if (asset != $none) #asset: asset,
       if (path != $none) #path: path,
+      if (archiveSource != $none) #archiveSource: archiveSource,
       if (bytes != $none) #bytes: bytes,
       if (errorMessage != $none) #errorMessage: errorMessage,
     }),
@@ -186,6 +197,7 @@ class _SendingFileCopyWithImpl<$R, $Out>
     thumbnail: data.get(#thumbnail, or: $value.thumbnail),
     asset: data.get(#asset, or: $value.asset),
     path: data.get(#path, or: $value.path),
+    archiveSource: data.get(#archiveSource, or: $value.archiveSource),
     bytes: data.get(#bytes, or: $value.bytes),
     errorMessage: data.get(#errorMessage, or: $value.errorMessage),
   );

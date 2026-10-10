@@ -44,7 +44,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1979579466;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1970643444;
 
 // Section: executor
 
@@ -1199,6 +1199,7 @@ fn wire__crate__api__http__RsHttpClient_upload_impl(
             let api_binary = <Option<Dart2RustStreamReceiver>>::sse_decode(&mut deserializer);
             let api_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_file_descriptor = <Option<i32>>::sse_decode(&mut deserializer);
+            let api_archive_source = <Option<String>>::sse_decode(&mut deserializer);
             let api_content_length = <u64>::sse_decode(&mut deserializer);
             let api_cancel_token = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<RsCancellationToken>,
@@ -1251,6 +1252,7 @@ fn wire__crate__api__http__RsHttpClient_upload_impl(
                                 api_binary,
                                 api_path,
                                 api_file_descriptor,
+                                api_archive_source,
                                 api_content_length,
                                 &*api_cancel_token_guard,
                             )
@@ -1545,6 +1547,7 @@ fn wire__crate__api__server__RsHttpServer_respond_file_download_impl(
             let api_file_id = <String>::sse_decode(&mut deserializer);
             let api_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_file_descriptor = <Option<i32>>::sse_decode(&mut deserializer);
+            let api_archive_source = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1572,6 +1575,7 @@ fn wire__crate__api__server__RsHttpServer_respond_file_download_impl(
                             api_file_id,
                             api_path,
                             api_file_descriptor,
+                            api_archive_source,
                         )
                         .await?;
                         Ok(output_ok)
@@ -3136,6 +3140,68 @@ fn wire__crate__api__filename__is_valid_file_name_impl(
         },
     )
 }
+fn wire__crate__api__macos_app_archive__prepare_macos_app_archive_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "prepare_macos_app_archive",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_path = <String>::sse_decode(&mut deserializer);
+            let api_cancel_token = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<RsCancellationToken>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let mut api_cancel_token_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_cancel_token,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_cancel_token_guard =
+                                        Some(api_cancel_token.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_cancel_token_guard = api_cancel_token_guard.unwrap();
+                        let output_ok = crate::api::macos_app_archive::prepare_macos_app_archive(
+                            api_path,
+                            &*api_cancel_token_guard,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__metadata__read_file_metadata_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4687,6 +4753,20 @@ impl SseDecode for crate::api::http::RsHttpClientError {
     }
 }
 
+impl SseDecode for crate::api::macos_app_archive::RsMacosAppArchiveInfo {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_source = <String>::sse_decode(deserializer);
+        let mut var_size = <u64>::sse_decode(deserializer);
+        let mut var_sha256 = <String>::sse_decode(deserializer);
+        return crate::api::macos_app_archive::RsMacosAppArchiveInfo {
+            source: var_source,
+            size: var_size,
+            sha256: var_sha256,
+        };
+    }
+}
+
 impl SseDecode for crate::api::server::RsServerEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5358,12 +5438,18 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         52 => wire__crate__api__crypto__hash_file_impl(port, ptr, rust_vec_len, data_len),
-        54 => {
+        54 => wire__crate__api__macos_app_archive__prepare_macos_app_archive_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        55 => {
             wire__crate__api__metadata__read_file_metadata_impl(port, ptr, rust_vec_len, data_len)
         }
-        56 => wire__crate__api__discovery__start_discovery_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__server__start_server_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__crypto__verify_cert_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__discovery__start_discovery_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__server__start_server_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__crypto__verify_cert_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5381,7 +5467,7 @@ fn pde_ffi_dispatcher_sync_impl(
         46 => wire__crate__api__cancel__create_cancellation_token_impl(ptr, rust_vec_len, data_len),
         47 => wire__crate__api__http__create_client_impl(ptr, rust_vec_len, data_len),
         53 => wire__crate__api__filename__is_valid_file_name_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__filename__sanitize_file_name_impl(ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__filename__sanitize_file_name_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -6136,6 +6222,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::http::RsHttpClientError>
     for crate::api::http::RsHttpClientError
 {
     fn into_into_dart(self) -> crate::api::http::RsHttpClientError {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::macos_app_archive::RsMacosAppArchiveInfo {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.source.into_into_dart().into_dart(),
+            self.size.into_into_dart().into_dart(),
+            self.sha256.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::macos_app_archive::RsMacosAppArchiveInfo
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::macos_app_archive::RsMacosAppArchiveInfo>
+    for crate::api::macos_app_archive::RsMacosAppArchiveInfo
+{
+    fn into_into_dart(self) -> crate::api::macos_app_archive::RsMacosAppArchiveInfo {
         self
     }
 }
@@ -7512,6 +7620,15 @@ impl SseEncode for crate::api::http::RsHttpClientError {
                 unimplemented!("");
             }
         }
+    }
+}
+
+impl SseEncode for crate::api::macos_app_archive::RsMacosAppArchiveInfo {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.source, serializer);
+        <u64>::sse_encode(self.size, serializer);
+        <String>::sse_encode(self.sha256, serializer);
     }
 }
 
