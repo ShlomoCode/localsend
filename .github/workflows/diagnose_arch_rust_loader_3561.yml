@@ -2,6 +2,7 @@ name: Diagnose Arch Rust loader 3561
 on:
   push:
     branches: [codex/diagnose-rust-loader-3561]
+    paths: [.github/workflows/diagnose_arch_rust_loader_3561.yml]
   workflow_dispatch:
 permissions:
   contents: read

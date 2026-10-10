@@ -1,9 +1,9 @@
-name: Diagnose Linux Rust loader from source 3561
+name: Diagnose Arch Rust loader from source 3561
 
 on:
   push:
     branches: [codex/diagnose-rust-loader-3561]
-    paths: [.github/workflows/diagnose_rust_loader_source_3561.yml]
+    paths: [.github/workflows/diagnose_arch_rust_loader_source_3561.yml]
   workflow_dispatch:
     inputs:
       candidate_ref:
@@ -16,23 +16,20 @@ permissions:
 
 jobs:
   loader:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
     timeout-minutes: 90
     env:
       DISPLAY: :99
       RUST_BACKTRACE: 1
 
     steps:
+      - name: Install Arch build runtime
+        run: pacman -Syu --noconfirm clang cmake ninja pkgconf gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox scrot binutils iproute2 xorg-xdpyinfo patchelf curl git unzip rustup
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Install Linux build and display dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
-            libayatana-appindicator3-dev xvfb openbox libegl1 libgl1-mesa-dri \
-            mesa-utils scrot binutils iproute2 x11-utils patchelf libgles2 dbus-x11
 
       - name: Start Xvfb and Openbox
         run: |
@@ -140,9 +137,9 @@ jobs:
             run_case "$label-original-bundle" "$original" "$original/lib" none
             run_case "$label-aur-layout-default" "$aur" "$aur/lib" none
             run_case "$label-aur-layout-ld-library-path" "$aur" "$aur/lib" ldpath
-            sudo ln -sfn "$aur/lib/librust_lib_localsend_app.so" /usr/lib/librust_lib_localsend_app.so
+            ln -sfn "$aur/lib/librust_lib_localsend_app.so" /usr/lib/librust_lib_localsend_app.so
             run_case "$label-aur-layout-system-symlink" "$aur" "$aur/lib" none
-            sudo rm -f /usr/lib/librust_lib_localsend_app.so
+            rm -f /usr/lib/librust_lib_localsend_app.so
           }
 
           mkdir -p "$RUNNER_TEMP/results"
