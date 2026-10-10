@@ -70,7 +70,7 @@ Future<void> clearTemporaryCacheFiles(Directory cacheDir) async {
       try {
         await event.delete();
       } catch (error) {
-        _logger.warning('Failed to delete file: $error');
+        _logger.warning('Failed to delete cache file: $error');
       }
     }
   }
