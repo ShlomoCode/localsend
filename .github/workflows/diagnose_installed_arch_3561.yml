@@ -8,13 +8,21 @@ permissions:
   contents: read
 jobs:
   installed:
+    strategy:
+      matrix:
+        package: [archlinuxcn, chaotic]
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
       - name: Install actual package and KDE runtime
         run: |
           pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox imagemagick curl iproute2 binutils git dbus plasma-desktop kwin kwin-x11 plasma-x11-session kde-cli-tools procps-ng xdg-user-dirs
-          curl -fL https://repo.archlinuxcn.org/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst -o /tmp/localsend.pkg.tar.zst
+          if [ '${{ matrix.package }}' = chaotic ]; then
+            package_url=https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst
+          else
+            package_url=https://repo.archlinuxcn.org/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst
+          fi
+          curl -fL "$package_url" -o /tmp/localsend.pkg.tar.zst
           pacman -U --noconfirm /tmp/localsend.pkg.tar.zst
           useradd -m -u 1000 tester
       - uses: actions/checkout@v6
@@ -61,14 +69,19 @@ jobs:
           sleep 12
           import -window root "$out/screen.png"
           ss -ltnp > "$out/listeners.txt"
-          pgrep -u tester -x localsend_app > "$out/pids.txt" || true
+          pgrep -u tester -x 'localsend(_app)?' > "$out/pids.txt" || true
           while read -r app_pid; do
             readlink "/proc/$app_pid/exe" >> "$out/process-exe.txt"
             cat "/proc/$app_pid/maps" >> "$out/process-maps.txt"
           done < "$out/pids.txt"
           if grep -q ':53317 ' "$out/listeners.txt"; then result=started; else result=no-server; fi
           echo "$case_name: $result" | tee "$out/result.txt"
-          pkill -u tester -x localsend_app || true
+          pkill -u tester -x 'localsend(_app)?' || true
+          for attempt in {1..10}; do
+            if ! pgrep -u tester -x 'localsend(_app)?' >/dev/null; then break; fi
+            sleep 1
+          done
+          ! pgrep -u tester -x 'localsend(_app)?' >/dev/null
           pkill -u tester -x plasmashell || true
           pkill -u tester -x kwin_x11 || true
           pkill -u tester -x openbox || true
@@ -82,5 +95,5 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: installed-arch-evidence
+          name: installed-${{ matrix.package }}-evidence
           path: evidence/
