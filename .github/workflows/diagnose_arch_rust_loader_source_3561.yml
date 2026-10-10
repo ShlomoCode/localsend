@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Install Arch build runtime
-        run: pacman -Syu --noconfirm clang cmake ninja pkgconf gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox scrot binutils iproute2 xorg-xdpyinfo patchelf curl git unzip rustup
+        run: pacman -Syu --noconfirm clang cmake ninja pkgconf gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox scrot binutils iproute2 xorg-xdpyinfo patchelf curl git unzip rustup ripgrep xdg-user-dirs
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
