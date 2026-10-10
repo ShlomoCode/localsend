@@ -1,0 +1,75 @@
+name: Diagnose Arch package Rust loader 3561
+on:
+  push:
+    branches: [codex/diagnose-rust-loader-3561]
+    paths: [.github/workflows/diagnose_arch_package_rust_loader_3561.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install Arch runtime
+        run: pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox imagemagick patchelf curl iproute2 tar binutils git
+      - uses: actions/checkout@v6
+      - name: Prepare Linux desktop and release
+        run: |
+          mkdir -p evidence original
+          curl -fL https://repo.archlinuxcn.org/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst -o package.tar.zst
+          sha256sum package.tar.zst | tee evidence/release-sha256.txt
+          mkdir unpacked
+          tar -xf package.tar.zst -C unpacked
+          cp -a unpacked/usr/lib/localsend/. original/
+          cp unpacked/.PKGINFO unpacked/.BUILDINFO evidence/
+          curl -fL 'https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=localsend' -o evidence/PKGBUILD
+          uname -a > evidence/environment.txt
+      - name: Compare original and AUR search paths
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1
+          sleep 2
+          openbox &
+          for case in control original aur no-engine-runpath; do
+            mkdir -p "$case-profile"
+            if [ "$case" != original ]; then
+              cp -a original "$case"
+            fi
+            if [ "$case" = aur ] || [ "$case" = no-engine-runpath ]; then
+              for file in "$case"/* "$case"/lib/*; do
+                if [ -f "$file" ] && readelf -h "$file" >/dev/null 2>&1; then
+                  if [[ "$file" == */lib/* ]]; then
+                    patchelf --set-rpath '$ORIGIN' "$file"
+                  else
+                    patchelf --set-rpath '$ORIGIN/lib' "$file"
+                  fi
+                fi
+              done
+            fi
+            if [ "$case" = no-engine-runpath ]; then
+              patchelf --remove-rpath "$case/lib/libflutter_linux_gtk.so"
+            fi
+            for file in "$case/localsend_app" "$case/lib/libflutter_linux_gtk.so" "$case/lib/librust_lib_localsend_app.so"; do
+              readelf -d "$file" >> "evidence/$case-elf.txt"
+            done
+            search_path=''
+            if [ "$case" = control ]; then search_path="$PWD/$case/lib"; fi
+            env XDG_CONFIG_HOME="$PWD/$case-profile" LD_LIBRARY_PATH="$search_path" LD_DEBUG=libs "$PWD/$case/localsend_app" > "evidence/$case.log" 2>&1 &
+            pid=$!
+            sleep 12
+            import -window root "evidence/$case.png"
+            if ss -ltn | grep -q ':53317 '; then result=started; else result=no-server; fi
+            echo "$case: $result" | tee -a evidence/results.txt
+            kill "$pid" || true
+            wait "$pid" || true
+            if [ "$case" = control ] && [ "$result" != started ]; then
+              tail -40 "evidence/$case.log"
+              exit 1
+            fi
+          done
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: rust-loader-release-evidence
+          path: evidence/
