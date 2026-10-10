@@ -34,6 +34,9 @@ RsHttpClient createClient({
   timeoutMs: timeoutMs,
 );
 
+// Rust type: RustOpaqueMoi<RsContentStreamReceiver>
+abstract class RsContentStreamReceiver implements RustOpaqueInterface {}
+
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<RsHttpClient>>
 abstract class RsHttpClient implements RustOpaqueInterface {
   Future<void> cancel({required ProtocolType protocol, required String ip, required int port, required String sessionId});
@@ -69,7 +72,7 @@ abstract class RsHttpClient implements RustOpaqueInterface {
     required String sessionId,
     required String fileId,
     required String token,
-    required ContentSource source,
+    required RsContentSource source,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   });

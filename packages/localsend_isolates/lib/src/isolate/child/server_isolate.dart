@@ -139,11 +139,13 @@ class HttpServerFileDownloadTargetTask implements BaseHttpServerTask {
   final String sessionId;
   final String fileId;
   final ContentSource source;
+  final int contentLength;
 
   HttpServerFileDownloadTargetTask({
     required this.sessionId,
     required this.fileId,
     required this.source,
+    required this.contentLength,
   });
 }
 
@@ -593,6 +595,7 @@ Future<void> setupHttpServerIsolate(
                   sessionId: targetTask.sessionId,
                   fileId: targetTask.fileId,
                   source: targetTask.source,
+                  contentLength: targetTask.contentLength,
                 );
           } catch (e, st) {
             _logger.warning('Could not resolve web download source', e, st);

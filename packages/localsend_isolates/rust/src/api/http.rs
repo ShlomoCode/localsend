@@ -1,5 +1,5 @@
-use crate::api::content_source::ContentSource;
 use crate::api::cancel::RsCancellationToken;
+use crate::api::content_source::RsContentSource;
 use crate::frb_generated::StreamSink;
 use flutter_rust_bridge::frb;
 pub use localsend::http::client::{ClientError, LsHttpClientVersion};
@@ -103,13 +103,14 @@ impl RsHttpClient {
         session_id: &str,
         file_id: &str,
         token: &str,
-        source: ContentSource,
+        source: RsContentSource,
         content_length: u64,
         cancel_token: &RsCancellationToken,
     ) {
         let result = async {
             let content = source
                 .into_content()
+                .await
                 .map_err(|e| RsHttpClientError::Io(e.to_string()))?;
             let last_emit = std::cell::Cell::new(None::<std::time::Instant>);
             let progress_sink = sink.clone();

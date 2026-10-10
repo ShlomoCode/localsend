@@ -27,29 +27,33 @@ class HttpUploadService {
     required void Function(double progress) onSendProgress,
     required RsCancellationToken cancelToken,
   }) async {
-    await client
-        .upload(
-          protocol: target.getProtocolType(),
-          ip: target.ip!,
-          port: target.port,
-          // The peer is already verified during the TLS handshake by the
-          // fingerprint [client] is pinned to.
-          publicKey: null,
-          sessionId: remoteSessionId ?? '',
-          fileId: fileId,
-          token: token,
-          source: await source.resolve(),
-          contentLength: BigInt.from(contentLength),
-          cancelToken: cancelToken,
-        )
-        .forEach((event) {
-          switch (event) {
-            case RsUploadEvent_Progress(:final progress):
-              onSendProgress(progress);
-            case RsUploadEvent_Failed(:final error):
-              // Fails the upload with the typed client error.
-              throw error;
-          }
-        });
+    await ContentSource.fromStream(source.openRead).transfer<void>(
+      (resolved) => client
+          .upload(
+            protocol: target.getProtocolType(),
+            ip: target.ip!,
+            port: target.port,
+            // The peer is already verified during the TLS handshake by the
+            // fingerprint [client] is pinned to.
+            publicKey: null,
+            sessionId: remoteSessionId ?? '',
+            fileId: fileId,
+            token: token,
+            source: resolved,
+            contentLength: BigInt.from(contentLength),
+            cancelToken: cancelToken,
+          )
+          .forEach((event) {
+            switch (event) {
+              case RsUploadEvent_Progress(:final progress):
+                onSendProgress(progress);
+              case RsUploadEvent_Failed(:final error):
+                // Fails the upload with the typed client error.
+                throw error;
+            }
+          }),
+      cancelToken: cancelToken,
+      contentLength: contentLength,
+    );
   }
 }

@@ -6,6 +6,7 @@
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'package:localsend_isolates/rust/api/content_source.dart';
+import 'package:localsend_isolates/rust/api/http.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
@@ -92,7 +93,7 @@ abstract class RsHttpServer implements RustOpaqueInterface {
   /// that produces the file content.
   ///
   /// The server reads the content and streams it to the web client.
-  Future<void> respondFileDownload({required String sessionId, required String fileId, required ContentSource source});
+  Future<void> respondFileDownload({required String sessionId, required String fileId, required RsContentSource source});
 
   /// Answers the pending [RsServerEvent::FileUpload] event with the target
   /// the file should be saved to (either a path or a file descriptor)

@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/content_source.dart';
+import 'package:localsend_isolates/rust/api/content_stream.dart';
 import 'package:localsend_isolates/rust/api/crypto.dart';
 import 'package:localsend_isolates/rust/api/discovery.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
@@ -33,6 +34,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     required super.portManager,
   });
 
+  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_RsContentStreamReceiverPtr =>
+      wire.rust_arc_decrement_strong_count_RustOpaque_RsContentStreamReceiver;
+
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_LsSignalingConnectionPtr =>
       wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection;
 
@@ -50,6 +54,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_RsCancellationTokenPtr =>
       wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken;
+
+  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_RsContentReaderPtr =>
+      wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader;
+
+  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_RsContentStreamSinkPtr =>
+      wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink;
 
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_RsDiscoveryPtr =>
       wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery;
@@ -82,6 +92,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RsCancellationToken dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(dynamic raw);
 
   @protected
+  RsContentReader dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(dynamic raw);
+
+  @protected
+  RsContentStreamSink dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(dynamic raw);
+
+  @protected
   RsDiscovery dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(dynamic raw);
 
   @protected
@@ -112,6 +128,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RsCancellationToken dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(dynamic raw);
 
   @protected
+  RsContentReader dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(dynamic raw);
+
+  @protected
+  RsContentStreamSink dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(dynamic raw);
+
+  @protected
   RsDiscovery dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(dynamic raw);
 
   @protected
@@ -136,6 +158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Map<String, FileDto> dco_decode_Map_String_file_dto_None(dynamic raw);
 
   @protected
+  RsContentStreamReceiver dco_decode_RustOpaque_RsContentStreamReceiver(dynamic raw);
+
+  @protected
   LsSignalingConnection dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(dynamic raw);
 
   @protected
@@ -152,6 +177,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RsCancellationToken dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(dynamic raw);
+
+  @protected
+  RsContentReader dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(dynamic raw);
+
+  @protected
+  RsContentStreamSink dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(dynamic raw);
 
   @protected
   RsDiscovery dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(dynamic raw);
@@ -247,6 +278,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RegisterDtoV2 dco_decode_box_autoadd_register_dto_v_2(dynamic raw);
+
+  @protected
+  RsContentSource dco_decode_box_autoadd_rs_content_source(dynamic raw);
 
   @protected
   RsDiscoveredDevice dco_decode_box_autoadd_rs_discovered_device(dynamic raw);
@@ -387,6 +421,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProtocolType dco_decode_protocol_type(dynamic raw);
 
   @protected
+  (RsContentStreamSink, RsContentStreamReceiver)
+  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_rs_content_stream_sink_rust_opaque_rs_content_stream_receiver(
+    dynamic raw,
+  );
+
+  @protected
   (String, FileDto) dco_decode_record_string_file_dto(dynamic raw);
 
   @protected
@@ -403,6 +443,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ResultWithPublicKeyRegisterResponseDto dco_decode_result_with_public_key_register_response_dto(dynamic raw);
+
+  @protected
+  RsContentSource dco_decode_rs_content_source(dynamic raw);
 
   @protected
   RsDeviceChannel dco_decode_rs_device_channel(dynamic raw);
@@ -515,6 +558,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RsContentReader sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(SseDeserializer deserializer);
+
+  @protected
+  RsContentStreamSink sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RsDiscovery sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(SseDeserializer deserializer);
 
   @protected
@@ -553,6 +604,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RsContentReader sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(SseDeserializer deserializer);
+
+  @protected
+  RsContentStreamSink sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RsDiscovery sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(SseDeserializer deserializer);
 
   @protected
@@ -571,6 +630,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Map<String, FileDto> sse_decode_Map_String_file_dto_None(SseDeserializer deserializer);
 
   @protected
+  RsContentStreamReceiver sse_decode_RustOpaque_RsContentStreamReceiver(SseDeserializer deserializer);
+
+  @protected
   LsSignalingConnection sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(SseDeserializer deserializer);
 
   @protected
@@ -587,6 +649,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RsCancellationToken sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(SseDeserializer deserializer);
+
+  @protected
+  RsContentReader sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(SseDeserializer deserializer);
+
+  @protected
+  RsContentStreamSink sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(SseDeserializer deserializer);
 
   @protected
   RsDiscovery sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(SseDeserializer deserializer);
@@ -682,6 +750,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RegisterDtoV2 sse_decode_box_autoadd_register_dto_v_2(SseDeserializer deserializer);
+
+  @protected
+  RsContentSource sse_decode_box_autoadd_rs_content_source(SseDeserializer deserializer);
 
   @protected
   RsDiscoveredDevice sse_decode_box_autoadd_rs_discovered_device(SseDeserializer deserializer);
@@ -822,6 +893,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProtocolType sse_decode_protocol_type(SseDeserializer deserializer);
 
   @protected
+  (RsContentStreamSink, RsContentStreamReceiver)
+  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_rs_content_stream_sink_rust_opaque_rs_content_stream_receiver(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   (String, FileDto) sse_decode_record_string_file_dto(SseDeserializer deserializer);
 
   @protected
@@ -838,6 +915,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ResultWithPublicKeyRegisterResponseDto sse_decode_result_with_public_key_register_response_dto(SseDeserializer deserializer);
+
+  @protected
+  RsContentSource sse_decode_rs_content_source(SseDeserializer deserializer);
 
   @protected
   RsDeviceChannel sse_decode_rs_device_channel(SseDeserializer deserializer);
@@ -960,6 +1040,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(
+    RsContentReader self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(
+    RsContentStreamSink self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(RsDiscovery self, SseSerializer serializer);
 
   @protected
@@ -1008,6 +1100,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(
+    RsContentReader self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(
+    RsContentStreamSink self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(RsDiscovery self, SseSerializer serializer);
 
   @protected
@@ -1033,6 +1137,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_Map_String_file_dto_None(Map<String, FileDto> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_RustOpaque_RsContentStreamReceiver(RsContentStreamReceiver self, SseSerializer serializer);
+
+  @protected
   void sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(
     LsSignalingConnection self,
     SseSerializer serializer,
@@ -1056,6 +1163,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(
     RsCancellationToken self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(RsContentReader self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(
+    RsContentStreamSink self,
     SseSerializer serializer,
   );
 
@@ -1154,6 +1270,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_register_dto_v_2(RegisterDtoV2 self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_rs_content_source(RsContentSource self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_rs_discovered_device(RsDiscoveredDevice self, SseSerializer serializer);
@@ -1294,6 +1413,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_protocol_type(ProtocolType self, SseSerializer serializer);
 
   @protected
+  void
+  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_rs_content_stream_sink_rust_opaque_rs_content_stream_receiver(
+    (RsContentStreamSink, RsContentStreamReceiver) self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_record_string_file_dto((String, FileDto) self, SseSerializer serializer);
 
   @protected
@@ -1310,6 +1436,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_result_with_public_key_register_response_dto(ResultWithPublicKeyRegisterResponseDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rs_content_source(RsContentSource self, SseSerializer serializer);
 
   @protected
   void sse_encode_rs_device_channel(RsDeviceChannel self, SseSerializer serializer);
@@ -1398,6 +1527,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 class RustLibWire implements BaseWire {
   RustLibWire.fromExternalLibrary(ExternalLibrary lib);
 
+  void rust_arc_increment_strong_count_RustOpaque_RsContentStreamReceiver(int ptr) =>
+      wasmModule.rust_arc_increment_strong_count_RustOpaque_RsContentStreamReceiver(ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_RsContentStreamReceiver(int ptr) =>
+      wasmModule.rust_arc_decrement_strong_count_RustOpaque_RsContentStreamReceiver(ptr);
+
   void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(int ptr) =>
       wasmModule.rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(ptr);
 
@@ -1434,6 +1569,18 @@ class RustLibWire implements BaseWire {
   void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(int ptr) =>
       wasmModule.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(ptr);
 
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(int ptr) =>
+      wasmModule.rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(int ptr) =>
+      wasmModule.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(ptr);
+
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(int ptr) =>
+      wasmModule.rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(int ptr) =>
+      wasmModule.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(ptr);
+
   void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(int ptr) =>
       wasmModule.rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(ptr);
 
@@ -1459,6 +1606,10 @@ external RustLibWasmModule get wasmModule;
 @JS()
 @anonymous
 extension type RustLibWasmModule._(JSObject _) implements JSObject {
+  external void rust_arc_increment_strong_count_RustOpaque_RsContentStreamReceiver(int ptr);
+
+  external void rust_arc_decrement_strong_count_RustOpaque_RsContentStreamReceiver(int ptr);
+
   external void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(int ptr);
 
   external void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLsSignalingConnection(int ptr);
@@ -1482,6 +1633,14 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
   external void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(int ptr);
 
   external void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(int ptr);
+
+  external void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(int ptr);
+
+  external void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentReader(int ptr);
+
+  external void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(int ptr);
+
+  external void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsContentStreamSink(int ptr);
 
   external void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsDiscovery(int ptr);
 

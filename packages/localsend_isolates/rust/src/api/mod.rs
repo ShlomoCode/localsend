@@ -1,5 +1,6 @@
-pub mod content_source;
 pub mod cancel;
+pub mod content_source;
+pub mod content_stream;
 pub mod crypto;
 pub mod discovery;
 pub mod filename;

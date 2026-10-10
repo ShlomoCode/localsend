@@ -127,6 +127,7 @@ class SendController {
             sessionId: event.sessionId,
             fileId: event.fileId,
             source: file.source,
+            contentLength: file.file.size,
           ),
         );
   }

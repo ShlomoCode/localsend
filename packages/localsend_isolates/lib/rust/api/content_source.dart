@@ -5,9 +5,12 @@
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+import 'package:localsend_isolates/rust/api/http.dart';
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
 part 'content_source.freezed.dart';
+
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `into_content`
 
 @freezed
 sealed class ContentSource with _$ContentSource {
@@ -25,4 +28,16 @@ sealed class ContentSource with _$ContentSource {
   const factory ContentSource.generated({
     required String descriptor,
   }) = ContentSource_Generated;
+}
+
+@freezed
+sealed class RsContentSource with _$RsContentSource {
+  const RsContentSource._();
+
+  const factory RsContentSource.native({
+    required ContentSource source,
+  }) = RsContentSource_Native;
+  const factory RsContentSource.stream({
+    required RsContentStreamReceiver receiver,
+  }) = RsContentSource_Stream;
 }

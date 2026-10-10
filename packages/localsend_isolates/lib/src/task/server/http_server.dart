@@ -106,11 +106,15 @@ class HttpServerService {
     required String sessionId,
     required String fileId,
     required ContentSource source,
+    required int contentLength,
   }) async {
-    await _requireServer().respondFileDownload(
-      sessionId: sessionId,
-      fileId: fileId,
-      source: await source.resolve(),
+    await ContentSource.fromStream(source.openRead).transfer<void>(
+      (resolved) => _requireServer().respondFileDownload(
+        sessionId: sessionId,
+        fileId: fileId,
+        source: resolved,
+      ),
+      contentLength: contentLength,
     );
   }
 

@@ -1,4 +1,4 @@
-use crate::api::content_source::ContentSource;
+use crate::api::content_source::RsContentSource;
 use crate::frb_generated::StreamSink;
 use flutter_rust_bridge::frb;
 pub use localsend::http::dto_v2::RegisterDtoV2;
@@ -625,7 +625,7 @@ impl RsHttpServer {
         &self,
         session_id: String,
         file_id: String,
-        source: ContentSource,
+        source: RsContentSource,
     ) -> anyhow::Result<()> {
         let Some(content_tx) = self
             .pending_downloads
@@ -636,7 +636,7 @@ impl RsHttpServer {
             return Err(anyhow::anyhow!("No pending file download for this file"));
         };
 
-        let content = source.into_content()?;
+        let content = source.into_content().await?;
 
         content_tx
             .send(content)

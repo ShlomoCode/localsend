@@ -470,11 +470,13 @@ class IsolateHttpServerFileDownloadTargetAction extends ReduxAction<IsolateContr
   final String sessionId;
   final String fileId;
   final ContentSource source;
+  final int contentLength;
 
   IsolateHttpServerFileDownloadTargetAction({
     required this.sessionId,
     required this.fileId,
     required this.source,
+    required this.contentLength,
   });
 
   @override
@@ -492,6 +494,7 @@ class IsolateHttpServerFileDownloadTargetAction extends ReduxAction<IsolateContr
             sessionId: sessionId,
             fileId: fileId,
             source: source,
+            contentLength: contentLength,
           ),
         ),
       ),

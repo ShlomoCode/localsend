@@ -447,4 +447,305 @@ as String,
 
 }
 
+/// @nodoc
+mixin _$RsContentSource {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is RsContentSource);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'RsContentSource()';
+}
+
+
+}
+
+/// @nodoc
+class $RsContentSourceCopyWith<$Res>  {
+$RsContentSourceCopyWith(RsContentSource _, $Res Function(RsContentSource) __);
+}
+
+
+/// Adds pattern-matching-related methods to [RsContentSource].
+extension RsContentSourcePatterns on RsContentSource {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( RsContentSource_Native value)?  native,TResult Function( RsContentSource_Stream value)?  stream,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case RsContentSource_Native() when native != null:
+return native(_that);case RsContentSource_Stream() when stream != null:
+return stream(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( RsContentSource_Native value)  native,required TResult Function( RsContentSource_Stream value)  stream,}){
+final _that = this;
+switch (_that) {
+case RsContentSource_Native():
+return native(_that);case RsContentSource_Stream():
+return stream(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( RsContentSource_Native value)?  native,TResult? Function( RsContentSource_Stream value)?  stream,}){
+final _that = this;
+switch (_that) {
+case RsContentSource_Native() when native != null:
+return native(_that);case RsContentSource_Stream() when stream != null:
+return stream(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( ContentSource source)?  native,TResult Function( RsContentStreamReceiver receiver)?  stream,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case RsContentSource_Native() when native != null:
+return native(_that.source);case RsContentSource_Stream() when stream != null:
+return stream(_that.receiver);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( ContentSource source)  native,required TResult Function( RsContentStreamReceiver receiver)  stream,}) {final _that = this;
+switch (_that) {
+case RsContentSource_Native():
+return native(_that.source);case RsContentSource_Stream():
+return stream(_that.receiver);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( ContentSource source)?  native,TResult? Function( RsContentStreamReceiver receiver)?  stream,}) {final _that = this;
+switch (_that) {
+case RsContentSource_Native() when native != null:
+return native(_that.source);case RsContentSource_Stream() when stream != null:
+return stream(_that.receiver);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class RsContentSource_Native extends RsContentSource {
+  const RsContentSource_Native({required this.source}): super._();
+
+
+ final  ContentSource source;
+
+/// Create a copy of RsContentSource
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$RsContentSource_NativeCopyWith<RsContentSource_Native> get copyWith => _$RsContentSource_NativeCopyWithImpl<RsContentSource_Native>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is RsContentSource_Native&&(identical(other.source, source) || other.source == source));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,source);
+
+@override
+String toString() {
+  return 'RsContentSource.native(source: $source)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $RsContentSource_NativeCopyWith<$Res> implements $RsContentSourceCopyWith<$Res> {
+  factory $RsContentSource_NativeCopyWith(RsContentSource_Native value, $Res Function(RsContentSource_Native) _then) = _$RsContentSource_NativeCopyWithImpl;
+@useResult
+$Res call({
+ ContentSource source
+});
+
+
+$ContentSourceCopyWith<$Res> get source;
+
+}
+/// @nodoc
+class _$RsContentSource_NativeCopyWithImpl<$Res>
+    implements $RsContentSource_NativeCopyWith<$Res> {
+  _$RsContentSource_NativeCopyWithImpl(this._self, this._then);
+
+  final RsContentSource_Native _self;
+  final $Res Function(RsContentSource_Native) _then;
+
+/// Create a copy of RsContentSource
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? source = null,}) {
+  return _then(RsContentSource_Native(
+source: null == source ? _self.source : source // ignore: cast_nullable_to_non_nullable
+as ContentSource,
+  ));
+}
+
+/// Create a copy of RsContentSource
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$ContentSourceCopyWith<$Res> get source {
+
+  return $ContentSourceCopyWith<$Res>(_self.source, (value) {
+    return _then(_self.copyWith(source: value));
+  });
+}
+}
+
+/// @nodoc
+
+
+class RsContentSource_Stream extends RsContentSource {
+  const RsContentSource_Stream({required this.receiver}): super._();
+
+
+ final  RsContentStreamReceiver receiver;
+
+/// Create a copy of RsContentSource
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$RsContentSource_StreamCopyWith<RsContentSource_Stream> get copyWith => _$RsContentSource_StreamCopyWithImpl<RsContentSource_Stream>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is RsContentSource_Stream&&(identical(other.receiver, receiver) || other.receiver == receiver));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,receiver);
+
+@override
+String toString() {
+  return 'RsContentSource.stream(receiver: $receiver)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $RsContentSource_StreamCopyWith<$Res> implements $RsContentSourceCopyWith<$Res> {
+  factory $RsContentSource_StreamCopyWith(RsContentSource_Stream value, $Res Function(RsContentSource_Stream) _then) = _$RsContentSource_StreamCopyWithImpl;
+@useResult
+$Res call({
+ RsContentStreamReceiver receiver
+});
+
+
+
+
+}
+/// @nodoc
+class _$RsContentSource_StreamCopyWithImpl<$Res>
+    implements $RsContentSource_StreamCopyWith<$Res> {
+  _$RsContentSource_StreamCopyWithImpl(this._self, this._then);
+
+  final RsContentSource_Stream _self;
+  final $Res Function(RsContentSource_Stream) _then;
+
+/// Create a copy of RsContentSource
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? receiver = null,}) {
+  return _then(RsContentSource_Stream(
+receiver: null == receiver ? _self.receiver : receiver // ignore: cast_nullable_to_non_nullable
+as RsContentStreamReceiver,
+  ));
+}
+
+
+}
+
 // dart format on
