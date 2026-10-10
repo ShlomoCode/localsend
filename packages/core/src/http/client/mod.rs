@@ -232,6 +232,8 @@ pub(super) fn create_reqwest_client(
     let mut builder = reqwest::Client::builder()
         .tls_backend_preconfigured(tls_config)
         .tls_info(true)
+        // Bound TCP/TLS setup without limiting receiver approval or file transfers.
+        .connect_timeout(std::time::Duration::from_secs(10))
         // Peers are on the local network: never dial them through a system or
         // environment proxy. Proxied connections also lose the `TlsInfo`
         // response extension that the certificate checks below rely on (#3299).
