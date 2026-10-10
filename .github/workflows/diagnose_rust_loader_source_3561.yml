@@ -76,7 +76,6 @@ jobs:
           git apply --check "$RUNNER_TEMP/candidate.patch"
           git apply "$RUNNER_TEMP/candidate.patch"
           cd app
-          flutter clean
           flutter pub get
           flutter build linux --release --target-platform linux-x64 -v 2>&1 | tee "$RUNNER_TEMP/build-candidate.log"
           mkdir -p "$RUNNER_TEMP/candidate"
@@ -84,10 +83,10 @@ jobs:
 
       - name: Run original bundle and AUR-style loader controls
         run: |
-          set +e
+          set -e
           run_case() {
             local label="$1" app_dir="$2" library_dir="$3" mode="$4"
-            local out profile exe pid
+            local expected="$5" out profile exe pid
             out="$RUNNER_TEMP/results/$label"
             profile="$RUNNER_TEMP/profile-$label"
             mkdir -p "$out" "$profile"
@@ -120,11 +119,18 @@ jobs:
               kill -KILL "$pid" 2>/dev/null || true
             ) >> "$out/run.log" 2>&1
             echo "$label: listener=$(rg -q ':53317' "$out/listener.txt" && echo yes || echo no), process=$(cat "$out/process.txt" 2>/dev/null || true)" | tee -a "$RUNNER_TEMP/results/summary.txt"
+            if [ "$expected" = yes ]; then
+              rg -q ':53317' "$out/listener.txt"
+              rg -q 'Child isolate is ready: HttpServerIsolate' "$out/app.log"
+            else
+              ! rg -q ':53317' "$out/listener.txt"
+              rg -q "Failed to load dynamic library 'librust_lib_localsend_app.so'" "$out/app.log"
+            fi
           }
 
           test_bundle() {
             local label="$1" source_bundle="$2"
-            local original aur file
+            local original aur file no_engine expected
             original="$RUNNER_TEMP/install-$label/original"
             aur="$RUNNER_TEMP/install-$label/usr/lib/localsend"
             mkdir -p "$original" "$(dirname "$aur")"
@@ -139,11 +145,17 @@ jobs:
                 fi
               fi
             done
-            run_case "$label-original-bundle" "$original" "$original/lib" none
-            run_case "$label-aur-layout-default" "$aur" "$aur/lib" none
-            run_case "$label-aur-layout-ld-library-path" "$aur" "$aur/lib" ldpath
-            sudo ln -sfn "$aur/lib/librust_lib_localsend_app.so" /usr/lib/librust_lib_localsend_app.so
-            run_case "$label-aur-layout-system-symlink" "$aur" "$aur/lib" none
+            run_case "$label-original-bundle" "$original" "$original/lib" none yes
+            run_case "$label-aur-layout-default" "$aur" "$aur/lib" none yes
+            no_engine="$RUNNER_TEMP/install-$label/no-engine-runpath"
+            cp -a "$aur" "$no_engine"
+            patchelf --remove-rpath "$no_engine/lib/libflutter_linux_gtk.so"
+            expected=no
+            if [ "$label" = candidate ]; then expected=yes; fi
+            run_case "$label-no-engine-runpath" "$no_engine" "$no_engine/lib" none "$expected"
+            run_case "$label-no-engine-runpath-ld-library-path" "$no_engine" "$no_engine/lib" ldpath yes
+            sudo ln -sfn "$no_engine/lib/librust_lib_localsend_app.so" /usr/lib/librust_lib_localsend_app.so
+            run_case "$label-no-engine-runpath-system-symlink" "$no_engine" "$no_engine/lib" none yes
             sudo rm -f /usr/lib/librust_lib_localsend_app.so
           }
 
