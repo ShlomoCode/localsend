@@ -1,0 +1,166 @@
+name: Diagnose Linux Rust loader from source 3561
+
+on:
+  push:
+    branches: [codex/diagnose-rust-loader-3561]
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: Optional same-repository ref with the candidate source patch; compares it with the triggering revision.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  loader:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      DISPLAY: :99
+      RUST_BACKTRACE: 1
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux build and display dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+            libayatana-appindicator3-dev xvfb openbox libegl1 libgl1-mesa-dri \
+            mesa-utils scrot binutils iproute2 x11-utils patchelf libgles2 dbus-x11
+
+      - name: Start Xvfb and Openbox
+        run: |
+          Xvfb "$DISPLAY" -screen 0 1280x900x24 -nolisten tcp >"$RUNNER_TEMP/xvfb.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/xvfb.pid"
+          for attempt in $(seq 1 20); do
+            if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          openbox --display "$DISPLAY" >"$RUNNER_TEMP/openbox.log" 2>&1 &
+          sleep 2
+
+      - name: Setup Flutter pinned by .fvmrc
+        uses: flutter-actions/setup-flutter@v4
+        with:
+          version: 3.41.9
+          channel: stable
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+
+      - name: Resolve Flutter dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build baseline Linux release bundle
+        run: |
+          cd app
+          flutter build linux --release --target-platform linux-x64 -v 2>&1 | tee "$RUNNER_TEMP/build-baseline.log"
+          mkdir -p "$RUNNER_TEMP/baseline"
+          cp -a build/linux/x64/release/bundle "$RUNNER_TEMP/baseline/bundle"
+
+      - name: Build optional candidate ref with the same toolchain
+        if: ${{ inputs.candidate_ref != '' }}
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+        run: |
+          git check-ref-format "$CANDIDATE_REF"
+          git fetch --no-tags origin "$CANDIDATE_REF"
+          git diff --binary "$GITHUB_SHA" FETCH_HEAD > "$RUNNER_TEMP/candidate.patch"
+          git apply --check "$RUNNER_TEMP/candidate.patch"
+          git apply "$RUNNER_TEMP/candidate.patch"
+          cd app
+          flutter clean
+          flutter pub get
+          flutter build linux --release --target-platform linux-x64 -v 2>&1 | tee "$RUNNER_TEMP/build-candidate.log"
+          mkdir -p "$RUNNER_TEMP/candidate"
+          cp -a build/linux/x64/release/bundle "$RUNNER_TEMP/candidate/bundle"
+
+      - name: Run original bundle and AUR-style loader controls
+        run: |
+          set +e
+          run_case() {
+            label="$1"; app_dir="$2"; library_dir="$3"; mode="$4"
+            out="$RUNNER_TEMP/results/$label"
+            profile="$RUNNER_TEMP/profile-$label"
+            mkdir -p "$out" "$profile"
+            exe="$app_dir/localsend_app"
+            {
+              echo "case=$label"
+              echo "executable=$exe"
+              echo "library_dir=$library_dir"
+              echo "mode=$mode"
+              sha256sum "$exe" "$library_dir/librust_lib_localsend_app.so"
+              readelf -h "$library_dir/librust_lib_localsend_app.so" | sed -n '1,20p'
+              readelf -d "$exe" | rg 'RPATH|RUNPATH|NEEDED' || true
+            } > "$out/identity.txt" 2>&1
+            (
+              cd "$RUNNER_TEMP"
+              export HOME="$profile" XDG_CONFIG_HOME="$profile/.config" XDG_DATA_HOME="$profile/.local/share"
+              case "$mode" in
+                ldpath) export LD_LIBRARY_PATH="$library_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+                *) unset LD_LIBRARY_PATH ;;
+              esac
+              "$exe" >"$out/app.log" 2>&1 &
+              pid=$!
+              echo "pid=$pid"
+              sleep 12
+              scrot "$out/screen.png" 2>"$out/scrot.log" || true
+              ss -lntp '( sport = :53317 )' > "$out/listener.txt" 2>&1
+              ps -p "$pid" -o pid=,stat=,args= > "$out/process.txt" 2>&1
+              kill -TERM "$pid" 2>/dev/null || true
+              for attempt in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+              kill -KILL "$pid" 2>/dev/null || true
+            ) >> "$out/run.log" 2>&1
+            echo "$label: listener=$(rg -q ':53317' "$out/listener.txt" && echo yes || echo no), process=$(cat "$out/process.txt" 2>/dev/null || true)" | tee -a "$RUNNER_TEMP/results/summary.txt"
+          }
+
+          test_bundle() {
+            label="$1"; source_bundle="$2"
+            original="$RUNNER_TEMP/install-$label/original"
+            aur="$RUNNER_TEMP/install-$label/usr/lib/localsend"
+            mkdir -p "$original" "$(dirname "$aur")"
+            cp -a "$source_bundle/." "$original/"
+            cp -a "$source_bundle" "$aur"
+            for file in "$aur"/* "$aur"/lib/*; do
+              if [ -f "$file" ] && readelf -h "$file" >/dev/null 2>&1; then
+                if [[ "$file" == */lib/* ]]; then
+                  patchelf --set-rpath '$ORIGIN' "$file"
+                else
+                  patchelf --set-rpath '$ORIGIN/lib' "$file"
+                fi
+              fi
+            done
+            run_case "$label-original-bundle" "$original" "$original/lib" none
+            run_case "$label-aur-layout-default" "$aur" "$aur/lib" none
+            run_case "$label-aur-layout-ld-library-path" "$aur" "$aur/lib" ldpath
+            sudo ln -sfn "$aur/lib/librust_lib_localsend_app.so" /usr/lib/librust_lib_localsend_app.so
+            run_case "$label-aur-layout-system-symlink" "$aur" "$aur/lib" none
+            sudo rm -f /usr/lib/librust_lib_localsend_app.so
+          }
+
+          mkdir -p "$RUNNER_TEMP/results"
+          test_bundle baseline "$RUNNER_TEMP/baseline/bundle"
+          if [ -d "$RUNNER_TEMP/candidate/bundle" ]; then
+            test_bundle candidate "$RUNNER_TEMP/candidate/bundle"
+          fi
+          cat "$RUNNER_TEMP/results/summary.txt"
+
+      - name: Upload loader evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: localsend-linux-loader-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/results/
+            ${{ runner.temp }}/build-baseline.log
+            ${{ runner.temp }}/build-candidate.log
+            ${{ runner.temp }}/xvfb.log
+            ${{ runner.temp }}/openbox.log
+          if-no-files-found: warn
+          retention-days: 14
