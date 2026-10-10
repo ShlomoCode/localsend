@@ -59,13 +59,15 @@ jobs:
           if [[ "$case_name" = kde-* ]]; then
             export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE KDE_FULL_SESSION=true
             if [ "$case_name" = kde-wayland ]; then
-              export WAYLAND_DISPLAY=wayland-localsend XDG_SESSION_TYPE=wayland QT_QPA_PLATFORM=wayland
-              kwin_wayland --x11-display "$DISPLAY" --width 1280 --height 900 --socket "$WAYLAND_DISPLAY" --xwayland --no-lockscreen --no-global-shortcuts > "$out/kwin.log" 2>&1 &
+              kwin_wayland --x11-display "$DISPLAY" --width 1280 --height 900 --socket wayland-localsend --xwayland --no-lockscreen --no-global-shortcuts > "$out/kwin.log" 2>&1 &
               for attempt in {1..30}; do
-                if [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then break; fi
+                if [ -S "$XDG_RUNTIME_DIR/wayland-localsend" ]; then break; fi
                 sleep 1
               done
-              test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+              ps -u tester -o pid,stat,args > "$out/session-processes.txt"
+              ls -la "$XDG_RUNTIME_DIR" > "$out/runtime-files.txt"
+              test -S "$XDG_RUNTIME_DIR/wayland-localsend"
+              export WAYLAND_DISPLAY=wayland-localsend XDG_SESSION_TYPE=wayland QT_QPA_PLATFORM=wayland
             else
               export QT_QPA_PLATFORM=xcb XDG_SESSION_TYPE=x11
               kwin_x11 --replace > "$out/kwin.log" 2>&1 &
