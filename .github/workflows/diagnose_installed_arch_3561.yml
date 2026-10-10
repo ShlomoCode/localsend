@@ -12,7 +12,9 @@ jobs:
       matrix:
         package: [archlinuxcn, chaotic]
     runs-on: ubuntu-24.04
-    container: archlinux:base-devel
+    container:
+      image: archlinux:base-devel
+      options: --cap-add=SYS_NICE
     steps:
       - name: Install actual package and KDE runtime
         run: |
