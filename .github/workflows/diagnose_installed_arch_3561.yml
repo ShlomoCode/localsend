@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Install actual package and KDE runtime
         run: |
-          pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb openbox imagemagick curl iproute2 binutils git dbus plasma-desktop kwin kwin-x11 plasma-x11-session kde-cli-tools procps-ng xdg-user-dirs
+          pacman -Syu --noconfirm gtk3 libayatana-appindicator mesa libglvnd xorg-server-xvfb xorg-xwayland openbox imagemagick curl iproute2 binutils git dbus plasma-desktop kwin kwin-x11 plasma-x11-session kde-cli-tools procps-ng xdg-user-dirs
           if [ '${{ matrix.package }}' = chaotic ]; then
             package_url=https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64/localsend-1.18.2-2-x86_64.pkg.tar.zst
           else
@@ -54,9 +54,20 @@ jobs:
           mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
           cd /home/tester
-          if [ "$case_name" = kde-desktop ]; then
-            export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE KDE_FULL_SESSION=true QT_QPA_PLATFORM=xcb
-            kwin_x11 --replace > "$out/kwin.log" 2>&1 &
+          if [[ "$case_name" = kde-* ]]; then
+            export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE KDE_FULL_SESSION=true
+            if [ "$case_name" = kde-wayland ]; then
+              export WAYLAND_DISPLAY=wayland-localsend XDG_SESSION_TYPE=wayland QT_QPA_PLATFORM=wayland
+              kwin_wayland --x11-display "$DISPLAY" --width 1280 --height 900 --socket "$WAYLAND_DISPLAY" --xwayland --no-lockscreen --no-global-shortcuts > "$out/kwin.log" 2>&1 &
+              for attempt in {1..30}; do
+                if [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then break; fi
+                sleep 1
+              done
+              test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+            else
+              export QT_QPA_PLATFORM=xcb XDG_SESSION_TYPE=x11
+              kwin_x11 --replace > "$out/kwin.log" 2>&1 &
+            fi
             plasmashell > "$out/plasma.log" 2>&1 &
             sleep 10
             kioclient exec /usr/share/applications/localsend.desktop > "$out/launcher.log" 2>&1
@@ -73,6 +84,7 @@ jobs:
           while read -r app_pid; do
             readlink "/proc/$app_pid/exe" >> "$out/process-exe.txt"
             cat "/proc/$app_pid/maps" >> "$out/process-maps.txt"
+            tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(DISPLAY|WAYLAND_DISPLAY|XDG_SESSION_TYPE|LD_LIBRARY_PATH|LD_PRELOAD)=' >> "$out/launch-environment.txt" || true
           done < "$out/pids.txt"
           if grep -q ':53317 ' "$out/listeners.txt"; then result=started; else result=no-server; fi
           echo "$case_name: $result" | tee "$out/result.txt"
@@ -84,10 +96,11 @@ jobs:
           ! pgrep -u tester -x 'localsend(_app)?' >/dev/null
           pkill -u tester -x plasmashell || true
           pkill -u tester -x kwin_x11 || true
+          pkill -u tester -x kwin_wayland || true
           pkill -u tester -x openbox || true
           SH
           chmod 755 /tmp/run-installed-localsend.sh
-          for case_name in installed-absolute installed-symlink kde-desktop; do
+          for case_name in installed-absolute installed-symlink kde-desktop kde-wayland; do
             mkdir -p "evidence/$case_name"
             chmod 777 "evidence/$case_name"
             runuser -u tester -- dbus-run-session -- /tmp/run-installed-localsend.sh "$case_name" "$PWD/evidence/$case_name"
