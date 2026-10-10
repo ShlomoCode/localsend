@@ -89,7 +89,8 @@ jobs:
         run: |
           set +e
           run_case() {
-            label="$1"; app_dir="$2"; library_dir="$3"; mode="$4"
+            local label="$1" app_dir="$2" library_dir="$3" mode="$4"
+            local out profile exe pid
             out="$RUNNER_TEMP/results/$label"
             profile="$RUNNER_TEMP/profile-$label"
             mkdir -p "$out" "$profile"
@@ -115,7 +116,7 @@ jobs:
               echo "pid=$pid"
               sleep 12
               scrot "$out/screen.png" 2>"$out/scrot.log" || true
-              ss -lntp '( sport = :53317 )' > "$out/listener.txt" 2>&1
+              ss -lntp > "$out/listener.txt" 2>&1
               ps -p "$pid" -o pid=,stat=,args= > "$out/process.txt" 2>&1
               kill -TERM "$pid" 2>/dev/null || true
               for attempt in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
@@ -125,7 +126,8 @@ jobs:
           }
 
           test_bundle() {
-            label="$1"; source_bundle="$2"
+            local label="$1" source_bundle="$2"
+            local original aur file
             original="$RUNNER_TEMP/install-$label/original"
             aur="$RUNNER_TEMP/install-$label/usr/lib/localsend"
             mkdir -p "$original" "$(dirname "$aur")"
@@ -133,7 +135,7 @@ jobs:
             cp -a "$source_bundle" "$aur"
             for file in "$aur"/* "$aur"/lib/*; do
               if [ -f "$file" ] && readelf -h "$file" >/dev/null 2>&1; then
-                if [[ "$file" == */lib/* ]]; then
+                if [[ "$file" =~ /lib/[^/]+$ ]]; then
                   patchelf --set-rpath '$ORIGIN' "$file"
                 else
                   patchelf --set-rpath '$ORIGIN/lib' "$file"
