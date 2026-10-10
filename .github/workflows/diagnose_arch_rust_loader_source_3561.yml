@@ -43,13 +43,19 @@ jobs:
           sleep 2
 
       - name: Setup Flutter pinned by .fvmrc
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: /__t/flutter/3.41.9/stable/flutter
         uses: flutter-actions/setup-flutter@v4
         with:
           version: 3.41.9
           channel: stable
 
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal
+        run: |
+          git config --global --add safe.directory /__t/flutter/3.41.9/stable/flutter
+          rustup toolchain install 1.97.1 --profile minimal
 
       - name: Resolve Flutter dependencies
         working-directory: app
