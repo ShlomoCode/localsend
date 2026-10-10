@@ -5,7 +5,7 @@ import 'package:localsend_app/util/native/cache_helper.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('cleanup waits for file deletion to finish', () async {
+  test('cache cleanup completes only after temporary file deletion', () async {
     final file = _ControlledFile();
     var completed = false;
     final cleanup = clearTemporaryCacheFiles(_ControlledDirectory(Stream.value(file))).then((_) => completed = true);
