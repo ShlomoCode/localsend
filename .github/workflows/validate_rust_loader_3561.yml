@@ -18,7 +18,7 @@ jobs:
       - run: pacman -Syu --noconfirm git curl unzip tar ripgrep
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.candidate_sha || 'b72c69be' }}
+          ref: ${{ inputs.candidate_sha || 'b72c69bec275ec4b547d7cba750a5f826256a916' }}
       - uses: flutter-actions/setup-flutter@v4
         env:
           GIT_CONFIG_COUNT: 1
