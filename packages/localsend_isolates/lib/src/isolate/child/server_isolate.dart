@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:localsend_isolates/constants.dart';
+import 'package:localsend_isolates/model/byte_stream_source.dart';
 import 'package:localsend_isolates/model/dto/multicast_dto.dart';
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:localsend_isolates/rust/api/model.dart' show FileDto;
@@ -131,23 +132,18 @@ class HttpServerPrepareDownloadDecisionTask implements BaseHttpServerTask {
   });
 }
 
-/// Answers a pending [HttpServerWebFileDownloadEvent] with the source the file
-/// content should be read from: either a file [path] or a readable [fileDescriptor] (Android).
+/// Answers a pending [HttpServerWebFileDownloadEvent] with a replayable source.
 ///
 /// The file is read and streamed by the Rust server itself.
 class HttpServerFileDownloadTargetTask implements BaseHttpServerTask {
   final String sessionId;
   final String fileId;
-  final String? path;
-  final int? fileDescriptor;
-  final String? archiveSource;
+  final ByteStreamSource source;
 
   HttpServerFileDownloadTargetTask({
     required this.sessionId,
     required this.fileId,
-    required this.path,
-    required this.fileDescriptor,
-    this.archiveSource,
+    required this.source,
   });
 }
 
@@ -590,15 +586,18 @@ Future<void> setupHttpServerIsolate(
               );
           return;
         case HttpServerFileDownloadTargetTask targetTask:
-          await ref
-              .read(httpServerProvider)
-              .respondFileDownload(
-                sessionId: targetTask.sessionId,
-                fileId: targetTask.fileId,
-                path: targetTask.path,
-                fileDescriptor: targetTask.fileDescriptor,
-                archiveSource: targetTask.archiveSource,
-              );
+          try {
+            await ref
+                .read(httpServerProvider)
+                .respondFileDownload(
+                  sessionId: targetTask.sessionId,
+                  fileId: targetTask.fileId,
+                  source: targetTask.source,
+                );
+          } catch (e, st) {
+            _logger.warning('Could not resolve web download source', e, st);
+            await ref.read(httpServerProvider).failFileDownload(sessionId: targetTask.sessionId, fileId: targetTask.fileId);
+          }
           return;
         case HttpServerFailFileDownloadTask failTask:
           await ref

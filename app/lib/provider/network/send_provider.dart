@@ -186,9 +186,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
               token: null,
               thumbnail: file.thumbnail,
               asset: file.asset,
-              path: file.path,
-              archiveSource: file.archiveSource,
-              bytes: file.bytes,
+              source: file.source,
               errorMessage: null,
             ),
         },
@@ -226,8 +224,8 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
       try {
         for (final (:id, :file) in selectedFiles) {
           try {
-            if (file.archiveSha256 != null) {
-              hashes[id] = file.archiveSha256!;
+            if (file.sha256 != null) {
+              hashes[id] = file.sha256!;
             } else {
               hashes[id] = await calculateFileHash(
                 path: file.path,
@@ -665,9 +663,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
           HttpUploadFile(
             remoteFileToken: file.token!,
             fileId: file.file.id,
-            filePath: file.path,
-            archiveSource: file.archiveSource,
-            fileBytes: file.bytes,
+            source: file.source,
             fileSize: file.file.size,
           ),
     ];

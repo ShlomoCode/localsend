@@ -8,7 +8,7 @@ bool isMacosApp(Directory directory) => Platform.isMacOS && p.extension(p.normal
 
 /// A selected app has only an estimated size until a transfer is started.
 bool isPendingMacosAppArchive(CrossFile file) =>
-    file.archiveSource == null && file.path != null && file.name.toLowerCase().endsWith('.app.zip') && isMacosApp(Directory(file.path!));
+    file.path != null && file.name.toLowerCase().endsWith('.app.zip') && isMacosApp(Directory(file.path!));
 
 Future<int> estimateMacosAppSize(Directory app) async {
   var size = 0;

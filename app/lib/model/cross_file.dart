@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dart_mappable/dart_mappable.dart';
+import 'package:localsend_isolates/model/byte_stream_source.dart';
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
@@ -15,10 +16,10 @@ class CrossFile with CrossFileMappable {
   final int size;
   final Uint8List? thumbnail;
   final AssetEntity? asset; // for thumbnails
-  final String? path;
-  final String? archiveSource; // replayable macOS app archive source
-  final String? archiveSha256;
-  final List<int>? bytes; // if type message, then UTF-8 encoded
+  final ByteStreamSource source;
+  final String? sha256;
+  String? get path => source.path;
+  List<int>? get bytes => source.bytes; // if type message, then UTF-8 encoded
   final String? lastModified; // RFC 3339; a string because DateTime would truncate to microseconds
   final String? lastAccessed; // RFC 3339
 
@@ -28,10 +29,8 @@ class CrossFile with CrossFileMappable {
     required this.size,
     required this.thumbnail,
     required this.asset,
-    required this.path,
-    this.archiveSource,
-    this.archiveSha256,
-    required this.bytes,
+    required this.source,
+    this.sha256,
     required this.lastModified,
     required this.lastAccessed,
   });

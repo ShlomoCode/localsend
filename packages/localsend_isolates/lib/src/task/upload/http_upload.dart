@@ -1,7 +1,7 @@
+import 'package:localsend_isolates/model/byte_stream_source.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
-import 'package:localsend_isolates/rust/api/stream.dart';
 import 'package:localsend_isolates/util/rust.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
@@ -18,10 +18,7 @@ class HttpUploadService {
   /// a connection.
   Future<void> upload({
     required RsHttpClient client,
-    required Stream<List<int>>? stream,
-    required String? path,
-    String? archiveSource,
-    required int? fileDescriptor,
+    required ByteStreamSource source,
     required int contentLength,
     required Device target,
     required String? remoteSessionId,
@@ -30,9 +27,7 @@ class HttpUploadService {
     required void Function(double progress) onSendProgress,
     required RsCancellationToken cancelToken,
   }) async {
-    final (sink, receiver) = stream != null ? await createStream() : (null, null);
-
-    final uploadFuture = client
+    await client
         .upload(
           protocol: target.getProtocolType(),
           ip: target.ip!,
@@ -43,10 +38,7 @@ class HttpUploadService {
           sessionId: remoteSessionId ?? '',
           fileId: fileId,
           token: token,
-          binary: receiver,
-          path: path,
-          archiveSource: archiveSource,
-          fileDescriptor: fileDescriptor,
+          source: await source.resolve(),
           contentLength: BigInt.from(contentLength),
           cancelToken: cancelToken,
         )
@@ -55,34 +47,9 @@ class HttpUploadService {
             case RsUploadEvent_Progress(:final progress):
               onSendProgress(progress);
             case RsUploadEvent_Failed(:final error):
-              // Fails [uploadFuture] with the typed client error.
+              // Fails the upload with the typed client error.
               throw error;
           }
         });
-
-    try {
-      await for (final chunk in stream ?? const Stream<List<int>>.empty()) {
-        try {
-          await sink!.add(data: chunk);
-        } catch (_) {
-          // The Rust side dropped the receiver, i.e. the upload request already
-          // ended (e.g. rejected by the receiver or cancelled).
-          // The actual error is thrown here:
-          await uploadFuture;
-          rethrow;
-        }
-      }
-      sink?.close();
-    } catch (e) {
-      // The source stream failed, so the upload request must be aborted.
-      // [e] is the root cause, thus the error of the upload request is swallowed.
-      cancelToken.cancel();
-      try {
-        await uploadFuture;
-      } catch (_) {}
-      rethrow;
-    }
-
-    await uploadFuture;
   }
 }

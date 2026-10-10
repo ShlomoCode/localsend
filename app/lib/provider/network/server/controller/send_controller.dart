@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/model/state/send/web/web_download_file.dart';
@@ -8,14 +7,11 @@ import 'package:localsend_app/model/state/send/web/web_download_state.dart';
 import 'package:localsend_app/provider/network/server/server_utils.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/native/cross_file_converters.dart';
-import 'package:localsend_app/util/native/directories.dart';
 import 'package:localsend_app/util/user_agent_analyzer.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/dto/file_dto.dart';
 import 'package:localsend_isolates/model/file_type.dart';
-import 'package:localsend_isolates/util/android_channel.dart' as isolate_android_channel;
 import 'package:logging/logging.dart';
-import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 const _uuid = Uuid();
@@ -31,8 +27,7 @@ class SendController {
   SendController(this.server);
 
   /// Builds the [WebDownloadState] for the given [files].
-  /// Files that only exist in memory (e.g. text messages) are materialized
-  /// to the cache directory so the Rust server can stream them.
+  /// Each source is kept in a replayable form for the Rust server to stream.
   Future<(WebDownloadState, PreparedSendingFiles)> buildWebDownloadState({required List<CrossFile> files}) async {
     final prepared = await CrossFileConverters.prepareFilesForSending(files);
     files = prepared.files;
@@ -45,15 +40,6 @@ class SendController {
           await Future.wait(
             files.map((file) async {
               final id = _uuid.v4();
-
-              String? path = file.path;
-              if (path == null && file.bytes != null) {
-                // The Rust server streams file content from disk, so in-memory
-                // bytes (text messages, clipboard content) are written to a temp file.
-                final tempPath = p.join(await getCacheDirectory(), 'web-download-$id');
-                await File(tempPath).writeAsBytes(file.bytes!);
-                path = tempPath;
-              }
 
               return MapEntry(
                 id,
@@ -75,9 +61,7 @@ class SendController {
                         : null,
                   ),
                   asset: file.asset,
-                  path: path,
-                  archiveSource: file.archiveSource,
-                  bytes: file.bytes,
+                  source: file.source,
                 ),
               );
             }),
@@ -128,27 +112,9 @@ class SendController {
   /// The Rust server already validated the session; it streams the content
   /// from the source resolved here.
   Future<void> onFileDownload(HttpServerWebFileDownloadEvent event) async {
-    final String? filePath;
-    final int? fileDescriptor;
-    final String? archiveSource;
-    try {
-      final file = server.getStateOrNull()?.webDownloadState?.files[event.fileId];
-      final path = file?.path;
-      archiveSource = file?.archiveSource;
-      if (path == null && archiveSource == null) {
-        // should not happen: the Rust server only emits events for offered files
-        throw StateError('No path for web download file ${event.fileId}');
-      }
-
-      if (path?.startsWith('content://') ?? false) {
-        filePath = null;
-        fileDescriptor = await isolate_android_channel.getFileDescriptorAndroid(uri: path!);
-      } else {
-        filePath = path;
-        fileDescriptor = null;
-      }
-    } catch (e, st) {
-      _logger.severe('Failed to resolve source for web download file ${event.fileId}', e, st);
+    final file = server.getStateOrNull()?.webDownloadState?.files[event.fileId];
+    if (file == null) {
+      _logger.severe('No source for web download file ${event.fileId}');
       // Unblock the web client's request waiting for the content source.
       server.ref.redux(parentIsolateProvider).dispatch(IsolateHttpServerFailFileDownloadAction(sessionId: event.sessionId, fileId: event.fileId));
       return;
@@ -160,9 +126,7 @@ class SendController {
           IsolateHttpServerFileDownloadTargetAction(
             sessionId: event.sessionId,
             fileId: event.fileId,
-            path: filePath,
-            fileDescriptor: fileDescriptor,
-            archiveSource: archiveSource,
+            source: file.source,
           ),
         );
   }

@@ -16,6 +16,7 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = CrossFileMapper._());
       FileTypeMapper.ensureInitialized();
+      ByteStreamSourceMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -39,22 +40,17 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
   );
   static AssetEntity? _$asset(CrossFile v) => v.asset;
   static const Field<CrossFile, AssetEntity> _f$asset = Field('asset', _$asset);
-  static String? _$path(CrossFile v) => v.path;
-  static const Field<CrossFile, String> _f$path = Field('path', _$path);
-  static String? _$archiveSource(CrossFile v) => v.archiveSource;
-  static const Field<CrossFile, String> _f$archiveSource = Field(
-    'archiveSource',
-    _$archiveSource,
+  static ByteStreamSource _$source(CrossFile v) => v.source;
+  static const Field<CrossFile, ByteStreamSource> _f$source = Field(
+    'source',
+    _$source,
+  );
+  static String? _$sha256(CrossFile v) => v.sha256;
+  static const Field<CrossFile, String> _f$sha256 = Field(
+    'sha256',
+    _$sha256,
     opt: true,
   );
-  static String? _$archiveSha256(CrossFile v) => v.archiveSha256;
-  static const Field<CrossFile, String> _f$archiveSha256 = Field(
-    'archiveSha256',
-    _$archiveSha256,
-    opt: true,
-  );
-  static List<int>? _$bytes(CrossFile v) => v.bytes;
-  static const Field<CrossFile, List<int>> _f$bytes = Field('bytes', _$bytes);
   static String? _$lastModified(CrossFile v) => v.lastModified;
   static const Field<CrossFile, String> _f$lastModified = Field(
     'lastModified',
@@ -73,10 +69,8 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
     #size: _f$size,
     #thumbnail: _f$thumbnail,
     #asset: _f$asset,
-    #path: _f$path,
-    #archiveSource: _f$archiveSource,
-    #archiveSha256: _f$archiveSha256,
-    #bytes: _f$bytes,
+    #source: _f$source,
+    #sha256: _f$sha256,
     #lastModified: _f$lastModified,
     #lastAccessed: _f$lastAccessed,
   };
@@ -88,10 +82,8 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
       size: data.dec(_f$size),
       thumbnail: data.dec(_f$thumbnail),
       asset: data.dec(_f$asset),
-      path: data.dec(_f$path),
-      archiveSource: data.dec(_f$archiveSource),
-      archiveSha256: data.dec(_f$archiveSha256),
-      bytes: data.dec(_f$bytes),
+      source: data.dec(_f$source),
+      sha256: data.dec(_f$sha256),
       lastModified: data.dec(_f$lastModified),
       lastAccessed: data.dec(_f$lastAccessed),
     );
@@ -156,17 +148,15 @@ extension CrossFileValueCopy<$R, $Out> on ObjectCopyWith<$R, CrossFile, $Out> {
 
 abstract class CrossFileCopyWith<$R, $In extends CrossFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
-  ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes;
+  ByteStreamSourceCopyWith<$R, ByteStreamSource, ByteStreamSource> get source;
   $R call({
     String? name,
     FileType? fileType,
     int? size,
     Uint8List? thumbnail,
     AssetEntity? asset,
-    String? path,
-    String? archiveSource,
-    String? archiveSha256,
-    List<int>? bytes,
+    ByteStreamSource? source,
+    String? sha256,
     String? lastModified,
     String? lastAccessed,
   });
@@ -182,14 +172,8 @@ class _CrossFileCopyWithImpl<$R, $Out>
   late final ClassMapperBase<CrossFile> $mapper =
       CrossFileMapper.ensureInitialized();
   @override
-  ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes =>
-      $value.bytes != null
-      ? ListCopyWith(
-          $value.bytes!,
-          (v, t) => ObjectCopyWith(v, $identity, t),
-          (v) => call(bytes: v),
-        )
-      : null;
+  ByteStreamSourceCopyWith<$R, ByteStreamSource, ByteStreamSource> get source =>
+      $value.source.copyWith.$chain((v) => call(source: v));
   @override
   $R call({
     String? name,
@@ -197,10 +181,8 @@ class _CrossFileCopyWithImpl<$R, $Out>
     int? size,
     Object? thumbnail = $none,
     Object? asset = $none,
-    Object? path = $none,
-    Object? archiveSource = $none,
-    Object? archiveSha256 = $none,
-    Object? bytes = $none,
+    ByteStreamSource? source,
+    Object? sha256 = $none,
     Object? lastModified = $none,
     Object? lastAccessed = $none,
   }) => $apply(
@@ -210,10 +192,8 @@ class _CrossFileCopyWithImpl<$R, $Out>
       if (size != null) #size: size,
       if (thumbnail != $none) #thumbnail: thumbnail,
       if (asset != $none) #asset: asset,
-      if (path != $none) #path: path,
-      if (archiveSource != $none) #archiveSource: archiveSource,
-      if (archiveSha256 != $none) #archiveSha256: archiveSha256,
-      if (bytes != $none) #bytes: bytes,
+      if (source != null) #source: source,
+      if (sha256 != $none) #sha256: sha256,
       if (lastModified != $none) #lastModified: lastModified,
       if (lastAccessed != $none) #lastAccessed: lastAccessed,
     }),
@@ -225,10 +205,8 @@ class _CrossFileCopyWithImpl<$R, $Out>
     size: data.get(#size, or: $value.size),
     thumbnail: data.get(#thumbnail, or: $value.thumbnail),
     asset: data.get(#asset, or: $value.asset),
-    path: data.get(#path, or: $value.path),
-    archiveSource: data.get(#archiveSource, or: $value.archiveSource),
-    archiveSha256: data.get(#archiveSha256, or: $value.archiveSha256),
-    bytes: data.get(#bytes, or: $value.bytes),
+    source: data.get(#source, or: $value.source),
+    sha256: data.get(#sha256, or: $value.sha256),
     lastModified: data.get(#lastModified, or: $value.lastModified),
     lastAccessed: data.get(#lastAccessed, or: $value.lastAccessed),
   );

@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:localsend_isolates/rust/api/byte_stream_source.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
@@ -12,7 +13,7 @@ Future<RsMacosAppArchiveInfo> prepareMacosAppArchive({required String path, requ
     RustLib.instance.api.crateApiMacosAppArchivePrepareMacosAppArchive(path: path, cancelToken: cancelToken);
 
 class RsMacosAppArchiveInfo {
-  final String source;
+  final ByteStreamSource source;
   final BigInt size;
   final String sha256;
 
