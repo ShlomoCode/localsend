@@ -337,7 +337,8 @@ const ACCEPT_FAILURE_LIMIT: u32 = 100;
 
 /// A peer that opens TCP but never finishes TLS must not retain a socket and
 /// connection task indefinitely. This only covers the handshake, not transfers.
-const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Use the same generous handshake timeout as NGINX's stream SSL module.
+const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Detects peers that vanished without closing their connections (e.g. left
 /// the network mid-transfer), which would otherwise count towards the

@@ -307,7 +307,7 @@ async fn idle_tls_connections_are_closed() {
 
     for mut peer in idle_peers {
         let mut byte = [0];
-        let read = tokio::time::timeout(Duration::from_secs(12), peer.read(&mut byte))
+        let read = tokio::time::timeout(Duration::from_secs(65), peer.read(&mut byte))
             .await
             .expect("idle TLS socket was never closed")
             .expect("socket read failed");
