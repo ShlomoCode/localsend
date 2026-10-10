@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dart_mappable/dart_mappable.dart';
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/model/dto/file_dto.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
@@ -13,7 +13,7 @@ class SendingFile with SendingFileMappable {
   final String? token;
   final Uint8List? thumbnail;
   final AssetEntity? asset; // for thumbnails
-  final ByteStreamSource source;
+  final ContentSource source;
   String? get path => source.path; // android, iOS, desktop
   List<int>? get bytes => source.bytes; // web
   final String? errorMessage; // when failed; the live status is tracked in fileTransferProvider

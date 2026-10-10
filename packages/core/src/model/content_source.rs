@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 /// A source of transfer bytes. Generated sources carry an opaque descriptor;
 /// callers do not need to know how a particular source produces its stream.
 #[derive(Debug)]
-pub enum ByteStreamSource {
+pub enum ContentSource {
     Path { path: String },
     Bytes { bytes: Vec<u8> },
     FileDescriptor { fd: i32 },
@@ -25,7 +25,7 @@ enum Generator {
     MacosAppArchive(MacosAppArchive),
 }
 
-impl ByteStreamSource {
+impl ContentSource {
     /// Wrap a measured archive in the private generated-source format.
     pub fn from_macos_app_archive(archive: MacosAppArchive) -> io::Result<Self> {
         let source = Generator::MacosAppArchive(archive);

@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:localsend_isolates/isolate.dart';
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
@@ -27,7 +27,7 @@ sealed class BaseHttpUploadTask {}
 class HttpUploadFile {
   final String remoteFileToken;
   final String fileId;
-  final ByteStreamSource source;
+  final ContentSource source;
   final int fileSize;
 
   HttpUploadFile({

@@ -1088,7 +1088,7 @@ fn wire__crate__api__http__RsHttpClient_upload_impl(
             let api_file_id = <String>::sse_decode(&mut deserializer);
             let api_token = <String>::sse_decode(&mut deserializer);
             let api_source =
-                <crate::api::byte_stream_source::ByteStreamSource>::sse_decode(&mut deserializer);
+                <crate::api::content_source::ContentSource>::sse_decode(&mut deserializer);
             let api_content_length = <u64>::sse_decode(&mut deserializer);
             let api_cancel_token = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<RsCancellationToken>,
@@ -1432,7 +1432,7 @@ fn wire__crate__api__server__RsHttpServer_respond_file_download_impl(
             let api_session_id = <String>::sse_decode(&mut deserializer);
             let api_file_id = <String>::sse_decode(&mut deserializer);
             let api_source =
-                <crate::api::byte_stream_source::ByteStreamSource>::sse_decode(&mut deserializer);
+                <crate::api::content_source::ContentSource>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -3289,20 +3289,6 @@ fn wire__crate__api__crypto__verify_cert_impl(
 
 #[allow(clippy::unnecessary_literal_unwrap)]
 const _: fn() = || {
-    match None::<crate::api::byte_stream_source::ByteStreamSource>.unwrap() {
-        crate::api::byte_stream_source::ByteStreamSource::Path { path } => {
-            let _: String = path;
-        }
-        crate::api::byte_stream_source::ByteStreamSource::Bytes { bytes } => {
-            let _: Vec<u8> = bytes;
-        }
-        crate::api::byte_stream_source::ByteStreamSource::FileDescriptor { fd } => {
-            let _: i32 = fd;
-        }
-        crate::api::byte_stream_source::ByteStreamSource::Generated { descriptor } => {
-            let _: String = descriptor;
-        }
-    }
     {
         let ClientInfo = None::<crate::api::webrtc::ClientInfo>.unwrap();
         let _: uuid::Uuid = ClientInfo.id;
@@ -3319,6 +3305,20 @@ const _: fn() = || {
         let _: Option<String> = ClientInfoWithoutId.device_model;
         let _: Option<crate::api::model::DeviceType> = ClientInfoWithoutId.device_type;
         let _: String = ClientInfoWithoutId.token;
+    }
+    match None::<crate::api::content_source::ContentSource>.unwrap() {
+        crate::api::content_source::ContentSource::Path { path } => {
+            let _: String = path;
+        }
+        crate::api::content_source::ContentSource::Bytes { bytes } => {
+            let _: Vec<u8> = bytes;
+        }
+        crate::api::content_source::ContentSource::FileDescriptor { fd } => {
+            let _: i32 = fd;
+        }
+        crate::api::content_source::ContentSource::Generated { descriptor } => {
+            let _: String = descriptor;
+        }
     }
     {
         let FileDto = None::<crate::api::model::FileDto>.unwrap();
@@ -3879,40 +3879,6 @@ impl SseDecode for bool {
     }
 }
 
-impl SseDecode for crate::api::byte_stream_source::ByteStreamSource {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut tag_ = <i32>::sse_decode(deserializer);
-        match tag_ {
-            0 => {
-                let mut var_path = <String>::sse_decode(deserializer);
-                return crate::api::byte_stream_source::ByteStreamSource::Path { path: var_path };
-            }
-            1 => {
-                let mut var_bytes = <Vec<u8>>::sse_decode(deserializer);
-                return crate::api::byte_stream_source::ByteStreamSource::Bytes {
-                    bytes: var_bytes,
-                };
-            }
-            2 => {
-                let mut var_fd = <i32>::sse_decode(deserializer);
-                return crate::api::byte_stream_source::ByteStreamSource::FileDescriptor {
-                    fd: var_fd,
-                };
-            }
-            3 => {
-                let mut var_descriptor = <String>::sse_decode(deserializer);
-                return crate::api::byte_stream_source::ByteStreamSource::Generated {
-                    descriptor: var_descriptor,
-                };
-            }
-            _ => {
-                unimplemented!("");
-            }
-        }
-    }
-}
-
 impl SseDecode for crate::api::webrtc::ClientInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3948,6 +3914,36 @@ impl SseDecode for crate::api::webrtc::ClientInfoWithoutId {
             device_type: var_deviceType,
             token: var_token,
         };
+    }
+}
+
+impl SseDecode for crate::api::content_source::ContentSource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_path = <String>::sse_decode(deserializer);
+                return crate::api::content_source::ContentSource::Path { path: var_path };
+            }
+            1 => {
+                let mut var_bytes = <Vec<u8>>::sse_decode(deserializer);
+                return crate::api::content_source::ContentSource::Bytes { bytes: var_bytes };
+            }
+            2 => {
+                let mut var_fd = <i32>::sse_decode(deserializer);
+                return crate::api::content_source::ContentSource::FileDescriptor { fd: var_fd };
+            }
+            3 => {
+                let mut var_descriptor = <String>::sse_decode(deserializer);
+                return crate::api::content_source::ContentSource::Generated {
+                    descriptor: var_descriptor,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -4587,8 +4583,7 @@ impl SseDecode for crate::api::http::RsHttpClientError {
 impl SseDecode for crate::api::macos_app_archive::RsMacosAppArchiveInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_source =
-            <crate::api::byte_stream_source::ByteStreamSource>::sse_decode(deserializer);
+        let mut var_source = <crate::api::content_source::ContentSource>::sse_decode(deserializer);
         let mut var_size = <u64>::sse_decode(deserializer);
         let mut var_sha256 = <String>::sse_decode(deserializer);
         return crate::api::macos_app_archive::RsMacosAppArchiveInfo {
@@ -5445,41 +5440,6 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<RsHttpServer>> for RsHttpServe
 }
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart
-    for FrbWrapper<crate::api::byte_stream_source::ByteStreamSource>
-{
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self.0 {
-            crate::api::byte_stream_source::ByteStreamSource::Path { path } => {
-                [0.into_dart(), path.into_into_dart().into_dart()].into_dart()
-            }
-            crate::api::byte_stream_source::ByteStreamSource::Bytes { bytes } => {
-                [1.into_dart(), bytes.into_into_dart().into_dart()].into_dart()
-            }
-            crate::api::byte_stream_source::ByteStreamSource::FileDescriptor { fd } => {
-                [2.into_dart(), fd.into_into_dart().into_dart()].into_dart()
-            }
-            crate::api::byte_stream_source::ByteStreamSource::Generated { descriptor } => {
-                [3.into_dart(), descriptor.into_into_dart().into_dart()].into_dart()
-            }
-            _ => {
-                unimplemented!("");
-            }
-        }
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for FrbWrapper<crate::api::byte_stream_source::ByteStreamSource>
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::api::byte_stream_source::ByteStreamSource>>
-    for crate::api::byte_stream_source::ByteStreamSource
-{
-    fn into_into_dart(self) -> FrbWrapper<crate::api::byte_stream_source::ByteStreamSource> {
-        self.into()
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::api::webrtc::ClientInfo> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5525,6 +5485,39 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::api::webrtc::ClientInfo
     for crate::api::webrtc::ClientInfoWithoutId
 {
     fn into_into_dart(self) -> FrbWrapper<crate::api::webrtc::ClientInfoWithoutId> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::api::content_source::ContentSource> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::api::content_source::ContentSource::Path { path } => {
+                [0.into_dart(), path.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::content_source::ContentSource::Bytes { bytes } => {
+                [1.into_dart(), bytes.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::content_source::ContentSource::FileDescriptor { fd } => {
+                [2.into_dart(), fd.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::content_source::ContentSource::Generated { descriptor } => {
+                [3.into_dart(), descriptor.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<crate::api::content_source::ContentSource>
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::api::content_source::ContentSource>>
+    for crate::api::content_source::ContentSource
+{
+    fn into_into_dart(self) -> FrbWrapper<crate::api::content_source::ContentSource> {
         self.into()
     }
 }
@@ -6847,33 +6840,6 @@ impl SseEncode for bool {
     }
 }
 
-impl SseEncode for crate::api::byte_stream_source::ByteStreamSource {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        match self {
-            crate::api::byte_stream_source::ByteStreamSource::Path { path } => {
-                <i32>::sse_encode(0, serializer);
-                <String>::sse_encode(path, serializer);
-            }
-            crate::api::byte_stream_source::ByteStreamSource::Bytes { bytes } => {
-                <i32>::sse_encode(1, serializer);
-                <Vec<u8>>::sse_encode(bytes, serializer);
-            }
-            crate::api::byte_stream_source::ByteStreamSource::FileDescriptor { fd } => {
-                <i32>::sse_encode(2, serializer);
-                <i32>::sse_encode(fd, serializer);
-            }
-            crate::api::byte_stream_source::ByteStreamSource::Generated { descriptor } => {
-                <i32>::sse_encode(3, serializer);
-                <String>::sse_encode(descriptor, serializer);
-            }
-            _ => {
-                unimplemented!("");
-            }
-        }
-    }
-}
-
 impl SseEncode for crate::api::webrtc::ClientInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6894,6 +6860,33 @@ impl SseEncode for crate::api::webrtc::ClientInfoWithoutId {
         <Option<String>>::sse_encode(self.device_model, serializer);
         <Option<crate::api::model::DeviceType>>::sse_encode(self.device_type, serializer);
         <String>::sse_encode(self.token, serializer);
+    }
+}
+
+impl SseEncode for crate::api::content_source::ContentSource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::content_source::ContentSource::Path { path } => {
+                <i32>::sse_encode(0, serializer);
+                <String>::sse_encode(path, serializer);
+            }
+            crate::api::content_source::ContentSource::Bytes { bytes } => {
+                <i32>::sse_encode(1, serializer);
+                <Vec<u8>>::sse_encode(bytes, serializer);
+            }
+            crate::api::content_source::ContentSource::FileDescriptor { fd } => {
+                <i32>::sse_encode(2, serializer);
+                <i32>::sse_encode(fd, serializer);
+            }
+            crate::api::content_source::ContentSource::Generated { descriptor } => {
+                <i32>::sse_encode(3, serializer);
+                <String>::sse_encode(descriptor, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -7413,7 +7406,7 @@ impl SseEncode for crate::api::http::RsHttpClientError {
 impl SseEncode for crate::api::macos_app_archive::RsMacosAppArchiveInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <crate::api::byte_stream_source::ByteStreamSource>::sse_encode(self.source, serializer);
+        <crate::api::content_source::ContentSource>::sse_encode(self.source, serializer);
         <u64>::sse_encode(self.size, serializer);
         <String>::sse_encode(self.sha256, serializer);
     }

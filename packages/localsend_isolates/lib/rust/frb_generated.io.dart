@@ -8,8 +8,8 @@ import 'dart:convert';
 import 'dart:ffi' as ffi;
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
-import 'package:localsend_isolates/rust/api/byte_stream_source.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
+import 'package:localsend_isolates/rust/api/content_source.dart';
 import 'package:localsend_isolates/rust/api/crypto.dart';
 import 'package:localsend_isolates/rust/api/discovery.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
@@ -205,13 +205,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
-  ByteStreamSource dco_decode_box_autoadd_byte_stream_source(dynamic raw);
-
-  @protected
   ClientInfo dco_decode_box_autoadd_client_info(dynamic raw);
 
   @protected
   ClientInfoWithoutId dco_decode_box_autoadd_client_info_without_id(dynamic raw);
+
+  @protected
+  ContentSource dco_decode_box_autoadd_content_source(dynamic raw);
 
   @protected
   DeviceType dco_decode_box_autoadd_device_type(dynamic raw);
@@ -268,13 +268,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WsServerSdpMessage dco_decode_box_autoadd_ws_server_sdp_message(dynamic raw);
 
   @protected
-  ByteStreamSource dco_decode_byte_stream_source(dynamic raw);
-
-  @protected
   ClientInfo dco_decode_client_info(dynamic raw);
 
   @protected
   ClientInfoWithoutId dco_decode_client_info_without_id(dynamic raw);
+
+  @protected
+  ContentSource dco_decode_content_source(dynamic raw);
 
   @protected
   DeviceLogKind dco_decode_device_log_kind(dynamic raw);
@@ -640,13 +640,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
-  ByteStreamSource sse_decode_box_autoadd_byte_stream_source(SseDeserializer deserializer);
-
-  @protected
   ClientInfo sse_decode_box_autoadd_client_info(SseDeserializer deserializer);
 
   @protected
   ClientInfoWithoutId sse_decode_box_autoadd_client_info_without_id(SseDeserializer deserializer);
+
+  @protected
+  ContentSource sse_decode_box_autoadd_content_source(SseDeserializer deserializer);
 
   @protected
   DeviceType sse_decode_box_autoadd_device_type(SseDeserializer deserializer);
@@ -703,13 +703,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WsServerSdpMessage sse_decode_box_autoadd_ws_server_sdp_message(SseDeserializer deserializer);
 
   @protected
-  ByteStreamSource sse_decode_byte_stream_source(SseDeserializer deserializer);
-
-  @protected
   ClientInfo sse_decode_client_info(SseDeserializer deserializer);
 
   @protected
   ClientInfoWithoutId sse_decode_client_info_without_id(SseDeserializer deserializer);
+
+  @protected
+  ContentSource sse_decode_content_source(SseDeserializer deserializer);
 
   @protected
   DeviceLogKind sse_decode_device_log_kind(SseDeserializer deserializer);
@@ -1112,13 +1112,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
-  void sse_encode_box_autoadd_byte_stream_source(ByteStreamSource self, SseSerializer serializer);
-
-  @protected
   void sse_encode_box_autoadd_client_info(ClientInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_client_info_without_id(ClientInfoWithoutId self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_content_source(ContentSource self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_device_type(DeviceType self, SseSerializer serializer);
@@ -1175,13 +1175,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_ws_server_sdp_message(WsServerSdpMessage self, SseSerializer serializer);
 
   @protected
-  void sse_encode_byte_stream_source(ByteStreamSource self, SseSerializer serializer);
-
-  @protected
   void sse_encode_client_info(ClientInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_client_info_without_id(ClientInfoWithoutId self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_content_source(ContentSource self, SseSerializer serializer);
 
   @protected
   void sse_encode_device_log_kind(DeviceLogKind self, SseSerializer serializer);

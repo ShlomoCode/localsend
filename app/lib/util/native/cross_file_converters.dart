@@ -6,7 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
 import 'package:localsend_app/util/native/macos_app_archive.dart';
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart' as rust_cancel;
 import 'package:localsend_isolates/rust/api/macos_app_archive.dart' as rust_archive;
@@ -49,7 +49,7 @@ class CrossFileConverters {
       size: await file.length(),
       thumbnail: null,
       asset: asset,
-      source: ByteStreamSource.file(file.path),
+      source: ContentSource.fromPath(file.path),
       lastModified: metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
@@ -66,7 +66,7 @@ class CrossFileConverters {
       size: await file.length(),
       thumbnail: null,
       asset: null,
-      source: kIsWeb ? ByteStreamSource.bytes(await file.readAsBytes()) : ByteStreamSource.file(file.path),
+      source: kIsWeb ? ContentSource.fromBytes(await file.readAsBytes()) : ContentSource.fromPath(file.path),
       lastModified: metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
@@ -83,7 +83,7 @@ class CrossFileConverters {
       size: await file.length(),
       thumbnail: null,
       asset: null,
-      source: ByteStreamSource.file(file.path),
+      source: ContentSource.fromPath(file.path),
       lastModified: metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
@@ -96,7 +96,7 @@ class CrossFileConverters {
       size: file.size,
       thumbnail: null,
       asset: null,
-      source: ByteStreamSource.file(file.uri),
+      source: ContentSource.fromPath(file.uri),
       // SAF only provides milliseconds, so there is no point statting in Rust.
       lastModified: file.lastModified,
       lastAccessed: null,
@@ -116,7 +116,7 @@ class CrossFileConverters {
       size: await file.length(),
       thumbnail: null,
       asset: null,
-      source: ByteStreamSource.file(file.path),
+      source: ContentSource.fromPath(file.path),
       lastModified: metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
@@ -130,7 +130,7 @@ class CrossFileConverters {
       thumbnail: app is ApplicationWithIcon ? app.icon : null,
       size: await file.length(),
       asset: null,
-      source: ByteStreamSource.file(app.apkFilePath),
+      source: ContentSource.fromPath(app.apkFilePath),
       lastModified: null,
       lastAccessed: null,
     );
@@ -143,7 +143,7 @@ class CrossFileConverters {
       size: await estimateMacosAppSize(app),
       thumbnail: null,
       asset: null,
-      source: ByteStreamSource.file(app.path),
+      source: ContentSource.fromPath(app.path),
       lastModified: null,
       lastAccessed: null,
     );
@@ -158,7 +158,7 @@ class CrossFileConverters {
       path: file.path!,
       cancelToken: rust_cancel.createCancellationToken(),
     );
-    return file.copyWith(source: ByteStreamSource.fromRust(archive.source), sha256: archive.sha256, size: archive.size.toInt());
+    return file.copyWith(source: ContentSource.fromRust(archive.source), sha256: archive.sha256, size: archive.size.toInt());
   }
 
   static Future<PreparedSendingFiles> prepareFilesForSending(List<CrossFile> files) async {

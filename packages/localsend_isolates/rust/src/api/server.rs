@@ -1,4 +1,4 @@
-use crate::api::byte_stream_source::ByteStreamSource;
+use crate::api::content_source::ContentSource;
 use crate::frb_generated::StreamSink;
 use flutter_rust_bridge::frb;
 pub use localsend::http::dto_v2::RegisterDtoV2;
@@ -625,7 +625,7 @@ impl RsHttpServer {
         &self,
         session_id: String,
         file_id: String,
-        source: ByteStreamSource,
+        source: ContentSource,
     ) -> anyhow::Result<()> {
         let Some(content_tx) = self
             .pending_downloads

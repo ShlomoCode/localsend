@@ -15,7 +15,7 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
   static WebDownloadFileMapper ensureInitialized() {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = WebDownloadFileMapper._());
-      ByteStreamSourceMapper.ensureInitialized();
+      ContentSourceMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -30,8 +30,8 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
     'asset',
     _$asset,
   );
-  static ByteStreamSource _$source(WebDownloadFile v) => v.source;
-  static const Field<WebDownloadFile, ByteStreamSource> _f$source = Field(
+  static ContentSource _$source(WebDownloadFile v) => v.source;
+  static const Field<WebDownloadFile, ContentSource> _f$source = Field(
     'source',
     _$source,
   );
@@ -113,8 +113,8 @@ extension WebDownloadFileValueCopy<$R, $Out>
 
 abstract class WebDownloadFileCopyWith<$R, $In extends WebDownloadFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
-  ByteStreamSourceCopyWith<$R, ByteStreamSource, ByteStreamSource> get source;
-  $R call({FileDto? file, AssetEntity? asset, ByteStreamSource? source});
+  ContentSourceCopyWith<$R, ContentSource, ContentSource> get source;
+  $R call({FileDto? file, AssetEntity? asset, ContentSource? source});
   WebDownloadFileCopyWith<$R2, $In, $Out2> $chain<$R2, $Out2>(
     Then<$Out2, $R2> t,
   );
@@ -129,10 +129,10 @@ class _WebDownloadFileCopyWithImpl<$R, $Out>
   late final ClassMapperBase<WebDownloadFile> $mapper =
       WebDownloadFileMapper.ensureInitialized();
   @override
-  ByteStreamSourceCopyWith<$R, ByteStreamSource, ByteStreamSource> get source =>
+  ContentSourceCopyWith<$R, ContentSource, ContentSource> get source =>
       $value.source.copyWith.$chain((v) => call(source: v));
   @override
-  $R call({FileDto? file, Object? asset = $none, ByteStreamSource? source}) =>
+  $R call({FileDto? file, Object? asset = $none, ContentSource? source}) =>
       $apply(
         FieldCopyWithData({
           if (file != null) #file: file,

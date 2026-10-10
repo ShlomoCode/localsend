@@ -5,8 +5,8 @@
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
-import 'package:localsend_isolates/rust/api/byte_stream_source.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
+import 'package:localsend_isolates/rust/api/content_source.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
@@ -69,7 +69,7 @@ abstract class RsHttpClient implements RustOpaqueInterface {
     required String sessionId,
     required String fileId,
     required String token,
-    required ByteStreamSource source,
+    required ContentSource source,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   });

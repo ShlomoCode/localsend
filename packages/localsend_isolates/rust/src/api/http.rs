@@ -1,4 +1,4 @@
-use crate::api::byte_stream_source::ByteStreamSource;
+use crate::api::content_source::ContentSource;
 use crate::api::cancel::RsCancellationToken;
 use crate::frb_generated::StreamSink;
 use flutter_rust_bridge::frb;
@@ -103,7 +103,7 @@ impl RsHttpClient {
         session_id: &str,
         file_id: &str,
         token: &str,
-        source: ByteStreamSource,
+        source: ContentSource,
         content_length: u64,
         cancel_token: &RsCancellationToken,
     ) {

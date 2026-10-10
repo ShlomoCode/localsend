@@ -7,22 +7,22 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
-part 'byte_stream_source.freezed.dart';
+part 'content_source.freezed.dart';
 
 @freezed
-sealed class ByteStreamSource with _$ByteStreamSource {
-  const ByteStreamSource._();
+sealed class ContentSource with _$ContentSource {
+  const ContentSource._();
 
-  const factory ByteStreamSource.path({
+  const factory ContentSource.path({
     required String path,
-  }) = ByteStreamSource_Path;
-  const factory ByteStreamSource.bytes({
+  }) = ContentSource_Path;
+  const factory ContentSource.bytes({
     required Uint8List bytes,
-  }) = ByteStreamSource_Bytes;
-  const factory ByteStreamSource.fileDescriptor({
+  }) = ContentSource_Bytes;
+  const factory ContentSource.fileDescriptor({
     required int fd,
-  }) = ByteStreamSource_FileDescriptor;
-  const factory ByteStreamSource.generated({
+  }) = ContentSource_FileDescriptor;
+  const factory ContentSource.generated({
     required String descriptor,
-  }) = ByteStreamSource_Generated;
+  }) = ContentSource_Generated;
 }

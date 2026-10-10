@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:localsend_isolates/constants.dart';
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/model/dto/multicast_dto.dart';
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:localsend_isolates/rust/api/model.dart' show FileDto;
@@ -138,7 +138,7 @@ class HttpServerPrepareDownloadDecisionTask implements BaseHttpServerTask {
 class HttpServerFileDownloadTargetTask implements BaseHttpServerTask {
   final String sessionId;
   final String fileId;
-  final ByteStreamSource source;
+  final ContentSource source;
 
   HttpServerFileDownloadTargetTask({
     required this.sessionId,

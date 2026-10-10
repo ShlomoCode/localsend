@@ -1,4 +1,4 @@
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/rust/api/model.dart';
 import 'package:localsend_isolates/rust/api/server.dart';
 import 'package:refena_flutter/refena_flutter.dart';
@@ -105,7 +105,7 @@ class HttpServerService {
   Future<void> respondFileDownload({
     required String sessionId,
     required String fileId,
-    required ByteStreamSource source,
+    required ContentSource source,
   }) async {
     await _requireServer().respondFileDownload(
       sessionId: sessionId,

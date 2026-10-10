@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/rust/api/server.dart' show WebParams;
 import 'package:localsend_isolates/src/isolate/child/discovery_isolate.dart';
@@ -469,7 +469,7 @@ class IsolateHttpServerPrepareDownloadDecisionAction extends ReduxAction<Isolate
 class IsolateHttpServerFileDownloadTargetAction extends ReduxAction<IsolateController, ParentIsolateState> {
   final String sessionId;
   final String fileId;
-  final ByteStreamSource source;
+  final ContentSource source;
 
   IsolateHttpServerFileDownloadTargetAction({
     required this.sessionId,

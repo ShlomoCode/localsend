@@ -7,8 +7,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'package:localsend_isolates/rust/api/byte_stream_source.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
+import 'package:localsend_isolates/rust/api/content_source.dart';
 import 'package:localsend_isolates/rust/api/crypto.dart';
 import 'package:localsend_isolates/rust/api/discovery.dart';
 import 'package:localsend_isolates/rust/api/filename.dart';
@@ -177,7 +177,7 @@ abstract class RustLibApi extends BaseApi {
     required String sessionId,
     required String fileId,
     required String token,
-    required ByteStreamSource source,
+    required ContentSource source,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   });
@@ -194,7 +194,7 @@ abstract class RustLibApi extends BaseApi {
     required RsHttpServer that,
     required String sessionId,
     required String fileId,
-    required ByteStreamSource source,
+    required ContentSource source,
   });
 
   Stream<double> crateApiServerRsHttpServerRespondFileUpload({
@@ -874,7 +874,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String sessionId,
     required String fileId,
     required String token,
-    required ByteStreamSource source,
+    required ContentSource source,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   }) {
@@ -893,7 +893,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             sse_encode_String(sessionId, serializer);
             sse_encode_String(fileId, serializer);
             sse_encode_String(token, serializer);
-            sse_encode_box_autoadd_byte_stream_source(source, serializer);
+            sse_encode_box_autoadd_content_source(source, serializer);
             sse_encode_u_64(contentLength, serializer);
             sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsCancellationToken(cancelToken, serializer);
             pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17, port: port_);
@@ -1031,7 +1031,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required RsHttpServer that,
     required String sessionId,
     required String fileId,
-    required ByteStreamSource source,
+    required ContentSource source,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1040,7 +1040,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRsHttpServer(that, serializer);
           sse_encode_String(sessionId, serializer);
           sse_encode_String(fileId, serializer);
-          sse_encode_box_autoadd_byte_stream_source(source, serializer);
+          sse_encode_box_autoadd_content_source(source, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 22, port: port_);
         },
         codec: SseCodec(
@@ -2449,12 +2449,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  ByteStreamSource dco_decode_box_autoadd_byte_stream_source(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_byte_stream_source(raw);
-  }
-
-  @protected
   ClientInfo dco_decode_box_autoadd_client_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_client_info(raw);
@@ -2464,6 +2458,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ClientInfoWithoutId dco_decode_box_autoadd_client_info_without_id(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_client_info_without_id(raw);
+  }
+
+  @protected
+  ContentSource dco_decode_box_autoadd_content_source(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_content_source(raw);
   }
 
   @protected
@@ -2575,31 +2575,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  ByteStreamSource dco_decode_byte_stream_source(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return ByteStreamSource_Path(
-          path: dco_decode_String(raw[1]),
-        );
-      case 1:
-        return ByteStreamSource_Bytes(
-          bytes: dco_decode_list_prim_u_8_strict(raw[1]),
-        );
-      case 2:
-        return ByteStreamSource_FileDescriptor(
-          fd: dco_decode_i_32(raw[1]),
-        );
-      case 3:
-        return ByteStreamSource_Generated(
-          descriptor: dco_decode_String(raw[1]),
-        );
-      default:
-        throw Exception('unreachable');
-    }
-  }
-
-  @protected
   ClientInfo dco_decode_client_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2626,6 +2601,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deviceType: dco_decode_opt_box_autoadd_device_type(arr[3]),
       token: dco_decode_String(arr[4]),
     );
+  }
+
+  @protected
+  ContentSource dco_decode_content_source(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return ContentSource_Path(
+          path: dco_decode_String(raw[1]),
+        );
+      case 1:
+        return ContentSource_Bytes(
+          bytes: dco_decode_list_prim_u_8_strict(raw[1]),
+        );
+      case 2:
+        return ContentSource_FileDescriptor(
+          fd: dco_decode_i_32(raw[1]),
+        );
+      case 3:
+        return ContentSource_Generated(
+          descriptor: dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception('unreachable');
+    }
   }
 
   @protected
@@ -3077,7 +3077,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final arr = raw as List<dynamic>;
     if (arr.length != 3) throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return RsMacosAppArchiveInfo(
-      source: dco_decode_byte_stream_source(arr[0]),
+      source: dco_decode_content_source(arr[0]),
       size: dco_decode_u_64(arr[1]),
       sha256: dco_decode_String(arr[2]),
     );
@@ -3710,12 +3710,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  ByteStreamSource sse_decode_box_autoadd_byte_stream_source(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_byte_stream_source(deserializer));
-  }
-
-  @protected
   ClientInfo sse_decode_box_autoadd_client_info(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_client_info(deserializer));
@@ -3725,6 +3719,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ClientInfoWithoutId sse_decode_box_autoadd_client_info_without_id(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_client_info_without_id(deserializer));
+  }
+
+  @protected
+  ContentSource sse_decode_box_autoadd_content_source(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_content_source(deserializer));
   }
 
   @protected
@@ -3836,29 +3836,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  ByteStreamSource sse_decode_byte_stream_source(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_path = sse_decode_String(deserializer);
-        return ByteStreamSource_Path(path: var_path);
-      case 1:
-        var var_bytes = sse_decode_list_prim_u_8_strict(deserializer);
-        return ByteStreamSource_Bytes(bytes: var_bytes);
-      case 2:
-        var var_fd = sse_decode_i_32(deserializer);
-        return ByteStreamSource_FileDescriptor(fd: var_fd);
-      case 3:
-        var var_descriptor = sse_decode_String(deserializer);
-        return ByteStreamSource_Generated(descriptor: var_descriptor);
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
   ClientInfo sse_decode_client_info(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_Uuid(deserializer);
@@ -3879,6 +3856,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_deviceType = sse_decode_opt_box_autoadd_device_type(deserializer);
     var var_token = sse_decode_String(deserializer);
     return ClientInfoWithoutId(alias: var_alias, version: var_version, deviceModel: var_deviceModel, deviceType: var_deviceType, token: var_token);
+  }
+
+  @protected
+  ContentSource sse_decode_content_source(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_path = sse_decode_String(deserializer);
+        return ContentSource_Path(path: var_path);
+      case 1:
+        var var_bytes = sse_decode_list_prim_u_8_strict(deserializer);
+        return ContentSource_Bytes(bytes: var_bytes);
+      case 2:
+        var var_fd = sse_decode_i_32(deserializer);
+        return ContentSource_FileDescriptor(fd: var_fd);
+      case 3:
+        var var_descriptor = sse_decode_String(deserializer);
+        return ContentSource_Generated(descriptor: var_descriptor);
+      default:
+        throw UnimplementedError('');
+    }
   }
 
   @protected
@@ -4412,7 +4412,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   RsMacosAppArchiveInfo sse_decode_rs_macos_app_archive_info(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_source = sse_decode_byte_stream_source(deserializer);
+    var var_source = sse_decode_content_source(deserializer);
     var var_size = sse_decode_u_64(deserializer);
     var var_sha256 = sse_decode_String(deserializer);
     return RsMacosAppArchiveInfo(source: var_source, size: var_size, sha256: var_sha256);
@@ -5152,12 +5152,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_byte_stream_source(ByteStreamSource self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_byte_stream_source(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_client_info(ClientInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_client_info(self, serializer);
@@ -5167,6 +5161,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_client_info_without_id(ClientInfoWithoutId self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_client_info_without_id(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_content_source(ContentSource self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_content_source(self, serializer);
   }
 
   @protected
@@ -5278,25 +5278,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_byte_stream_source(ByteStreamSource self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case ByteStreamSource_Path(path: final path):
-        sse_encode_i_32(0, serializer);
-        sse_encode_String(path, serializer);
-      case ByteStreamSource_Bytes(bytes: final bytes):
-        sse_encode_i_32(1, serializer);
-        sse_encode_list_prim_u_8_strict(bytes, serializer);
-      case ByteStreamSource_FileDescriptor(fd: final fd):
-        sse_encode_i_32(2, serializer);
-        sse_encode_i_32(fd, serializer);
-      case ByteStreamSource_Generated(descriptor: final descriptor):
-        sse_encode_i_32(3, serializer);
-        sse_encode_String(descriptor, serializer);
-    }
-  }
-
-  @protected
   void sse_encode_client_info(ClientInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_Uuid(self.id, serializer);
@@ -5315,6 +5296,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.deviceModel, serializer);
     sse_encode_opt_box_autoadd_device_type(self.deviceType, serializer);
     sse_encode_String(self.token, serializer);
+  }
+
+  @protected
+  void sse_encode_content_source(ContentSource self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case ContentSource_Path(path: final path):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(path, serializer);
+      case ContentSource_Bytes(bytes: final bytes):
+        sse_encode_i_32(1, serializer);
+        sse_encode_list_prim_u_8_strict(bytes, serializer);
+      case ContentSource_FileDescriptor(fd: final fd):
+        sse_encode_i_32(2, serializer);
+        sse_encode_i_32(fd, serializer);
+      case ContentSource_Generated(descriptor: final descriptor):
+        sse_encode_i_32(3, serializer);
+        sse_encode_String(descriptor, serializer);
+    }
   }
 
   @protected
@@ -5743,7 +5743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_rs_macos_app_archive_info(RsMacosAppArchiveInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_byte_stream_source(self.source, serializer);
+    sse_encode_content_source(self.source, serializer);
     sse_encode_u_64(self.size, serializer);
     sse_encode_String(self.sha256, serializer);
   }
@@ -6248,7 +6248,7 @@ class RsHttpClientImpl extends RustOpaque implements RsHttpClient {
     required String sessionId,
     required String fileId,
     required String token,
-    required ByteStreamSource source,
+    required ContentSource source,
     required BigInt contentLength,
     required RsCancellationToken cancelToken,
   }) => RustLib.instance.api.crateApiHttpRsHttpClientUpload(
@@ -6322,7 +6322,7 @@ class RsHttpServerImpl extends RustOpaque implements RsHttpServer {
   /// that produces the file content.
   ///
   /// The server reads the content and streams it to the web client.
-  Future<void> respondFileDownload({required String sessionId, required String fileId, required ByteStreamSource source}) =>
+  Future<void> respondFileDownload({required String sessionId, required String fileId, required ContentSource source}) =>
       RustLib.instance.api.crateApiServerRsHttpServerRespondFileDownload(that: this, sessionId: sessionId, fileId: fileId, source: source);
 
   /// Answers the pending [RsServerEvent::FileUpload] event with the target

@@ -1,4 +1,4 @@
-import 'package:localsend_isolates/model/byte_stream_source.dart';
+import 'package:localsend_isolates/model/content_source.dart';
 import 'package:localsend_isolates/model/device.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
@@ -18,7 +18,7 @@ class HttpUploadService {
   /// a connection.
   Future<void> upload({
     required RsHttpClient client,
-    required ByteStreamSource source,
+    required ContentSource source,
     required int contentLength,
     required Device target,
     required String? remoteSessionId,

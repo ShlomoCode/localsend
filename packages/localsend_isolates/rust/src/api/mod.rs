@@ -1,4 +1,4 @@
-pub mod byte_stream_source;
+pub mod content_source;
 pub mod cancel;
 pub mod crypto;
 pub mod discovery;

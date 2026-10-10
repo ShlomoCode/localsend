@@ -1,8 +1,8 @@
 use flutter_rust_bridge::frb;
-pub use localsend::model::byte_stream_source::ByteStreamSource;
+pub use localsend::model::content_source::ContentSource;
 
-#[frb(mirror(ByteStreamSource))]
-pub enum _ByteStreamSource {
+#[frb(mirror(ContentSource))]
+pub enum _ContentSource {
     Path { path: String },
     Bytes { bytes: Vec<u8> },
     FileDescriptor { fd: i32 },

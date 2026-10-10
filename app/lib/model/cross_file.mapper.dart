@@ -16,7 +16,7 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = CrossFileMapper._());
       FileTypeMapper.ensureInitialized();
-      ByteStreamSourceMapper.ensureInitialized();
+      ContentSourceMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -40,8 +40,8 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
   );
   static AssetEntity? _$asset(CrossFile v) => v.asset;
   static const Field<CrossFile, AssetEntity> _f$asset = Field('asset', _$asset);
-  static ByteStreamSource _$source(CrossFile v) => v.source;
-  static const Field<CrossFile, ByteStreamSource> _f$source = Field(
+  static ContentSource _$source(CrossFile v) => v.source;
+  static const Field<CrossFile, ContentSource> _f$source = Field(
     'source',
     _$source,
   );
@@ -148,14 +148,14 @@ extension CrossFileValueCopy<$R, $Out> on ObjectCopyWith<$R, CrossFile, $Out> {
 
 abstract class CrossFileCopyWith<$R, $In extends CrossFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
-  ByteStreamSourceCopyWith<$R, ByteStreamSource, ByteStreamSource> get source;
+  ContentSourceCopyWith<$R, ContentSource, ContentSource> get source;
   $R call({
     String? name,
     FileType? fileType,
     int? size,
     Uint8List? thumbnail,
     AssetEntity? asset,
-    ByteStreamSource? source,
+    ContentSource? source,
     String? sha256,
     String? lastModified,
     String? lastAccessed,
@@ -172,7 +172,7 @@ class _CrossFileCopyWithImpl<$R, $Out>
   late final ClassMapperBase<CrossFile> $mapper =
       CrossFileMapper.ensureInitialized();
   @override
-  ByteStreamSourceCopyWith<$R, ByteStreamSource, ByteStreamSource> get source =>
+  ContentSourceCopyWith<$R, ContentSource, ContentSource> get source =>
       $value.source.copyWith.$chain((v) => call(source: v));
   @override
   $R call({
@@ -181,7 +181,7 @@ class _CrossFileCopyWithImpl<$R, $Out>
     int? size,
     Object? thumbnail = $none,
     Object? asset = $none,
-    ByteStreamSource? source,
+    ContentSource? source,
     Object? sha256 = $none,
     Object? lastModified = $none,
     Object? lastAccessed = $none,

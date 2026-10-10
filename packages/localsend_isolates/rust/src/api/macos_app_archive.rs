@@ -1,9 +1,9 @@
-use crate::api::byte_stream_source::ByteStreamSource;
+use crate::api::content_source::ContentSource;
 use crate::api::cancel::RsCancellationToken;
 use localsend::model::macos_app_archive::MacosAppArchive;
 
 pub struct RsMacosAppArchiveInfo {
-    pub source: ByteStreamSource,
+    pub source: ContentSource,
     pub size: u64,
     pub sha256: String,
 }
@@ -17,7 +17,7 @@ pub async fn prepare_macos_app_archive(
     let size = archive.size();
     let sha256 = archive.sha256();
     Ok(RsMacosAppArchiveInfo {
-        source: ByteStreamSource::from_macos_app_archive(archive)?,
+        source: ContentSource::from_macos_app_archive(archive)?,
         size,
         sha256,
     })
