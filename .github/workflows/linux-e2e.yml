@@ -116,12 +116,19 @@ jobs:
           (cd candidate && ../packages/candidate.AppImage --appimage-extract > ../evidence/candidate-extract.log)
           sha256sum baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app | tee evidence/packaged-executables.sha256
           cmp baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app
+          (cd baseline/squashfs-root && find . -type f -name '*.so*' -print0 | sort -z | xargs -0 sha256sum) > evidence/baseline-libraries.sha256
+          (cd candidate/squashfs-root && find . -type f -name '*.so*' -print0 | sort -z | xargs -0 sha256sum) > evidence/candidate-libraries.sha256
+          cmp evidence/baseline-libraries.sha256 evidence/candidate-libraries.sha256
+          grep -q 'libapp.so' evidence/candidate-libraries.sha256
           cp source-evidence/built-executable.sha256 evidence/prepackaging-executable.sha256
           cp baseline/squashfs-root/org.localsend.localsend_app.desktop evidence/baseline.desktop
           cp candidate/squashfs-root/org.localsend.localsend_app.desktop evidence/candidate.desktop
           ! grep -q '^StartupWMClass=' evidence/baseline.desktop
           grep -qx 'StartupWMClass=org.localsend.localsend_app' evidence/candidate.desktop
           diff -u evidence/baseline.desktop evidence/candidate.desktop > evidence/desktop.diff || test "$?" = 1
+          sed '/^StartupWMClass=/d; /^$/d' evidence/baseline.desktop > evidence/baseline-normalized.desktop
+          sed '/^StartupWMClass=/d; /^$/d' evidence/candidate.desktop > evidence/candidate-normalized.desktop
+          cmp evidence/baseline-normalized.desktop evidence/candidate-normalized.desktop
           desktop-file-validate evidence/baseline.desktop
           desktop-file-validate evidence/candidate.desktop
           printf 'Identical exact-source executable; generated candidate desktop class validated.\n' > evidence/verdict.txt
