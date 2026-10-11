@@ -129,19 +129,27 @@ async function remote(key) {
 }
 async function record(name, action) {
   const path = `/sdcard/issue1864-recordings/${name}.mp4`;
-  const process = spawn('adb', ['shell', 'screenrecord', '--time-limit', '45', path]);
-  const finished = new Promise(resolve => process.once('exit', (code, signal) => resolve({ code, signal })));
-  process.stderr.on('data', data => fs.appendFileSync(`${out}/${name}-screenrecord.log`, data));
-  log({ type: 'recording', action: 'start', name });
+  const natural=process.env.ISSUE1864_RECORDING_STOP==='natural';
+  const requestedDuration=natural ? 15 : 45;
+  const recorder = spawn('adb', ['shell', 'screenrecord', '--time-limit', String(requestedDuration), path]);
+  const finished = new Promise(resolve => recorder.once('exit', (code, signal) => resolve({ code, signal, time:Date.now() })));
+  recorder.stderr.on('data', data => fs.appendFileSync(`${out}/${name}-screenrecord.log`, data));
+  log({ type: 'recording', action: 'start', name, stopMode:natural ? 'natural-expiry' : 'SIGINT', requestedDuration });
   await pause(900);
-  let actionError, captureError;
-  try { await action(); await pause(1200); }
+  let actionError, captureError, actionCompletedAt;
+  try { await action(); actionCompletedAt=Date.now(); await pause(1200); }
   catch(error) { actionError=error; }
   finally {
-    try { adb('shell', 'pkill', '-INT', 'screenrecord'); }
-    catch(error) { log({type:'recording',action:'stop-error',name,status:error.status,message:error.message}); }
+    if(!natural) {
+      try { adb('shell', 'pkill', '-INT', 'screenrecord'); }
+      catch(error) { log({type:'recording',action:'stop-error',name,status:error.status,message:error.message}); }
+    }
     const exit=await finished;
     log({type:'recording',action:'process-exit',name,...exit});
+    if(natural && (exit.code!==0 || !actionCompletedAt || actionCompletedAt>=exit.time)) {
+      captureError=new Error('Natural recording ended before required actions completed or exited uncleanly');
+    }
+    const recordingError=captureError;
     // A completed recording survives a transient ADB transport loss. Retry only
     // reading this exact file; never repeat the actions that produced it.
     for(let attempt=1;attempt<=3;attempt++) {
@@ -152,7 +160,7 @@ async function record(name, action) {
           adb('shell','test','-s',path);
         }
         adb('pull', path, `${out}/${name}.mp4`);
-        captureError=undefined;
+        captureError=recordingError;
         log({type:'recording',action:'pull-success',name,attempt});
         break;
       } catch(error) {
@@ -161,7 +169,7 @@ async function record(name, action) {
           stdout:error.stdout?.toString(),stderr:error.stderr?.toString()});
       }
     }
-    log({type:'recording',action:'end',name,actionFailed:!!actionError,captureFailed:!!captureError});
+    log({type:'recording',action:'end',name,actionCompletedAt,actionFailed:!!actionError,captureFailed:!!captureError});
   }
   if(actionError) throw actionError;
   if(captureError) throw captureError;
