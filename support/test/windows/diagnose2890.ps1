@@ -79,6 +79,7 @@ function Screenshot([string]$name) {
  Import-Csv "$EvidenceDirectory/$name.tsv" -Delimiter "`t" | Where-Object {$_.text} | Select-Object left,top,width,height,text | Format-Table | Out-String | Write-Host
 }
 function Click([int]$x,[int]$y) {
+ Write-Host "INPUT click x=$x y=$y utc=$((Get-Date).ToUniversalTime().ToString('o'))"
  [Desktop2381]::SetCursorPos($x,$y) | Out-Null
  [Desktop2381]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
  [Desktop2381]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
@@ -244,6 +245,13 @@ foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";w
  }
  Start-Sleep -Seconds 1
  Screenshot "$($size.name)-after-wheel"
+ Write-Host "INPUT wheel-to-end x=440 y=300 notches=24 delta=-120 utc=$((Get-Date).ToUniversalTime().ToString('o'))"
+ for($n=0;$n -lt 24;$n++) {
+  [Desktop2381]::mouse_event(0x800,0,0,([uint32]4294967176),[UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 100
+ }
+ Start-Sleep -Seconds 1
+ Screenshot "$($size.name)-after-wheel-to-end"
  # Drag at the visible right edge of the dialog. Images determine whether a scrollbar exists.
  Click 576 240
  [Desktop2381]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
@@ -255,7 +263,7 @@ foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";w
 $lastRows=Import-Csv "$EvidenceDirectory/larger-after-edge-drag.tsv" -Delimiter "`t"
 $lastPeer=$lastRows | Where-Object {$_.text -eq "Peer12"} | Select-Object -First 1
 $lastPeerIp=$lastRows | Where-Object {$_.text -like '*127.0.0.12*'} | Select-Object -First 1
-@{lastRowVisible=($null -ne $lastPeer -or $null -ne $lastPeerIp);lastRowOcr=$lastPeer;lastRowIpOcr=$lastPeerIp;input="six wheel notches, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
+@{lastRowVisible=($null -ne $lastPeer -or $null -ne $lastPeerIp);lastRowOcr=$lastPeer;lastRowIpOcr=$lastPeerIp;input="six wheel notches, 24 more to end, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
 if($lastPeer -or $lastPeerIp) {
  $lastRowY=if($lastPeer){([int]$lastPeer.top + [int]$lastPeer.height/2)/2 + 10}else{([int]$lastPeerIp.top + [int]$lastPeerIp.height/2)/2 - 10}
  FavoritePencil "larger-after-edge-drag" $lastRowY
