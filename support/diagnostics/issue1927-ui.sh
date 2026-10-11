@@ -185,3 +185,70 @@ wait_app_exit() {
   printf 'app-exit timeout: %s\n' "$label" >> "$OUT/inconclusive-transitions.txt"
   return 1
 }
+identity_command() {
+  local stage=$1 result=0
+  shift
+  printf '%s stage=%s remaining=%s command=' "$(date -u --iso-8601=ns)" "$stage" "$((transition_deadline-SECONDS))" >> "$OUT/$identity_label-identity-observer.txt"
+  printf '%q ' "$@" >> "$OUT/$identity_label-identity-observer.txt"
+  printf '\n' >> "$OUT/$identity_label-identity-observer.txt"
+  run_ui_observer "$@" 2>> "$OUT/$identity_label-identity-observer.txt" || result=$?
+  printf 'stage=%s exit=%s\n' "$stage" "$result" >> "$OUT/$identity_label-identity-observer.txt"
+  return "$result"
+}
+qualified_app_pid() {
+  # Flatpak ps reports the supervisor, not the executable leaf. Resolve the
+  # unique descendant by UID, executable inode and exact sandbox identity.
+  local identity_label=$1 transition_deadline=$((SECONDS+12)) uid rows instance anchor descendants pid actual expected status info ticks before_ticks found=''
+  uid=$(id -u) || return 1
+  identity_command instances flatpak ps --columns=instance,application,pid > "$OUT/$identity_label-instances.txt" || return 1
+  identity_command topology ps -u "$uid" -o pid=,ppid=,uid=,comm= > "$OUT/$identity_label-topology.txt" || return 1
+  rows=$(identity_command instance-filter awk '$2=="org.localsend.localsend_app" {print $1,$3}' "$OUT/$identity_label-instances.txt") || return 1
+  [[ "$rows" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
+  read -r instance anchor <<< "$rows"
+  descendants=$(identity_command descendants awk -v anchor="$anchor" '
+    {parent[$1]=$2} END {for(pid in parent){p=pid; for(n=0;n<1024 && p in parent;n++){if(p==anchor){print pid;break}p=parent[p]}}}
+  ' "$OUT/$identity_label-topology.txt") || return 1
+  for pid in $descendants; do
+    identity_command "start-before-$pid" sudo -n cat "/proc/$pid/stat" > "$OUT/$identity_label-$pid-stat-before.txt" || continue
+    before_ticks=$(identity_command "start-before-field-$pid" awk '{sub(/^.*\) /,""); print $20}' "$OUT/$identity_label-$pid-stat-before.txt") || continue
+    [[ "$before_ticks" =~ ^[0-9]+$ ]] || return 1
+    status="$OUT/$identity_label-$pid-status.txt"
+    identity_command "status-$pid" sudo -n cat "/proc/$pid/status" > "$status" || continue
+    identity_command "cgroup-$pid" sudo -n cat "/proc/$pid/cgroup" > "$OUT/$identity_label-$pid-cgroup.txt" || continue
+    identity_command "exe-$pid" sudo -n readlink "/proc/$pid/exe" > "$OUT/$identity_label-$pid-exe.txt" || continue
+    actual=$(identity_command "exe-inode-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/exe") || continue
+    expected=$(identity_command "app-inode-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/root/app/localsend_app") || continue
+    printf 'pid=%s executable_inode=%s expected_inode=%s\n' "$pid" "$actual" "$expected" >> "$OUT/$identity_label-identity-observer.txt"
+    [ "$actual" = "$expected" ] || continue
+    info="$OUT/$identity_label-$pid-flatpak-info.txt"
+    identity_command "sandbox-$pid" sudo -n cat "/proc/$pid/root/.flatpak-info" > "$info" || return 1
+    identity_command "uid-$pid" awk -v uid="$uid" '/^Uid:/ {matched=($2==uid && $3==uid && $4==uid && $5==uid)} END {exit !matched}' "$status" || return 1
+    identity_command "sandbox-match-$pid" awk -v instance="$instance" '
+      /^\[/ {section=$0} section=="[Application]" && $0=="name=org.localsend.localsend_app" {app=1}
+      section=="[Instance]" && $0=="instance-id=" instance {matched=1} END {exit !(app && matched)}
+    ' "$info" || return 1
+    identity_command "start-$pid" sudo -n cat "/proc/$pid/stat" > "$OUT/$identity_label-$pid-stat.txt" || return 1
+    ticks=$(identity_command "start-field-$pid" awk '{sub(/^.*\) /,""); print $20}' "$OUT/$identity_label-$pid-stat.txt") || return 1
+    [[ "$ticks" =~ ^[0-9]+$ ]] || return 1
+    [ "$ticks" = "$before_ticks" ] || return 1
+    [ -z "$found" ] || return 1
+    found=$pid
+    printf '%s %s %s %s\n' "$instance" "$anchor" "$pid" "$ticks" > "$OUT/$identity_label-process-identity.txt"
+  done
+  [ -n "$found" ] && [ "$SECONDS" -lt "$transition_deadline" ] || return 1
+  printf '%s\n' "$found"
+}
+qualified_visible_window() {
+  local identity_label=$1 pid=$2 transition_deadline=$((SECONDS+8)) windows property_pid namespace_pid
+  windows=$(identity_command windows xdotool search --onlyvisible --name '^LocalSend$') || return 1
+  [[ "$windows" =~ ^[0-9]+$ ]] || return 1
+  identity_command window-properties xprop -id "$windows" WM_CLASS _NET_WM_PID > "$OUT/$identity_label-window-properties.txt" || return 1
+  identity_command window-class grep -Fq '"org.localsend.localsend_app"' "$OUT/$identity_label-window-properties.txt" || return 1
+  property_pid=$(identity_command window-pid xdotool getwindowpid "$windows") || return 1
+  namespace_pid=$(identity_command namespace-pid sudo -n awk '/^NSpid:/ {print $NF}' "/proc/$pid/status") || return 1
+  [[ "$property_pid" =~ ^[0-9]+$ && "$namespace_pid" =~ ^[0-9]+$ ]] || return 1
+  printf 'host_pid=%s namespace_pid=%s window_pid=%s\n' "$pid" "$namespace_pid" "$property_pid" >> "$OUT/$identity_label-identity-observer.txt"
+  [ "$property_pid" = "$pid" ] || [ "$property_pid" = "$namespace_pid" ] || return 1
+  [ "$SECONDS" -lt "$transition_deadline" ] || return 1
+  printf '%s\n' "$windows"
+}

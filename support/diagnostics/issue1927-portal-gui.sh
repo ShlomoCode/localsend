@@ -15,7 +15,7 @@ start_portal_monitor() {
 }
 start_portal_monitor initial
 launch_settings() {
-  local label=$1
+  local label=$1 pid
   flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
   wid=''
   for i in $(seq 1 30); do
@@ -24,18 +24,31 @@ launch_settings() {
     sleep 1
   done
   test -n "$wid"
+  snapshot "$label-before-input"
+  pid=$(qualified_app_pid "$label")
+  wid=$(qualified_visible_window "$label" "$pid")
   stabilize_window
   xdotool mousemove --window "$wid" 105 211 click 1
   sleep 2
   import -window "$wid" "$OUT/$label-settings.png"
 }
 snapshot() {
-  local label=$1
-  { date -u --iso-8601=ns; loginctl list-sessions; flatpak ps --columns=instance,application,pid; pgrep -ax localsend || true; } > "$OUT/$label-processes.txt"
-  { ls -la "$HOME/.config/autostart"; cat "$HOME/.config/autostart/"*.desktop; } > "$OUT/$label-host-entry.txt" 2>&1 || true
-  find "$HOME/.var/app/org.localsend.localsend_app" -maxdepth 5 -name '*preferences*' -type f -exec cat {} \; > "$OUT/$label-preferences.txt"
-  import -window root "$OUT/$label-desktop.png"
-  if [ -n "${wid:-}" ]; then import -window "$wid" "$OUT/$label-settings.png"; fi
+  local label=$1 identity_label=$1 transition_deadline=$((SECONDS+12)) name window windows
+  identity_command sessions loginctl list-sessions > "$OUT/$label-sessions.txt" || true
+  identity_command instances flatpak ps --columns=instance,application,pid > "$OUT/$label-processes.txt" || true
+  identity_command processes ps -eo pid,ppid,uid,comm,args >> "$OUT/$label-processes.txt" || true
+  identity_command desktop import -window root "$OUT/$label-desktop.png" || true
+  windows=$(identity_command visible-windows xdotool search --onlyvisible --name '^LocalSend$') || windows=''
+  printf '%s\n' "$windows" > "$OUT/$label-visible-windows.txt"
+  for window in $windows; do
+    identity_command "window-$window" xprop -id "$window" WM_CLASS _NET_WM_PID >> "$OUT/$label-window-properties.txt" || true
+  done
+  for name in localsend_app org.localsend.localsend_app; do
+    identity_command "host-stat-$name" stat "$HOME/.config/autostart/$name.desktop" >> "$OUT/$label-host-entry.txt" || true
+    identity_command "host-read-$name" cat "$HOME/.config/autostart/$name.desktop" >> "$OUT/$label-host-entry.txt" || true
+  done
+  identity_command preferences find "$HOME/.var/app/org.localsend.localsend_app" -maxdepth 5 -name '*preferences*' -type f -exec grep -oE '"flutter.ls_flatpak_auto_start(_hidden)?":(true|false)' {} \; > "$OUT/$label-preferences.txt" || true
+  if [ -n "${wid:-}" ]; then identity_command settings import -window "$wid" "$OUT/$label-settings.png" || true; fi
 }
 click_recorded() {
   local label=$1 phrase=$2 before=$3 after=$4 entry_kind=$5 y
@@ -64,34 +77,39 @@ require_switch_state 'Autostart after login' enabled-reopened-observed ON > /dev
 flatpak kill org.localsend.localsend_app
 wid=''
 relogin
-start_portal_monitor visible-login
-pgrep -x localsend > "$OUT/visible-login-pid.txt"
-xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/visible-login-window.txt"
 snapshot visible-login
+start_portal_monitor visible-login
+pid=$(qualified_app_pid visible-login)
+printf '%s\n' "$pid" > "$OUT/visible-login-pid.txt"
+qualified_visible_window visible-login "$pid" > "$OUT/visible-login-window.txt"
 launch_settings visible-login-settings
 click_recorded hidden 'Start hidden' OFF ON host-flatpak-hidden
 grep -q -- '--hidden' "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 flatpak kill org.localsend.localsend_app
 wid=''
 relogin
-start_portal_monitor hidden-login
-pgrep -x localsend > "$OUT/hidden-login-pid.txt"
-xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/hidden-login-window.txt" || true
-test ! -s "$OUT/hidden-login-window.txt"
 snapshot hidden-login
+start_portal_monitor hidden-login
+pid=$(qualified_app_pid hidden-login)
+printf '%s\n' "$pid" > "$OUT/hidden-login-pid.txt"
+window_result=0
+run_ui_observer xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/hidden-login-window.txt" 2> "$OUT/hidden-login-window-error.txt" || window_result=$?
+test "$window_result" = 1 && test ! -s "$OUT/hidden-login-window.txt" && test ! -s "$OUT/hidden-login-window-error.txt"
 # Normal launcher asks the running app to foreground. Preserve PID identity.
 launch_settings hidden-login-foreground
-pgrep -x localsend > "$OUT/hidden-foreground-pid.txt"
+qualified_app_pid hidden-foreground > "$OUT/hidden-foreground-pid.txt"
 cmp "$OUT/hidden-login-pid.txt" "$OUT/hidden-foreground-pid.txt"
+cmp "$OUT/hidden-login-process-identity.txt" "$OUT/hidden-foreground-process-identity.txt"
 click_recorded visible-again 'Start hidden' ON OFF host-flatpak-visible
 if grep -q -- '--hidden' "$HOME/.config/autostart/org.localsend.localsend_app.desktop"; then exit 24; fi
 flatpak kill org.localsend.localsend_app
 wid=''
 relogin
-start_portal_monitor visible-again-login
-pgrep -x localsend > "$OUT/visible-again-login-pid.txt"
-xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/visible-again-login-window.txt"
 snapshot visible-again-login
+start_portal_monitor visible-again-login
+pid=$(qualified_app_pid visible-again-login)
+printf '%s\n' "$pid" > "$OUT/visible-again-login-pid.txt"
+qualified_visible_window visible-again-login "$pid" > "$OUT/visible-again-login-window.txt"
 launch_settings disable-before
 click_recorded disable 'Autostart after login' ON OFF host-absent
 test ! -e "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
@@ -105,6 +123,7 @@ flatpak kill org.localsend.localsend_app
 wid=''
 relogin
 snapshot disabled-login
-if pgrep -x localsend; then exit 25; fi
+run_ui_observer flatpak ps --columns=instance,application,pid > "$OUT/disabled-login-instance-check.txt"
+run_ui_observer awk '$2=="org.localsend.localsend_app" {found=1} END {exit found}' "$OUT/disabled-login-instance-check.txt"
 kill "$monitor_pid" || true
 printf 'Portal command-path diagnostic completed; cached-state design remains unshippable.\n' > "$OUT/result.txt"
