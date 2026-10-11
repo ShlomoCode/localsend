@@ -66,13 +66,25 @@ foreach ($file in @('LocalSend.LocalSend.yaml','LocalSend.LocalSend.installer.ya
  Invoke-WebRequest "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/l/LocalSend/LocalSend/1.15.1/$file" -OutFile "$manifest/$file"
 }
 Copy-Item "$manifest/*" "$ev/" -Force
+$fixedManifest = Join-Path $env:RUNNER_TEMP 'manifest151-fixed-switch'
+New-Item -ItemType Directory -Force $fixedManifest | Out-Null
+Copy-Item "$manifest/*" $fixedManifest
+$installerText = Get-Content "$fixedManifest/LocalSend.LocalSend.installer.yaml" -Raw
+$installerText = [regex]::Replace($installerText, '(?m)^(    Custom: [^\r\n]+)', '$1' + "`n    Upgrade: /FORCECLOSEAPPLICATIONS")
+[IO.File]::WriteAllText("$fixedManifest/LocalSend.LocalSend.installer.yaml", $installerText, (New-Object Text.UTF8Encoding $false))
+Copy-Item "$fixedManifest/LocalSend.LocalSend.installer.yaml" "$ev/fixed-switch-installer.yaml"
 & $wgPath settings --enable LocalManifestFiles 2>&1 | Out-File "$ev/manifest-setting.txt"
+& $wgPath validate --manifest $manifest 2>&1 | Out-File "$ev/original-manifest-validation.txt"
+if ($LASTEXITCODE -ne 0) { throw 'Original Microsoft manifest validation failed' }
+& $wgPath validate --manifest $fixedManifest 2>&1 | Out-File "$ev/fixed-manifest-validation.txt"
+if ($LASTEXITCODE -ne 0) { throw 'Single-switch manifest validation failed' }
 function Snapshot($name) {
  Get-Process localsend_app -ErrorAction SilentlyContinue | Select-Object Id, Path, StartTime, Responding, MainWindowHandle, MainWindowTitle | ConvertTo-Json | Set-Content "$ev/$name-process.json"
  $registry = foreach ($root in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
   Get-ItemProperty $root -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match 'LocalSend' } | Select-Object PSPath, DisplayName, DisplayVersion, InstallLocation, UninstallString, QuietUninstallString
  }
  @($registry) | ConvertTo-Json | Set-Content "$ev/$name-registry.json"
+ @{ Registry = @($registry); Process = @(Get-Process localsend_app -ErrorAction SilentlyContinue | Select-Object Id, MainWindowHandle); SampleTime = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 4 | Set-Content "$ev/$name-state.json"
  & $wgPath list --id LocalSend.LocalSend --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-File "$ev/$name-winget-list.txt"
  Get-ChildItem "$env:ProgramFiles/LocalSend" -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime | ConvertTo-Json | Set-Content "$ev/$name-files.json"
  if (Test-Path "$env:ProgramFiles/LocalSend/localsend_app.exe") {
@@ -92,7 +104,7 @@ function ResetBaseline($name) {
  if ($setup.ExitCode -ne 0) { throw "Baseline installation failed: $($setup.ExitCode)" }
  Snapshot "$name-baseline"
 }
-function Upgrade($name,$route,$running,$tray=$false,$hidden=$false) {
+function Upgrade($name,$route,$running,$tray=$false,$hidden=$false,$target='1.15.1') {
  ResetBaseline $name
  if ($running) {
   $app = Start-Process "$env:ProgramFiles/LocalSend/localsend_app.exe" -PassThru
@@ -128,8 +140,11 @@ function Upgrade($name,$route,$running,$tray=$false,$hidden=$false) {
   }
  }
  Snapshot "$name-before"
- if ($route -eq 'source') { $args = @('upgrade','--id','LocalSend.LocalSend','--exact','--version','1.15.1','--source','winget','--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
- else { $args = @('upgrade','--manifest',"`"$manifest`"",'--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
+ if ($route -eq 'source') { $args = @('upgrade','--id','LocalSend.LocalSend','--exact','--version',$target,'--source','winget','--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
+ else {
+  $selectedManifest = if ($route -eq 'local-manifest-fixed') { $fixedManifest } else { $manifest }
+  $args = @('upgrade','--manifest',"`"$selectedManifest`"",'--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity')
+ }
  $start = Get-Date
  $up = Start-Process $wgPath -ArgumentList $args -PassThru -RedirectStandardOutput "$ev/$name-winget-upgrade.txt" -RedirectStandardError "$ev/$name-winget-error.txt"
  $retainedHandle = $up.Handle
@@ -143,13 +158,17 @@ function Upgrade($name,$route,$running,$tray=$false,$hidden=$false) {
  $timeline | ConvertTo-Json -Depth 5 | Set-Content "$ev/$name-timeline.json"
  @{ Name = $name; Route = $route; Running = $running; Tray = $tray; Hidden = $hidden; Arguments = $args; ExitCode = $up.ExitCode; DurationSeconds = ((Get-Date)-$start).TotalSeconds } | ConvertTo-Json | Set-Content "$ev/$name-result.json"
  Snapshot "$name-after"
+ $reg = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{00809252-FEC6-448E-83B4-E7F55AE7E47D}_is1' -ErrorAction SilentlyContinue
+ $installedVersion = if (Test-Path "$env:ProgramFiles/LocalSend/localsend_app.exe") { (Get-Item "$env:ProgramFiles/LocalSend/localsend_app.exe").VersionInfo.ProductVersion } else { $null }
+ $completed = $up.ExitCode -eq 0 -and $reg.DisplayVersion -eq $target -and $installedVersion -like "$target*"
+ @{ ExpectedSuccess = $route -eq 'local-manifest-fixed' -or $target -eq '1.18.2'; Completed = $completed; Registration = $reg.DisplayVersion; FileVersion = $installedVersion; ProcessAlive = [bool](Get-Process localsend_app -ErrorAction SilentlyContinue) } | ConvertTo-Json | Set-Content "$ev/$name-verdict.json"
 }
 try {
  $route = if ($source151 -eq 0) { 'source' } else { 'local-manifest' }
- Upgrade 'running-off-control' $route $true
- Upgrade 'running-tray-visible-1' $route $true $true
- Upgrade 'running-tray-visible-2' $route $true $true
- Upgrade 'running-tray-hidden' $route $true $true $true
+ Upgrade 'original-metadata-tray-visible' 'local-manifest' $true $true
+ Upgrade 'one-switch-tray-visible-1' 'local-manifest-fixed' $true $true
+ Upgrade 'one-switch-tray-visible-2' 'local-manifest-fixed' $true $true
+ Upgrade 'current-source-tray-visible' 'source' $true $true $false '1.18.2'
 } finally {
  foreach ($logRoot in @("$env:LOCALAPPDATA/Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir", "$env:LOCALAPPDATA/Microsoft/WinGet/DiagOutputDir")) {
   if (Test-Path $logRoot) { Copy-Item "$logRoot/*" $ev -Force -ErrorAction Continue }
