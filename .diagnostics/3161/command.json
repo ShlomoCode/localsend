@@ -1,1 +1,1 @@
-{"round":10,"actions":[{"kind":"click","x":415,"y":407},{"kind":"wait","seconds":2},{"kind":"click","x":421,"y":363},{"kind":"wait","seconds":2},{"kind":"stop-app"}]}
+{"round":11,"actions":[{"kind":"key","value":"Super_L"},{"kind":"text","value":"localsend"},{"kind":"key","value":"Return"},{"kind":"wait","seconds":5}]}
