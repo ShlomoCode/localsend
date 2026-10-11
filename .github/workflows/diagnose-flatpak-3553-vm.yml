@@ -1,0 +1,30 @@
+name: Diagnose 2898 Debian upgrade
+on:
+  workflow_dispatch:
+concurrency:
+  group: issue2898-debian-upgrade
+  cancel-in-progress: false
+jobs:
+  investigate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Debian 12 to 13 userspace upgrade and launch
+        run: |
+          mkdir -p evidence/cloud
+          uname -a > evidence/cloud/host-kernel.txt
+          lscpu > evidence/cloud/host-cpu.txt
+          docker pull debian:bookworm
+          docker image inspect debian:bookworm > evidence/cloud/container-image.json
+          docker run --name issue2898 -v "$PWD:/work" debian:bookworm bash /work/support/diagnostics/2898-upgrade.sh
+      - name: Preserve logs
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" evidence/cloud
+          docker logs issue2898 > evidence/cloud/container-console.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2898-debian-upgrade-evidence
+          path: evidence/cloud/
