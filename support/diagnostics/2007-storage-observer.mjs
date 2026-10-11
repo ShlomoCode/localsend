@@ -50,6 +50,7 @@ export function storageObserver({wd,prefix,session}) {
   const element=prefix+'/element/'+input['element-6066-11e4-a52e-4f735466cecf'];
   await wd('POST',element+'/clear',{});
   await wd('POST',element+'/value',{text:fixtureName});
+  await wd('POST',prefix+'/appium/device/hide_keyboard',{});
   const requestedUtc=new Date().toISOString();
   await click('accessibility id','Finalize owned received file','owned-scan-request');
   await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Scan completed"]',label:'owned-scan-callback',timeoutMs:30000});
