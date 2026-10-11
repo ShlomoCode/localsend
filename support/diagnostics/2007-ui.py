@@ -110,7 +110,7 @@ tooltip = screen('manual-send-tooltip')
 # address dialog after the click instead.
 click(row_end + 70, row_y)
 address_title = text('Enter', 'manual-address-dialog')
-if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0']:
+if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0', 'current-c1ce']:
     # Raw official 1.16.1 screenshot38110217141 shows IP Address 100 px
     # right and 48 px below the Enter title center. Full OCR misses its label.
     click(address_title[0] + 100, address_title[1] + 48)
@@ -170,7 +170,7 @@ if os.environ.get('ISSUE_2007_RESEND'):
     row_y = int(nearby[0]['top']) + int(nearby[0]['height']) // 2
     click(row_end + 70, row_y)
     address_title = text('Enter', 'resend-manual-address-dialog')
-    if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0']:
+    if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0', 'current-c1ce']:
         click(address_title[0] + 100, address_title[1] + 48)
         screen('resend-manual-ip-mode-selected')
     run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
