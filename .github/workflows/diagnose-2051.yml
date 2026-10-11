@@ -1,6 +1,9 @@
 name: Diagnose 2051 Android Open
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2051-open]
+    paths: [.github/workflows/diagnose-2051.yml, support/diagnostics/2051/**]
 jobs:
   reproduce:
     runs-on: ubuntu-24.04
