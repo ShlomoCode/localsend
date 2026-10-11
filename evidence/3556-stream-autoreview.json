@@ -1,0 +1,6 @@
+{
+  "findings": [],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "No concrete P0, P1, or P2 defects were identified in the provided bundle. The streaming and coalesced paths preserve EOF semantics, isolate peer cancellation, and gate the real transfer on physical transport controls. This assessment is limited to the supplied diff; no tests were run.",
+  "overall_confidence": 0.84
+}

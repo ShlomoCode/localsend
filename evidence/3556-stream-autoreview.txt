@@ -1,0 +1,3 @@
+autoreview clean: no accepted/actionable findings reported
+overall: patch is correct (0.84)
+No concrete P0, P1, or P2 defects were identified in the provided bundle. The streaming and coalesced paths preserve EOF semantics, isolate peer cancellation, and gate the real transfer on physical transport controls. This assessment is limited to the supplied diff; no tests were run.
