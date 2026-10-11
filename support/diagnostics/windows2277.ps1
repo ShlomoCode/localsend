@@ -71,7 +71,8 @@ foreach($animations in @($false,$true)) {
   Start-Sleep -Seconds 2;Screenshot "$name-selected"
   $nearby=Import-Csv "$EvidenceDirectory/$name-selected.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'Nearby'}|Select-Object -First 1
   if(!$nearby){throw 'Selected Send page missing Nearby devices'}
-  Click 537 ([int]$nearby.top+[int]$nearby.height/2) 'Send-mode-menu'
+  # The gear at x616 is Send mode; x537 is the separate manual-address action.
+  Click 616 ([int]$nearby.top+[int]$nearby.height/2) 'Send-mode-menu'
   Start-Sleep -Milliseconds 800;Screenshot "$name-send-mode-menu"
   Word 'link' "$name-send-mode-menu";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
   # A single click on the Material back arrow, whose location is checked in retained screenshot.
