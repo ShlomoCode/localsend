@@ -13,6 +13,10 @@ on:
         type: choice
         options: [Samsung Galaxy S23, Xiaomi Redmi Note 11]
         default: Samsung Galaxy S23
+      discovery_timeout:
+        type: choice
+        options: ['500', '10000']
+        default: '500'
 permissions:
   contents: read
 jobs:
@@ -51,6 +55,7 @@ jobs:
       BS_OS: ${{ inputs.device == 'Xiaomi Redmi Note 11' && '11.0' || '13.0' }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2830.mjs
       CLIPBOARD_CASES: ${{ inputs.clipboard_case }}
+      DISCOVERY_TIMEOUT_MS: ${{ inputs.discovery_timeout }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

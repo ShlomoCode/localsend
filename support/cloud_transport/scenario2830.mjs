@@ -15,7 +15,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
  async function click(label){const e=await wd("POST",`/session/${session}/element`,{using:"accessibility id",value:label});event("receiver-input",{label});await wd("POST",`/session/${session}/element/${e["element-6066-11e4-a52e-4f735466cecf"]}/click`,{});}
  async function diagnostic(label,command){try{const result=await wd("POST",`/session/${session}/execute/sync`,{script:"browserstack_executor: "+JSON.stringify({action:"adbShell",arguments:{command}}),args:[]});writeFileSync(`evidence/${label}.txt`,typeof result==="string"?result:JSON.stringify(result));}catch(e){writeFileSync(`evidence/${label}-unavailable.txt`,String(e));}}
  try {
-  await exec("pwsh",["-NoProfile","-File","support/diagnostics/windows2830-startup.ps1","-OutputDirectory","evidence","-ReleaseVersion","1.17.0","-AssetArchitecture","x86-64","-RunnerLabel","windows-11-arm","-DiagnosticPeerPort",String(senderPort),"-StartupOnly"]);
+  await exec("pwsh",["-NoProfile","-File","support/diagnostics/windows2830-startup.ps1","-OutputDirectory","evidence","-ReleaseVersion","1.17.0","-AssetArchitecture","x86-64","-RunnerLabel","windows-11-arm","-DiagnosticPeerPort",String(senderPort),"-DiagnosticDiscoveryTimeout",process.env.DISCOVERY_TIMEOUT_MS||"500","-StartupOnly"]);
   await snapshot("receiver-before");
   await diagnostic("receiver-miui","getprop ro.miui.ui.version.name");
   await diagnostic("receiver-build","getprop ro.build.fingerprint");

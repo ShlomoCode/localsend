@@ -13,6 +13,7 @@ param(
   [string] $ExecutablePath,
   [string] $SourceRevision,
   [int] $DiagnosticPeerPort = 0,
+  [int] $DiagnosticDiscoveryTimeout = 500,
   [switch] $StartupOnly
 )
 
@@ -315,7 +316,9 @@ namespace LocalSendReleaseUiProbe {
 
   if ($DiagnosticPeerPort -gt 0) {
     $favorite = @{id='issue2830-relay';fingerprint='issue2830-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='Android receiver';customAlias=$true} | ConvertTo-Json -Compress
-    @{'flutter.ls_alias'='Windows2830';'flutter.ls_favorites'=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
+    $senderSettings = @{'flutter.ls_alias'='Windows2830';'flutter.ls_favorites'=@($favorite);'flutter.ls_timeout'=$DiagnosticDiscoveryTimeout}
+    $senderSettings | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
+    $senderSettings | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutputDirectory 'sender-settings-fixture.json')
   }
   if ($EntryMethod -eq 'SendTo') {
     $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList @('"' + $selectionPath + '"') -PassThru
