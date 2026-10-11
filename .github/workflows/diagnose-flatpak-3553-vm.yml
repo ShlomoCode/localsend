@@ -7,13 +7,21 @@ on:
     paths:
       - .github/workflows/diagnose-flatpak-3553-vm.yml
   workflow_dispatch:
+    inputs:
+      start_version:
+        description: Ubuntu guest release (24.04 exercises the supported LTS upgrade)
+        default: '24.04'
+        type: choice
+        options: ['24.04', '26.04']
 
 jobs:
   full-session:
     runs-on: ubuntu-26.04
-    timeout-minutes: 70
+    timeout-minutes: 120
     steps:
-      - name: Install VM tools and prepare an Ubuntu 26.04 guest
+      - name: Install VM tools and prepare the Ubuntu guest
+        env:
+          START_VERSION: ${{ inputs.start_version || '24.04' }}
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -26,8 +34,8 @@ jobs:
           test "$disk_free_kb" -ge 10485760
           curl --fail --location --retry 3 \
             --output /home/runner/localsend-vm/ubuntu.img \
-            https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
-          qemu-img resize /home/runner/localsend-vm/ubuntu.img 24G
+            "https://cloud-images.ubuntu.com/releases/$START_VERSION/release/ubuntu-$START_VERSION-server-cloudimg-amd64.img"
+          qemu-img resize /home/runner/localsend-vm/ubuntu.img 36G
           ssh-keygen -q -t ed25519 -N '' -f /tmp/localsend-vm/id_ed25519
           probe_key=$(cat /tmp/localsend-vm/id_ed25519.pub)
           cat > /tmp/localsend-vm/user-data <<EOF
@@ -48,6 +56,7 @@ jobs:
             - curl
             - openssh-server
             - libayatana-appindicator3-1
+            - update-manager-core
           runcmd:
             - [sh, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm3/custom.conf"]
             - [systemctl, set-default, graphical.target]
@@ -70,7 +79,7 @@ jobs:
             -monitor unix:/tmp/localsend-vm/monitor,server,nowait \
             -serial file:evidence/vm/serial.log \
             -daemonize 2> evidence/vm/qemu-start.log
-          printf 'Image: Ubuntu 26.04 server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: virtio-vga\n' > evidence/vm/host-setup.txt
+          printf 'Image: Ubuntu %s server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: virtio-vga\n' "$START_VERSION" > evidence/vm/host-setup.txt
           uname -a >> evidence/vm/host-setup.txt
           lscpu > evidence/vm/host-cpu.txt
           free -m >> evidence/vm/host-setup.txt
@@ -151,7 +160,7 @@ jobs:
           gnome-shell --version
           flatpak --version
           flatpak info --show-commit org.localsend.localsend_app
-          flatpak info --show-commit org.freedesktop.Platform//26.08
+          flatpak list --runtime --columns=application,branch,commit
           loginctl list-sessions
           for session in $(loginctl list-sessions --no-legend | awk '$3 == "probe" {print $1}'); do loginctl show-session "$session" -p Type -p State -p Desktop -p Display -p Seat; done
           ls -la /run/user/$(id -u)/wayland-* /run/user/$(id -u)/bus
@@ -202,6 +211,29 @@ jobs:
             fi
             sleep 3
           done
+
+      - name: Upgrade the installed 24.04 system through the supported LTS path
+        if: inputs.start_version != '26.04'
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 60 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /etc/os-release; flatpak --version; flatpak info org.localsend.localsend_app; dpkg-query -W; find ~/.cache/fontconfig ~/.var/app/org.localsend.localsend_app -type f -printf "%p %s\n" 2>/dev/null || true' > evidence/vm/pre-upgrade-packages.txt
+          timeout 2400 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/upgrade.log 2>&1 <<'GUEST'
+          set -e
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold full-upgrade
+          sudo sed -i 's/^Prompt=.*/Prompt=lts/' /etc/update-manager/release-upgrades
+          sudo env DEBIAN_FRONTEND=noninteractive do-release-upgrade -f DistUpgradeViewNonInteractive
+          GUEST
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo systemctl reboot' >/dev/null 2>&1 || true
+          ready=0
+          for i in $(seq 1 90); do
+            sleep 10
+            if timeout 8 ssh "${ssh_opts[@]}" probe@127.0.0.1 'grep -q "VERSION_ID=\"26.04\"" /etc/os-release && systemctl is-active --quiet gdm3 && test -S /run/user/$(id -u)/wayland-0' >/dev/null 2>&1; then ready=1; break; fi
+          done
+          timeout 45 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /etc/os-release; uname -a; gnome-shell --version; flatpak --version; flatpak info org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit; dpkg-query -W; sudo cat /var/log/dist-upgrade/main.log' > evidence/vm/post-upgrade-packages.txt 2>&1 || true
+          echo "UPGRADE_GDM_READY=$ready" | tee evidence/vm/upgrade-result.txt
+          test "$ready" = 1
 
       - name: Compare the reported generic kernel when available
         run: |
@@ -295,6 +327,73 @@ jobs:
               echo 'DEB38_CONTROL=failed' | tee -a "evidence/vm/$label-state.txt"
               exit 1
             fi
+            sleep 3
+          done
+
+      - name: Compare valid session and renderer interventions
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/package-boundary.txt 2>&1 <<'GUEST'
+          flatpak info org.localsend.localsend_app
+          flatpak info --show-metadata org.localsend.localsend_app
+          flatpak remote-info --log flathub org.localsend.localsend_app
+          flatpak list --runtime --columns=application,branch,version,commit
+          flatpak run --command=sh org.localsend.localsend_app -c 'command -v localsend; ls -l /app/bin /app/localsend_app; env | sort'
+          GUEST
+          for mode in baseline fresh software zink x11 isolated-network software-engine; do
+            label="matrix-$mode"
+            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode $label" <<'GUEST'
+          set -eu
+          mode=$1
+          label=$2
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          export WAYLAND_DISPLAY=wayland-0
+          export XDG_SESSION_TYPE=wayland
+          export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+          shell_pid=$(pgrep -n -u "$(id -u)" -x gnome-shell)
+          display=$(tr '\0' '\n' < "/proc/$shell_pid/environ" | sed -n 's/^DISPLAY=//p' | head -n 1)
+          xauthority=$(tr '\0' '\n' < "/proc/$shell_pid/environ" | sed -n 's/^XAUTHORITY=//p' | head -n 1)
+          export DISPLAY="$display" XAUTHORITY="$xauthority"
+          args=()
+          case "$mode" in
+            fresh) mv "$HOME/.var/app/org.localsend.localsend_app" "$HOME/localsend-profile-before-fresh" ;;
+            software) args+=(--env=LIBGL_ALWAYS_SOFTWARE=1) ;;
+            zink) args+=(--env=MESA_LOADER_DRIVER_OVERRIDE=zink --env=LIBGL_ALWAYS_SOFTWARE=1) ;;
+            x11) args+=(--nosocket=wayland --socket=x11 --env=GDK_BACKEND=x11) ;;
+            isolated-network) args+=(--unshare=network) ;;
+          esac
+          if [ "$mode" = software-engine ]; then
+            nohup flatpak run org.localsend.localsend_app --enable-software-rendering > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
+          else
+            nohup flatpak run "${args[@]}" org.localsend.localsend_app > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
+          fi
+          echo "MODE=$mode DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY launcher=$!"
+          GUEST
+            sleep 25
+            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$label.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            sudo chown "$(id -u):$(id -g)" "evidence/vm/$label.ppm"
+            convert "evidence/vm/$label.ppm" "evidence/vm/$label.png"
+            timeout 50 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $label" > "evidence/vm/$label-state.txt" 2>&1 <<'GUEST'
+          label=$1
+          date -u
+          ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep || true
+          ss -lntup | grep 53317 || true
+          echo "log_bytes=$(wc -c < "/tmp/localsend-$label.log")"
+          cat "/tmp/localsend-$label.log"
+          app_pid=$(pgrep -n -x localsend || true)
+          if [ -n "$app_pid" ]; then
+            ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm
+            cat "/proc/$app_pid/stat"
+            sleep 5
+            cat "/proc/$app_pid/stat"
+            if ! ss -lntup | grep -q 'tcp.*LISTEN.*53317'; then
+              timeout 12 sudo gdb -q -batch -p "$app_pid" -ex 'info proc mappings' -ex 'thread apply all bt 16' || true
+            fi
+          fi
+          pkill -x localsend || true
+          GUEST
             sleep 3
           done
 
