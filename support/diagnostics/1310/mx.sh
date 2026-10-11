@@ -38,6 +38,18 @@ sleep 3
 vncdo -s localhost::5900 type demo key enter
 sleep 3
 vncdo -s localhost::5900 capture evidence/mx/ssh-start.png
+if ! timeout 12 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then
+  vncdo -s localhost::5900 type 'sudo apt-get update && sudo apt-get install -y openssh-server && sudo service ssh start' key enter
+  sleep 3
+  vncdo -s localhost::5900 type demo key enter
+  ready=0
+  for n in $(seq 1 60); do
+    if timeout 10 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then ready=1; break; fi
+    sleep 5
+  done
+  vncdo -s localhost::5900 capture evidence/mx/ssh-installed.png
+  test "$ready" = 1
+fi
 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'id; cat /etc/os-release; command -v xdotool || true; command -v scrot || true; command -v tesseract || true'
 sshpass -p demo scp -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" support/diagnostics/1310/mx-guest.sh support/diagnostics/1310/actions.sh demo@127.0.0.1:/home/demo/
 bash support/diagnostics/1310/host-peer.sh > evidence/host-peer-workload.log 2>&1 &
