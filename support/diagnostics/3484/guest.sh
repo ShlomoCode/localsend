@@ -31,7 +31,12 @@ makepkg --noconfirm --syncdeps --install
 printf 'cc42a4f3eacdcb25ec31f0016b1272acb003145ab30484db8965450e20c72cd2  LocalSend-1.18.2-linux-x86-64.deb\n' | sha256sum -c -
 sha256sum LocalSend-*.deb *.pkg.tar.zst > /work/evidence/cloud/artifact-sha256.txt
 cd /home/investigator
-curl -fLsS https://api.github.com/repos/brenoperucchi/omarchy/tarball/31bd80daa4613ffdee995ac27467fce5a2990806 -o omarchy.tar.gz
+# Unmodified parent of the shell change that suppresses LocalSend's tray item.
+# The reporter's exact installed shell revision is unknown; this host keeps
+# the same tooltip fallback while allowing the real item to be hovered.
+shell_revision=df708831b662785c62323a754b9c7834acd4dac7
+printf '%s\n' "$shell_revision" > /work/evidence/cloud/host-source-revision.txt
+curl -fLsS "https://api.github.com/repos/brenoperucchi/omarchy/tarball/$shell_revision" -o omarchy.tar.gz
 sha256sum omarchy.tar.gz > /work/evidence/cloud/host-source-sha256.txt
 mkdir omarchy
 tar -xf omarchy.tar.gz -C omarchy --strip-components=1
