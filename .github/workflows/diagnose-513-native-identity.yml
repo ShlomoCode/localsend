@@ -25,7 +25,7 @@ jobs:
             ostree --repo="repo-$condition" init --mode=archive-z2
             flatpak build-import-bundle "repo-$condition" "source-packages/$condition.flatpak"
             ref=$(ostree --repo="repo-$condition" refs | head -n 1)
-            ostree --repo="repo-$condition" checkout "$ref" "extracted-$condition"
+            ostree --repo="repo-$condition" checkout --user-mode "$ref" "extracted-$condition"
             plugin=$(find "extracted-$condition/files" -name '*desktop_drop*.so' -print -quit)
             cp "$plugin" "evidence/identity/$condition-desktop-drop.so"
             sha256sum "$plugin" > "evidence/identity/$condition-sha256.txt"
