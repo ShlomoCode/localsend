@@ -171,7 +171,17 @@ jobs:
           gnome-shell --version
           flatpak --version
           flatpak info --show-commit org.localsend.localsend_app
-          flatpak list --runtime --columns=application,branch,commit
+          cat > /home/probe/flatpak-identities <<'IDENTITIES'
+          #!/bin/bash
+          set -e
+          flatpak info org.localsend.localsend_app
+          for ref in $(flatpak list --runtime --columns=ref); do
+            printf '%s ' "$ref"
+            flatpak info --show-commit "$ref"
+          done
+          IDENTITIES
+          chmod +x /home/probe/flatpak-identities
+          /home/probe/flatpak-identities
           loginctl list-sessions
           for session in $(loginctl list-sessions --no-legend | awk '$3 == "probe" {print $1}'); do loginctl show-session "$session" -p Type -p State -p Desktop -p Display -p Seat; done
           ls -la /run/user/$(id -u)/wayland-* /run/user/$(id -u)/bus
@@ -182,7 +192,7 @@ jobs:
           if [ "$PACKAGE_VERSION" = previous-25.08 ]; then kinds+=(flatpak-other); fi
           for kind in "${kinds[@]}"; do
             if [ "$kind" = flatpak-other ]; then
-              timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app; flatpak info org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' > evidence/vm/pre-upgrade-other-package.txt 2>&1
+              timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app && /home/probe/flatpak-identities' > evidence/vm/pre-upgrade-other-package.txt 2>&1
             fi
             timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind" <<'GUEST'
           set -u
@@ -261,7 +271,7 @@ jobs:
             sleep 10
             if timeout 8 ssh "${ssh_opts[@]}" probe@127.0.0.1 'grep -q "VERSION_ID=\"26.04\"" /etc/os-release && systemctl is-active --quiet gdm3 && test -S /run/user/$(id -u)/wayland-0' >/dev/null 2>&1; then ready=1; break; fi
           done
-          timeout 45 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /etc/os-release; uname -a; gnome-shell --version; flatpak --version; flatpak info org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit; dpkg-query -W; sudo cat /var/log/dist-upgrade/main.log' > evidence/vm/post-upgrade-packages.txt 2>&1 || true
+          timeout 45 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /etc/os-release; uname -a; gnome-shell --version; flatpak --version; /home/probe/flatpak-identities; dpkg-query -W; sudo cat /var/log/dist-upgrade/main.log' > evidence/vm/post-upgrade-packages.txt 2>&1 || true
           echo "UPGRADE_GDM_READY=$ready" | tee evidence/vm/upgrade-result.txt
           test "$ready" = 1
 
@@ -314,14 +324,14 @@ jobs:
           done
           echo "KERNEL_38_READY=$ready" | tee evidence/vm/kernel38-environment.txt
           timeout 15 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
-            'uname -a; loginctl list-sessions; flatpak info --show-commit org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' \
+            'uname -a; loginctl list-sessions; /home/probe/flatpak-identities' \
             >> evidence/vm/kernel38-environment.txt 2>&1 || true
           test "$ready" = 1
           kinds=(deb flatpak)
           if [ "$PACKAGE_VERSION" = previous-25.08 ]; then kinds+=(flatpak-other); fi
           for kind in "${kinds[@]}"; do
             if [ "$kind" = flatpak-other ]; then
-              timeout 120 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app; flatpak info org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' > evidence/vm/post-upgrade-other-package.txt 2>&1
+              timeout 120 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app && /home/probe/flatpak-identities' > evidence/vm/post-upgrade-other-package.txt 2>&1
             fi
             label="${kind}38"
             timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind $label" <<'GUEST'
@@ -378,7 +388,7 @@ jobs:
           flatpak info org.localsend.localsend_app
           flatpak info --show-metadata org.localsend.localsend_app
           flatpak remote-info --log flathub org.localsend.localsend_app
-          flatpak list --runtime --columns=application,branch,version,commit
+          /home/probe/flatpak-identities
           flatpak run --command=sh org.localsend.localsend_app -c 'command -v localsend; ls -l /app/bin /app/localsend_app; env | sort'
           GUEST
           for mode in baseline fresh software zink x11 isolated-network software-engine; do
