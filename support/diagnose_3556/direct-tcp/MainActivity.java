@@ -40,6 +40,7 @@ public final class MainActivity extends Activity {
             ByteArrayOutputStream configBytes = new ByteArrayOutputStream();
             try (InputStream input = getAssets().open("config.json")) { byte[] buffer = new byte[4096]; int n; while ((n = input.read(buffer)) != -1) configBytes.write(buffer, 0, n); }
             config = new JSONObject(configBytes.toString("UTF-8")); String host = config.getString("host");
+            result.put("targetHost", host).put("httpPort", 8080).put("tcpPort", 53317);
             event("http-control-start", host);
             HttpURLConnection http = (HttpURLConnection) new URL("http://" + host + ":8080/health").openConnection();
             http.setConnectTimeout(10000); http.setReadTimeout(10000); http.setRequestProperty("Authorization", "Bearer " + config.getString("token"));
@@ -59,6 +60,7 @@ public final class MainActivity extends Activity {
             finally { dns.shutdownNow(); }
             JSONArray resolved = new JSONArray(); for (InetAddress address : addresses) resolved.put(address.getHostAddress());
             event("native-dns-resolved", resolved); if (addresses.length == 0) throw new IOException("No native DNS addresses");
+            if (!addresses[0].getHostAddress().equals(host)) throw new IOException("Native literal IPv4 resolution differs from selected runner address");
             // Use the first actual native DNS answer, and expose it instead of silently falling back.
             for (int count : new int[]{0, 1, 65537}) {
                 JSONObject c = new JSONObject().put("expectedCount", count).put("address", addresses[0].getHostAddress()); cases.put(c);

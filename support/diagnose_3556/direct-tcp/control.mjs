@@ -2,14 +2,19 @@ import assert from 'node:assert/strict';
 import {readFileSync, mkdirSync, writeFileSync, appendFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {createServer as httpServer} from 'node:http';
-import {createServer as tcpServer} from 'node:net';
+import {createServer as tcpServer, isIP} from 'node:net';
 import {createHash} from 'node:crypto';
 
 // Run only inside the explicitly owned fork Actions job. Never retries session creation.
 assert.equal(process.env.GITHUB_REPOSITORY, 'ShlomoCode/localsend');
 assert.equal(process.env.GITHUB_ACTIONS, 'true');
-for (const key of ['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','TCP_TOKEN','TCP_MARKER','TCP_HELPER_APK','BS_LOCAL_ID','BS_LOCAL_BINARY']) assert(process.env[key], key);
+for (const key of ['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','TCP_TOKEN','TCP_MARKER','TCP_HOST','TCP_HELPER_APK','BS_LOCAL_ID','BS_LOCAL_BINARY']) assert(process.env[key], key);
 const env = process.env, output = 'evidence/direct-tcp'; mkdirSync(output,{recursive:true});
+assert.equal(isIP(env.TCP_HOST),4,'Selected adapter host must be a literal IPv4 address');
+const octets=env.TCP_HOST.split('.').map(Number);
+assert(octets[0]===10||(octets[0]===172&&octets[1]>=16&&octets[1]<=31)||(octets[0]===192&&octets[1]===168),'Selected adapter address must be private and nonloopback');
+const adapterSelection=JSON.parse(readFileSync(output+'/adapter-selection.json','utf8'));
+assert.equal(adapterSelection.selected.address,env.TCP_HOST,'Embedded host and adapter evidence differ');
 const auth = 'Basic '+Buffer.from(env.BROWSERSTACK_USERNAME+':'+env.BROWSERSTACK_ACCESS_KEY).toString('base64');
 const secrets = [env.BROWSERSTACK_USERNAME,env.BROWSERSTACK_ACCESS_KEY,env.TCP_TOKEN,auth];
 const redact = value => secrets.reduce((text, secret) => text.replaceAll(secret,'[redacted]'),String(value));
@@ -22,7 +27,7 @@ const expected = [0,1,65537].map(count=>{
  const bytes=Buffer.alloc(count);for(let i=0;i<count;i++)bytes[i]=(i*31+7)&255;
  return {count,sha256:createHash('sha256').update(bytes).digest('hex')};
 });
-const report={status:'preparing',startedUtc:new Date().toISOString(),hostname:'bs-local.com',httpPort:8080,tcpPort:53317,
+const report={status:'preparing',startedUtc:new Date().toISOString(),hostname:env.TCP_HOST,adapterSelection,httpPort:8080,tcpPort:53317,
  marker:env.TCP_MARKER,expected,runnerCases:cases,cleanupErrors:[],
  scope:'Synthetic native Socket reachability and byte/half-close/EOF control; no original app transfer',
  limitations:['Windows Server 2022 differs from reporter Windows 10','Physical Samsung S20 Android 10; reporter Android version unknown','A tiny pass establishes no sustained throughput or 16GB result']};
@@ -34,7 +39,7 @@ const http=httpServer((request,response)=>{
 http.requestTimeout=10000;http.headersTimeout=10000;http.setTimeout(10000);
 const tcp=tcpServer({allowHalfOpen:true},socket=>{
  sockets.add(socket);const index=cases.length;
- const record={index,openedUtc:new Date().toISOString(),remote:socket.remoteAddress,count:0};cases.push(record);
+ const record={index,openedUtc:new Date().toISOString(),remote:socket.remoteAddress,localAddress:socket.localAddress,localPort:socket.localPort,count:0};cases.push(record);
  const hash=createHash('sha256'),deadline=setTimeout(()=>socket.destroy(new Error('Absolute TCP case deadline')),30000);
  trace({event:'tcp-connect',index,remote:socket.remoteAddress});socket.setTimeout(10000,()=>socket.destroy(new Error('TCP idle timeout')));
  socket.on('data',data=>{record.count+=data.length;hash.update(data);if(record.count>65537)socket.destroy(new Error('Unexpected extra bytes'));});
@@ -56,7 +61,7 @@ async function request(url,method='GET',body,timeout=30000){
  return data;
 }
 const api = path => 'https://api-cloud.browserstack.com/app-automate/'+path;
-let session,local,creationAttempted=false;
+let session,local,creationAttempted=false,localExited=false,localExit=null,localExitPromise,localSpawnError;
 const wd=async(method,path,body,attempt=0)=>{
  const started=Date.now();try{
   const data=await request('https://hub-cloud.browserstack.com/wd/hub'+path,method,body,path==='/session'?300000:30000);
@@ -90,15 +95,21 @@ async function recoverOwnedSession(){
  report.cleanupErrors.push('Unknown session-create outcome: no running owned session found within bounded provider lookup; parent must inspect owned build '+buildName);
 }
 try{
- await new Promise((ok,no)=>{http.once('error',no);http.listen(8080,'0.0.0.0',ok);});
- await new Promise((ok,no)=>{tcp.once('error',no);tcp.listen(53317,'0.0.0.0',ok);});
- trace({event:'listeners-ready',http:'0.0.0.0:8080',tcp:'0.0.0.0:53317'});
+ await new Promise((ok,no)=>{http.once('error',no);http.listen(8080,env.TCP_HOST,ok);});
+ await new Promise((ok,no)=>{tcp.once('error',no);tcp.listen(53317,env.TCP_HOST,ok);});
+ report.listeners={http:http.address(),tcp:tcp.address()};
+ trace({event:'listeners-ready',...report.listeners});
  let localText='';local=spawn(env.BS_LOCAL_BINARY,['--key',env.BROWSERSTACK_ACCESS_KEY,'--local-identifier',env.BS_LOCAL_ID,'--force-local','--only-automate'],{windowsHide:true,stdio:['ignore','pipe','pipe']});
- local.on('error',error=>{localText+='\n'+error.message;});
+ localExitPromise=new Promise(resolve=>local.once('exit',(code,signal)=>{
+  localExited=true;localExit={pid:local.pid,code,signal,utc:new Date().toISOString()};
+  trace({event:'owned-local-exit',...localExit});resolve(localExit);
+ }));
+ trace({event:'owned-local-spawn',pid:local.pid,identifier:env.BS_LOCAL_ID});
+ local.on('error',error=>{localSpawnError=error;localText+='\n'+error.message;trace({event:'owned-local-process-error',pid:local.pid,error:redact(error.message)});});
  for(const stream of [local.stdout,local.stderr])stream.on('data',data=>{localText+=data.toString();save('local.log',localText);});
  const readyDeadline=Date.now()+120000;
  while(!/You can now access your local|Local Testing successfully connected|BrowserStackLocal is connected|Local connection established|Connected to BrowserStack/i.test(localText)){
-  assert(local.exitCode===null,'Owned Local process exited before readiness');assert(Date.now()<readyDeadline,'Local readiness timeout');await sleep(500);
+  assert(!localExited&&!localSpawnError,'Owned Local process failed or exited before readiness');assert(Date.now()<readyDeadline,'Local readiness timeout');await sleep(500);
  }
  trace({event:'owned-local-ready',pid:local.pid,identifier:env.BS_LOCAL_ID});
  const form=new FormData();form.append('file',new Blob([readFileSync(env.TCP_HELPER_APK)]),'direct-tcp-helper.apk');
@@ -141,10 +152,18 @@ try{
 }finally{
  if(!session&&creationAttempted){try{await recoverOwnedSession();}catch(e){report.cleanupErrors.push('startup lookup: '+redact(e.message));}}
  if(session){try{await wd('DELETE',base());trace({event:'owned-session-deleted',session});}catch(e){report.cleanupErrors.push('session DELETE: '+redact(e.message));}}
- if(local&&local.exitCode===null){
-  local.kill();await Promise.race([new Promise(resolve=>local.once('exit',resolve)),sleep(10000)]);
-  if(local.exitCode===null)report.cleanupErrors.push('Owned Local process did not exit within 10 seconds');else trace({event:'owned-local-exited',code:local.exitCode});
+ if(local?.pid&&!localExited){
+  trace({event:'owned-local-termination-request',pid:local.pid});
+  try{local.kill();}catch(error){report.cleanupErrors.push('Owned Local termination: '+redact(error.message));}
+  await Promise.race([localExitPromise,sleep(10000)]);
+  if(!localExited){
+   let alive=false;
+   try{process.kill(local.pid,0);alive=true;}catch(error){if(error.code!=='ESRCH'){alive=true;report.cleanupErrors.push('Owned Local liveness lookup: '+redact(error.message));}}
+   report.cleanupErrors.push('Owned Local exit event absent after 10 seconds; PID '+local.pid+' alive='+alive);
+   trace({event:'owned-local-exit-deadline',pid:local.pid,alive});
+  }
  }
+ report.localProcess={pid:local?.pid||null,exited:localExited,exit:localExit};
  for(const socket of sockets)socket.destroy();http.closeAllConnections();
  await Promise.all([http,tcp].map(server=>new Promise(resolve=>server.close(()=>resolve()))));
  report.finishedUtc=new Date().toISOString();save('results.json',report);

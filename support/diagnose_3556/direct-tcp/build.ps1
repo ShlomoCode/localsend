@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-if (-not $env:GITHUB_ENV -or -not $env:TCP_TOKEN -or -not $env:TCP_MARKER) { throw 'Cloud job environment required.' }
+if (-not $env:GITHUB_ENV -or -not $env:TCP_TOKEN -or -not $env:TCP_MARKER -or -not $env:TCP_HOST) { throw 'Cloud job environment and selected adapter address required.' }
 $private=Join-Path $env:RUNNER_TEMP ('direct-tcp-'+[Guid]::NewGuid().ToString('N'))
 foreach ($dir in @('classes','dex','assets')) { [void][IO.Directory]::CreateDirectory((Join-Path $private $dir)) }
 $sdk=$env:ANDROID_HOME
@@ -9,7 +9,7 @@ function Checked([string]$tool,[string[]]$arguments) { & $tool @arguments | Out-
 Checked (Join-Path $sdk 'cmdline-tools/latest/bin/sdkmanager.bat') @('platforms;android-35','build-tools;35.0.0',('--sdk_root='+$sdk))
 $tools=Join-Path $sdk 'build-tools/35.0.0'; $android=Join-Path $sdk 'platforms/android-35/android.jar'
 $config=Join-Path $private 'assets/config.json'
-[IO.File]::WriteAllText($config,(ConvertTo-Json -Compress @{host='bs-local.com';token=$env:TCP_TOKEN;marker=$env:TCP_MARKER}),[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($config,(ConvertTo-Json -Compress @{host=$env:TCP_HOST;token=$env:TCP_TOKEN;marker=$env:TCP_MARKER}),[Text.UTF8Encoding]::new($false))
 try {
  Checked (Join-Path $env:JAVA_HOME 'bin/javac.exe') @('-source','8','-target','8','-classpath',$android,'-d',(Join-Path $private 'classes'),(Join-Path $PSScriptRoot 'MainActivity.java'))
  $classes=@(Get-ChildItem (Join-Path $private 'classes') -Recurse -Filter '*.class' | ForEach-Object FullName)

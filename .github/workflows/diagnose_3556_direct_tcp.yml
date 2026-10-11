@@ -36,6 +36,28 @@ jobs:
           "TCP_TOKEN=$token" >> $env:GITHUB_ENV
           "TCP_MARKER=$([Guid]::NewGuid().ToString('N'))" >> $env:GITHUB_ENV
           "BS_LOCAL_ID=direct3556-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_ENV
+      - name: Select one owned active adapter private IPv4 address
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidates=@(foreach ($adapter in Get-NetIPConfiguration) {
+            if ($adapter.NetAdapter.Status -ne 'Up' -or -not $adapter.IPv4DefaultGateway) { continue }
+            foreach ($address in $adapter.IPv4Address) {
+              $parsed=$null
+              if (-not [Net.IPAddress]::TryParse($address.IPAddress,[ref]$parsed)) { continue }
+              if ($parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { continue }
+              $octets=$parsed.GetAddressBytes()
+              $private=$octets[0] -eq 10 -or ($octets[0] -eq 172 -and $octets[1] -ge 16 -and $octets[1] -le 31) -or ($octets[0] -eq 192 -and $octets[1] -eq 168)
+              if (-not $private -or [Net.IPAddress]::IsLoopback($parsed) -or ($octets[0] -eq 169 -and $octets[1] -eq 254)) { continue }
+              [pscustomobject]@{interfaceIndex=$adapter.InterfaceIndex;interfaceAlias=$adapter.InterfaceAlias;address=$parsed.ToString();prefixLength=$address.PrefixLength;gateway=@($adapter.IPv4DefaultGateway.NextHop);status=$adapter.NetAdapter.Status}
+            }
+          })
+          if ($candidates.Count -eq 0) { throw 'No active default-gateway adapter with private nonloopback IPv4; no device session will start.' }
+          $selected=$candidates | Sort-Object interfaceIndex,address | Select-Object -First 1
+          New-Item -ItemType Directory -Force evidence/direct-tcp | Out-Null
+          $selection=@{utc=[DateTime]::UtcNow.ToString('o');method='First private IPv4 on active default-gateway adapter, ordered by interface index then address; local interface inventory only';selected=$selected;candidates=$candidates}
+          [IO.File]::WriteAllText((Join-Path $pwd 'evidence/direct-tcp/adapter-selection.json'),($selection | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
+          "TCP_HOST=$($selected.address)" >> $env:GITHUB_ENV
       - name: Build separate native diagnostic APK
         shell: pwsh
         run: support/diagnose_3556/direct-tcp/build.ps1
