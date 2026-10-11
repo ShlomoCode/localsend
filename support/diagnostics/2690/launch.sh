@@ -35,6 +35,21 @@ for iteration in 1 2 3; do
     "$artifact" > /evidence/launch/$phase-$iteration.log 2>&1 &
   fi
   app_pid=$!
+  maps_pid=
+  if [[ ${TRACE_LOADER:-0} == 1 ]]; then
+    (
+      while kill -0 "$app_pid" 2>/dev/null; do
+        if [[ -r /proc/$app_pid/maps ]]; then
+          cat /proc/$app_pid/maps > /evidence/launch/maps-$phase-$iteration.tmp
+          if [[ -s /evidence/launch/maps-$phase-$iteration.tmp ]]; then
+            mv /evidence/launch/maps-$phase-$iteration.tmp /evidence/launch/maps-$phase-$iteration.txt
+          fi
+        fi
+        sleep 0.1
+      done
+    ) &
+    maps_pid=$!
+  fi
   sleep 10
   if kill -0 "$app_pid" 2>/dev/null; then
     xdotool search --onlyvisible --name LocalSend > /evidence/launch/$phase-$iteration.windows
@@ -47,6 +62,9 @@ for iteration in 1 2 3; do
     wait "$app_pid"
     app_status=$?
     window_status=none
+  fi
+  if [[ -n $maps_pid ]]; then
+    wait "$maps_pid" || true
   fi
   set -e
   printf '%s\t%s\t%s\t%s\n' "$phase" "$iteration" "$app_status" "$window_status" >> /evidence/launch/results.tsv
