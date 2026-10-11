@@ -25,6 +25,10 @@ on:
         type: choice
         options: [original-release, control, tagged]
         default: original-release
+      source_family:
+        type: choice
+        options: [historical, current]
+        default: historical
 permissions:
   contents: read
   actions: read
@@ -107,6 +111,7 @@ jobs:
       BS_OS: '15.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2311.mjs
       SOURCE_APK_KIND: ${{ inputs.source_apk_kind || 'original-release' }}
+      SOURCE_APP_FAMILY: ${{ inputs.source_family || 'historical' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -124,17 +129,19 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.source_run_id }}
-          pattern: issue2311-source-boundary-*
+          pattern: ${{ inputs.source_family == 'current' && 'issue2311-current-boundary-*' || 'issue2311-source-boundary-*' }}
           merge-multiple: true
           path: source-artifact
       - name: Upload selected source-build APK for real receiver workflow
         if: inputs.source_apk_kind != 'original-release'
         shell: pwsh
         run: |
-          $apk="source-artifact/localsend-1.17.0-source-$env:SOURCE_APK_KIND-arm64.apk"
+          $version=if($env:SOURCE_APP_FAMILY -eq 'current'){'current'}else{'1.17.0'}
+          $apk="source-artifact/localsend-$version-source-$env:SOURCE_APK_KIND-arm64.apk"
           if(-not (Test-Path $apk)){throw 'Selected source APK missing'}
           $identity=Get-Content source-artifact/identity.txt -Raw
-          if($identity -notmatch 'historical_source=7f21d1f9082a43803e05c37f021912e012145aa5'){throw 'Historical source identity differs'}
+          $expected=if($env:SOURCE_APP_FAMILY -eq 'current'){'current_source=c1ce322fb3acf08e44f329b8b7208b8b0d91e244'}else{'historical_source=7f21d1f9082a43803e05c37f021912e012145aa5'}
+          if($identity -notmatch $expected){throw 'Source identity differs from selected family'}
           New-Item -ItemType Directory evidence/source-lineage -Force|Out-Null
           Copy-Item source-artifact/*.txt,source-artifact/*.sha256,source-artifact/*.diff,source-artifact/file_saver*.dart evidence/source-lineage/
           Get-FileHash $apk | ConvertTo-Json | Set-Content evidence/source-receiver-apk.json
