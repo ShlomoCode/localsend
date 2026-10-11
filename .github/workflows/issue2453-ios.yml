@@ -74,8 +74,9 @@ jobs:
           export PATH="$HOME/.pub-cache/bin:$PATH"
           if [[ '${{ inputs.flutter_sdk }}' != 3.24.5 ]]; then
             sed -i '' 's/3.24.5/${{ inputs.flutter_sdk }}/' ../.fvmrc
-            # Flutter3.32 SDK pins intl0.20; retain all other declared app dependencies.
+            # Flutter3.32 SDK pins intl0.20 and path1.9.1; retain other declared app dependencies.
             sed -i '' 's/intl: \^0.19.0/intl: ^0.20.2/' pubspec.yaml
+            sed -i '' 's/path: 1.9.0/path: 1.9.1/' pubspec.yaml
             git diff -- ../.fvmrc pubspec.yaml > "$GITHUB_WORKSPACE/evidence/sdk-input.patch"
           fi
           fvm install '${{ inputs.flutter_sdk }}'
