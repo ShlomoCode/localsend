@@ -84,7 +84,7 @@ public final class RelayService extends Service {
       if(body!=null){byte[] data=body.getBytes("UTF-8");c.setDoOutput(true);c.setFixedLengthStreamingMode(data.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream out=c.getOutputStream()){out.write(data);}}
       if(c.getResponseCode()!=200)throw new IOException("Relay response "+c.getResponseCode());
       return read(c.getInputStream());
-    }catch(Exception e){trace("http-failure:"+method+":"+path+":"+e.getClass().getSimpleName(),"-");throw e;}finally{c.disconnect();}
+    }catch(Exception e){String detail=String.valueOf(e.getMessage()).replace(token,"[redacted]").replace(endpoint,"[relay]");trace("http-failure:"+method+":"+path+":"+e.getClass().getSimpleName()+":"+detail,"-");throw e;}finally{c.disconnect();}
   }
   private static String read(InputStream in)throws Exception{try(InputStream input=in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=input.read(b))!=-1)out.write(b,0,n);return out.toString("UTF-8");}}
   public void onDestroy(){trace("service-destroy","-");running=false;try{if(listener!=null)listener.close();if(control!=null)control.close();}catch(Exception ignored){}for(String id:sockets.keySet())try{trace("service-close",id);sockets.get(id).close();}catch(Exception ignored){}sockets.clear();super.onDestroy();}

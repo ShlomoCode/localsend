@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+if([string]::IsNullOrWhiteSpace($env:RELAY_TOKEN)){throw 'Helper relay capability missing'}
 $output = 'C:\tmp\helper'
 New-Item -ItemType Directory -Force "$output/classes", "$output/dex", "$output/assets" | Out-Null
 if (-not $env:ANDROID_HOME -or -not (Test-Path "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat")) {

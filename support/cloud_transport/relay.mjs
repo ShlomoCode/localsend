@@ -30,7 +30,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     const id=String(++next);attach(p,id,'sender');enqueue({id,kind:'open'});
   });
   const server=http.createServer((req,res)=>{
-    if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(401);res.end();return;}
+    if(req.headers.authorization!==`Bearer ${token}`){record('http-unauthorized',{method:req.method,path:req.url});res.writeHead(401);res.end();return;}
     res.setHeader('content-type','application/json');
     if(req.method==='GET' && req.url==='/pull') {
       if(waiter){res.writeHead(409);res.end();return;}

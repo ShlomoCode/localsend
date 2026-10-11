@@ -54,6 +54,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force C:/tmp/helper,evidence | Out-Null
           node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+      - name: Build helper with next-step relay capability
+        shell: pwsh
+        run: |
+          @{tokenPresent=(-not [string]::IsNullOrWhiteSpace($env:RELAY_TOKEN));tokenLength=$env:RELAY_TOKEN.Length;utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content evidence/helper-capability-presence.json
+          if([string]::IsNullOrWhiteSpace($env:RELAY_TOKEN)){throw 'Helper relay capability missing'}
           ./support/cloud_transport/build-helper.ps1
       - name: Run live-capacity checked physical clipboard control
         shell: pwsh
@@ -74,6 +79,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Helper upload failed'}
           $env:HELPER_APP=(Get-Content C:/tmp/helper/upload.json | ConvertFrom-Json).app_url
           if(-not $env:HELPER_APP){throw 'Helper app URL missing'}
+          Get-Process node,BrowserStackLocal -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,StartTime | ConvertTo-Json | Set-Content evidence/local-processes-before-session.json
           node support/cloud_transport/mobile-control.mjs
       - name: Collect own session identity
         if: always()

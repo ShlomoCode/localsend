@@ -5,6 +5,8 @@ import {writeFileSync} from 'node:fs';
 import {relay} from './relay.mjs';
 
 const token=process.env.RELAY_TOKEN;
+writeFileSync('evidence/controller-capability-presence.json',JSON.stringify({tokenPresent:!!token,tokenLength:token?.length||0,utc:new Date().toISOString()}));
+assert(token,'Controller relay capability missing');
 const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
 const senderPort=Number(process.env.TRANSPORT_SENDER_PORT||53318);
 const r=relay({token,tcpPort:senderPort});await r.start();let session;
@@ -28,9 +30,10 @@ try {
  await new Promise(ok=>setTimeout(ok,3000));await clickText('Start socket control');
  await new Promise(ok=>setTimeout(ok,2500));
  for(const size of [0,1,65537,8*1024*1024]){
-  const data=randomBytes(size),expected=createHash('sha256').update(data).digest('hex');
-  const s=net.connect({host:'127.0.0.1',port:senderPort,allowHalfOpen:true});s.setTimeout(180000,()=>s.destroy(new Error('Physical relay timeout')));s.end(data);
-  const chunks=[];for await(const d of s)chunks.push(d);const reply=JSON.parse(Buffer.concat(chunks));
+ const data=randomBytes(size),expected=createHash('sha256').update(data).digest('hex');
+  const s=net.connect({host:'127.0.0.1',port:senderPort,allowHalfOpen:true});s.setTimeout(60000,()=>s.destroy(new Error('Physical relay timeout')));s.end(data);
+  const keepalive=setInterval(()=>wd('GET',`/session/${session}/source`).catch(()=>{}),20000);
+  const chunks=[];try{for await(const d of s)chunks.push(d);}finally{clearInterval(keepalive);}const reply=JSON.parse(Buffer.concat(chunks));
   assert.equal(reply.count,size);assert.equal(reply.sha256,expected);results.push({bytes:size,byteExact:true,replyAfterHalfClose:true});console.log('Physical control passed '+size+' bytes');
  }
  writeFileSync('mobile-control-results.json',JSON.stringify({device:caps['appium:deviceName'],os:caps['appium:platformVersion'],results,metrics:r.status()},null,2));
