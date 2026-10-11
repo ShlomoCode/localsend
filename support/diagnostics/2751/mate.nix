@@ -29,10 +29,12 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     machine.wait_for_file("${user.home}/.Xauthority")
     machine.succeed("xauth merge ${user.home}/.Xauthority")
     machine.wait_until_succeeds("pgrep mate-panel && pgrep -f mate-settings-daemon", timeout=120)
+    session_data = machine.succeed("tr '\\0' '\\n' < /proc/$(pgrep -u alice -f mate-session | head -1)/environ | sed -n 's/^XDG_DATA_DIRS=//p'").strip()
+    assert session_data, "MATE session XDG_DATA_DIRS was not recovered"
     def user_command(command):
-        return machine.succeed("su - alice -c " + shlex.quote("${env} " + command))
-    user_command("gsettings set org.mate.screensaver lock-enabled false")
-    user_command("gsettings set org.mate.session idle-delay 0")
+        return machine.succeed("su - alice -c " + shlex.quote("${env} XDG_DATA_DIRS=" + shlex.quote(session_data) + " " + command))
+    user_command("dconf write /org/mate/screensaver/lock-enabled false")
+    user_command("dconf write /org/mate/session/idle-delay 0")
     user_command("gsettings set org.mate.interface window-scaling-factor 1")
     machine.sleep(8)
     machine.wait_until_succeeds("pgrep nm-applet")
