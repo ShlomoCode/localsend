@@ -1,4 +1,4 @@
-param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Versions=@('1.17.0','1.18.2','current'),[string[]]$Locales=@('en','uk','fr'))
+param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Versions=@('1.17.0','1.18.2','current'),[string[]]$Locales=@('en','uk','fr'),[int]$WindowWidth=1215)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -66,8 +66,9 @@ $setupInputs|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-inputs.json"
 [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
 if([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width -lt 1215){throw 'Desktop smaller than original screenshot; do not run report scenario'}
 $script:inputs=@()
+$script:captureWidth=1215
 function Capture([string]$name) {
- $bmp=New-Object System.Drawing.Bitmap(1215,738);$g=[System.Drawing.Graphics]::FromImage($bmp)
+ $bmp=New-Object System.Drawing.Bitmap($script:captureWidth,738);$g=[System.Drawing.Graphics]::FromImage($bmp)
  $g.CopyFromScreen(0,0,0,0,$bmp.Size);$bmp.Save("$EvidenceDirectory/$name.png",[System.Drawing.Imaging.ImageFormat]::Png)
  $g.Dispose();$bmp.Dispose();$script:p.Refresh()
  $r=New-Object Desktop2861+Rect;[Desktop2861]::GetClientRect($script:p.MainWindowHandle,[ref]$r)|Out-Null
@@ -83,6 +84,7 @@ Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,
 @{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;commit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;processor=$env:PROCESSOR_ARCHITECTURE;screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.ToString();textScale=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor;logPixels=(Get-ItemProperty 'HKCU:/Control Panel/Desktop' -ErrorAction SilentlyContinue).LogPixels}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
 Get-ChildItem 'C:/Windows/Fonts' -Filter '*seg*'|Get-FileHash -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/segoe-fonts.json"
 foreach($version in $Versions) {foreach($locale in $Locales) {
+ $script:captureWidth=1215
  $name="$version-$locale";$source="$ReleaseRoot/$version";$folder="$EvidenceDirectory/$name-app"
  Copy-Item $source $folder -Recurse
  $exe=(Get-ChildItem $folder -Recurse -Filter localsend_app.exe|Select-Object -First 1).FullName
@@ -97,12 +99,25 @@ foreach($version in $Versions) {foreach($locale in $Locales) {
   Start-Sleep -Seconds 15;$script:p.Refresh();if(!$script:p.MainWindowHandle){throw 'No app window'}
   [Desktop2861]::MoveWindow($script:p.MainWindowHandle,0,0,1215,738,$true)|Out-Null;[Desktop2861]::SetForegroundWindow($script:p.MainWindowHandle)|Out-Null
   [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
-  Click 100 85 'Foreground LocalSend logo'
+  Click 100 16 'Foreground LocalSend observed title bar'
   Start-Sleep -Seconds 2;Capture "$name-initial"
+  for($focusAttempt=1;$focusAttempt -le 3 -and [Desktop2861]::GetForegroundWindow() -ne $script:p.MainWindowHandle;$focusAttempt++) {
+   $focusElements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+   $wsl=$focusElements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window -and $_.Current.Name -eq 'C:\Windows\system32\wsl.exe'}|Select-Object -First 1
+   if($wsl){try{([System.Windows.Automation.WindowPattern]$wsl.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)).Close()}catch{[System.Windows.Forms.SendKeys]::SendWait('{ESC}')}}
+   [Desktop2861]::SetForegroundWindow($script:p.MainWindowHandle)|Out-Null
+   Click 100 16 'Foreground retry at observed LocalSend title bar'
+   Capture "$name-initial-retry-$focusAttempt"
+  }
   if([Desktop2861]::GetForegroundWindow() -ne $script:p.MainWindowHandle){throw 'LocalSend not foreground; scenario not reached'}
-  Click 110 243 'Settings rail';Capture "$name-settings-top"
-  for($step=1;$step -le 4;$step++) {
-   [Desktop2861]::SetCursorPos(750,620)|Out-Null;[Desktop2861]::mouse_event(2048,0,0,4294967176,[UIntPtr]::Zero)
+  $scale=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor
+  # Positions observed in actual initial screenshots at the supported Windows Text size settings.
+  $settingsY=switch($scale){125{254};150{272};default{243}}
+  Click 110 $settingsY 'Settings rail at observed text-size position';Capture "$name-settings-top"
+  if($WindowWidth -ne 1215){[Desktop2861]::MoveWindow($script:p.MainWindowHandle,0,0,$WindowWidth,738,$true)|Out-Null;$script:captureWidth=$WindowWidth;Start-Sleep -Seconds 2;Capture "$name-settings-resized"}
+  for($step=1;$step -le 8;$step++) {
+   $scrollX=[Math]::Min(750,$WindowWidth-60)
+   [Desktop2861]::SetCursorPos($scrollX,600)|Out-Null;[Desktop2861]::mouse_event(2048,0,0,4294967176,[UIntPtr]::Zero)
    $script:inputs+=@{action='Settings scroll down 120';step=$step;utc=[DateTime]::UtcNow.ToString('o')}
    Start-Sleep -Milliseconds 800;Capture "$name-settings-scroll-$step"
   }

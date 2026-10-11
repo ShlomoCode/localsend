@@ -98,6 +98,7 @@ foreach($scale in @(100,125,150)) {
  Start-Sleep -Seconds 2
  Stop-Transcript
  & "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale" -Versions @('current') -Locales @('en','uk','fr')
+ if($scale -eq 125){& "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale-narrow" -Versions @('current') -Locales @('en','uk','fr') -WindowWidth 400}
  Start-Transcript "$EvidenceDirectory/transcript.txt" -Append
 }
 Stop-Transcript
