@@ -104,6 +104,10 @@ for repetition in 2 3; do
   capture "repeat-$repetition-result"
 done
 # Supported file chooser path: same Documents file, without filesystem overrides.
+if [[ "${SOURCE_DROP_SEND:-0}" == 1 ]]; then
+  # Candidate sends the selection produced by the actual final Documents drop.
+  capture 11-documents-drop-send-selection
+else
 move 140 285
 button true
 button false
@@ -130,6 +134,7 @@ key ret
 sleep 5
 capture 11-documents-chooser-result
 /home/runner/513-vm/ssh 'export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus; flatpak run --command=sh org.localsend.localsend_app -c '\''ls -l /home/probe/Documents/513-control.txt; find /run/user/$(id -u)/doc -maxdepth 3 -type f -name 513-control.txt -exec sha256sum {} \; '\''' > evidence/vm/chooser-access-control.txt 2>&1
+fi
 bash support/diagnostics/513-peer.sh
 capture 12-peer-app
 # GNOME groups both LocalSend windows; focus the exposed sender strip directly.
@@ -143,6 +148,12 @@ button true
 button false
 sleep 2
 capture 14-manual-address
+if [[ "${SOURCE_ADDRESS:-ip}" == hashtag ]]; then
+  # The c1ce source offers a hashtag input, using the observed veth suffix.
+  qevent '{"execute":"human-monitor-command","arguments":{"command-line":"sendkey 2 50"}}'
+  capture 15-manual-address-filled
+  key ret
+else
 for code in 1 9 2 dot 1 6 8 dot 5 1 dot 2; do
   qevent "{\"execute\":\"human-monitor-command\",\"arguments\":{\"command-line\":\"sendkey $code 50\"}}"
 done
@@ -150,12 +161,10 @@ capture 15-manual-address-filled
 move 565 495
 button true
 button false
+fi
 sleep 5
 capture 16-after-manual-confirm
-# Manual discovery returns a peer tile; choosing it is the actual send action.
-move 600 505
-button true
-button false
+# Confirming the manual-address dialog starts the actual sending session.
 sleep 5
 capture 17-after-send
 # Foreground the peer using its exposed strip and retain its approval screen.
