@@ -1,6 +1,11 @@
 param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence)
 $ErrorActionPreference='Stop'
-Add-Type -AssemblyName System.Drawing,UIAutomationClient,UIAutomationTypes
+function Write-DiagnosticPhase([string]$phase){
+ @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase}|ConvertTo-Json -Compress|Add-Content "evidence/$Label-phases.jsonl"
+}
+Write-DiagnosticPhase 'before-drawing-assembly'
+Add-Type -AssemblyName System.Drawing
+Write-DiagnosticPhase 'before-native-type-compilation'
 Add-Type @'
 using System;using System.Text;using System.Runtime.InteropServices;
 public static class W3393 {
@@ -45,9 +50,12 @@ public static class W3393 {
  public struct Rect { public int L,T,R,B; }
 }
 '@
+Write-DiagnosticPhase 'before-find-window'
 $window=[W3393]::FindWindow('FLUTTER_RUNNER_WIN32_WINDOW','LocalSend')
 if($window -eq [IntPtr]::Zero){throw 'No LocalSend window'}
+Write-DiagnosticPhase 'before-child-enumeration'
 [W3393]::Children($window)|ConvertTo-Json -Depth 5|Set-Content "evidence/$Label-hwnd-tree.json"
+Write-DiagnosticPhase 'after-child-enumeration'
 $view=$window
 $point=New-Object W3393+Point
 $point.X=$X;$point.Y=$Y
@@ -68,6 +76,7 @@ $focusFailed=$false
 $foregroundInfo=$null
 $inputEvidence=$null
 if($Action -eq 'click'){
+ Write-DiagnosticPhase 'before-foreground-observation'
  $beforeForeground=[W3393]::GetForegroundWindow()
  $beforePid=0u
  $foregroundThread=[W3393]::GetWindowThreadProcessId($beforeForeground,[ref]$beforePid)
@@ -101,6 +110,7 @@ if($Action -eq 'click'){
   foreach($thread in $attachedThreads){[void][W3393]::AttachThreadInput($currentThread,$thread,$false)}
  }
  if(-not $focusFailed){
+ Write-DiagnosticPhase 'before-input'
  $packed=[IntPtr](($point.Y -shl 16) -bor ($point.X -band 0xffff))
  if($UseControlSequence){
   $posted=[W3393]::ControlClick($view,$packed)
@@ -114,19 +124,21 @@ if($Action -eq 'click'){
  $inputEvidence=@{method='PowerShell spaced PostMessage';intervalMs=80}
  }
  Start-Sleep -Milliseconds 800
+ Write-DiagnosticPhase 'after-input'
  }
 }
 $rect=New-Object W3393+Rect
+Write-DiagnosticPhase 'before-window-capture'
 [void][W3393]::GetWindowRect($window,[ref]$rect)
 $image=[System.Drawing.Bitmap]::new($rect.R-$rect.L,$rect.B-$rect.T)
 $graphics=[System.Drawing.Graphics]::FromImage($image)
 $dc=$graphics.GetHdc()
 try { $captured=[W3393]::PrintWindow($window,$dc,2) } finally {$graphics.ReleaseHdc($dc);$graphics.Dispose()}
 try {if(-not $captured){throw 'Window capture failed'};$image.Save((Join-Path $PWD "evidence/$Label.png"))}finally{$image.Dispose()}
-$element=[System.Windows.Automation.AutomationElement]::FromHandle($window)
-$elements=$element.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-@($elements|ForEach-Object{@{name=$_.Current.Name;role=$_.Current.ControlType.ProgrammaticName}})|ConvertTo-Json -Depth 4|Set-Content "evidence/$Label-ui.json"
+Write-DiagnosticPhase 'after-window-capture'
+@{captured=$false;reason='Accessibility collection disabled for diagnostic CLR isolation; earlier captures exposed only FLUTTERVIEW pane'}|ConvertTo-Json|Set-Content "evidence/$Label-ui.json"
 $foreground=[W3393]::GetForegroundWindow()
 $foregroundPid=0u;[void][W3393]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)
 @{action=$Action;x=$X;y=$Y;targetX=$point.X;targetY=$point.Y;targetClass=$targetClass.ToString();appPid=$appPid;targetPid=$viewPid;utc=[DateTime]::UtcNow.ToString('o');window=$window.ToInt64();view=$view.ToInt64();foregroundBefore=$foregroundInfo;focus=$focusEvidence;input=$inputEvidence;foregroundHwnd=$foreground.ToInt64();foregroundPid=$foregroundPid;ownedWindows=[W3393]::OwnedWindows($appPid)}|ConvertTo-Json -Depth 6|Set-Content "evidence/$Label-action.json"
+Write-DiagnosticPhase 'complete'
 if($focusFailed){throw 'Original LocalSend foreground could not be established; File click was not sent'}
