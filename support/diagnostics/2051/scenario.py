@@ -99,8 +99,8 @@ def open_actual(filename, phase):
         if "Markor" in labels(xml):
             click(R, "Markor", phase + "-before-markor")
             xml = snapshot(R, phase + "-chooser")
-            if "Just once" in labels(xml):
-                click(R, "Just once", phase + "-before-just-once")
+        if "Just once" in labels(xml):
+            click(R, "Just once", phase + "-before-just-once")
             time.sleep(3)
             xml = snapshot(R, phase + "-viewer-selected")
         (ROOT / (phase + "-intent.txt")).write_text(adb(R, "shell", "dumpsys", "activity", "activities"))
