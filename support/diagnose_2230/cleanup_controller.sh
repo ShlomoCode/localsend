@@ -15,7 +15,7 @@ command_line=$(tr '\0' ' ' < "/proc/$pid/cmdline")
 [[ "$command_line" == *receiver_control.sh* && "$command_line" == *"$case_id"* ]]
 printf '%s\tTERM\t%s\n' "$(date -u --iso-8601=ns)" "$pid" > "$out/parent-cleanup.tsv"
 kill -TERM "$pid"
-for attempt in $(seq 1 150); do
+for attempt in $(seq 1 850); do
   test -r "/proc/$pid/stat" || exit 0
   if test "$(awk '{print $3}' "/proc/$pid/stat")" = Z; then exit 0; fi
   sleep 0.2

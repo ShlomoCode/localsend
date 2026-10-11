@@ -30,18 +30,32 @@ event() { printf '%s\t%s\t%s\t%s\n' "$(stamp)" "$(mono)" "$1" "${2:-}" >> "$out/
 frame=0
 snapshot() {
   frame=$((frame+1)); base="$out/$(printf '%04d' "$frame")-$1"
+  control_tsv="$base.tsv"
   event screenshot "$base.png"
   timeout 5 ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x900 -i "$DISPLAY" -frames:v 1 "$base.png"
   timeout 5 tesseract "$base.png" "$base" --psm 11 tsv txt > "$base.ocr.log" 2>&1
 }
 # Only exact, confident, unique OCR words are actionable. Full-screen coordinates.
 coords() {
-  awk -F '\t' -v word="$1" 'NR>1 && $1==5 && $11>=50 && tolower($12)==tolower(word) {n++; x=$7+$9/2; y=$8+$10/2} END {if(n==1) printf "%d %d",x,y; else exit 1}' "$base.tsv"
+  awk -F '\t' -v word="$1" 'NR>1 && $1==5 && $11>=50 && tolower($12)==tolower(word) {n++; x=$7+$9/2; y=$8+$10/2} END {if(n==1) printf "%d %d",x,y; else exit 1}' "$control_tsv"
+}
+inverse_ocr_fallback() {
+  # The original release renders white labels on colored buttons. Keep full
+  # screenshot dimensions so OCR coordinates remain screen coordinates.
+  local processed="$base-inverse-threshold"
+  event ocr_fallback "$processed.png"
+  if timeout 5 ffmpeg -nostdin -y -loglevel error -i "$base.png" \
+    -vf "format=gray,lut=y='if(gt(val,180),0,255)'" -frames:v 1 "$processed.png" \
+    > "$processed.preprocess.log" 2>&1 && \
+    timeout 5 tesseract "$processed.png" "$processed" --psm 11 \
+      -c tessedit_do_invert=0 tsv txt > "$processed.ocr.log" 2>&1; then
+    control_tsv="$processed.tsv"
+  fi
 }
 has() { grep -Eiq "$1" "$base.txt"; }
 click_word() {
   local xy; xy=$(coords "$1") || return 1
-  event click "$1 at $xy using $base.tsv"
+  event click "$1 at $xy using $control_tsv"
   read -r x y <<< "$xy"
   timeout 3 xdotool windowactivate --sync "$WINDOW"
   timeout 3 xdotool mousemove --sync "$x" "$y" click 1
@@ -53,12 +67,13 @@ confirm_cancel() {
   continue_xy=$(coords Continue) || return 1
   read -r continue_x continue_y <<< "$continue_xy"
   cancel_xy=$(awk -F '\t' -v cx="$continue_x" -v cy="$continue_y" \
-    'NR>1 && $1==5 && $11>=50 && tolower($12)=="cancel" {x=$7+$9/2;y=$8+$10/2;if(x>cx && y>cy-25 && y<cy+25){n++;px=x;py=y}} END{if(n==1)printf "%d %d",px,py;else exit 1}' "$base.tsv") || return 1
+    'NR>1 && $1==5 && $11>=50 && tolower($12)=="cancel" {x=$7+$9/2;y=$8+$10/2;if(x>cx && y>cy-25 && y<cy+25){n++;px=x;py=y}} END{if(n==1)printf "%d %d",px,py;else exit 1}' "$control_tsv") || return 1
   read -r x y <<< "$cancel_xy"
   event click "dialog Cancel at $cancel_xy using $base.tsv"
   timeout 3 xdotool mousemove --sync "$x" "$y" click 1
 }
 video_pid=''
+video_validation_ok=0
 recorder_alive() {
   [[ -r "/proc/$video_pid/stat" ]] || return 1
   # A zombie has exited and can be reaped immediately by wait.
@@ -99,6 +114,20 @@ stop_video() {
     printf 'utc\tshutdown_method\texit_code\trecorder_pid\n%s\t%s\t%s\t%s\n' \
       "$(stamp)" "$method" "$recorder_status" "$video_pid" > "$out/recording-closed.tsv"
     video_pid=''
+    # Also runs through EXIT on aborted controllers. Validation failure stays
+    # separate from the observed app result and never becomes product success.
+    if [[ "$method" == KILL_not_reaped ]]; then
+      printf 'utc_started\tutc_finished\tstatus\treason\n%s\t%s\tfailed\trecorder_still_alive\n' \
+        "$(stamp)" "$(stamp)" > "$out/video-validation.tsv"
+      video_validation_ok=0
+      event video_validation failed
+    elif bash "$(dirname "${BASH_SOURCE[0]}")/validate_video.sh" "$out"; then
+      video_validation_ok=1
+      event video_validation passed
+    else
+      video_validation_ok=0
+      event video_validation failed
+    fi
   fi
 }
 trap stop_video EXIT
@@ -111,7 +140,10 @@ printf 'armed\t%s\n' "$(stamp)" > "$out/armed.tsv"
 wait_deadline=$(( $(mono)+60000 )); accepted=0
 while (( $(mono) < wait_deadline )); do
   snapshot approval
-  if coords Accept >/dev/null && coords Decline >/dev/null; then
+  if ! coords Accept >/dev/null || ! coords Decline >/dev/null; then
+    inverse_ocr_fallback
+  fi
+  if (( $(mono) < wait_deadline )) && coords Accept >/dev/null && coords Decline >/dev/null; then
     click_word Accept
     accepted=1; accept_ms=$(mono); event accepted
     printf 'accepted\t%s\n' "$(stamp)" > "$out/accepted.tsv"
@@ -158,6 +190,9 @@ for attempt in $(seq 1 8); do
   if has Ubuntu2230 && has '\bReceive\b' && has '\bSend\b' && has '\bSettings\b' && ! coords Accept >/dev/null; then
     recovery=home_rendered; break
   fi
+  if ! coords Continue >/dev/null && ! coords Done >/dev/null && ! coords Close >/dev/null && ! coords Decline >/dev/null && ! coords Cancel >/dev/null; then
+    inverse_ocr_fallback
+  fi
   if coords Continue >/dev/null; then
     confirm_cancel || true
   elif click_word Done || click_word Close || click_word Decline; then :
@@ -170,8 +205,8 @@ for attempt in $(seq 1 8); do
 done
 event recovery "$recovery"
 stop_video
-printf 'status=%s\naccepted=%s\nfinished=%s\nhash_match=%s\nexplicit_error=%s\nresponsiveness=%s\nrecovery=%s\napp_pid=%s\n' \
-  "$status" "$accepted" "$finished" "$hash_match" "$explicit_error" "$responsive" "$recovery" "$APP_PID" > "$out/result.env"
+printf 'status=%s\naccepted=%s\nfinished=%s\nhash_match=%s\nexplicit_error=%s\nresponsiveness=%s\nrecovery=%s\napp_pid=%s\nvideo_validation_ok=%s\n' \
+  "$status" "$accepted" "$finished" "$hash_match" "$explicit_error" "$responsive" "$recovery" "$APP_PID" "$video_validation_ok" > "$out/result.env"
 printf 'complete\t%s\t%s\n' "$(stamp)" "$status" > "$out/complete.tsv"
 # Product failures are evidence, not infrastructure success. Parent reads result.
-[[ "$status" == finished_and_hash_verified && "$recovery" == home_rendered ]]
+[[ "$status" == finished_and_hash_verified && "$recovery" == home_rendered && "$video_validation_ok" == 1 ]]

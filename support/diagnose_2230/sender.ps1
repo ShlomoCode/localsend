@@ -131,7 +131,7 @@ try {
     $receiver=Start-Process wsl.exe -ArgumentList $guestArgs -PassThru -NoNewWindow
     SelectFile $case.path
     SendToReceiver $ip
-    if(-not $receiver.WaitForExit(150000)) { $receiver.Kill(); throw 'Receiver UI/control deadline expired.' }
+    if(-not $receiver.WaitForExit(330000)) { $receiver.Kill(); throw 'Receiver UI/control deadline expired.' }
     [void](Snapshot ($case.id+'-terminal'))
     if($case.id -eq 'ascii-control' -and $receiver.ExitCode -ne 0) { throw 'ASCII actual app control failed; boundary cases are not admitted.' }
     if($receiver.ExitCode -ne 0) { throw 'Boundary case requires investigation of retained receiver evidence before more input.' }
@@ -143,7 +143,7 @@ try {
   throw
 } finally {
   if($receiver -and -not $receiver.HasExited -and $currentCase) {
-    & wsl -d Ubuntu-24.04 -u tester -- timeout 40 bash "$linuxRoot/support/diagnose_2230/cleanup_controller.sh" "$linuxRoot/evidence/2230" $currentCase
+    & wsl -d Ubuntu-24.04 -u tester -- timeout 180 bash "$linuxRoot/support/diagnose_2230/cleanup_controller.sh" "$linuxRoot/evidence/2230" $currentCase
     if(-not $receiver.WaitForExit(10000)) {
       'WSL controller process did not finish after bounded Linux cleanup; inspect recording-closed.tsv.' | Set-Content (Join-Path $evidence 'cleanup-error.txt')
       $receiver.Kill()
