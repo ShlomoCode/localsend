@@ -101,13 +101,14 @@ tar xf baseline.tar.gz -C released/base
 sha256sum baseline.tar.gz > evidence/artifact-sha256.txt
 dpkg-query -W > evidence/package-inventory.txt
 /sbin/ldconfig -p > evidence/library-inventory.txt
+/sbin/swapon --help > evidence/swapon-help.txt
 { uname -a; lscpu; free -m; /sbin/swapon --show --bytes; cat /proc/meminfo; cat /proc/sys/vm/swappiness; findmnt --target /swap.img; cat /etc/os-release; } > evidence/environment.txt
-test "$(/sbin/swapon --show --noheadings --output=NAME | wc -l)" = 1
-test "$(/sbin/swapon --show --noheadings --output=NAME)" = /swap.img
+test "$(/sbin/swapon --show=NAME --noheadings | wc -l)" = 1
+test "$(/sbin/swapon --show=NAME --noheadings)" = /swap.img
 # The swap header consumes one page; the on-disk allocation remains 2 GiB.
 test "$(stat --format=%s /swap.img)" = 2147483648
 expected_swap_bytes=$((2147483648 - $(getconf PAGESIZE)))
-test "$(/sbin/swapon --show --noheadings --bytes --output=SIZE | tr -d '[:space:]')" = "$expected_swap_bytes"
+test "$(/sbin/swapon --show=SIZE --noheadings --bytes | tr -d '[:space:]')" = "$expected_swap_bytes"
 swap_type=$(findmnt -n -o FSTYPE --target /swap.img)
 test "$swap_type" != tmpfs
 test "$swap_type" != ramfs
