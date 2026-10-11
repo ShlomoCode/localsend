@@ -104,9 +104,12 @@ tooltip = screen('manual-send-tooltip')
 # control; full-screen OCR can miss its small tooltip. Require the resulting
 # address dialog after the click instead.
 click(row_end + 70, row_y)
-text('Enter', 'manual-address-dialog')
+address_title = text('Enter', 'manual-address-dialog')
 if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0']:
-    click(*text('IP', 'manual-ip-mode'))
+    # Raw official 1.16.1 screenshot38110217141 shows IP Address 100 px
+    # right and 48 px below the Enter title center. Full OCR misses its label.
+    click(address_title[0] + 100, address_title[1] + 48)
+    screen('manual-ip-mode-selected')
 run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
 run('xdotool', 'key', 'Return')
 time.sleep(2)
@@ -154,9 +157,10 @@ if os.environ.get('ISSUE_2007_RESEND'):
     row_end = max(int(w['left']) + int(w['width']) for w in nearby)
     row_y = int(nearby[0]['top']) + int(nearby[0]['height']) // 2
     click(row_end + 70, row_y)
-    text('Enter', 'resend-manual-address-dialog')
+    address_title = text('Enter', 'resend-manual-address-dialog')
     if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0']:
-        click(*text('IP', 'resend-manual-ip-mode'))
+        click(address_title[0] + 100, address_title[1] + 48)
+        screen('resend-manual-ip-mode-selected')
     run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
     screen('resend-address-prepared')
     (out / 'resend-address-ready').touch()
