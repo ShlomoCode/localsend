@@ -1,1 +1,1 @@
-{"round":5,"actions":[{"kind":"key","value":"Super_L"},{"kind":"text","value":"accessibility"},{"kind":"key","value":"Return"},{"kind":"wait","seconds":3}]}
+{"round":6,"actions":[{"kind":"click","x":904,"y":650}]}
