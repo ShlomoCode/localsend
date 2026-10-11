@@ -504,7 +504,9 @@ video_pid=$!
 set +e
 # Optional geometry validity is retained by the UI driver separately from causal timing.
 # A quick query or capture exit cannot establish valid geometry or correction success.
-PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" python3 support/diagnostics/2754-ui.py
+# This bash reads its commands from SSH stdin. UI subprocesses must not consume
+# that command stream; in particular FFmpeg otherwise reads interactive keys.
+PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" python3 support/diagnostics/2754-ui.py < /dev/null
 status=$?
 if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ] || [ "$PROBE_ENGINE_VARIANT" != official ]; then
  grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1

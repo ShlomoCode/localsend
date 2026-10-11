@@ -32,9 +32,60 @@ def keyboard_switch(name):
     x=left+574
     log("keyboard-toggle-ui",x=x,y=y,crop_left=left,crop_top=top)
     run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(4)
+def folder_saved_crop(name,suffix,left,top,width,height,scale,psm):
+    source=out/(name+".png")
+    with source.open("rb") as saved_frame:
+        header=saved_frame.read(24)
+    if len(header)!=24 or header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR":
+        raise RuntimeError("Saved Folder frame has no valid PNG dimensions: "+name)
+    image_width=int.from_bytes(header[16:20],"big"); image_height=int.from_bytes(header[20:24],"big")
+    if not (left>=0 and top>=0 and width>0 and height>0
+            and left+width<=image_width and top+height<=image_height):
+        raise RuntimeError("Folder crop outside saved frame: "+name+suffix)
+    crop=out/(name+suffix+".png")
+    cropped=run("ffmpeg","-nostdin","-v","error","-y","-i",str(source),
+                "-vf",f"crop={width}:{height}:{left}:{top},scale={width*scale}:{height*scale}:flags=lanczos",
+                "-frames:v","1",str(crop))
+    crop.with_suffix(".ffmpeg.stderr").write_text(cropped.stderr)
+    if cropped.returncode!=0: raise RuntimeError("Folder saved-frame crop failed: "+name+suffix)
+    result=run("tesseract",str(crop),"stdout","--psm",str(psm),"tsv")
+    crop.with_suffix(".tsv").write_text(result.stdout)
+    crop.with_suffix(".tesseract.stderr").write_text(result.stderr)
+    if result.returncode!=0: raise RuntimeError("Folder saved-frame OCR failed: "+name+suffix)
+    return list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
 def click_word(word,name):
     rows=snap(name)
     hits=[r for r in rows if r["text"].lower().strip()==word.lower()]
+    if word.lower()=="folder":
+        focused=run("xdotool","getwindowfocus").stdout.strip()
+        title=run("xdotool","getwindowname",focused).stdout.strip()
+        owner=run("xdotool","getwindowpid",focused).stdout.strip()
+        if title!="LocalSend" or owner!=str(app.pid):
+            raise RuntimeError("Folder opener requires focused original LocalSend: "+name)
+        selections=[r for r in rows if r["text"].lower().strip()=="selection"]
+        if len(selections)!=1: raise RuntimeError("Folder opener requires unique Selection heading: "+name)
+        selection=selections[0]
+        # A dimmed Folder remains readable behind MessageInputDialog. Check the
+        # audited modal region in the SAME frame before accepting either OCR path.
+        modal_rows=folder_saved_crop(name,"-folder-modal-gate",int(selection["left"])+1,
+                                    int(selection["top"])+184,310,220,1,6)
+        modal_labels={r["text"].lower().strip() for r in modal_rows}
+        previous_modal={"type","message"}.issubset(modal_labels)
+        log("folder-modal-gate",previous_modal=previous_modal,window_id=focused,owner_pid=owner)
+        if previous_modal: raise RuntimeError("Previous Text dialog visible before Folder trigger: "+name)
+        if not hits:
+            left=int(selection["left"])-8; top=int(selection["top"])+24
+            picker_rows=folder_saved_crop(name,"-folder-picker",left,top,460,80,3,11)
+            hits=[r for r in picker_rows if r["text"].lower().strip()=="folder"]
+            if len(hits)!=1 or float(hits[0]["conf"])<90:
+                raise RuntimeError("Folder fallback requires unique exact confident label: "+name)
+            hit=hits[0]
+            x=round(left+(int(hit["left"])+int(hit["width"])/2)/3)
+            y=round(top+(int(hit["top"])+int(hit["height"])/2)/3)
+            log("folder-picker-ocr-fallback",x=x,y=y,confidence=hit["conf"],crop_x=left,crop_y=top,scale=3)
+            hits=[dict(left=str(x),top=str(y),width="0",height="0",text="Folder")]
+        elif len(hits)!=1 or float(hits[0]["conf"])<90:
+            raise RuntimeError("Folder opener requires unique exact confident label: "+name)
     if not hits and word.lower()=="text":
         selections=[r for r in rows if r["text"].lower().strip()=="selection"]
         if not selections: raise RuntimeError("Missing original Selection heading in "+name)
@@ -94,8 +145,10 @@ def picker_control(word,label):
         focused=run("xdotool","getwindowfocus").stdout.strip()
         title=run("xdotool","getwindowname",focused).stdout.strip()
         owner=run("xdotool","getwindowpid",focused).stdout.strip()
-        action="open" if word=="File" else "select"
-        titles=("open file",) if word=="File" else ("select folder","select a folder","select directory")
+        # Pinned file_selector_linux 0.9.4 uses Open for both native actions;
+        # getDirectoryPath() without an override titles Folder Choose Directory.
+        action="open"
+        titles=("open file",) if word=="File" else ("choose directory",)
         # The retained Mint cohort uses an in-process GTK chooser. A portal
         # owned by another process would need a separate provenance gate.
         if owner.isdigit() and int(owner)==app.pid and title.lower() in titles:
@@ -128,7 +181,7 @@ def picker_control(word,label):
                         image_width=image_width,image_height=image_height)
                     attempt+=1; time.sleep(1); continue
                 crop=out/(frame+"-buttons.png")
-                cropped=run("ffmpeg","-v","error","-y","-i",str(out/(frame+".png")),
+                cropped=run("ffmpeg","-nostdin","-v","error","-y","-i",str(out/(frame+".png")),
                             "-vf",f"crop={width}:{height}:{left}:{top},scale={width*3}:{height*3}:flags=lanczos",
                             "-frames:v","1",str(crop))
                 (out/(frame+"-buttons-ffmpeg.stderr")).write_text(cropped.stderr)
