@@ -28,7 +28,11 @@ try {
  session=created.sessionId;
  assert(session,'Session ID missing');writeFileSync('/tmp/helper/session-id',session);
  console.log('BrowserStack control session created for '+caps['appium:deviceName']);
- await new Promise(ok=>setTimeout(ok,3000));await clickText('Start socket control');
+ await new Promise(ok=>setTimeout(ok,3000));
+ writeFileSync('evidence/helper-before-start.xml',await wd('GET',`/session/${session}/source`));
+ await clickText('Start socket control');
+ const helperStarted=await wd('GET',`/session/${session}/source`);writeFileSync('evidence/helper-after-start.xml',helperStarted);
+ assert(helperStarted.includes('Socket control running'),'Actual helper Start button did not activate the service');
  await new Promise(ok=>setTimeout(ok,2500));
  for(const size of [0,1,65537,8*1024*1024]){
   const data=randomBytes(size),expected=createHash('sha256').update(data).digest('hex');
