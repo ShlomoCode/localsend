@@ -205,6 +205,7 @@ environment() {
   {
     date -u --iso-8601=seconds
     uname -a
+    locale
     cat /etc/os-release
     dpkg-query -W -f='${Package} ${Version}\n' flatpak fontconfig xvfb openbox dbus-x11 imagemagick xdotool gdb strace 2>/dev/null || true
     fc-cache --version 2>&1 || true
@@ -213,6 +214,7 @@ environment() {
     flatpak --user info --show-runtime org.localsend.localsend_app 2>&1 || true
     flatpak --user info --show-commit org.localsend.localsend_app 2>&1 || true
     flatpak run --user --command=fc-cache org.localsend.localsend_app --version 2>&1 || true
+    flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "LANG=%s LC_ALL=%s LANGUAGE=%s\n" "$LANG" "$LC_ALL" "$LANGUAGE"; locale' 2>&1 || true
     printf 'Expected app commit: %s\n' "${EXPECTED_APP_COMMIT:-not-provided}"
     printf 'Expected runtime commit: %s\n' "${EXPECTED_RUNTIME_COMMIT:-not-provided}"
   } > "$OUT/environment.txt"

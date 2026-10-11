@@ -34,7 +34,8 @@ done
 ISO="$WORK/linuxmint-22.3-cinnamon-64bit.iso"
 ISO_DIR="$WORK/iso"
 ROOT="$WORK/mint-root"
-mkdir -p "$ISO_DIR" "$ROOT"
+LOCAL_ROOT="$WORK/local-font-root"
+mkdir -p "$ISO_DIR" "$ROOT" "$LOCAL_ROOT"
 
 SOURCE_URL="$PRIMARY_URL"
 echo "Downloading the official Linux Mint 22.3 ISO."
@@ -61,9 +62,10 @@ printf '%s\n' "$MANIFEST" > "$OUT/manifest-source.txt"
 echo "Extracting font files and fontconfig metadata from the squashfs."
 unsquashfs -s "$SQUASHFS" > "$OUT/squashfs-info.txt" 2>&1 || fail "Could not read squashfs metadata."
 timeout 12m unsquashfs -no-progress -d "$ROOT" "$SQUASHFS" \
-  usr/share/fonts etc/fonts > "$OUT/unsquashfs-extraction.log" 2>&1 || fail "Could not extract required font and fontconfig paths."
+  usr/share/fonts usr/share/fontconfig usr/share/javascript/mathjax/fonts/HTML-CSS/TeX/otf \
+  usr/share/poppler/cMap etc/fonts > "$OUT/unsquashfs-extraction.log" 2>&1 || fail "Could not extract required font and fontconfig paths."
 
-if timeout 3m unsquashfs -no-progress -d "$ROOT" "$SQUASHFS" usr/local/share/fonts >> "$OUT/unsquashfs-extraction.log" 2>&1 && [[ -d "$ROOT/usr/local/share/fonts" ]]; then
+if timeout 3m unsquashfs -no-progress -d "$LOCAL_ROOT" "$SQUASHFS" usr/local/share/fonts >> "$OUT/unsquashfs-extraction.log" 2>&1 && [[ -d "$LOCAL_ROOT/usr/local/share/fonts" ]]; then
   HAS_LOCAL_FONTS=true
 else
   # This path is optional in the Mint image. Keep the first extraction log as evidence.
@@ -71,7 +73,28 @@ else
 fi
 
 [[ -d "$ROOT/usr/share/fonts" ]] || fail "The Mint image contains no usr/share/fonts directory."
+[[ -d "$ROOT/usr/share/fontconfig" ]] || fail "The Mint image contains no usr/share/fontconfig metadata directory."
+[[ -d "$ROOT/usr/share/javascript/mathjax/fonts/HTML-CSS/TeX/otf" ]] || fail "The Mint image contains no MathJax OTF symlink target directory."
+[[ -d "$ROOT/usr/share/poppler/cMap" ]] || fail "The Mint image contains no Poppler CMap symlink target directory."
 [[ -d "$ROOT/etc/fonts" ]] || fail "The Mint image contains no etc/fonts metadata directory."
+
+metadata_hashes="$OUT/fontconfig-metadata-sha256.txt"
+: > "$metadata_hashes"
+for metadata_root in "$ROOT/etc/fonts" "$ROOT/usr/share/fontconfig" "$ROOT/usr/share/poppler/cMap"; do
+  while IFS= read -r -d '' entry; do
+    relative=${entry#"$ROOT/"}
+    if [[ -L "$entry" ]]; then
+      target=$(readlink "$entry")
+      hash=$(printf '%s' "$target" | sha256sum | awk '{print $1}')
+      printf '%s  %s [symlink -> %s]\n' "$hash" "$relative" "$target" >> "$metadata_hashes"
+    elif [[ -f "$entry" ]]; then
+      hash=$(sha256sum "$entry" | awk '{print $1}')
+      printf '%s  %s\n' "$hash" "$relative" >> "$metadata_hashes"
+    fi
+  done < <(find "$metadata_root" \( -type f -o -type l \) -print0)
+done
+LC_ALL=C sort -k2,2 -o "$metadata_hashes" "$metadata_hashes"
+[[ -s "$metadata_hashes" ]] || fail "No etc/fonts or usr/share/fontconfig metadata files were found."
 
 awk '
   {
@@ -84,11 +107,13 @@ awk '
 
 {
   find "$ROOT/usr/share/fonts" -type f -print0
-  if [[ "$HAS_LOCAL_FONTS" == true && -d "$ROOT/usr/local/share/fonts" ]]; then
-    find "$ROOT/usr/local/share/fonts" -type f -print0
+  find "$ROOT/usr/share/javascript/mathjax/fonts/HTML-CSS/TeX/otf" -type f -print0
+  if [[ "$HAS_LOCAL_FONTS" == true && -d "$LOCAL_ROOT/usr/local/share/fonts" ]]; then
+    find "$LOCAL_ROOT/usr/local/share/fonts" -type f -print0
   fi
 } | while IFS= read -r -d '' file; do
   relative=${file#"$ROOT/"}
+  relative=${relative#"$WORK/local-font-root/"}
   printf '%s\0%s\n' "$file" "$relative"
 done | while IFS= read -r -d '' file && IFS= read -r relative; do
   sha256sum "$file" | awk -v path="$relative" '{print $1 "  " path}'
@@ -103,7 +128,10 @@ source_url=$SOURCE_URL
 iso_sha256=$actual_sha
 expected_iso_sha256=$EXPECTED_SHA256
 manifest_sha256=$(sha256sum "$MANIFEST" | awk '{print $1}')
+fontconfig_and_cmap_metadata_sha256=$(sha256sum "$metadata_hashes" | awk '{print $1}')
+fontfile_inventory_sha256=$(sha256sum "$OUT/fontfile-sha256.txt" | awk '{print $1}')
 font_files=$(wc -l < "$OUT/fontfile-sha256.txt" | tr -d ' ')
+external_mathjax_font_files=$(awk '$2 ~ /^usr\/share\/javascript\/mathjax\/fonts\/HTML-CSS\/TeX\/otf\// {count++} END {print count+0}' "$OUT/fontfile-sha256.txt")
 local_font_directory_present=$HAS_LOCAL_FONTS
 EOF
 
@@ -111,13 +139,17 @@ echo "Creating the font corpus archive."
 archive_root="$WORK/archive"
 mkdir -p "$archive_root"
 cp -a "$ROOT/usr/share/fonts" "$archive_root/usr-share-fonts"
-if [[ "$HAS_LOCAL_FONTS" == true && -d "$ROOT/usr/local/share/fonts" ]]; then
-  cp -a "$ROOT/usr/local/share/fonts" "$archive_root/usr-local-share-fonts"
+if [[ "$HAS_LOCAL_FONTS" == true && -d "$LOCAL_ROOT/usr/local/share/fonts" ]]; then
+  cp -a "$LOCAL_ROOT/usr/local/share/fonts" "$archive_root/usr-local-share-fonts"
 fi
 cp -a "$ROOT/etc/fonts" "$archive_root/etc-fonts-metadata"
+cp -a "$ROOT/usr/share/fontconfig" "$archive_root/usr-share-fontconfig-metadata"
+cp -a "$ROOT/usr/share/javascript/mathjax/fonts/HTML-CSS/TeX/otf" "$archive_root/mathjax-otf-fonts"
+cp -a "$ROOT/usr/share/poppler/cMap" "$archive_root/poppler-cmap-metadata"
 cp "$MANIFEST" "$archive_root/filesystem.manifest"
 cp "$OUT/font-packages.txt" "$archive_root/font-packages.txt"
 cp "$OUT/fontfile-sha256.txt" "$archive_root/fontfile-sha256.txt"
+cp "$metadata_hashes" "$archive_root/fontconfig-metadata-sha256.txt"
 cp "$OUT/source-provenance.txt" "$archive_root/source-provenance.txt"
 cp "$OUT/7z-extraction.log" "$archive_root/7z-extraction.log"
 cp "$OUT/unsquashfs-extraction.log" "$archive_root/unsquashfs-extraction.log"

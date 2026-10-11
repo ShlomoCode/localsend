@@ -39,10 +39,14 @@ jobs:
       matrix:
         include:
           - layout: system
+            locale: en_US.UTF-8
+            language: en_US:en
             runtime: '26.08'
             app-commit: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
             runtime-commit: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
           - layout: user
+            locale: zh_CN.UTF-8
+            language: zh_CN:zh
             runtime: '26.08'
             app-commit: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
             runtime-commit: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
@@ -52,7 +56,7 @@ jobs:
       - name: Install diagnostic dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox dbus-x11 flatpak imagemagick xdotool x11-utils iproute2 gdb strace fontconfig libgtk-3-0t64 libayatana-appindicator3-1 libgl1-mesa-dri libegl1 libgles2 curl procps
+          sudo apt-get install -y xvfb openbox dbus-x11 flatpak imagemagick xdotool x11-utils iproute2 gdb strace fontconfig locales libgtk-3-0t64 libayatana-appindicator3-1 libgl1-mesa-dri libegl1 libgles2 curl procps
           sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
           sudo curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
           sudo apt-get update
@@ -62,7 +66,7 @@ jobs:
         with:
           name: mint22.3-font-corpus
           path: mint-fonts
-      - name: Install exact Mint fonts on ephemeral runner
+      - name: Install exact Mint fonts and fontconfig rules on ephemeral runner
         env:
           FONT_LAYOUT: ${{ matrix.layout }}
         run: |
@@ -80,26 +84,59 @@ jobs:
             sudo cp -a "$RUNNER_TEMP/mint-font-corpus/usr-local-share-fonts" /usr/local/share/fonts
           fi
           sudo mkdir -p /usr/local/share/fonts
+          sudo mv /etc/fonts "$RUNNER_TEMP/original-fonts/etc-fonts"
+          sudo mv /usr/share/fontconfig "$RUNNER_TEMP/original-fonts/usr-share-fontconfig"
+          sudo cp -a "$RUNNER_TEMP/mint-font-corpus/etc-fonts-metadata" /etc/fonts
+          sudo cp -a "$RUNNER_TEMP/mint-font-corpus/usr-share-fontconfig-metadata" /usr/share/fontconfig
+          mathjax_target=/usr/share/javascript/mathjax/fonts/HTML-CSS/TeX/otf
+          sudo mkdir -p "$(dirname "$mathjax_target")" /usr/share/poppler
+          if [[ -d "$mathjax_target" ]]; then
+            sudo mv "$mathjax_target" "$RUNNER_TEMP/original-fonts/mathjax-otf-fonts"
+          fi
+          sudo cp -a "$RUNNER_TEMP/mint-font-corpus/mathjax-otf-fonts" "$mathjax_target"
+          if [[ -d /usr/share/poppler/cMap ]]; then
+            sudo mv /usr/share/poppler/cMap "$RUNNER_TEMP/original-fonts/poppler-cmap"
+          fi
+          sudo cp -a "$RUNNER_TEMP/mint-font-corpus/poppler-cmap-metadata" /usr/share/poppler/cMap
+          broken_configs=$(find /etc/fonts/conf.d -xtype l -print)
+          if [[ -n "$broken_configs" ]]; then
+            printf 'Broken fontconfig rules: %s\n' "$broken_configs"
+            exit 1
+          fi
+          broken_fonts=$(find /usr/share/fonts -xtype l -print)
+          if [[ -n "$broken_fonts" ]]; then
+            printf 'Broken font links: %s\n' "$broken_fonts"
+            exit 1
+          fi
           if [[ "$FONT_LAYOUT" == user ]]; then
             mkdir -p "$HOME/.local/share/fonts"
             cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "$HOME/.local/share/fonts/"
             sha256sum "$HOME/.local/share/fonts/DejaVuSans.ttf" > evidence/user-installed-font.txt
           fi
-          printf 'corpus=Mint22.3-Cinnamon-ISO layout=%s\n' "$FONT_LAYOUT" > evidence/font-scenario.txt
+          printf 'corpus=Mint22.3-Cinnamon-ISO config=Mint22.3-Cinnamon-ISO layout=%s\n' "$FONT_LAYOUT" > evidence/font-scenario.txt
           sudo fc-cache -f
+      - name: Configure test locale
+        env:
+          TEST_LOCALE: ${{ matrix.locale }}
+        run: |
+          sudo locale-gen "$TEST_LOCALE"
+          flatpak config --user --set languages 'en;zh'
       - name: Run reproduction harness in a D-Bus session
         shell: bash
         env:
           RUNTIME_BRANCH: ${{ matrix.runtime }}
           EXPECTED_APP_COMMIT: ${{ matrix.app-commit }}
           EXPECTED_RUNTIME_COMMIT: ${{ matrix.runtime-commit }}
+          LANG: ${{ matrix.locale }}
+          LC_ALL: ${{ matrix.locale }}
+          LANGUAGE: ${{ matrix.language }}
           OUT: ${{ github.workspace }}/evidence
         run: dbus-run-session -- bash support/diagnostics/repro-flatpak-3553.sh
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: localsend-flatpak-mint-fonts-${{ matrix.layout }}-runtime-${{ matrix.runtime }}
+          name: localsend-flatpak-mint-fonts-config-${{ matrix.layout }}-runtime-${{ matrix.runtime }}
           path: evidence/
           if-no-files-found: warn
           retention-days: 14
