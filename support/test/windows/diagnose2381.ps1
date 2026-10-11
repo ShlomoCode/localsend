@@ -57,7 +57,7 @@ function PrimaryButton([string]$snap) {
  }
  $bmp.Dispose()
  if ($count -lt 150) {throw "Primary filled button unavailable in $snap"}
- Write-Host "Primary button in $snap: $minX,$minY to $maxX,$maxY"
+ Write-Host "Primary button in ${snap}: $minX,$minY to $maxX,$maxY"
  Click (($minX+$maxX)/2) (($minY+$maxY)/2)
 }
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
