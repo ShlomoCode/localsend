@@ -1,0 +1,68 @@
+[
+  {
+    "windows": [
+      {
+        "wmClass": "org.localsend.localsend_app",
+        "appId": "window:2",
+        "windowBacked": true,
+        "desktopFile": "",
+        "renderedIcon": "application-x-executable"
+      }
+    ]
+  },
+  {
+    "windows": [
+      {
+        "wmClass": "org.localsend.localsend_app",
+        "appId": "window:3",
+        "windowBacked": true,
+        "desktopFile": "",
+        "renderedIcon": "application-x-executable"
+      }
+    ]
+  },
+  {
+    "windows": [
+      {
+        "wmClass": "org.localsend.localsend_app",
+        "appId": "window:4",
+        "windowBacked": true,
+        "desktopFile": "",
+        "renderedIcon": "application-x-executable"
+      }
+    ]
+  },
+  {
+    "windows": [
+      {
+        "wmClass": "org.localsend.localsend_app",
+        "appId": "localsend.desktop",
+        "windowBacked": false,
+        "desktopFile": "/home/probe/.local/share/applications/localsend.desktop",
+        "renderedIcon": "/home/probe/AppImages/.icons/localsend"
+      }
+    ]
+  },
+  {
+    "windows": [
+      {
+        "wmClass": "org.localsend.localsend_app",
+        "appId": "localsend.desktop",
+        "windowBacked": false,
+        "desktopFile": "/home/probe/.local/share/applications/localsend.desktop",
+        "renderedIcon": "/home/probe/AppImages/.icons/localsend"
+      }
+    ]
+  },
+  {
+    "windows": [
+      {
+        "wmClass": "org.localsend.localsend_app",
+        "appId": "localsend.desktop",
+        "windowBacked": false,
+        "desktopFile": "/home/probe/.local/share/applications/localsend.desktop",
+        "renderedIcon": "/home/probe/AppImages/.icons/localsend"
+      }
+    ]
+  }
+]

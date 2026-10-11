@@ -1,0 +1,19 @@
+Bundled autoreview terminal transcript, 2026-10-11.
+Working directory: /tmp/localsend-bug-2433
+Command: rtk /Users/shlomo/.codex/skills/autoreview/scripts/autoreview --mode commit --commit 2e950198 --max-priority P2 --output /tmp/issue2433-autoreview.txt --json-output /tmp/issue2433-autoreview.json --prompt [context below]
+Context: The change is limited to AppImage metadata. Actual c1ce322fb3acf08e44f329b8b7208b8b0d91e244 x86_64 native source was built once, packaged with the unchanged and changed recipes by the pinned appimage-builder 1.1.0 action, integrated normally through Gear Lever, and launched by real GNOME Shell in Fedora 42 Wayland. Baseline 3/3 uses window-backed generic executable icon; candidate 3/3 associates localsend.desktop and renders LocalSend icon. Actual measured class is org.localsend.localsend_app. appimage-builder 1.1.0 SetupAppInfoCommand generates the desktop entry before after_runtime; RunScriptCommand sets TARGET_APPDIR to the absolute AppDir. ARM64 UI was not executed; its equivalent recipe receives the same hook. Review only the four-line production patch, not diagnostic workflows.
+Result: exit code 0, exec session 91716.
+Raw helper stdout:
+autoreview target: commit
+branch: codex/diag-2433-gnome
+engine: codex
+model: gpt-5.6-sol
+fallback_model: gpt-5.6-terra
+thinking: high
+tools: on
+web_search: on
+ref: 2e950198
+bundle: 1893 bytes; review passes: 1
+autoreview clean: no accepted/actionable findings reported
+overall: patch is correct (0.99)
+The four-line metadata change appends the measured GNOME window class to the generated desktop entry at the documented build stage for both architectures. The supplied integration results directly validate the x86_64 behavior, and the equivalent ARM64 recipe change introduces no distinct defect visible in the bundle.
