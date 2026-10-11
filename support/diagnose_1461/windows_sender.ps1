@@ -79,8 +79,35 @@ public static class ReceiverNative {
 '@
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
+public class SenderControl {
+ public long Hwnd,Parent; public int Pid,Id,Left,Top,Width,Height;
+ public string ClassName,Text; public bool Visible,Enabled,FileNameAncestor;
+}
 public static class SenderInput {
+ [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left,Top,Right,Bottom; }
+ private delegate bool EnumProc(IntPtr hwnd,IntPtr data);
+ [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent,EnumProc callback,IntPtr data);
+ [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
+ [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr hwnd);
+ [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
+ [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+ [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr hwnd);
+ [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int size);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd,StringBuilder text,int size);
+ public static SenderControl[] Children(IntPtr root) {
+  var controls=new List<SenderControl>();
+  EnumChildWindows(root,(hwnd,data)=>{
+   uint pid;GetWindowThreadProcessId(hwnd,out pid);RECT r;GetWindowRect(hwnd,out r);
+   var text=new StringBuilder(32768);var cls=new StringBuilder(256);GetWindowText(hwnd,text,text.Capacity);GetClassName(hwnd,cls,cls.Capacity);
+   bool filename=false;IntPtr parent=hwnd;
+   for(int depth=0;depth<16&&parent!=IntPtr.Zero&&parent!=root;depth++){if(GetDlgCtrlID(parent)==1148)filename=true;parent=GetParent(parent);}
+   controls.Add(new SenderControl {Hwnd=hwnd.ToInt64(),Parent=GetParent(hwnd).ToInt64(),Pid=(int)pid,Id=GetDlgCtrlID(hwnd),Left=r.Left,Top=r.Top,Width=r.Right-r.Left,Height=r.Bottom-r.Top,ClassName=cls.ToString(),Text=text.ToString(),Visible=IsWindowVisible(hwnd),Enabled=IsWindowEnabled(hwnd),FileNameAncestor=filename});return true;
+  },IntPtr.Zero);return controls.ToArray();
+ }
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd,uint message,IntPtr wp,IntPtr lp);
@@ -135,22 +162,16 @@ Add-Type -AssemblyName UIAutomationTypes
 $root=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($Hwnd))
 $elements=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $tree=@()
-foreach($e in $elements){try{$v=$e.Current;$b=$v.BoundingRectangle;$tree+=@{name=$v.Name;id=$v.AutomationId;type=$v.ControlType.ProgrammaticName;offscreen=$v.IsOffscreen;enabled=$v.IsEnabled;x=$b.X;y=$b.Y;width=$b.Width;height=$b.Height}}catch{};if($tree.Count -ge 700){break}}
+function Finite([double]$v){if([double]::IsNaN($v) -or [double]::IsInfinity($v)){return $null};return $v}
+foreach($e in $elements){try{$v=$e.Current;$b=$v.BoundingRectangle;$tree+=@{name=$v.Name;id=$v.AutomationId;type=$v.ControlType.ProgrammaticName;offscreen=$v.IsOffscreen;enabled=$v.IsEnabled;x=(Finite $b.X);y=(Finite $b.Y);width=(Finite $b.Width);height=(Finite $b.Height)}}catch{};if($tree.Count -ge 700){break}}
 $r=@{tree=$tree;acted=$false}
-if($Operation -eq 'picker'){
- $edits=@($elements | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $_.Current.AutomationId -eq '1148' -and -not $_.Current.IsOffscreen })
- if($edits.Count -ne 1){throw 'Native file picker File name edit (1148) was not uniquely observed.'}
- $p=$null;if(-not $edits[0].TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$p)){throw 'Native file picker has no ValuePattern.'};([System.Windows.Automation.ValuePattern]$p).SetValue($Value)
- $buttons=@($elements | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.AutomationId -eq '1' -and $_.Current.Name -match '^(&)?Open$' -and -not $_.Current.IsOffscreen })
- if($buttons.Count -ne 1){throw 'Native file picker Open button was not uniquely observed.'}
- $p=$buttons[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);([System.Windows.Automation.InvokePattern]$p).Invoke();$r.acted=$true;$r.method='Native Windows File name ValuePattern and observed Open InvokePattern'
-}
 [IO.File]::WriteAllText($Result,(ConvertTo-Json $r -Depth 8),[Text.UTF8Encoding]::new($false))
 '@,[Text.UTF8Encoding]::new($false))
 function Worker($script,$arguments,$result,[int]$timeout=20000){
  if(Test-Path $result){Remove-Item -LiteralPath $result}
- $process=Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList (@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$script+'"'))+$arguments) -PassThru -WindowStyle Hidden
- try{if(-not $process.WaitForExit((Remaining $timeout))){throw "Worker timeout: $script"};if($process.ExitCode -ne 0 -or -not(Test-Path $result)){throw "Worker failed: $script"};return Get-Content -LiteralPath $result -Raw | ConvertFrom-Json}finally{if(-not $process.HasExited){$process.Kill();[void]$process.WaitForExit(5000)}}
+ $stdout=$result+'.stdout.txt';$stderr=$result+'.stderr.txt'
+ $process=Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList (@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$script+'"'))+$arguments) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+ try{if(-not $process.WaitForExit((Remaining $timeout))){throw "Worker timeout: $script; inspect $stdout and $stderr"};if($process.ExitCode -ne 0 -or -not(Test-Path $result)){throw "Worker failed: $script; exit $($process.ExitCode); inspect $stdout and $stderr"};return Get-Content -LiteralPath $result -Raw | ConvertFrom-Json}finally{if(-not $process.HasExited){$process.Kill();[void]$process.WaitForExit(5000)}}
 }
 function Window([IntPtr]$hwnd=$appHwnd){$w=@([ReceiverNative]::All()|Where-Object{$_.Hwnd -eq $hwnd.ToInt64() -and $_.Visible});if($w.Count -ne 1 -or $w[0].Width -lt 100){throw 'Owned visible window unavailable.'};return $w[0]}
 function Focus([IntPtr]$hwnd=$appHwnd){[void][ReceiverNative]::Activate($hwnd);Start-Sleep -Milliseconds 200;if([ReceiverNative]::GetForegroundWindow() -ne $hwnd){throw 'Owned window is not foreground; input withheld.'}}
@@ -191,9 +212,9 @@ function BitmapDigest([Drawing.Bitmap]$bitmap){
  $lock=$bitmap.LockBits([Drawing.Rectangle]::new(0,0,$bitmap.Width,$bitmap.Height),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
  try{$bytes=[byte[]]::new([Math]::Abs($lock.Stride)*$bitmap.Height);[Runtime.InteropServices.Marshal]::Copy($lock.Scan0,$bytes,0,$bytes.Length);for($i=3;$i -lt $bytes.Length;$i+=4){$bytes[$i]=0};$hash=[Security.Cryptography.SHA256]::Create();try{return [BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','')}finally{$hash.Dispose()}}finally{$bitmap.UnlockBits($lock)}
 }
-function FreshPixels($s,$bounds){
- $w=Window
- if([ReceiverNative]::GetForegroundWindow() -ne $appHwnd -or $w.Hwnd -ne $s.window.Hwnd -or $w.Left -ne $s.window.Left -or $w.Top -ne $s.window.Top -or $w.Width -ne $s.window.Width -or $w.Height -ne $s.window.Height){return $false}
+function FreshPixels($s,$bounds,[IntPtr]$hwnd=$appHwnd){
+ $w=Window $hwnd
+ if([ReceiverNative]::GetForegroundWindow() -ne $hwnd -or $w.Hwnd -ne $s.window.Hwnd -or $w.Left -ne $s.window.Left -or $w.Top -ne $s.window.Top -or $w.Width -ne $s.window.Width -or $w.Height -ne $s.window.Height){return $false}
  # Compare only the observed semantic label plus two pixels. A rotating logo or
  # blinking caret elsewhere in this window does not invalidate this control.
  $left=[int][Math]::Floor($bounds.x-$w.Left)-2;$top=[int][Math]::Floor($bounds.y-$w.Top)-2
@@ -261,6 +282,30 @@ function Probe($command){
  }
  $out.handlesAfter=Handles ($label+'-after') $f;return $out
 }
+function NativePicker([IntPtr]$hwnd,[string]$path,[string]$id){
+ $dialog=Window $hwnd;if($dialog.Pid -ne $app.Id -or $dialog.ClassName -ne '#32770'){throw 'Picker is not the owned native dialog.'}
+ $children=@([SenderInput]::Children($hwnd));$evidence=@{dialog=$dialog;before=$children;typed=$null;after=$null;method='Observed native Edit HWND mouse focus, ordinary keyboard input, GetWindowText verification, observed native Open mouse click'}
+ $record=Join-Path $OutputDirectory ($id+'-picker-native.json');Json $record $evidence
+ $edits=@($children|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Edit' -and $_.FileNameAncestor -and $_.Width -gt 0})
+ $buttons=@($children|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Button' -and $_.Id -eq 1 -and $_.Text -match '^(&)?Open$'})
+ if($edits.Count -ne 1 -or $buttons.Count -ne 1){throw 'Native File name Edit (under ID 1148) and Open Button (ID 1) must be unique; inspect retained HWND evidence.'}
+ Focus $hwnd;$edit=$edits[0];[SenderInput]::Click([int]($edit.Left+$edit.Width/2),[int]($edit.Top+$edit.Height/2))
+ [System.Windows.Forms.SendKeys]::SendWait('^a')
+ $escaped=[regex]::Replace($path,'([+^%~(){}\[\]])','{$1}')
+ [System.Windows.Forms.SendKeys]::SendWait($escaped);Start-Sleep -Milliseconds 200
+ $after=@([SenderInput]::Children($hwnd));$actual=@($after|Where-Object{$_.Hwnd -eq $edit.Hwnd -and $_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Edit' -and $_.FileNameAncestor})
+ $evidence.typed=$actual;$evidence.after=$after;Json $record $evidence
+ if($actual.Count -ne 1 -or $actual[0].Text -cne $path){throw 'Actual native File name text differs from fixture path; Open withheld.'}
+ $snapshot=Snapshot 'native-picker-path-verified' $hwnd
+ $open=@([SenderInput]::Children($hwnd)|Where-Object{$_.Hwnd -eq $buttons[0].Hwnd -and $_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Button' -and $_.Id -eq 1 -and $_.Text -match '^(&)?Open$'})
+ if($open.Count -ne 1){throw 'Observed native Open control changed before click.'};$button=$open[0]
+ if($button.Left -ne $buttons[0].Left -or $button.Top -ne $buttons[0].Top -or $button.Width -ne $buttons[0].Width -or $button.Height -ne $buttons[0].Height){throw 'Native Open geometry changed; input withheld.'}
+ $bounds=@{x=$button.Left;y=$button.Top;width=$button.Width;height=$button.Height}
+ if(-not(FreshPixels $snapshot $bounds $hwnd)){throw 'Native Open pixels or dialog ownership changed before input.'}
+ [SenderInput]::Click([int]($button.Left+$button.Width/2),[int]($button.Top+$button.Height/2))
+ $report.actions+=@{name='native-picker-open';utc=[DateTime]::UtcNow.ToString('o');nativeEvidence=$record;screenshot=$snapshot.screenshot;fileName=$path;button=$button}
+ return @{acted=$true;nativeEvidence=$record;screenshot=$snapshot.screenshot}
+}
 function Execute($c){
  switch($c.action){
   'screenshot' { Focus; return Snapshot ('command-'+$c.id) }
@@ -288,8 +333,7 @@ function Execute($c){
    do{$picker=@([ReceiverNative]::All()|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.ClassName -eq '#32770'});if($picker.Count -eq 1){break};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
    if($picker.Count -ne 1){throw 'Native file picker owned by the sender was not observed.'}
    $hwnd=[IntPtr]::new($picker[0].Hwnd);Focus $hwnd;$before=Snapshot 'native-picker-before' $hwnd
-   $result=Join-Path $OutputDirectory ($c.id+'-picker.json')
-   $picked=Worker $uiaWorker @('-Hwnd',$hwnd.ToInt64(),'-Result',('"'+$result+'"'),'-Operation','picker','-Value',('"'+$f.path+'"')) $result
+   $picked=NativePicker $hwnd $f.path $c.id
    if(-not $picked.acted){throw 'Native picker did not invoke Open.'}
    Start-Sleep -Milliseconds 800;Focus;$after=Snapshot 'source-selected';$text=$after.ocr.text+' '+(($after.uia.tree.name)-join ' ')
    if($text -notmatch 'Files: 1'){throw 'Selection of exactly one file was not observed.'}
