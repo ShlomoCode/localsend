@@ -33,11 +33,16 @@ export default async function({session,wd,senderPort,transportStatus}){
    await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,...(index?['-CompletePrevious']:[])]);
    await waitForNativeControl({wd,prefix,label:gallery+'-pending',...target('Accept')});
    await click('Options');await capture(gallery+'-options-before');
-   const e=await waitForNativeControl({wd,prefix,label:gallery+'-gallery',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Save media to gallery")]/descendant-or-self::*[@checkable="true"]',requireClickable:false});
-   const id=e['element-6066-11e4-a52e-4f735466cecf'];
-   const checked=await wd('GET',prefix+'/element/'+id+'/attribute/checked');
    const desired=gallery.startsWith('on');
-   if((checked==='true'||checked===true)!==desired)await wd('POST',prefix+'/element/'+id+'/click',{});
+   const e=await waitForNativeControl({wd,prefix,label:gallery+'-gallery',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and (@content-desc="On" or @content-desc="Off") and @clickable="true"]'});
+   const id=e['element-6066-11e4-a52e-4f735466cecf'];
+   const selected=await wd('GET',prefix+'/element/'+id+'/attribute/content-desc');
+   if(selected!==(desired?'On':'Off')){
+    await wd('POST',prefix+'/element/'+id+'/click',{});
+    const choice=await waitForNativeControl({wd,prefix,label:gallery+'-gallery-choice',using:'xpath',value:`(//*[@package="org.localsend.localsend_app" and @content-desc="${desired?'On':'Off'}" and @clickable="true"])[last()]`});
+    await wd('POST',prefix+'/element/'+choice['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   }
+   await waitForNativeControl({wd,prefix,label:gallery+'-gallery-verified',using:'xpath',value:`//*[@package="org.localsend.localsend_app" and @content-desc="${desired?'On':'Off'}" and @clickable="true"]`,sourceIncludes:['Save media to gallery']});
    await capture(gallery+'-options-selected');await wd('POST',prefix+'/back',{});
    await click('Accept');await waitForNativeControl({wd,prefix,label:gallery+'-complete',...target('Done')});
    await capture(gallery+'-completed');
