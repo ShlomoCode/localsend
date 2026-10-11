@@ -432,10 +432,14 @@ if($FallbackControl) {
  }
  function FinishControl([string]$from,[string]$to,[string]$prefix) {
   [Desktop2381]::SetForegroundWindow($apps[$from].MainWindowHandle) | Out-Null
-  Click 930 714
+  Screenshot "$prefix-$from-before-done"
+  $doneFrom=@(Import-Csv "$EvidenceDirectory/$prefix-$from-before-done.tsv" -Delimiter "`t" | Where-Object {$_.text -eq "Done" -and [int]$_.top -gt 1300})
+  if($doneFrom.Count -gt 0) {Click 930 714}
   Screenshot "$prefix-$from-done"
   [Desktop2381]::SetForegroundWindow($apps[$to].MainWindowHandle) | Out-Null
-  Click 930 714
+  Screenshot "$prefix-$to-before-done"
+  $doneTo=@(Import-Csv "$EvidenceDirectory/$prefix-$to-before-done.tsv" -Delimiter "`t" | Where-Object {$_.text -eq "Done" -and [int]$_.top -gt 1300})
+  if($doneTo.Count -gt 0) {Click 930 714}
   Screenshot "$prefix-$to-done"
  }
  function PickControlFixture([string]$name,[string]$prefix) {
@@ -457,7 +461,9 @@ if($FallbackControl) {
   [Desktop2381]::SetForegroundWindow($apps[$to].MainWindowHandle) | Out-Null
   Start-Sleep -Seconds 2
   Screenshot "$prefix-request"
-  Click 566 702
+  $alreadyReceived=@(Get-ChildItem $destination -File | Where-Object {$oldPaths -notcontains $_.FullName -and $_.Length -eq (Get-Item $fixture).Length -and (Get-FileHash $_.FullName -Algorithm SHA256).Hash -eq $originalHash}).Count -gt 0
+  if(-not $alreadyReceived) {Word "Accept" "$prefix-request"}
+  @{freshMatchingFileBeforeAccept=$alreadyReceived;acceptClicked=(-not $alreadyReceived)} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-accept-behavior.json"
   Start-Sleep -Seconds 5
   Screenshot "$prefix-completed"
   $files=@(Get-ChildItem $destination -File | ForEach-Object {@{path=$_.FullName;name=$_.Name;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;creationUtc=$_.CreationTimeUtc.ToString("o");lastWriteUtc=$_.LastWriteTimeUtc.ToString("o")}})
@@ -529,6 +535,7 @@ if($FallbackControl) {
  if($alphaHash -eq $betaHash) {throw "Actual source and receiver identities are not distinct"}
  ReverseControl "receiver" "fallback-learn-new-ip"
  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+ Click 103 199
  Screenshot "fallback-nearby-no-exact-favorite"
  Click 868 288
  Screenshot "fallback-device-details"
