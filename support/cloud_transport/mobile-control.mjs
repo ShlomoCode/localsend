@@ -24,6 +24,9 @@ async function clickText(text){
 const results=[];
 const helperMode=process.env.HELPER_SERVICE_MODE||'foreground';
 assert(['foreground','ordinary'].includes(helperMode),'Unknown helper service mode');
+const helperObservationMode=process.env.HELPER_OBSERVATION_MODE||'native';
+assert(['native','public-supplementary'].includes(helperObservationMode),'Unknown helper observation mode');
+assert(helperObservationMode!=='public-supplementary'||helperMode==='ordinary','Supplementary trial requires ordinary helper');
 const transportSnapshot=()=>({utc:new Date().toISOString(),status:r.status(),trace:r.trace.map(event=>({...event}))});
 try {
  const localUrl=new URL('https://www.browserstack.com/local/v1/list');localUrl.searchParams.set('auth_token',process.env.BROWSERSTACK_ACCESS_KEY);
@@ -58,7 +61,7 @@ try {
  writeFileSync('evidence/helper-poll-drain.json',JSON.stringify({elapsedMs:Date.now()-drainStart,status:r.status()},null,2));
  assert(!r.status().pollPending,'Old helper poll did not drain');await clickText('Relay to LocalSend');
  if(helperMode==='ordinary'){
-  const {observeHelper}=await import('./helper-lifecycle3393.mjs');
+  const {observeHelper}=await import(helperObservationMode==='public-supplementary'?'./helper-public-observation3393.mjs':'./helper-lifecycle3393.mjs');
   await observeHelper({session,wd,label:'relay-before-localsend',transportSnapshot,expectBackground:false});
  }
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});

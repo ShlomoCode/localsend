@@ -16,7 +16,7 @@ public final class MainActivity extends Activity {
     });
     String configuredMode=null;
     String configFailure=null;
-    try{configuredMode=RelayService.readConfig(this).getString("serviceMode");}
+    try{configuredMode=RelayService.readConfig(this).getString("serviceMode");RelayService.activityEvent("created",0,0);}
     catch(Exception e){configFailure=e.getClass().getSimpleName();Log.e("CloudTransport","Helper config failed: "+configFailure);}
     final String serviceMode=configuredMode;
     TextView text=new TextView(this);text.setText(serviceMode==null?"Helper config failed: "+configFailure:"Cloud transport helper\nService mode: "+serviceMode+"\nSeparate diagnostic app. LocalSend is unchanged.");layout.addView(text);
@@ -30,6 +30,11 @@ public final class MainActivity extends Activity {
     setContentView(layout);
     layout.requestApplyInsets();
   }
+  protected void onStart(){super.onStart();RelayService.activityEvent("started",1,0);}
+  protected void onResume(){super.onResume();RelayService.activityEvent("resumed",0,1);}
+  protected void onPause(){RelayService.activityEvent("paused",0,-1);super.onPause();}
+  protected void onStop(){RelayService.activityEvent("stopped",-1,0);super.onStop();}
+  protected void onDestroy(){RelayService.activityEvent("destroyed",0,0);super.onDestroy();}
   private void startRelay(boolean control,String serviceMode,TextView text){
     try{
       Intent intent=new Intent(this,RelayService.class).putExtra("control",control);

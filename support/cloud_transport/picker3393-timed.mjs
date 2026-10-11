@@ -70,7 +70,7 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
    phase(caseName,'native-readiness-after-hold');
    await source(`${caseName}-after-timed-hold`);
    writeFileSync(`evidence/${caseName}-after-timed-hold.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
-   await lifecycle(`${caseName}-after-timed-hold`);
+   await lifecycle(`${caseName}-after-timed-hold`,{exposureInterval:{started:timing.started,ended:timing.ended}});
    await ui('snapshot',0,0,`windows-${caseName}-after-timed-hold`);
    // A Documents row at the storage root is not the current Documents folder.
    const documentsFolder={...folderTarget,sourceIncludes:['text="Documents" resource-id="com.google.android.documentsui:id/breadcrumb_text"']};

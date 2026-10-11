@@ -21,10 +21,10 @@ export default async function({session,wd,senderPort,transportStatus,transportSn
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
  async function source(label) { const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
- async function lifecycle(label) {
+ async function lifecycle(label,observationOptions={}) {
   if(ordinaryHelper){
-   const {observeHelper}=await import('./helper-lifecycle3393.mjs');
-   await observeHelper({session,wd,label,transportSnapshot});
+   const {observeHelper}=await import(process.env.HELPER_OBSERVATION_MODE==='public-supplementary'?'./helper-public-observation3393.mjs':'./helper-lifecycle3393.mjs');
+   await observeHelper({session,wd,label,transportSnapshot,...observationOptions});
   }
   const failures=[];
   for(const command of ['dumpsys activity -p org.localsend.localsend_app processes','dumpsys activity processes','dumpsys activity']){

@@ -2,6 +2,7 @@ package org.localsend.cloudtransport;
 import android.app.*;
 import android.content.Intent;
 import android.content.Context;
+import android.content.ComponentName;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Base64;
@@ -11,24 +12,49 @@ import java.net.*;
 import java.io.*;
 import java.util.concurrent.*;
 import java.security.MessageDigest;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class RelayService extends Service {
+  private static final String processNonce=UUID.randomUUID().toString();
+  private static final AtomicLong observationSequence=new AtomicLong();
+  private static final Object activityLock=new Object();
+  private static volatile boolean publicObservation=false;
+  private static int startedActivities=0,resumedActivities=0;
+  private static long activityVersion=0,activityElapsedNs=0;
+  private static String lastActivityEvent="unobserved";
   private volatile boolean running=false;
-  private String endpoint,token;
+  private String endpoint,token,serviceMode;
   private int targetPort;
   private ServerSocket control;
   private final ConcurrentHashMap<String,Socket> sockets=new ConcurrentHashMap<>();
   private void trace(String origin,String id){Log.i("CloudTransport","elapsedNs="+SystemClock.elapsedRealtimeNanos()+" origin="+origin+" peer="+id);}
+  static void activityEvent(String event,int startedDelta,int resumedDelta){
+    if(!publicObservation)return;
+    synchronized(activityLock){
+      startedActivities+=startedDelta;resumedActivities+=resumedDelta;
+      lastActivityEvent=event;activityElapsedNs=SystemClock.elapsedRealtimeNanos();activityVersion++;
+      Log.i("CloudTransport","own-activity nonce="+processNonce+" pid="+android.os.Process.myPid()+" uid="+android.os.Process.myUid()+" elapsedNs="+activityElapsedNs+" version="+activityVersion+" event="+event+" started="+startedActivities+" resumed="+resumedActivities);
+    }
+  }
+  private static JSONObject activitySnapshot()throws Exception{
+    synchronized(activityLock){
+      if(startedActivities<0||resumedActivities<0||resumedActivities>startedActivities||activityVersion==0)throw new IllegalStateException("Inconsistent activity lifecycle");
+      return new JSONObject().put("version",activityVersion).put("event",lastActivityEvent).put("elapsedNs",activityElapsedNs).put("started",startedActivities).put("resumed",resumedActivities);
+    }
+  }
   static JSONObject readConfig(Context context)throws Exception{
     JSONObject config=new JSONObject(read(context.getAssets().open("config.json")));
     String serviceMode=config.getString("serviceMode");
     if(!serviceMode.equals("foreground")&&!serviceMode.equals("ordinary"))throw new IllegalArgumentException("Invalid service mode");
+    String observationMode=config.getString("observationMode");
+    if(!observationMode.equals("native")&&!observationMode.equals("public-supplementary"))throw new IllegalArgumentException("Invalid observation mode");
+    publicObservation=observationMode.equals("public-supplementary");
     return config;
   }
   public IBinder onBind(Intent intent){return null;}
   public int onStartCommand(Intent intent,int flags,int id){
     if(running)return START_NOT_STICKY;
-    String serviceMode;
     try{
       JSONObject config=readConfig(this);
       serviceMode=config.getString("serviceMode");
@@ -75,10 +101,55 @@ public final class RelayService extends Service {
     else if(kind.equals("close")||kind.equals("error")){trace("relay-command:"+kind,id);Socket s=sockets.remove(id);if(s!=null)s.close();}
   }
   private void push(JSONObject e)throws Exception{request("POST","/push",e.toString());}
+  // These are sampled public framework observations, not freezer-state or
+  // continuous-health evidence. Only existing pull requests carry them.
+  private JSONObject observation()throws Exception{
+    long sampleStartNs=SystemClock.elapsedRealtimeNanos();
+    JSONObject beforeActivity=activitySnapshot();
+    int pid=android.os.Process.myPid(),uid=android.os.Process.myUid();
+    ActivityManager manager=getSystemService(ActivityManager.class);
+    ActivityManager.RunningAppProcessInfo process=new ActivityManager.RunningAppProcessInfo();
+    ActivityManager.getMyMemoryState(process);
+    if(process.pid!=pid||process.uid!=uid)throw new IllegalStateException("Own process identity mismatch");
+    ComponentName expected=new ComponentName(this,RelayService.class);
+    List<ActivityManager.RunningServiceInfo> services=manager.getRunningServices(64);
+    ActivityManager.RunningServiceInfo own=null;
+    int matches=0;
+    if(services!=null)for(ActivityManager.RunningServiceInfo info:services){if(expected.equals(info.service)){own=info;matches++;}}
+    if(matches!=1||own.pid!=pid||own.uid!=uid)throw new IllegalStateException("Own service identity missing or inconsistent");
+    boolean foregroundFlag=(own.flags&ActivityManager.RunningServiceInfo.FLAG_FOREGROUND)!=0;
+    boolean startedFlag=(own.flags&ActivityManager.RunningServiceInfo.FLAG_STARTED)!=0;
+    if(own.foreground!=foregroundFlag||own.started!=startedFlag)throw new IllegalStateException("Own service flags inconsistent");
+    JSONObject service=new JSONObject().put("component",own.service.flattenToString()).put("pid",own.pid).put("uid",own.uid).put("started",own.started).put("foreground",own.foreground).put("flags",own.flags).put("foregroundFlag",foregroundFlag).put("startedFlag",startedFlag).put("activeSinceMs",own.activeSince);
+    JSONArray peers=new JSONArray();
+    // Map membership can change while observed; report that limitation and
+    // require the receiver to correlate peer events rather than assume atomicity.
+    int peerCountStart=sockets.size();
+    if(peerCountStart>32)throw new IllegalStateException("Peer observation limit exceeded");
+    for(Map.Entry<String,Socket> entry:sockets.entrySet()){
+      if(peers.length()>=32)throw new IllegalStateException("Peer observation limit exceeded");
+      Socket socket=entry.getValue();
+      peers.put(new JSONObject().put("id",entry.getKey()).put("closed",socket.isClosed()).put("connected",socket.isConnected()).put("inputShutdown",socket.isInputShutdown()).put("outputShutdown",socket.isOutputShutdown()).put("localAddress",socket.getLocalAddress().getHostAddress()).put("localPort",socket.getLocalPort()).put("remoteAddress",socket.getInetAddress().getHostAddress()).put("remotePort",socket.getPort()));
+    }
+    JSONObject afterActivity=activitySnapshot();
+    boolean activityStable=beforeActivity.getLong("version")==afterActivity.getLong("version");
+    int peerCountEnd=sockets.size();
+    if(peerCountEnd>32)throw new IllegalStateException("Peer observation limit exceeded");
+    long sampleEndNs=SystemClock.elapsedRealtimeNanos();
+    return new JSONObject().put("schema",1).put("processNonce",processNonce).put("sequence",observationSequence.incrementAndGet()).put("sampleStartNs",sampleStartNs).put("sampleEndNs",sampleEndNs).put("pid",pid).put("uid",uid).put("memoryState",new JSONObject().put("pid",process.pid).put("uid",process.uid)).put("importance",process.importance).put("serviceMode",serviceMode).put("activityBefore",beforeActivity).put("activity",afterActivity).put("activityStable",activityStable).put("serviceMatches",matches).put("service",service).put("peerCountStart",peerCountStart).put("peerCountEnd",peerCountEnd).put("peers",peers).put("peerSnapshotAtomic",false);
+  }
   private String request(String method,String path,String body)throws Exception{
     HttpURLConnection c=(HttpURLConnection)new URL(endpoint+path).openConnection();
     c.setConnectTimeout(10000);c.setReadTimeout(30000);c.setRequestMethod(method);c.setRequestProperty("Authorization","Bearer "+token);
     try{
+      if(publicObservation&&method.equals("GET")&&path.equals("/pull")){
+        JSONObject sample=observation();
+        sample.put("emittedElapsedNs",SystemClock.elapsedRealtimeNanos());
+        byte[] observationBytes=sample.toString().getBytes("UTF-8");
+        if(observationBytes.length>8192)throw new IllegalStateException("Observation payload limit exceeded");
+        c.setRequestProperty("X-CloudTransport-Observation",Base64.encodeToString(observationBytes,Base64.NO_WRAP));
+        Log.i("CloudTransport","own-observation "+sample.toString());
+      }
       if(body!=null){byte[] data=body.getBytes("UTF-8");c.setDoOutput(true);c.setFixedLengthStreamingMode(data.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream out=c.getOutputStream()){out.write(data);}}
       int status=c.getResponseCode();if(status!=200){trace("http-status:"+method+":"+path+":"+status,"-");throw new IOException("Relay response "+status);}
       return read(c.getInputStream());

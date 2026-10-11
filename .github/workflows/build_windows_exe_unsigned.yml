@@ -22,6 +22,10 @@ on:
         type: choice
         options: [foreground, ordinary]
         default: foreground
+      helper_observation_mode:
+        type: choice
+        options: [native, public-supplementary]
+        default: native
 permissions:
   contents: read
 jobs:
@@ -101,6 +105,7 @@ jobs:
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
       BACKGROUND_POLICY_EXPERIMENT: ${{ inputs.background_policy || 'observe' }}
       HELPER_SERVICE_MODE: ${{ inputs.helper_service_mode || 'foreground' }}
+      HELPER_OBSERVATION_MODE: ${{ inputs.helper_observation_mode || 'native' }}
       BS_OS: '15.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario3393.mjs
     steps:

@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $serviceMode = if ([string]::IsNullOrEmpty($env:HELPER_SERVICE_MODE)) { 'foreground' } else { $env:HELPER_SERVICE_MODE }
 if ($serviceMode -cnotin @('foreground', 'ordinary')) { throw 'HELPER_SERVICE_MODE must be foreground or ordinary' }
+$observationMode = if ([string]::IsNullOrEmpty($env:HELPER_OBSERVATION_MODE)) { 'native' } else { $env:HELPER_OBSERVATION_MODE }
+if ($observationMode -cnotin @('native', 'public-supplementary')) { throw 'HELPER_OBSERVATION_MODE must be native or public-supplementary' }
 $output = 'C:\tmp\helper'
 New-Item -ItemType Directory -Force "$output/classes", "$output/dex", "$output/assets" | Out-Null
 if (-not $env:ANDROID_HOME -or -not (Test-Path "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat")) {
@@ -12,7 +14,7 @@ if (-not $env:ANDROID_HOME -or -not (Test-Path "$env:ANDROID_HOME/cmdline-tools/
 }
 1..100 | ForEach-Object { 'y' } | & "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" 'platforms;android-35' 'build-tools;35.0.0'
 if ($LASTEXITCODE -ne 0) { throw 'Android SDK preparation failed' }
-@{endpoint='http://bs-local.com:8080';token=$env:RELAY_TOKEN;serviceMode=$serviceMode} | ConvertTo-Json -Compress | Set-Content "$output/assets/config.json"
+@{endpoint='http://bs-local.com:8080';token=$env:RELAY_TOKEN;serviceMode=$serviceMode;observationMode=$observationMode} | ConvertTo-Json -Compress | Set-Content "$output/assets/config.json"
 $source = @(Get-ChildItem support/cloud_transport/android -Filter '*.java' | ForEach-Object FullName)
 & javac -source 8 -target 8 -classpath "$env:ANDROID_HOME/platforms/android-35/android.jar" -d "$output/classes" @source
 if ($LASTEXITCODE -ne 0) { throw 'javac failed' }
