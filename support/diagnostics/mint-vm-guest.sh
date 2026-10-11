@@ -39,7 +39,7 @@ export XAUTHORITY="${XAUTHORITY:-$HOME_MINT/.Xauthority}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y xvfb openbox dbus-x11 flatpak imagemagick xdotool x11-utils x11-xserver-utils iproute2 gdb strace fontconfig locales libgtk-3-0 libayatana-appindicator3-1 libgl1-mesa-dri libegl1 libgles2 curl procps
-curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-apt-keyring.gpg
+curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
 curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
 apt-get update
 apt-get install -y brave-keyring

@@ -10,6 +10,9 @@ exec > >(tee -a "$OUT/host.log") 2>&1
 QEMU_PID=""
 cleanup() {
   if [[ -n "$QEMU_PID" ]] && kill -0 "$QEMU_PID" 2>/dev/null; then
+    if [[ -S "${HMP:-}" ]]; then
+      printf 'screendump "%s/boot-screen.ppm"\n' "$OUT" | timeout 5s socat - "UNIX-CONNECT:$HMP" > "$OUT/monitor.log" 2>&1 || true
+    fi
     kill "$QEMU_PID" 2>/dev/null || true
     wait "$QEMU_PID" 2>/dev/null || true
   fi
@@ -80,8 +83,8 @@ done
 [[ -S "$SERIAL" ]] || fail 'QEMU serial socket did not appear within 90 seconds.'
 
 set +e
-expect <<'EXPECT' > "$OUT/serial.log" 2>&1
-set timeout 1500
+expect <<'EXPECT' > >(tee "$OUT/serial.log") 2>&1
+set timeout 240
 log_user 1
 spawn socat -,raw,echo=0 UNIX-CONNECT:$env(SERIAL)
 expect {
@@ -92,9 +95,10 @@ expect {
 }
 send -- {stty -echo; mkdir -p /mnt/input /mnt/evidence /mnt/flatpak-data; mount -t 9p -o trans=virtio,version=9p2000.L,ro localsend_input /mnt/input; mount -t 9p -o trans=virtio,version=9p2000.L localsend_evidence /mnt/evidence; mount -t ext4 /dev/vda /mnt/flatpak-data; bash /mnt/input/mint-vm-guest.sh /mnt/input /mnt/evidence /mnt/flatpak-data; guest_status=$?; echo MINT_VM_DONE:$guest_status}
 send -- "\r"
+set timeout 1500
 expect {
-  -re {\r\nMINT_VM_DONE:0\r} { exit 0 }
-  -re {\r\nMINT_VM_DONE:[1-9][0-9]*\r} { puts "Guest returned a nonzero status"; exit 25 }
+  -re {(^|[\r\n])MINT_VM_DONE:0[\r\n]} { exit 0 }
+  -re {(^|[\r\n])MINT_VM_DONE:[1-9][0-9]*[\r\n]} { puts "Guest returned a nonzero status"; exit 25 }
   timeout { puts "Timed out waiting for guest completion marker"; exit 23 }
   eof { puts "Serial console closed before guest completion"; exit 24 }
 }

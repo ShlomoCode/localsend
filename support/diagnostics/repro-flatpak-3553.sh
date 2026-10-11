@@ -175,8 +175,19 @@ launch_case() {
     mean=$(identify -format '%[fx:mean]' "$dir/window-$wid.png" 2>/dev/null || echo 1)
     if awk -v m="$mean" 'BEGIN {exit !(m<0.03)}'; then black_window=1; fi
   done < <(xdotool search --onlyvisible --name '.*' 2>/dev/null || true)
-  printf 'all_visible_windows=%s app_windows=%s black_app_window=%s app_port_53317=%s\n' "$windows" "$app_windows" "$black_window" "$port" > "$dir/ui-state.txt"
-  if [[ "$app_windows" -gt 0 && "$port" -gt 0 ]]; then result=started
+  local process_state
+  process_state=$(sudo awk '{print $3}' "/proc/$app_pid/stat" 2>/dev/null || true)
+  printf 'all_visible_windows=%s app_windows=%s black_app_window=%s app_port_53317=%s process_state=%s\n' "$windows" "$app_windows" "$black_window" "$port" "$process_state" > "$dir/ui-state.txt"
+  if [[ -z "$process_state" || "$process_state" == Z || "$process_state" == X ]]; then
+    result=infrastructure_failure_exited_during_capture
+    if kill -0 "$pid" 2>/dev/null; then
+      echo running > "$dir/launcher-result.txt"
+    else
+      local capture_launcher_exit=0
+      wait "$pid" 2>/dev/null || capture_launcher_exit=$?
+      echo "exit=$capture_launcher_exit" > "$dir/launcher-result.txt"
+    fi
+  elif [[ "$app_windows" -gt 0 && "$port" -gt 0 ]]; then result=started
   elif [[ "$port" -eq 0 && ( "$app_windows" -eq 0 || "$black_window" -eq 1 ) ]] && awk -v p="$cpu" 'BEGIN {exit !(p>=80)}'; then result=hang_candidate
   else result=started_or_slow
   fi
