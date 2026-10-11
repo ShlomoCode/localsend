@@ -310,10 +310,10 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     remove=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Delete',label:'file-manager-delete-action'});
    }
    await wd('POST',prefix+'/element/'+remove['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   const confirm=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash")]',label:'file-manager-deletion-confirmation'});
+   const confirm=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash" or @text="Move to Recycle bin")]',label:'file-manager-deletion-confirmation'});
    await snapshot('files-delete-dialog');
    const deleteSource=readFileSync('evidence/android-files-delete-dialog.xml','utf8');
-   const deletionMode=/trash/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
+   const deletionMode=/trash|recycle bin/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
    assert.equal(deletionMode,purgeTrash?'trash':requestedDeletionAction,'Native confirmation does not match the requested deletion action; do not substitute another deletion mode');
    await waitFile('evidence/resend-address-ready',90000);
    const deleteUtc=new Date().toISOString();
@@ -364,7 +364,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     }
     await nativeClick('accessibility id','Go to My Files home','purge-my-files-home');
     await nativeClick('xpath','//*[starts-with(@content-desc,"More options")]','purge-my-files-menu');
-    await nativeClick('xpath','//*[@text="Trash"]','purge-trash-entry');
+    await nativeClick('xpath','//*[@text="Trash" or @text="Recycle bin"]','purge-trash-entry');
     const trashFile=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="A.txt"]',label:'purge-trash-owned-A',stableRect:true});
     await snapshot('trash-retained-A');
     assert.equal(await wd('GET',prefix+'/appium/device/current_package'),fileManagerPackage,'Trash foreground provider differs');
