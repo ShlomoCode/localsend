@@ -10,6 +10,10 @@ on:
         description: Build artifact name
         required: true
         default: baseline2381-c1ce
+      checks_only:
+        description: Run focused source checks instead of a Windows build
+        type: boolean
+        default: false
 jobs:
   baseline:
     runs-on: windows-latest
@@ -23,6 +27,7 @@ jobs:
           flutter-version: 3.41.9
           channel: stable
       - name: Prepare required MSIX helper
+        if: ${{ !inputs.checks_only }}
         shell: pwsh
         run: |
           $makepri = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin/10.*/x64/makepri.exe" | Select-Object -Last 1
@@ -32,9 +37,23 @@ jobs:
         working-directory: app
         run: flutter pub get
       - name: Build specified source
+        if: ${{ !inputs.checks_only }}
         working-directory: app
         run: flutter build windows
+      - name: Check changed file formatting
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: dart format --output=none --set-exit-if-changed lib/pages/tabs/send_tab.dart
+      - name: Analyze changed file
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: flutter analyze lib/pages/tabs/send_tab.dart
+      - name: Check existing favorite behavior
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: flutter test test/unit/provider/favorites_provider_test.dart
       - uses: actions/upload-artifact@v6
+        if: ${{ !inputs.checks_only }}
         with:
           name: ${{ inputs.artifact_name }}
           path: app/build/windows/x64/runner/Release

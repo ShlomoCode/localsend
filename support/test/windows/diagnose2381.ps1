@@ -466,7 +466,8 @@ if($FallbackControl) {
  }
  function ReverseControl([string]$from,[string]$prefix) {
   PickControlFixture $from $prefix
-  Click 576 212
+  # File selection expands the panel; Favorites is measured at y350 in the actual control screenshot.
+  Click 576 350
   Screenshot "$prefix-favorites-empty"
   PrimaryButton "$prefix-favorites-empty"
   Screenshot "$prefix-add-sender-favorite"
