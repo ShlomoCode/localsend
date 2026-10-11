@@ -1,6 +1,7 @@
 import csv
 from datetime import datetime, timezone
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -116,12 +117,15 @@ while not (out / 'control-completed').exists():
 screen('sender-control-completed')
 (out / 'sender-first-finished').touch()
 if os.environ.get('ISSUE_2007_RESEND'):
-    deadline = time.monotonic() + 180
-    while not (out / 'resend-ready').exists():
-        if time.monotonic() > deadline:
-            screen('sender-delete-control-timeout')
-            raise RuntimeError('Real receiver deletion did not complete')
-        time.sleep(0.5)
+    variant = os.environ.get('ISSUE_2007_VARIANT', 'unchanged')
+    if variant == 'changed':
+        # Change bytes while keeping filename, extension and length identical.
+        fixture.write_bytes(fixture.read_bytes().replace(b'control v1', b'control v2'))
+    elif variant == 'renamed':
+        renamed = fixture.with_name('B.txt')
+        renamed.write_bytes(fixture.read_bytes())
+        fixture = renamed
+    (out / 'resend-input.json').write_text(json.dumps({'variant': variant, 'path': str(fixture), 'name': fixture.name}, indent=2))
     # Observed original Finished screen places the session Done action here.
     click(938, 680)
     screen('resend-send-page')
@@ -146,10 +150,20 @@ if os.environ.get('ISSUE_2007_RESEND'):
     click(row_end + 70, row_y)
     text('Enter', 'resend-manual-address-dialog')
     run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
+    screen('resend-address-prepared')
+    (out / 'resend-address-ready').touch()
+    deadline = time.monotonic() + 180
+    while not (out / 'resend-ready').exists():
+        if time.monotonic() > deadline:
+            screen('sender-delete-control-timeout')
+            raise RuntimeError('Real receiver deletion did not complete')
+        time.sleep(0.05)
+    submitted_utc = datetime.now(timezone.utc).isoformat()
     run('xdotool', 'key', 'Return')
+    (out / 'resend-submission.json').write_text(json.dumps({'utc': submitted_utc, 'action': 'Return in prepared real address dialog'}, indent=2))
+    (out / 'resend-requested').touch()
     time.sleep(2)
     screen('resend-transfer-requested')
-    (out / 'resend-requested').touch()
     deadline = time.monotonic() + 120
     while not (out / 'resend-completed').exists():
         if time.monotonic() > deadline:

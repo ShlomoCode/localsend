@@ -115,27 +115,27 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const deleteSource=readFileSync('evidence/android-files-delete-dialog.xml','utf8');
    const deletionMode=/trash/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
    const confirm=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash")]'});
+   await waitFile('evidence/resend-address-ready',90000);
    const deleteUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+confirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   await new Promise(r=>setTimeout(r,1500));
-   await snapshot('files-after-deletion');
+   let absenceError;
    const absent=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
     if(!String(error).includes('No such file or directory'))throw error;
+    absenceError=String(error);
     return null;
    });
    assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
-   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,confirmation:'android-files-delete-dialog.xml'},null,2));
+   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,pathAbsenceUtc:new Date().toISOString(),absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
-   await new Promise(r=>setTimeout(r,1500));
-   await snapshot('receiver-return-after-delete');
    const done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'});
    await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   await snapshot('receiver-ready-for-resend');
    writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
    await waitFile('evidence/resend-requested',90000);
+   const resendInput=JSON.parse(readFileSync('evidence/resend-input.json','utf8'));
+   const resendExpected=readFileSync(resendInput.path);
+   const resendDestination='/sdcard/Download/'+resendInput.name;
    let secondAccept;
    for(let i=0;i<20;i++){
-    await snapshot('resend-request-'+i);
     secondAccept=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Accept'}).catch(()=>null);
     if(secondAccept)break;
     await new Promise(r=>setTimeout(r,1000));
@@ -147,15 +147,19 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    for(let attempt=0;attempt<10;attempt++){
     await new Promise(r=>setTimeout(r,1000));
     await snapshot('after-resend-accept-'+attempt);
-    const value=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
+    const value=await wd('POST',prefix+'/appium/device/pull_file',{path:resendDestination}).catch(error=>{
      if(!String(error).includes('No such file or directory'))throw error;
      return null;
     });
-    if(value!==null){saved=Buffer.from(value,'base64');break;}
+    if(value!==null){
+     saved=Buffer.from(value,'base64');
+     if(saved.equals(resendExpected))break;
+    }
    }
-   const byteExact=saved?.equals(expected)??false;
-   if(saved)writeFileSync('evidence/android-resaved-A.txt',saved);
-   writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:'1.18.2',deletionMode,deleteUtc,acceptUtc,unchangedFile:true,sameName:'A.txt',sameDestination:'/sdcard/Download/A.txt',accepted:true,saved:saved!==undefined,byteExact,bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
+   const byteExact=saved?.equals(resendExpected)??false;
+   const submission=JSON.parse(readFileSync('evidence/resend-submission.json','utf8'));
+   if(saved)writeFileSync('evidence/android-resaved-'+resendInput.name,saved);
+   writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:'1.18.2',deletionMode,deleteUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name==='A.txt',fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
    writeFileSync('evidence/resend-completed','Resend outcome observed; inspect byteExact and endpoint evidence\n');
    await new Promise(r=>desktop.once('exit',r));
    assert.equal(desktop.exitCode,0,'Desktop resend observation did not complete');

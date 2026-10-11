@@ -1,6 +1,12 @@
 name: Diagnose issue 2007 physical original apps
 on:
   workflow_dispatch:
+    inputs:
+      scenario:
+        type: choice
+        options: [unchanged, changed, renamed]
+        default: unchanged
+        description: Actual resend file variant after permanent deletion
   push:
     branches: [codex/bug-2007-diagnostics]
     paths: [.github/workflows/diagnose-2007-physical.yml]
@@ -15,6 +21,7 @@ jobs:
       BASELINE_APP: bs://d5703b8a4cb6bc74c349f36d8f2ed3c3b9a28441
       BS_DEVICE: Vivo Y21
       BS_OS: '11.0'
+      ISSUE_2007_VARIANT: ${{ inputs.scenario || 'unchanged' }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-physical-control.mjs
     steps:
       - uses: actions/checkout@v6
