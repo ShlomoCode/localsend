@@ -87,6 +87,10 @@ while IFS= read -r assignment; do export "$assignment"; done < evidence/session-
 { cinnamon --version; flatpak --version; loginctl list-sessions; } > evidence/desktop-identity.txt
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user --noninteractive -y flathub org.localsend.localsend_app
+{ dpkg-query -W '*xdg-desktop-portal*'; flatpak remote-info --user --log flathub org.localsend.localsend_app; } > evidence/portal-and-package-history.txt 2>&1
+gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop > evidence/portal-host-introspection.txt 2>&1 || true
+flatpak run --user --command=sh org.localsend.localsend_app -c 'command -v gdbus; gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop' > evidence/portal-sandbox-introspection.txt 2>&1 || true
+cp -a /usr/share/xdg-desktop-portal evidence/portal-backend-config
 session_environment() {
   local desktop_pid
   desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
