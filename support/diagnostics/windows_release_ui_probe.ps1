@@ -314,7 +314,7 @@ namespace LocalSendReleaseUiProbe {
 
   if ($DiagnosticPeerPort -gt 0) {
     $favorite = @{id='issue3393-relay';fingerprint='issue3393-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='Android15 receiver';customAlias=$true} | ConvertTo-Json -Compress
-    @{ls_alias='Windows3393';ls_favorites=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
+    @{'flutter.ls_alias'='Windows3393';'flutter.ls_favorites'=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
   }
   if ($EntryMethod -eq 'SendTo') {
     $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList @('"' + $selectionPath + '"') -PassThru
