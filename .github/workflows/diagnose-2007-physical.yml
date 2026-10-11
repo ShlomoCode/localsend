@@ -48,6 +48,10 @@ jobs:
       SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-physical-control.mjs
     steps:
       - uses: actions/checkout@v6
+      - name: Verify diagnostic JavaScript syntax before device allocation
+        run: |
+          node --check support/diagnostics/2007-physical-control.mjs
+          node --check support/diagnostics/native-readiness.mjs
       - uses: actions/setup-java@v5
         with:
           distribution: temurin

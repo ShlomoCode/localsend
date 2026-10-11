@@ -66,7 +66,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await waitForNativeControl({wd,prefix,using:'id',value:'com.google.android.documentsui:id/toolbar',label:stage+'-reopened-native-picker'});
    nativeSource=await wd('GET',prefix+'/source');
   }
-  if(!nativeSource.includes('resource-id="com.google.android.documentsui:id/breadcrumb_text" text="Documents"')&&!/text="Documents"[^>]*resource-id="com.google.android.documentsui:id/breadcrumb_text"/.test(nativeSource)){
+  const documentsSelected=(nativeSource.match(/<[^>]+>/g)||[]).some(tag=>tag.includes('text="Documents"')&&tag.includes('resource-id="com.google.android.documentsui:id/breadcrumb_text"'));
+  if(!documentsSelected){
    await click('xpath','//*[@text="Documents" and @resource-id!="com.google.android.documentsui:id/breadcrumb_text"]');
   }
   await snapshot(stage+'-native-documents');
