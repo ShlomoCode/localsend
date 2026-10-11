@@ -51,6 +51,40 @@ export default async function({session,wd,senderPort,transportStatus}){
   await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
   return result;
  }
+ async function fileManagerDetails(filename,label,desired){
+  const appId='com.google.android.apps.nbu.files';
+  const installed=await wd('POST',prefix+'/appium/device/app_installed',{appId});
+  if(!installed)throw new Error('Google Files is not installed; normal file-manager details require another observed entry');
+  await wd('POST',prefix+'/appium/device/activate_app',{appId});
+  for(let attempt=0;attempt<5;attempt++){
+   await capture(label+'-files-entry-'+attempt);
+   const source=await wd('GET',prefix+'/source');
+   const choice=source.includes('id/agree_button')?{using:'id',value:appId+':id/agree_button'}:source.includes('permission_allow_button')?{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'}:null;
+   if(!choice)break;
+   const e=await waitForNativeControl({wd,prefix,label:label+'-files-onboarding-'+attempt,...choice});
+   await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  }
+  const actualPackage=await wd('GET',prefix+'/appium/device/current_package');
+  writeFileSync(`evidence/${label}-files-provenance.json`,JSON.stringify({appId,installed,actualPackage},null,2));
+  if(actualPackage!==appId)throw new Error('Normal Google Files foreground package differs');
+  const browse=await waitForNativeControl({wd,prefix,label:label+'-files-browse',using:'xpath',value:'//*[@text="Browse" or @content-desc="Browse"]',optional:true,timeoutMs:3000});
+  if(browse)await wd('POST',prefix+'/element/'+browse['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  await capture(label+'-files-browse');
+  const category=await waitForNativeControl({wd,prefix,label:label+'-files-category',using:'xpath',value:`//*[@text="${desired?'Images':'Downloads'}"]`});
+  await wd('POST',prefix+'/element/'+category['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  await capture(label+'-files-category');
+  const file=await waitForNativeControl({wd,prefix,label:label+'-files-owned-image',using:'xpath',value:`//*[@text="${filename}" or contains(@content-desc,"${filename}")]`});
+  const rect=await wd('GET',prefix+'/element/'+file['element-6066-11e4-a52e-4f735466cecf']+'/rect');
+  await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'owned-image',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
+  await capture(label+'-files-owned-selected');
+  const menu=await waitForNativeControl({wd,prefix,label:label+'-files-menu',using:'accessibility id',value:'More options'});
+  await wd('POST',prefix+'/element/'+menu['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  await capture(label+'-files-menu');
+  const info=await waitForNativeControl({wd,prefix,label:label+'-files-info',using:'xpath',value:'//*[@text="File info" or @text="Details" or @content-desc="File info" or @content-desc="Details"]'});
+  await wd('POST',prefix+'/element/'+info['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  await capture(label+'-files-details');
+  await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+ }
  try{
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-desktop.ps1']);
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName',`issue2311-${process.env.GITHUB_RUN_ID}-control.txt`,'-DiagnosticPeerPort',String(senderPort)]);
@@ -92,7 +126,9 @@ export default async function({session,wd,senderPort,transportStatus}){
    const mediaStore=await shell(`content query --uri content://media/external/images/media --projection _id:_display_name:_data:date_modified:date_added:datetaken --where "_display_name='${filename}'"`,gallery+'-mediastore');
    const normalMetadata=await helperMetadata(filename,gallery);
    results.push({case:gallery,source,savedPath,savedSha256,byteExact:true,filesystem,mediaStore,normalMetadata});
+   writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));
    writeFileSync(`evidence/saved-${gallery}.png`,saved);
+   await fileManagerDetails(filename,gallery,desired);
    await click('Done');
   }
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
