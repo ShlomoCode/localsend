@@ -25,6 +25,7 @@ jobs:
       - name: Validate diagnostic syntax in cloud
         run: |
           bash -n support/diagnostics/2414-memory-pair.sh
+          bash -n support/diagnostics/2414-memory-preflight.sh
           python3 - <<'PY'
           import ast
           from pathlib import Path

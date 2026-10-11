@@ -247,6 +247,11 @@ def run_case(count):
         focus('host',swin)
         locate_host('Sender2414',case+'-sender-ready')
         result['sender_ready_geometry']=normalize_host(swin,case)
+        if SOURCE_PAIR:
+            loaded_maps=Path(f'/proc/{sender.pid}/maps').read_text()
+            (OUT/(case+'-sender-ready-loaded-maps.txt')).write_text(loaded_maps)
+            if 'libdartjni.so' in loaded_maps or 'libjvm.so' in loaded_maps:
+                raise RuntimeError('Sender loaded JNI unexpectedly; runtime qualification must be revised')
         capture('host',case+'-sender-ready')
         result['stage']='picker'
         click('host',(96,188))

@@ -42,7 +42,24 @@ for line in cache.splitlines():
         libraries.setdefault(match[1], []).append(Path(match[2]))
 records = []
 failures = []
-pending = [path for path in bundle.rglob('*') if path.is_file() and path.open('rb').read(4) == b'\x7fELF']
+all_elf = [path for path in bundle.rglob('*') if path.is_file() and path.open('rb').read(4) == b'\x7fELF']
+source_pair = Path('/home/probe/source-pair-mode').exists() and Path('/home/probe/source-pair-mode').read_text().strip() == '1'
+optional = bundle / 'lib/libdartjni.so'
+optional_records = []
+if source_pair and optional in all_elf:
+    # JNI 1.0.0's Flutter CMake target is optional, and its Dart library loads
+    # lazily. It is not registered as a Linux native plugin or used by this
+    # app's Linux folder/send/save route. Keep the artifact untouched and
+    # transparently record its unresolved Java dependency. Any real DT_NEEDED
+    # edge to it below still traverses it and fails the closure normally.
+    optional_records.append({'path': str(optional),
+        'role': 'Dormant optional JNI root on the Linux file route; require real control and loaded-map verification',
+        'dynamic': subprocess.check_output(['readelf', '-d', str(optional)], text=True),
+        'versions': subprocess.check_output(['readelf', '-V', str(optional)], text=True),
+        'unresolved_optional_dependency': 'libjvm.so; no JRE installed solely to satisfy all-ELF inspection',
+        'source': 'jni1.0.0 src/CMakeLists.txt optional Flutter JNI; lib/src/jni.dart lazy _dylib; exact app Linux registrant and NativeAssetsManifest'})
+pending = [path for path in all_elf if not (source_pair and path == optional)]
+roots = list(map(str, pending))
 visited = set()
 while pending:
     path = pending.pop()
@@ -83,7 +100,8 @@ while pending:
         if missing:
             failures.append(f'{path}: {soname} lacks {missing}')
     records.append(record)
-(output / 'static-abi-preflight.json').write_text(json.dumps({'scope': 'Static readelf only; no artifact execution or ldd', 'records': records, 'failures': failures}, indent=2))
+(output / 'static-abi-preflight.json').write_text(json.dumps({'scope': 'Static readelf runtime closure; no artifact execution or ldd',
+    'roots': roots, 'optional_artifacts': optional_records, 'records': records, 'failures': failures}, indent=2))
 if failures:
     raise SystemExit('\n'.join(failures))
 PY

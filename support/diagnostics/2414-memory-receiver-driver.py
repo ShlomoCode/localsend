@@ -156,6 +156,16 @@ def stage(state, name):
               'smaps_rollup': pss, 'status': read(f'/proc/{pid}/status'),
               'meminfo': read('/proc/meminfo'), 'pressure_memory': read('/proc/pressure/memory'),
               'vmstat': vmstat()}
+    if SOURCE_PAIR:
+        maps = read(f'/proc/{pid}/maps')
+        if not isinstance(maps, str):
+            raise RuntimeError('Actual loaded library maps unavailable')
+        map_path = OUT / f"files-{state['count']}-{name}-loaded-maps.txt"
+        map_path.write_text(maps)
+        record['loaded_maps_path'] = str(map_path)
+        record['jni_loaded'] = 'libdartjni.so' in maps or 'libjvm.so' in maps
+        if record['jni_loaded']:
+            raise RuntimeError('JNI unexpectedly loaded on this Linux route; runtime qualification must be revised')
     record['read_completed'] = time.monotonic()
     record['read_duration_seconds'] = record['read_completed'] - start
     record['pss_valid'] = (isinstance(pss, str) and record['observed_starttime'] == state['starttime']
