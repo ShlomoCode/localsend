@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync,appendFileSync} from "node:fs";
 const exec=promisify(execFile), pause=ms=>new Promise(r=>setTimeout(r,ms));
 export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
- const event=(name,detail={})=>appendFileSync("evidence/timeline.jsonl",JSON.stringify({utc:new Date().toISOString(),name,...detail})+"\n");
+ const event=(name,detail={})=>appendFileSync("evidence/timeline.jsonl",JSON.stringify({utc:new Date().toISOString(),name,...detail,eventType:name})+"\n");
  async function ui(action,x,y,label){await exec("pwsh",["-NoProfile","-File","support/diagnostics/windows2830-ui.ps1","-Action",action,"-X",String(x),"-Y",String(y),"-Label",label]);event("windows-ui",{action,x,y,label});}
  async function snapshot(label){
   const start=Date.now();
