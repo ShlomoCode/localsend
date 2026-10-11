@@ -24,9 +24,9 @@ on:
         description: Require the actual native permanent deletion or trash operation
       destination:
         type: choice
-        options: [downloads, saf-documents]
+        options: [downloads, saf-documents, saf-documents-persistent]
         default: downloads
-        description: Default Downloads path or Documents selected through native SAF
+        description: Downloads, per-transfer SAF Documents, or persistent Settings SAF Documents
 jobs:
   original-app-control:
     runs-on: ubuntu-24.04

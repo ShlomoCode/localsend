@@ -9,7 +9,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const prefix=`/session/${session}`;
  const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
  const requestedDeletionAction=process.env.ISSUE_2007_DELETE_ACTION||'permanent';
- const safDocuments=process.env.ISSUE_2007_DESTINATION==='saf-documents';
+ const persistentSaf=process.env.ISSUE_2007_DESTINATION==='saf-documents-persistent';
+ const safDocuments=persistentSaf||process.env.ISSUE_2007_DESTINATION==='saf-documents';
  const deviceFolder=safDocuments?'/sdcard/Documents':'/sdcard/Download';
  const windows=process.platform==='win32';
  await wd('POST',prefix+'/appium/settings',{settings:{waitForIdleTimeout:0}});
@@ -29,9 +30,25 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const element=await waitForNativeControl({wd,prefix,using,value,label:stage+'-saf-control-'+controlIndex++});
    await wd('POST',prefix+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   }
-  await click('accessibility id','Options');
-  await snapshot(stage+'-options');
-  await click('xpath','//*[@content-desc="Save to folder"]/following-sibling::android.widget.Button[1]');
+  if(persistentSaf&&stage!=='settings'){
+   await click('accessibility id','Options');
+   await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"primary%3ADocuments") or contains(@content-desc,"primary:Documents")]',label:stage+'-persistent-saf-destination'});
+   await snapshot(stage+'-persistent-saf-options');
+   writeFileSync('evidence/'+stage+'-saf-selection.json',JSON.stringify({selectionTiming:'Persistent Settings selection before first transfer; Options verification only at each approval',actualNativePicker:false,persistentNativeSelection:'settings-saf-selection.json',selectedDocumentsObserved:true,physicalPath:deviceFolder,source:'android-'+stage+'-persistent-saf-options.xml'},null,2));
+   await wd('POST',prefix+'/back',{});
+   return;
+  }
+  if(persistentSaf){
+   await click('xpath','//*[contains(@content-desc,"Settings") and @clickable="true"]');
+   await snapshot('settings-before-scroll');
+   await waitForNativeControl({wd,prefix,using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description("Save to folder"))',label:'settings-save-folder-scroll'});
+   await snapshot('settings-destination-ready');
+   await click('xpath','//android.widget.Button[@content-desc="Downloads"]');
+  }else{
+   await click('accessibility id','Options');
+   await snapshot(stage+'-options');
+   await click('xpath','//*[@content-desc="Save to folder"]/following-sibling::android.widget.Button[1]');
+  }
   let nativeSource;
   const pickerDeadline=Date.now()+10000;
   let pickerAttempt=0;
@@ -71,7 +88,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    let backAttempt=0;
    do{
     nativeSource=await wd('GET',prefix+'/source');
-    writeFileSync('evidence/'+stage+'-native-after-back-'+backAttempt+++'.xml',nativeSource);
+    writeFileSync('evidence/'+stage+'-native-after-back-'+(backAttempt++)+'.xml',nativeSource);
     if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource)||nativeSource.includes('content-desc="Save to folder"'))break;
     await new Promise(r=>setTimeout(r,200));
    }while(Date.now()<backDeadline);
@@ -111,8 +128,9 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,200));
   }while(Date.now()<selectionDeadline);
   assert(selected.includes('/storage/emulated/0/Documents')||selected.includes('primary%3ADocuments')||selected.includes('primary:Documents'),'Selected Documents destination not observed');
-  writeFileSync(`evidence/${stage}-saf-selection.json`,JSON.stringify({actualNativePicker:true,permissionPromptObserved,permissionAccepted,selectedDocumentsObserved:true,physicalPath:deviceFolder,source:`android-${stage}-selected-directory-${selectionAttempt-1}.xml`,apiBasis:'Official 1.17 source selects pickDirectoryPathAndroid on SDK27+ and SafStream for content URI. Native Documents selection observed, not inferred from path alone.'},null,2));
-  await wd('POST',prefix+'/back',{});
+  writeFileSync(`evidence/${stage}-saf-selection.json`,JSON.stringify({selectionTiming:persistentSaf?'Persistent Settings selection before first transfer':'Per-transfer Options selection before Accept',actualNativePicker:true,permissionPromptObserved,permissionAccepted,selectedDocumentsObserved:true,physicalPath:deviceFolder,source:`android-${stage}-selected-directory-${selectionAttempt-1}.xml`,apiBasis:'Official 1.17 source selects pickDirectoryPathAndroid on SDK27+ and SafStream for content URI. Native Documents selection observed, not inferred from path alone.'},null,2));
+  if(persistentSaf)await click('xpath','//*[contains(@content-desc,"Receive") and @clickable="true"]');
+  else await wd('POST',prefix+'/back',{});
  }
  async function waitFile(file,ms){
   const end=Date.now()+ms;
@@ -145,6 +163,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await new Promise(r=>setTimeout(r,2000));
  }
  assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
+ if(persistentSaf)await chooseSafDocuments('settings');
  const fileManagerInventory=[];
  for(const appId of ['com.vivo.filemanager','com.android.filemanager','com.google.android.apps.nbu.files']){
   const installed=await wd('POST',prefix+'/appium/device/app_installed',{appId}).catch(error=>({error:String(error)}));
