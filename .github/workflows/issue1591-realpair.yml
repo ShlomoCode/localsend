@@ -1,0 +1,104 @@
+name: iPad real app transfer diagnostic
+on:
+  push:
+    branches: [codex/issue1591-investigation]
+    paths:
+      - .github/workflows/issue1591-realpair.yml
+      - support/diagnostics/issue1591-realpair/**
+  workflow_dispatch:
+    inputs:
+      proxy_app:
+        description: Normally uploaded signed byte proxy bs:// app URL
+        type: string
+        required: true
+        default: bs://839561daa771f7b560f7b3c247ab0db75b3eb805
+      receiver_app:
+        description: Unchanged LocalSend IPA bs:// URL (current or historical release)
+        type: string
+        default: bs://4750eafebb15101bf6a61e9d8fc6632a43b20735
+        required: true
+      receiver_identity:
+        description: Exact receiver version, artifact provenance and upload/build reference
+        type: string
+        required: true
+      comparison:
+        description: Run only after the MKV gallery off control passes
+        type: choice
+        options: [none, mp4-off, gallery-on]
+        default: none
+      fixture_run_id:
+        description: Optional previous fork run ID to reuse the exact fixture bytes
+        type: string
+      fixture_artifact:
+        description: Exact realpair artifact name from fixture_run_id
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: issue1591-realpair
+  cancel-in-progress: false
+jobs:
+  realpair:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      PROXY_APP: ${{ inputs.proxy_app || 'bs://839561daa771f7b560f7b3c247ab0db75b3eb805' }}
+      RECEIVER_APP: ${{ inputs.receiver_app || 'bs://4750eafebb15101bf6a61e9d8fc6632a43b20735' }}
+      RECEIVER_IDENTITY: ${{ inputs.receiver_identity || 'LocalSend 1.18.2 unchanged c1ce322fb3acf08e44f329b8b7208b8b0d91e244 normal unsigned arm64 source build run 38135768528 artifact 11701275665 IPA sha256 abe84652465ce8add78f25a50e5c3bcceeac87d4e4f084c53d73d0b21cc06c27 BrowserStack normal resign' }}
+      COMPARISON: ${{ github.event_name == 'workflow_dispatch' && inputs.comparison || 'none' }}
+      BS_LOCAL_ID: issue1591-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Retrieve exact retained fixtures for controlled comparison
+        if: inputs.fixture_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.fixture_run_id }}
+          name: ${{ inputs.fixture_artifact }}
+          path: fixture-source
+      - name: Prepare cloud-only media and Local binary
+        shell: pwsh
+        env:
+          FIXTURE_RUN_ID: ${{ inputs.fixture_run_id }}
+          FIXTURE_ARTIFACT: ${{ inputs.fixture_artifact }}
+        run: |
+          New-Item -ItemType Directory -Force evidence,C:/tmp/bs-local-bin | Out-Null
+          if($env:FIXTURE_RUN_ID){
+            if(-not $env:FIXTURE_ARTIFACT){throw 'Exact fixture artifact name is required'}
+            ./support/diagnostics/issue1591-realpair/fixtures.ps1 -ReuseDirectory fixture-source
+            @{run=$env:FIXTURE_RUN_ID;artifact=$env:FIXTURE_ARTIFACT}|ConvertTo-Json|Set-Content evidence/fixture-lineage.json
+          }else{
+            choco install ffmpeg --yes --no-progress
+            if($LASTEXITCODE -ne 0){throw 'ffmpeg installation failed'}
+            $env:PATH="C:/ProgramData/chocolatey/bin;"+$env:PATH
+            ./support/diagnostics/issue1591-realpair/fixtures.ps1
+          }
+          Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
+          Expand-Archive C:/tmp/bs-local.zip C:/tmp/bs-local-bin -Force
+          Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
+          New-NetFirewallRule -Name Issue1591Local -DisplayName Issue1591Local -Direction Inbound -Program C:/tmp/bs-local-bin/BrowserStackLocal.exe -Action Allow -Profile Any | Out-Null
+          New-NetFirewallRule -Name Issue1591Relay -DisplayName Issue1591Relay -Direction Inbound -Program (Get-Command node).Source -Protocol TCP -LocalPort 8080 -Action Allow -Profile Any | Out-Null
+      - name: Real Windows to iPad transfer, owned session and cleanup
+        shell: pwsh
+        run: node support/diagnostics/issue1591-realpair/run.mjs
+      - name: Retain original evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: issue1591-realpair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            !evidence/release/**
+            !evidence/*.zip
+          if-no-files-found: error
+          retention-days: 30

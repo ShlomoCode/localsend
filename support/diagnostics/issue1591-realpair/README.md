@@ -1,0 +1,21 @@
+# Run the iPad real transfer diagnostic
+
+This diagnostic selects a valid MKV in Explorer, sends it through unchanged Windows LocalSend 1.17.0, accepts it in an unchanged iPad LocalSend IPA, and compares the saved Documents file with the source. The separate signed Swift proxy forwards TLS bytes through BrowserStack Local. It has a finite iOS background budget.
+
+The workflow runs one Windows Server 2022 x64 job in `ShlomoCode/localsend`. It requires an already uploaded proxy app URL, the receiver app URL, and the receiver's exact artifact provenance. The proxy build and upload happen before this workflow. Enter immutable `bs://` hashes, rather than custom IDs that might later select another build. Its branch/path-limited push trigger runs only the Gallery off MKV control with the recorded default current receiver and normally uploaded proxy. Gallery comparisons require a dispatch input.
+
+1. Build the separate Swift proxy through its cloud workflow and upload that IPA normally to BrowserStack.
+2. Dispatch `issue1591-realpair.yml` with its proxy hash and an unchanged receiver hash. Describe the receiver version, source or release lineage, and cloud build/upload reference in `receiver_identity`.
+3. Leave `comparison` at `none` for the first run. Inspect Gallery off, Explorer selection, real approval/completion, the exact Documents pull, SHA-256, original device logs, video, and cleanup results.
+4. After that control succeeds, select `mp4-off` to compare the same H.264/AAC streams in MP4. The workflow repeats the MKV control before the MP4 case.
+5. Select `gallery-on` only after reviewing the working control. It runs the MKV Documents control, then an MP4 gallery control, then MKV gallery. It requests only normal add-only Photos consent. MP4 gallery completion is UI evidence; MKV's expected folder fallback requires the exact Documents hash. This diagnostic does not claim byte verification inside Photos.
+
+For a baseline/fix comparison, set `fixture_run_id` and `fixture_artifact` to the retained fork run and exact evidence artifact. The job verifies the original source fixture identities, then selects copies with unique case filenames. This keeps media bytes/codecs identical and avoids destination collisions. Do not generate fresh fixtures for a causal comparison.
+
+The Windows job encodes a one-second MP4 once with FFmpeg, then remuxes those streams into MKV. It retains FFmpeg/ffprobe versions, both stream/container reports, the source bytes, and SHA-256. Windows release archive and executable identities are recorded separately.
+
+`reused/` copies Windows release/UI/Explorer and TCP relay sources from diagnostic revision `910e05c3`. Changes add a startup-only mode to prevent an extra text attachment, accept a supplied media fixture, split selection from sending so Explorer preparation does not consume the proxy's background budget, and name the relay favorite accurately. Source reuse does not establish that iOS UI locators or the new cloud job have passed.
+
+Each run admits at most one owned BrowserStack session after a fresh capacity check against the five-session ceiling and plan limits. It stores only its own session ID and deletes only that session, without a trailing slash. It stops its owned Local process tree and relay in `finally`. Failures remain workflow failures; a missing element, unsupported pull, tunnel failure, suspension, or expiry is not labeled a product reproduction.
+
+Evidence includes W3C HTTP status/errors, native source and screenshots, Windows selection/menu/input and sender-end records, saved bytes, transport trace, background-switch timestamps, original device/Appium logs, original BrowserStack video when its metadata URL is available, and cleanup status. Receiver success requires an observed **Finished** file result in addition to **Done**. The Windows backend supplies original screenshots and HWND/PID/input records; its sender status requires visual review because Flutter text is not exposed by that backend. The relay token is ephemeral and redacted from persisted text. BrowserStack's retained Appium service logs can include UI value RPCs, so the token is usable only during its owned run and the relay is stopped on completion.
