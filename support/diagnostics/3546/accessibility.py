@@ -131,6 +131,17 @@ def visible_windows(pid):
     return result.stdout.split()
 
 
+def minimize_live_windows():
+    # Closing a settings popup can invalidate a window while xdotool enumerates
+    # the tree. Retry the enumeration and minimize only current visible windows;
+    # the Open control still independently requires its target to be hidden.
+    for _ in range(3):
+        result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "^LocalSend$"], capture_output=True, text=True)
+        for window in result.stdout.split():
+            subprocess.run(["xdotool", "windowminimize", window], capture_output=True, text=True)
+        time.sleep(.5)
+
+
 def open_via_menu(pid, stage):
     item = registered_item(pid)
     service, path = item["address"].split("/", 1)
@@ -148,7 +159,7 @@ def open_via_menu(pid, stage):
             collect(child)
     collect(layout)
     assert len(leaves) == 1, f"Expected one original Open leaf, got {leaves}"
-    subprocess.run(["xdotool", "search", "--name", "^LocalSend$", "windowminimize"], check=True)
+    minimize_live_windows()
     time.sleep(1)
     assert not visible_windows(pid), "Target window remained visible before Open"
     menu.Event(dbus.Int32(leaves[0]), "clicked", dbus.Int32(0, variant_level=1), dbus.UInt32(0))
