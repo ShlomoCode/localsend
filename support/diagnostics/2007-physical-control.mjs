@@ -54,6 +54,14 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await wd('POST',prefix+'/element/'+accept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   await new Promise(r=>setTimeout(r,3500));
   await snapshot('after-accept');
+  const permissionSource=readFileSync('evidence/android-after-accept.xml','utf8');
+  if(permissionSource.includes('permission_allow_button')){
+   const allow=await wd('POST',prefix+'/element',{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'});
+   writeFileSync('evidence/android-permission-input.json',JSON.stringify({action:'Allow photos and media',utc:new Date().toISOString()},null,2));
+   await wd('POST',prefix+'/element/'+allow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   await new Promise(r=>setTimeout(r,3500));
+   await snapshot('after-storage-permission');
+  }
   const expected=readFileSync('/tmp/issue-2007/A.txt');
   const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'});
   const actual=Buffer.from(encoded,'base64');
