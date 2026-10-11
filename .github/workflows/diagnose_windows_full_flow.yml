@@ -5,8 +5,12 @@ on:
       scenario:
         type: choice
         default: selection
-        options: [selection, windows-transfer-control, moderate-transfer-control]
+        options: [selection, windows-transfer-control, moderate-transfer-control, direct-tcp-gate]
 jobs:
+  direct-tcp-gate:
+    if: inputs.scenario == 'direct-tcp-gate'
+    uses: ./.github/workflows/diagnose_3556_direct_tcp.yml
+    secrets: inherit
   storage-control:
     if: inputs.scenario == 'selection'
     runs-on: ubuntu-24.04
