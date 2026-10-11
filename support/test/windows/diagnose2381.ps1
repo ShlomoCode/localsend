@@ -142,7 +142,7 @@ Screenshot "sender-send"
 # The favorite icon was visually located at (576,212) in the retained release screenshot.
 Click 576 212
 Screenshot "favorites-empty"
-foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205";alias="NetBird LAN"})) {
+foreach ($favorite in @(@{ip="10.0.20.2";alias="My Desktop (Home Lan)"},@{ip="100.95.193.205";alias="My Desktop (NetBird)"})) {
  $snapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-empty"} else {"favorites-first"}
  PrimaryButton $snapshot
  Screenshot "add-$($favorite.ip)"
@@ -180,7 +180,7 @@ foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205"
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 $favorites = @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
 $favorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-before-scan.json"
-if ($favorites.Count -ne 2 -or $favorites[0].alias -ne "Home LAN" -or $favorites[1].alias -ne "NetBird LAN") {throw "UI input did not store the intended favorite names"}
+if ($favorites.Count -ne 2 -or $favorites[0].alias -ne "My Desktop (Home Lan)" -or $favorites[1].alias -ne "My Desktop (NetBird)") {throw "UI input did not store the intended favorite names"}
 if ($favorites[0].fingerprint -ne $favorites[1].fingerprint) {throw "Favorites do not refer to the same real peer identity"}
 Word "Cancel" "favorites-second"
 
@@ -192,13 +192,51 @@ Screenshot "favorites-after-scan"
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-after-scan.json"
 # The two Edit pencil centers were verified on the actual two-row Favorites dialog.
-foreach ($edit in @(@{alias="Home LAN";y=358},@{alias="NetBird LAN";y=414})) {
+foreach ($edit in @(@{alias="My Desktop (Home Lan)";y=358;ip="10.0.20.2"},@{alias="My Desktop (NetBird)";y=414;ip="100.95.193.205"})) {
  Click 588 $edit.y
- Screenshot "edit-$($edit.alias.Replace(' ','-'))"
- # Record this dialog first; its text field geometry must be verified before editing.
- throw "Edit dialog checkpoint: retain exact UI geometry before customAlias scenario"
+ $editSnapshot="edit-$($edit.ip)"
+ Screenshot $editSnapshot
+ # The Edit name field is x384-616/y257-305 in run 38104091779.
+ Click 500 280
+ [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 100}")
+ Paste $edit.alias
+ Screenshot "edit-filled-$($edit.ip)"
+ PrimaryButton "edit-filled-$($edit.ip)"
+ Start-Sleep -Seconds 2
+ Screenshot "edit-confirmed-$($edit.ip)"
+ # Editing to the same stored name does not set customAlias. For the second
+ # favorite, first apply a distinct intermediate name through the same UI.
+ $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+ $edited=@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | Where-Object {$_.ip -eq $edit.ip}
+ if (-not $edited.customAlias) {
+  Click 500 280
+  [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 100}")
+  Paste "$($edit.alias) temp"
+  Screenshot "edit-intermediate-$($edit.ip)"
+  PrimaryButton "edit-intermediate-$($edit.ip)"
+  Click 500 280
+  [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 100}")
+  Paste $edit.alias
+  Screenshot "edit-restored-$($edit.ip)"
+  PrimaryButton "edit-restored-$($edit.ip)"
+ }
+ Word "Cancel" "edit-confirmed-$($edit.ip)"
+ Screenshot "favorites-edited-$($edit.ip)"
 }
-Word "Cancel" "favorites-after-scan"
+$stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+$customFavorites=@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
+$customFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-custom-before-scan.json"
+if (@($customFavorites | Where-Object {-not $_.customAlias}).Count -gt 0) {throw "Actual UI Edit did not set both custom aliases"}
+Word "Cancel" "favorites-edited-100.95.193.205"
+Screenshot "nearby-after-edit"
+Click 497 212
+Start-Sleep -Seconds 8
+Screenshot "nearby-custom-after-scan"
+Click 576 212
+Screenshot "favorites-custom-after-scan"
+$stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-custom-after-scan.json"
+Word "Cancel" "favorites-custom-after-scan"
 Click 103 245
 Screenshot "settings-top"
 $found=$false
