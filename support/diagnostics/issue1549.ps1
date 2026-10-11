@@ -92,13 +92,40 @@ function ResetBaseline($name) {
  if ($setup.ExitCode -ne 0) { throw "Baseline installation failed: $($setup.ExitCode)" }
  Snapshot "$name-baseline"
 }
-function Upgrade($name,$route,$running) {
+function Upgrade($name,$route,$running,$tray=$false,$hidden=$false) {
  ResetBaseline $name
  if ($running) {
   $app = Start-Process "$env:ProgramFiles/LocalSend/localsend_app.exe" -PassThru
   Start-Sleep 15
   $app.Refresh()
   if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'Baseline app failed to create its real window' }
+  if ($tray) {
+   [Input1549]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
+   $rect = New-Object Rect1549
+   [Input1549]::GetWindowRect($app.MainWindowHandle, [ref]$rect) | Out-Null
+   if ($rect.Right-$rect.Left -ne 400 -or $rect.Bottom-$rect.Top -ne 500) { throw 'Tray UI probe geometry changed' }
+   [Input1549]::SetCursorPos($rect.Right-64, $rect.Bottom-44) | Out-Null
+   [Input1549]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [Input1549]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+   Start-Sleep 2
+   Screenshot "$name-setting-off"
+   # Switch coordinates were observed in run38145897069, not inferred from code.
+   [Input1549]::SetCursorPos($rect.Right-117, $rect.Bottom-98) | Out-Null
+   [Input1549]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [Input1549]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+   Start-Sleep 2
+   $prefs = Get-Content "$env:APPDATA/LocalSend/settings.json" -Raw | ConvertFrom-Json
+   @{ MinimizeToTray = $prefs.'flutter.ls_minimize_to_tray'; ProfilePath = "$env:APPDATA/LocalSend/settings.json"; Input = 'Settings then observed switch'; SwitchX = $rect.Right-117; SwitchY = $rect.Bottom-98 } | ConvertTo-Json | Set-Content "$ev/$name-setting.json"
+   if ($prefs.'flutter.ls_minimize_to_tray' -ne $true) { throw 'Real UI action did not enable tray preference' }
+   [Input1549]::SetCursorPos($rect.Left+220, $rect.Top+280) | Out-Null
+   [Input1549]::mouse_event(2048,0,0,4294967176,[UIntPtr]::Zero)
+   Start-Sleep 1
+   Screenshot "$name-setting-on"
+   if ($hidden) {
+    $app.CloseMainWindow() | Out-Null
+    Start-Sleep 2
+    $app.Refresh()
+    if ($app.HasExited) { throw 'Normal close exited instead of tray hiding' }
+   }
+  }
  }
  Snapshot "$name-before"
  if ($route -eq 'source') { $args = @('upgrade','--id','LocalSend.LocalSend','--exact','--version','1.15.1','--source','winget','--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
@@ -114,29 +141,15 @@ function Upgrade($name,$route,$running) {
  }
  $up.WaitForExit()
  $timeline | ConvertTo-Json -Depth 5 | Set-Content "$ev/$name-timeline.json"
- @{ Name = $name; Route = $route; Running = $running; Arguments = $args; ExitCode = $up.ExitCode; DurationSeconds = ((Get-Date)-$start).TotalSeconds } | ConvertTo-Json | Set-Content "$ev/$name-result.json"
+ @{ Name = $name; Route = $route; Running = $running; Tray = $tray; Hidden = $hidden; Arguments = $args; ExitCode = $up.ExitCode; DurationSeconds = ((Get-Date)-$start).TotalSeconds } | ConvertTo-Json | Set-Content "$ev/$name-result.json"
  Snapshot "$name-after"
 }
 try {
  $route = if ($source151 -eq 0) { 'source' } else { 'local-manifest' }
- ResetBaseline 'ui-tray-probe'
- $app = Start-Process "$env:ProgramFiles/LocalSend/localsend_app.exe" -PassThru
- Start-Sleep 15
- $app.Refresh()
- if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'App failed to create window' }
- [Input1549]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
- $rect = New-Object Rect1549
- [Input1549]::GetWindowRect($app.MainWindowHandle, [ref]$rect) | Out-Null
- $rect | ConvertTo-Json | Set-Content "$ev/ui-probe-rect.json"
- Snapshot 'ui-probe-home'
- [Input1549]::SetCursorPos($rect.Right-64, $rect.Bottom-44) | Out-Null
- [Input1549]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [Input1549]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
- Start-Sleep 2
- Snapshot 'ui-probe-settings'
- $window = [System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
- $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
- $elements | ForEach-Object { @{ Name = $_.Current.Name; Type = $_.Current.ControlType.ProgrammaticName; Bounds = [string]$_.Current.BoundingRectangle } } | ConvertTo-Json | Set-Content "$ev/ui-probe-tree.json"
- Get-ChildItem "$env:APPDATA/LocalSend", "$env:APPDATA/org.localsend" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length | ConvertTo-Json | Set-Content "$ev/ui-probe-profile-files.json"
+ Upgrade 'running-off-control' $route $true
+ Upgrade 'running-tray-visible-1' $route $true $true
+ Upgrade 'running-tray-visible-2' $route $true $true
+ Upgrade 'running-tray-hidden' $route $true $true $true
 } finally {
  foreach ($logRoot in @("$env:LOCALAPPDATA/Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir", "$env:LOCALAPPDATA/Microsoft/WinGet/DiagOutputDir")) {
   if (Test-Path $logRoot) { Copy-Item "$logRoot/*" $ev -Force -ErrorAction Continue }
