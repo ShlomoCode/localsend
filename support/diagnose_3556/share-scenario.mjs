@@ -89,23 +89,72 @@ export default async function shareScenario({session,wd,output}){
   if(text.includes('Add to selection'))return 'Add to selection';
   return null;
  }
- let cpuUnavailable=false,cpuSupported=false;
+ let cpuUnavailable=false,cpuSupported=false,cpuMethod='performance';
  async function sampleCpu(stage){
   if(cpuUnavailable)return;
   const sample={stage,utc:new Date().toISOString(),packageName:'org.localsend.localsend_app',dataType:'cpuinfo'};
   const started=Date.now();
   try{
-   if(!cpuSupported){
-    sample.advertisedTypes=await wd('POST',base+'/execute/sync',{script:'mobile: getPerformanceDataTypes',args:[]});
-    assert(Array.isArray(sample.advertisedTypes)&&sample.advertisedTypes.includes('cpuinfo'),'Appium does not advertise cpuinfo');
-    cpuSupported=true;
+   if(cpuMethod==='performance'){
+    try{
+     if(!cpuSupported){
+      sample.advertisedTypes=await wd('POST',base+'/execute/sync',{script:'mobile: getPerformanceDataTypes',args:[]});
+      assert(Array.isArray(sample.advertisedTypes)&&sample.advertisedTypes.includes('cpuinfo'),'Appium does not advertise cpuinfo');
+      cpuSupported=true;
+     }
+     sample.raw=await wd('POST',base+'/execute/sync',{script:'mobile: getPerformanceData',args:[{packageName:sample.packageName,dataType:'cpuinfo'}]});
+     sample.method='mobile: getPerformanceData';
+    }catch(error){
+     sample.performanceUnavailable=redact(error.message);cpuMethod='shell';
+    }
    }
-   sample.raw=await wd('POST',base+'/execute/sync',{script:'mobile: getPerformanceData',args:[{packageName:sample.packageName,dataType:'cpuinfo'}]});
+   if(cpuMethod==='shell'){
+    // Official UiAutomator2 mobile:shell API; read-only, bounded command, no permission/configuration changes.
+    sample.method='mobile: shell';sample.command={command:'dumpsys',args:['cpuinfo'],timeout:5000,includeStderr:true};
+    sample.documentation='https://github.com/appium/appium-uiautomator2-driver#mobile-shell';
+    sample.raw=await wd('POST',base+'/execute/sync',{script:'mobile: shell',args:[sample.command]});
+    const stdout=typeof sample.raw==='string'?sample.raw:sample.raw?.stdout;
+    assert(typeof stdout==='string'&&stdout.trim(),'dumpsys cpuinfo returned no stdout');
+    sample.packageLines=stdout.split(/\r?\n/).filter(line=>line.includes(sample.packageName));
+    sample.packagePresent=sample.packageLines.length>0;
+   }
    sample.status='returned';
   }catch(error){sample.status='unavailable';sample.error=redact(error.message);cpuUnavailable=true;}
   sample.requestDurationMs=Date.now()-started;
-  sample.limit='Appium package cpuinfo at this instant; raw headers and values are retained without assuming units or whole-device CPU';
+  sample.limit=sample.method==='mobile: shell'?'Raw dumpsys cpuinfo reports its own historical sampling window and system/process context; matching package lines are retained, absence is not zero CPU':
+   'Appium package cpuinfo at this instant; raw headers and values are retained without assuming units or whole-device CPU';
   report.cpuSamples.push(sample);save('cpu-samples.json',report.cpuSamples);
+ }
+ async function findChooserTarget(entry,name){
+  const deadline=Date.now()+60000,maxScrolls=8;let scrolls=0,index=0,canScrollMore=true;
+  entry.chooserSearch={startedUtc:new Date().toISOString(),maxScrolls,timeoutMs:60000,observations:[],
+   documentation:'https://github.com/appium/appium-uiautomator2-driver/blob/master/docs/android-mobile-gestures.md#mobile-scrollgesture'};
+  do{
+   const observed=await snap(name+'-chooser-search-'+String(index++).padStart(2,'0'));
+   const list=nodes(observed.xml),targets=list.filter(n=>n.text==='LocalSend'&&n.enabled==='true'&&n.displayed==='true');
+   if(targets.length){
+    assert.equal(targets.length,1,'Chooser exposes multiple LocalSend targets');
+    entry.chooserSearch.status='target-observed';entry.chooserSearch.scrolls=scrolls;entry.chooserSearch.finishedUtc=new Date().toISOString();
+    save(name+'-result.json',entry);return observed;
+   }
+   if(!canScrollMore)throw Error('Native chooser reached its observed scroll end without a LocalSend target');
+   const containers=list.filter(n=>n.package==='android'&&n['resource-id']==='android:id/resolver_list'&&n.scrollable==='true'&&n.displayed==='true'&&n.enabled==='true');
+   if(!containers.length){await sleep(1000);continue;}
+   assert.equal(containers.length,1,'Native chooser resolver list is ambiguous');
+   assert(scrolls<maxScrolls,'Native chooser exhausted the bounded scroll count without LocalSend');
+   const element=await wd('POST',base+'/element',{using:'id',value:containers[0]['resource-id']}),elementId=id(element);
+   const rect=await wd('GET',base+'/element/'+elementId+'/rect');
+   assert(rect.width>0&&rect.height>0&&rect.x>=0&&rect.y>=0&&rect.x+rect.width<=observed.width&&rect.y+rect.height<=observed.height,'Chooser scroll container has invalid current screen bounds');
+   const action={utc:new Date().toISOString(),label:'Scroll observed native chooser resolver list',resourceId:containers[0]['resource-id'],rect,direction:'down',percent:0.75};
+   report.actions.push(action);entry.chooserSearch.observations.push(action);save(name+'-result.json',entry);
+   // Official mobile:scrollGesture accepts a current element ID and reports whether it can scroll farther.
+   canScrollMore=await wd('POST',base+'/execute/sync',{script:'mobile: scrollGesture',args:[{elementId,direction:'down',percent:0.75}]});
+   assert(typeof canScrollMore==='boolean','Chooser scroll returned no supported can-scroll boolean');
+   action.canScrollMore=canScrollMore;scrolls++;entry.chooserSearch.scrolls=scrolls;
+   await snap(name+'-chooser-after-scroll-'+String(scrolls).padStart(2,'0'));save(name+'-result.json',entry);
+   await sleep(500);
+  }while(Date.now()<deadline);
+  throw Error('Native chooser did not expose LocalSend within the bounded 60-second observed search');
  }
  const hasLabel=(xml,name)=>labels(xml).some(v=>v===name||v.split('\n').includes(name));
  const hasFile=(xml,name)=>labels(xml).some(v=>v===name||v.split('\n').includes(name));
@@ -205,8 +254,9 @@ export default async function shareScenario({session,wd,output}){
   const ready=await snap(name+'-helper-before-share');const activeFixture=parseFixture(ready.xml,fixture.bytes);
   assert.equal(activeFixture.uri,fixture.uri,'Helper last URI changed before sharing');assert.equal(activeFixture.sha256,fixture.sha256);
   entry.nativeShareActionUtc=new Date().toISOString();await helperClick('Share owned fixture');await snap(name+'-chooser-loading');
-  const chooser=await waitFor(s=>nodes(s).some(n=>n.text==='LocalSend'&&n.enabled==='true'&&n.displayed==='true'),60000,'Native Samsung chooser did not expose LocalSend within 60 seconds');
-  await snap(name+'-chooser-ready',chooser);entry.chooserLocalSendInputUtc=new Date().toISOString();await ui('text("LocalSend")');
+  const chooser=await findChooserTarget(entry,name);
+  await snap(name+'-chooser-ready',chooser.xml);entry.chooserLocalSendInputUtc=new Date().toISOString();
+  await touch(await bounds('-android uiautomator','new UiSelector().text("LocalSend").enabled(true)'),'Observed native chooser LocalSend target',chooser);
   const first=await snap(name+'-first-frame');entry.selectionObserved=selected(first.xml,fixture.bytes);
   // Do not touch old coordinates after a rotation or layout change. Re-observe the semantic control.
   const currentManual=await bounds('accessibility id','Manual sending').catch(()=>null);
@@ -253,7 +303,13 @@ export default async function shareScenario({session,wd,output}){
   entry.outcome=entry.waitActions?'anr-observed':entry.selectionObserved&&entry.responseAfterSelection?'selection-and-input-response-observed':'selection-or-input-response-not-established';
   save(name+'-result.json',entry);
   if(fixture.bytes===1048576)assert(entry.selectionObserved&&entry.responseAfterSelection,'Small share control did not establish Selection 1.0 MB and a real Enter address response');
-  }catch(error){entry.outcome='incomplete';entry.error=redact(error.stack||error);throw error;}
+  }catch(error){
+   entry.outcome='incomplete';entry.error=redact(error.stack||error);
+   if(entry.chooserSearch&&entry.chooserSearch.status!=='target-observed'){
+    entry.chooserSearch.status='incomplete';entry.chooserSearch.error=redact(error.message);entry.chooserSearch.finishedUtc=new Date().toISOString();
+   }
+   throw error;
+  }
   finally{entry.finishedUtc=new Date().toISOString();save(name+'-result.json',entry);save('progress.json',report);}
  }
  try{
