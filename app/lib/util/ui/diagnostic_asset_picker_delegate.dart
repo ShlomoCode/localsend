@@ -1,8 +1,11 @@
-// Temporary issue1864 causal probe. Both source builds use this delegate;
-// only ISSUE1864_FOCUS_PROBE changes thumbnail focus and activation behavior.
+// Temporary issue1864 causal probes using one common delegate source.
+// ISSUE1864_FOCUS_PROBE enables the existing thumbnail focus/activation trial.
+// The next trial holds that enabled and varies only collapsed folder-list focus exclusion.
 import 'package:flutter/material.dart';
 import 'package:localsend_app/util/ui/diagnostic_picker_focus_trace.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
+
+const bool _excludeCollapsedPath = bool.fromEnvironment('ISSUE1864_EXCLUDE_COLLAPSED_PATH');
 
 Future<List<AssetEntity>?> pickDiagnosticMedia(BuildContext context, AssetPickerConfig config) async {
   final permission = await AssetPicker.permissionCheck();
@@ -40,6 +43,30 @@ class _DiagnosticPickerDelegate extends DefaultAssetPickerBuilderDelegate<Defaul
     if (trace != null) provider.addListener(_traceProvider);
   }
   final DiagnosticPickerFocusTrace? trace;
+  bool? _lastTracedPathExpanded;
+
+  void _tracePathFocus(bool expanded) {
+    if (trace == null || _lastTracedPathExpanded == expanded) return;
+    _lastTracedPathExpanded = expanded;
+    tracePicker('path-list-focus-policy', {'excludeCollapsedPath': _excludeCollapsedPath, 'expanded': expanded});
+  }
+
+  @override
+  Widget pathEntityListWidget(BuildContext context) {
+    final child = super.pathEntityListWidget(context);
+    if (!_excludeCollapsedPath) {
+      _tracePathFocus(isSwitchingPath.value);
+      return child;
+    }
+    return ValueListenableBuilder<bool>(
+      valueListenable: isSwitchingPath,
+      child: child,
+      builder: (_, bool expanded, Widget? child) {
+        _tracePathFocus(expanded);
+        return ExcludeFocus(excluding: !expanded, child: child!);
+      },
+    );
+  }
 
   void _traceProvider() {
     tracePicker('provider-change', {'folder': provider.currentPath?.path.name, 'selectedIds': provider.selectedAssets.map((asset) => asset.id).toList()});

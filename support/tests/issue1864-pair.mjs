@@ -2,6 +2,8 @@ import fs from 'node:fs';
 const baseline=JSON.parse(fs.readFileSync('evidence-cloud/source-baseline/outcome.json'));
 const focus=JSON.parse(fs.readFileSync('evidence-cloud/source-focus/outcome.json'));
 const b=baseline.visualAssertions, f=focus.visualAssertions;
+const experimentPath='evidence-cloud/source-pair-experiment.json';
+const experiment=fs.existsSync(experimentPath) ? JSON.parse(fs.readFileSync(experimentPath,'utf8')) : null;
 const gates={
   baselineMouse:baseline.mouseSelected===true,
   focusMouse:focus.mouseSelected===true,
@@ -12,5 +14,5 @@ const gates={
   focusShortHighlight:f.shortFocusPixels>2000,
   focusFreshHighlight:f.freshFocusPixels>2000,
 };
-fs.writeFileSync('evidence-cloud/source-pair-verdict.json',JSON.stringify({baseline:b,focus:f,gates},null,2));
+fs.writeFileSync('evidence-cloud/source-pair-verdict.json',JSON.stringify({experiment,baseline:b,focus:f,gates},null,2));
 if(Object.values(gates).some(value=>!value)) throw new Error('Source causal pair did not satisfy every visible baseline/focus/mouse gate; inspect raw evidence');
