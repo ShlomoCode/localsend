@@ -20,6 +20,11 @@ qdbus_bin=$(command -v qdbus6 || command -v qdbus || echo /usr/lib/qt6/bin/qdbus
 "$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels(); for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){print(ws[j].id+":"+ws[j].type);}}' > evidence/widgets.txt || true
 find release -maxdepth 3 -type f > evidence/release-files.txt
 app=$(find "$PWD/release" -name localsend_app -type f | head -1)
+echo "stable_id_diagnostic=${STABLE_ID:-0}; uid=$(id -u); app=$app" >> evidence/environment.txt
+if [[ "${STABLE_ID:-0}" == "1" ]]; then
+  gcc -shared -fPIC support/diagnostics/3546/stable-id.c -ldl -o "$RUNNER_TEMP/3546-stable-id.so"
+  export LD_PRELOAD="$RUNNER_TEMP/3546-stable-id.so"
+fi
 cd "$(dirname "$app")"
 "$app" > "$GITHUB_WORKSPACE/evidence/app.log" 2>&1 &
 export APP_PID=$! APP_EXE="$app" FULL_SCENARIO=1

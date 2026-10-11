@@ -194,11 +194,16 @@ try:
         click(find("Cancel", "button"))
         subprocess.run(["xdotool", "key", "Escape"], check=True)
         pid = int(os.environ["APP_PID"])
+        expected_lost = os.environ.get("STABLE_ID") != "1"
         outcomes = []
         for cycle in range(1, 3):
-            stage = f"baseline-cycle{cycle}"
+            stage = f"{'baseline' if expected_lost else 'stable-id'}-cycle{cycle}"
+            print(f"[3546] {stage} begin", flush=True)
             before = registered_item(pid)
-            assert panel_item() is not None, "Original tray item is not rendered in panel"
+            if cycle == 1 or expected_lost:
+                assert panel_item() is not None, "Original tray item is not rendered in panel"
+            else:
+                assert panel_item() is None, "Intervention lost Hide before second cycle"
             prepare_hide(stage)
             quit_via_menu(pid, stage)
             app = Path(os.environ["APP_EXE"])
@@ -211,6 +216,11 @@ try:
             snapshot(stage + "-restarted-panel")
             outcomes.append({"before": before, "after": after, "preference_lost": panel_item() is not None})
             Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
+            if panel_item() is not None:
+                bounds = panel_item().queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+                subprocess.run(["xdotool", "mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2)], check=True)
+                time.sleep(2)
+                snapshot(stage + "-restarted-tooltip")
             click(find("Show hidden icons", "button"))
             click(find("Configure System Tray...", "button"))
             click(find("Entries"))
@@ -218,7 +228,8 @@ try:
             click(find("Cancel", "button"))
             subprocess.run(["xdotool", "key", "Escape"], check=True)
         Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
-        assert all(case["preference_lost"] for case in outcomes), "Baseline did not reproduce in both restart cycles"
+        assert all(case["preference_lost"] == expected_lost for case in outcomes), "Unexpected preference outcome"
+        assert all((case["before"]["id"] != case["after"]["id"]) == expected_lost for case in outcomes), "Unexpected identity outcome"
 except Exception:
     snapshot("ui-error")
     raise
