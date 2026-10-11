@@ -1,1 +1,1 @@
-{"round":1,"actions":[{"kind":"settings"},{"kind":"wait","seconds":5},{"kind":"probe","value":". /home/probe/session-env; gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.gnome.Mutter.DisplayConfig.GetCurrentState; gnome-shell --version; flatpak info org.localsend.localsend_app"}]}
+{"round":2,"actions":[{"kind":"key","value":"ctrl+alt+f"},{"kind":"wait","seconds":2},{"kind":"capture"}]}
