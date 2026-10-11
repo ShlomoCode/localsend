@@ -19,10 +19,20 @@ jobs:
       - name: Run the unmodified NixOS 25.05 package on MATE
         run: |
           set -euo pipefail
-          mkdir -p evidence
-          nix-build support/diagnostics/2751/mate.nix -A driver --no-out-link | tee evidence/driver-path.txt
-          driver=$(tail -1 evidence/driver-path.txt)
-          "$driver/bin/nixos-test-driver" --no-interactive --global-timeout 900 -o "$PWD/evidence" 2>&1 | tee evidence/test-driver.log
+          for variant in baseline panel-fix; do
+            mkdir -p "evidence/$variant"
+            fixed=false
+            if [ "$variant" = panel-fix ]; then fixed=true; fi
+            nix-build support/diagnostics/2751/mate.nix -A driver --arg panelFix "$fixed" --no-out-link | tee "evidence/$variant/driver-path.txt"
+            driver=$(tail -1 "evidence/$variant/driver-path.txt")
+            "$driver/bin/nixos-test-driver" --no-interactive --global-timeout 900 -o "$PWD/evidence/$variant" 2>&1 | tee "evidence/$variant/test-driver.log"
+          done
+      - name: Measure rendered icon pixels and retain tray crops
+        run: |
+          set -euo pipefail
+          python3 -m pip install Pillow
+          python3 support/diagnostics/2751/measure.py evidence/baseline
+          python3 support/diagnostics/2751/measure.py evidence/panel-fix
       - uses: actions/upload-artifact@v4
         if: always()
         with:

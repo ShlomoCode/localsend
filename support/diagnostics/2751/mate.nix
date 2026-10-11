@@ -1,3 +1,4 @@
+{ panelFix ? false }:
 let
   revision = "6132ff3ee5a9509d0aeb66a01a7d662c6384289b";
   nixpkgs = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${revision}.tar.gz";
@@ -19,6 +20,17 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     virtualisation.cores = 2;
     virtualisation.resolution = { x = 3840; y = 2160; };
     virtualisation.qemu.options = [ "-device virtio-vga,xres=3840,yres=2160" ];
+    nixpkgs.overlays = if panelFix then [ (final: prev: {
+      mate = prev.mate.overrideScope (mateFinal: matePrev: {
+        mate-panel = matePrev.mate-panel.overrideAttrs (old: {
+          postPatch = (old.postPatch or "") + ''
+            substituteInPlace applets/notification_area/status-notifier/sn-item-v0.c \
+              --replace-fail 'pixbuf, icon_size-2, icon_size-2,' \
+                'pixbuf, (icon_size-2)*scale, (icon_size-2)*scale,'
+          '';
+        });
+      });
+    }) ] else [];
   };
   testScript = { nodes, ... }: let
     user = nodes.machine.users.users.alice;
@@ -55,7 +67,8 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     for label, scale, restart in [
         ("100-live-first", 1, False), ("200-live", 2, False),
         ("100-live-return", 1, False), ("200-fresh", 2, True),
-        ("100-fresh", 1, True), ("200-live-repeat", 2, False)]:
+        ("100-fresh", 1, True), ("200-live-repeat", 2, False),
+        ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True)]:
         user_command("gsettings set org.mate.interface window-scaling-factor " + str(scale))
         machine.sleep(8)
         machine.wait_until_succeeds("pgrep mate-panel")
@@ -70,6 +83,10 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
         user_command("dconf dump /org/mate/ > /tmp/evidence/" + label + ".dconf")
         user_command("busctl --user list > /tmp/evidence/" + label + "-bus.txt")
         user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > /tmp/evidence/" + label + "-items.txt")
+        items = shlex.split(user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems"))
+        for item in items[2:]:
+            service, path = item.split("/", 1)
+            user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
         machine.screenshot(label)
         machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
         machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
