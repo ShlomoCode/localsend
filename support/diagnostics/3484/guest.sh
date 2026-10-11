@@ -15,6 +15,9 @@ useradd -m -G wheel,video,render investigator
 printf 'investigator ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/investigator
 chmod 440 /etc/sudoers.d/investigator
 chown -R investigator:investigator /work/evidence/cloud
+mkdir -p /work/input
+chgrp wheel /work/input
+chmod 2775 /work/input
 sudo -u investigator bash <<'USER'
 set -euxo pipefail
 cd /home/investigator
@@ -36,7 +39,7 @@ export PATH="$OMARCHY_PATH/bin:$PATH"
 bash omarchy/bin/omarchy-theme-set-templates
 mv .local/state/omarchy/current/next-theme .local/state/omarchy/current/theme
 cat > .config/omarchy/shell.json <<'CONFIG'
-{"version":1,"idle":{"screensaver":0,"lock":0},"bar":{"position":"top","transparent":false,"layout":{"left":[{"id":"omarchy.tray"}],"center":[],"right":[]}},"plugins":[]}
+{"version":1,"idle":{"screensaver":86400,"lock":86400},"bar":{"position":"top","transparent":false,"layout":{"left":[{"id":"omarchy.tray"}],"center":[],"right":[]}},"plugins":[]}
 CONFIG
 cp .config/omarchy/shell.json /work/evidence/cloud/shell.json
 cat > .config/hypr3484.conf <<'HYPR'
@@ -57,6 +60,9 @@ if [ "$(tty)" = /dev/tty1 ]; then
 fi
 PROFILE
 USER
+printf '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  /work/source-bundle.tar.gz\n' | sha256sum -c -
+mkdir /opt/current-base
+tar -xf /work/source-bundle.tar.gz -C /opt/current-base
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'GETTY'
 [Service]

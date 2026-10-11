@@ -11,11 +11,15 @@ jobs:
   arch-tray:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v6
       - name: Arch Hyprland VM and real Quickshell hover
         env:
           ARCH_DATE: ${{ inputs.archive_date || 'latest' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           bash support/diagnostics/3484/vm.sh
       - name: Preserve evidence
