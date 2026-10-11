@@ -1,0 +1,120 @@
+name: Build unsigned iOS device artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sprint-ios-cloud
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: macos-15
+    timeout-minutes: 55
+    steps:
+      - name: Check out the approved application source
+        uses: actions/checkout@v4
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: source
+          persist-credentials: false
+
+      - name: Prepare provenance
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          mkdir -p "$GITHUB_WORKSPACE/evidence/locks-before"
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/evidence/source-commit.txt"
+          git status --porcelain > "$GITHUB_WORKSPACE/evidence/source-status-before.txt"
+          cp .fvmrc rust-toolchain.toml pubspec.lock Cargo.lock app/ios/Podfile.lock "$GITHUB_WORKSPACE/evidence/locks-before/"
+          cp packages/localsend_isolates/rust-toolchain.toml "$GITHUB_WORKSPACE/evidence/locks-before/plugin-rust-toolchain.toml"
+          shasum -a 256 "$GITHUB_WORKSPACE/evidence/locks-before/"* > "$GITHUB_WORKSPACE/evidence/locks-before.sha256"
+          sw_vers > "$GITHUB_WORKSPACE/evidence/macos.txt"
+          uname -m >> "$GITHUB_WORKSPACE/evidence/macos.txt"
+          xcodebuild -version > "$GITHUB_WORKSPACE/evidence/xcode.txt"
+          xcodebuild -showsdks >> "$GITHUB_WORKSPACE/evidence/xcode.txt"
+
+      - name: Install the pinned Flutter bootstrap
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+
+      - name: Resolve the pinned build tools and dependencies
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Cargokit prints its environment. No upload or signing secrets enter this job.
+          test -z "${BROWSERSTACK_ACCESS_KEY:-}${BROWSERSTACK_USERNAME:-}${BS_SPRINT_ACCESS_KEY:-}${BS_SPRINT_USERNAME:-}"
+          dart pub global activate fvm 3.2.1
+          export PATH="$HOME/.pub-cache/bin:$PATH"
+          fvm install 3.41.9
+          fvm flutter --version > "$GITHUB_WORKSPACE/evidence/flutter.txt"
+          fvm flutter precache --ios
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add --toolchain 1.97.1 aarch64-apple-ios
+          rustup show > "$GITHUB_WORKSPACE/evidence/rust.txt"
+          pod --version > "$GITHUB_WORKSPACE/evidence/cocoapods.txt"
+          fvm flutter pub get --enforce-lockfile
+          (cd packages/localsend_isolates/rust_builder/cargokit/build_tool && fvm flutter pub get)
+
+      - name: Build an unsigned arm64 device application
+        working-directory: source/app
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.pub-cache/bin:$PATH"
+          test -z "${BROWSERSTACK_ACCESS_KEY:-}${BROWSERSTACK_USERNAME:-}${BS_SPRINT_ACCESS_KEY:-}${BS_SPRINT_USERNAME:-}"
+          fvm flutter build ios --release --no-codesign 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
+
+      - name: Package the unsigned IPA and inspect the device bundle
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/evidence"
+          app="app/build/ios/iphoneos/Runner.app"
+          test -d "$app"
+          test -d "$app/PlugIns/ShareExtension.appex"
+          test "$(lipo -archs "$app/Runner")" = arm64
+          mkdir -p "$out/package/Payload" "$out/locks-after"
+          ditto "$app" "$out/package/Payload/Runner.app"
+          (cd "$out/package" && ditto -c -k --keepParent Payload ../localsend-c1ce-unsigned-device.ipa)
+          rm -rf "$out/package"
+          printf '%s\n' 'Unsigned arm64 device build; not an App Store artifact. Admission does not prove installation.' > "$out/artifact-scope.txt"
+          shasum -a 256 "$out/localsend-c1ce-unsigned-device.ipa" > "$out/ipa.sha256"
+          plutil -p "$app/Info.plist" > "$out/runner-plist.txt"
+          plutil -p "$app/PlugIns/ShareExtension.appex/Info.plist" > "$out/extension-plist.txt"
+          cp app/ios/Runner/Runner.entitlements "$out/runner-requested.entitlements"
+          cp app/ios/ShareExtension/ShareExtension.entitlements "$out/extension-requested.entitlements"
+          find "$app/Frameworks" "$app/PlugIns" -type f -print > "$out/framework-and-extension-files.txt"
+          find "$app" -type f -exec shasum -a 256 {} \; > "$out/device-bundle.sha256"
+          while IFS= read -r binary; do
+            if file "$binary" | grep -q 'Mach-O'; then
+              printf '\nFILE %s\n' "$binary"
+              file "$binary"
+              otool -l "$binary" | sed -n '/LC_BUILD_VERSION/,+6p; /LC_VERSION_MIN_IPHONEOS/,+4p'
+              otool -L "$binary"
+              codesign -dvv "$binary" 2>&1 || true
+            fi
+          done < <(find "$app" -type f) > "$out/macho-provenance.txt"
+          cp .fvmrc rust-toolchain.toml pubspec.lock Cargo.lock app/ios/Podfile.lock "$out/locks-after/"
+          shasum -a 256 "$out/locks-after/"* > "$out/locks-after.sha256"
+          git status --porcelain > "$out/source-status-after.txt"
+          git diff > "$out/generated-source-diff.patch"
+
+      - name: Preserve evidence and unsigned device artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprint-ios-device-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
+          if-no-files-found: error
