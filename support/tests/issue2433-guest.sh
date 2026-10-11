@@ -14,7 +14,7 @@ provision)
     --repofrompath=archive-base,https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/42/Everything/x86_64/os/ \
     --repofrompath=archive-updates,https://archives.fedoraproject.org/pub/archive/fedora/linux/updates/42/Everything/x86_64/ \
     --setopt=archive-base.gpgcheck=0 --setopt=archive-updates.gpgcheck=0 \
-    install gnome-shell gnome-session gnome-session-wayland-session gdm gnome-control-center gnome-calculator nautilus flatpak fuse-libs mesa-dri-drivers xorg-x11-server-Xwayland python3-gobject desktop-file-utils
+    install gnome-shell gnome-session gnome-session-wayland-session gdm gnome-control-center gnome-calculator nautilus flatpak fuse fuse-libs mesa-dri-drivers xorg-x11-server-Xwayland python3-gobject desktop-file-utils
   sudo mkdir -p /etc/gdm
   printf '[daemon]\nAutomaticLoginEnable=True\nAutomaticLogin=probe\n' | sudo tee /etc/gdm/custom.conf
   mkdir -p ~/.config
@@ -41,7 +41,7 @@ integrate)
   find ~/.local/share -type f \( -name '*.png' -o -name '*.svg' \) -exec sha256sum {} \; > evidence/integrated-icons.sha256
   cp -a ~/.local/share/applications evidence/desktop-files
   mkdir -p evidence/icons
-  while IFS= read -r icon; do test -f "$icon"; cp "$icon" evidence/icons/; done < <(sed -n 's/^Icon=//p' evidence/integrated-desktop.txt)
+  while IFS= read -r icon; do test -f "$icon"; sha256sum "$icon" >> evidence/integrated-icons.sha256; cp "$icon" evidence/icons/; done < <(sed -n 's/^Icon=//p' evidence/integrated-desktop.txt)
   for i in $(seq 1 30); do if probe Inspect > evidence/probe-ready.txt 2>&1; then break; fi; sleep 2; done
   probe Inspect >> evidence/probe-ready.txt
   ;;
