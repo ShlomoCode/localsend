@@ -49,12 +49,19 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await snapshot(stage+'-native-documents');
   await click('xpath','//*[@text="Use this folder" or @text="USE THIS FOLDER"]');
   await snapshot(stage+'-native-permission');
-  const permissionPromptObserved=readFileSync(`evidence/android-${stage}-native-permission.xml`,'utf8').includes('text="Allow"');
-  if(permissionPromptObserved)await click('xpath','//*[@text="Allow"]');
-  await snapshot(stage+'-selected-directory');
-  const selected=readFileSync(`evidence/android-${stage}-selected-directory.xml`,'utf8');
+  const permissionPromptObserved=/text="(?:Allow|ALLOW)"/.test(readFileSync(`evidence/android-${stage}-native-permission.xml`,'utf8'));
+  if(permissionPromptObserved)await click('xpath','//*[@text="Allow" or @text="ALLOW"]');
+  let selected;
+  const selectionDeadline=Date.now()+10000;
+  let selectionAttempt=0;
+  do{
+   await snapshot(stage+'-selected-directory-'+selectionAttempt);
+   selected=readFileSync(`evidence/android-${stage}-selected-directory-${selectionAttempt++}.xml`,'utf8');
+   if(selected.includes('/storage/emulated/0/Documents')||selected.includes('primary%3ADocuments')||selected.includes('primary:Documents'))break;
+   await new Promise(r=>setTimeout(r,200));
+  }while(Date.now()<selectionDeadline);
   assert(selected.includes('/storage/emulated/0/Documents')||selected.includes('primary%3ADocuments')||selected.includes('primary:Documents'),'Selected Documents destination not observed');
-  writeFileSync(`evidence/${stage}-saf-selection.json`,JSON.stringify({actualNativePicker:true,permissionPromptObserved,permissionAccepted:permissionPromptObserved,selectedDocumentsObserved:true,physicalPath:deviceFolder,source:`android-${stage}-selected-directory.xml`,apiBasis:'Official 1.17 source selects pickDirectoryPathAndroid on SDK27+ and SafStream for content URI. Native Documents selection observed, not inferred from path alone.'},null,2));
+  writeFileSync(`evidence/${stage}-saf-selection.json`,JSON.stringify({actualNativePicker:true,permissionPromptObserved,permissionAccepted:permissionPromptObserved,selectedDocumentsObserved:true,physicalPath:deviceFolder,source:`android-${stage}-selected-directory-${selectionAttempt-1}.xml`,apiBasis:'Official 1.17 source selects pickDirectoryPathAndroid on SDK27+ and SafStream for content URI. Native Documents selection observed, not inferred from path alone.'},null,2));
   await wd('POST',prefix+'/back',{});
  }
  async function waitFile(file,ms){
@@ -88,6 +95,12 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await new Promise(r=>setTimeout(r,2000));
  }
  assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
+ const fileManagerInventory=[];
+ for(const appId of ['com.vivo.filemanager','com.android.filemanager','com.google.android.apps.nbu.files']){
+  const installed=await wd('POST',prefix+'/appium/device/app_installed',{appId}).catch(error=>({error:String(error)}));
+  fileManagerInventory.push({appId,installed});
+ }
+ writeFileSync('evidence/installed-file-managers.json',JSON.stringify({method:'Read-only Appium isAppInstalled for normal preinstalled file managers',apps:fileManagerInventory},null,2));
  const before=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A.txt'}).catch(error=>{
   if(!String(error).includes('No such file or directory'))throw error;
   return null;
