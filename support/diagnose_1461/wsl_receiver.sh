@@ -95,19 +95,54 @@ guest_ip=$(awk '{split($4,a,"/");print a[1]}' "$out/guest-eth0-address.txt")
 [[ "$guest_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 printf '%s\n' "$guest_ip" > "$out/guest-ipv4.txt"
 printf 'GUEST_IP=%q\nALIAS=%q\nPORT=41631\n' "$guest_ip" WSL1461 >> "$out/session.env"
+exact_readiness_word() {
+  awk -F '\t' -v word="$2" 'NR>1 && $1==5 && $11>=50 && $12==word {n++} END{exit n!=1}' "$1"
+}
 for ((attempt=0; attempt<60; attempt++)); do
   xvfb_owned || { echo 'Owned Xvfb exited during actual app readiness'; exit 1; }
   kill -0 "$app_pid" || { echo 'Receiver exited before readiness'; exit 1; }
   windows=$(xdotool search --onlyvisible --pid "$app_pid" 2>/dev/null || true)
   if [[ -n "$windows" && $(wc -l <<< "$windows") == 1 ]]; then
     window=$windows
+    [[ $(timeout 3 xdotool getwindowpid "$window") == "$app_pid" ]]
     xdotool windowactivate --sync "$window"
     xdotool windowsize "$window" 1200 820 windowmove "$window" 20 20
     timeout 8 ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x900 -i "$DISPLAY" -frames:v 1 "$out/readiness.png"
     timeout 8 tesseract "$out/readiness.png" "$out/readiness" --psm 11 tsv txt >/dev/null 2>&1
+    receive_observed=0; receive_source=original
+    if exact_readiness_word "$out/readiness.tsv" Receive; then
+      receive_observed=1
+    elif grep -q WSL1461 "$out/readiness.txt" && exact_readiness_word "$out/readiness.tsv" LocalSend; then
+      # E13's original frame visibly has Receive, but its tiny navigation label
+      # was OCR'd as "feceive" with confidence 0. That spelling never qualifies.
+      # v1.14 HomePage's desktop NavigationRail contains the LocalSend heading
+      # then Receive/Send/Settings. At the imposed 1200x820 size, the retained
+      # E13 frame places these in the top-left 320x320 of the actual app window.
+      # Read the owned window's native origin; crop only that bounded region
+      # from the original pixels and enlarge it, retaining both representations.
+      timeout 3 xdotool getwindowgeometry --shell "$window" > "$out/readiness-window-geometry.txt"
+      read -r native_x native_y native_w native_h <<< "$(awk -F= '$1=="X"{x=$2} $1=="Y"{y=$2} $1=="WIDTH"{w=$2} $1=="HEIGHT"{h=$2} END{print x,y,w,h}' "$out/readiness-window-geometry.txt")"
+      [[ "$native_x" =~ ^[0-9]+$ && "$native_y" =~ ^[0-9]+$ && "$native_w" =~ ^[0-9]+$ && "$native_h" =~ ^[0-9]+$ ]]
+      (( native_w >= 320 && native_h >= 320 && native_x+native_w <= 1280 && native_y+native_h <= 900 ))
+      [[ $(timeout 3 xdotool getwindowpid "$window") == "$app_pid" ]]
+      cp "$out/readiness.png" "$out/readiness-navigation-source.png"
+      date -u --iso-8601=ns > "$out/readiness-navigation-observed.utc"
+      printf 'source_png\twindow\tpid\tx\ty\twidth\theight\tscale\n%s\t%s\t%s\t%s\t%s\t320\t320\t4\n' \
+        "$out/readiness-navigation-source.png" "$window" "$app_pid" "$native_x" "$native_y" > "$out/readiness-navigation-transform.tsv"
+      timeout 8 ffmpeg -nostdin -y -loglevel error -i "$out/readiness-navigation-source.png" \
+        -vf "crop=320:320:$native_x:$native_y,scale=iw*4:ih*4:flags=lanczos" -frames:v 1 "$out/readiness-navigation.png"
+      timeout 8 tesseract "$out/readiness-navigation.png" "$out/readiness-navigation" --psm 11 tsv txt > "$out/readiness-navigation-ocr.log" 2>&1
+      [[ $(timeout 3 xdotool getwindowpid "$window") == "$app_pid" ]]
+      if exact_readiness_word "$out/readiness-navigation.tsv" Receive; then
+        receive_observed=1; receive_source=owned_navigation_crop_scaled_4
+      fi
+    fi
     ss -ltnp > "$out/listeners.txt"
-    if grep -q WSL1461 "$out/readiness.txt" && grep -q Receive "$out/readiness.txt" &&
+    if (( receive_observed )) && grep -q WSL1461 "$out/readiness.txt" && kill -0 "$app_pid" &&
+       [[ $(readlink -f "/proc/$app_pid/exe") == "$exe" && $(awk '{print $22}' "/proc/$app_pid/stat") == "$(cat "$out/app.start-tick")" && $(timeout 3 xdotool getwindowpid "$window") == "$app_pid" ]] &&
        grep -E ':41631[[:space:]].*pid='"$app_pid"',' "$out/listeners.txt" >/dev/null; then
+      printf 'receive_source\texact_word\tminimum_confidence\twindow\tpid\n%s\tReceive\t50\t%s\t%s\n' \
+        "$receive_source" "$window" "$app_pid" > "$out/readiness-observation.tsv"
       printf 'WINDOW=%q\n' "$window" >> "$out/session.env"
       printf 'ready\t%s\t%s\n' "$(date -u --iso-8601=ns)" "$app_pid" > "$out/ready.tsv"
       break
