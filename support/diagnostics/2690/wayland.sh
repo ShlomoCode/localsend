@@ -20,8 +20,17 @@ run_window() {
   label=$1
   executable=$2
   set +e
-  "$executable" > /evidence/launch/wayland-$label.log 2>&1 &
+  LD_DEBUG=libs,versions LD_DEBUG_OUTPUT=/evidence/launch/loader-$label "$executable" > /evidence/launch/wayland-$label.log 2>&1 &
   process_pid=$!
+  (
+    while kill -0 "$process_pid" 2>/dev/null; do
+      if [[ -r /proc/$process_pid/maps ]]; then
+        cat /proc/$process_pid/maps > /evidence/launch/maps-$label.txt
+      fi
+      sleep 0.1
+    done
+  ) &
+  maps_pid=$!
   sleep 12
   xwd -root -silent -out /evidence/launch/wayland-$label.xwd
   if kill -0 "$process_pid" 2>/dev/null; then
@@ -33,6 +42,7 @@ run_window() {
     status=$?
   fi
   set -e
+  wait "$maps_pid" || true
   printf '%s\t%s\n' "$label" "$status" >> /evidence/launch/wayland-results.tsv
   cat /evidence/launch/wayland-$label.log
 }
@@ -41,4 +51,13 @@ run_window original /evidence/original.AppImage
 run_window current /evidence/current.AppImage
 run_window repacked-baseline /evidence/repacked-baseline.AppImage
 run_window candidate /evidence/repacked-candidate.AppImage
+run_window cursor-egl /evidence/repacked-cursor-egl.AppImage
 run_window current-after /evidence/current.AppImage
+mkdir -p /tmp/candidate-dir
+cd /tmp/candidate-dir
+/evidence/repacked-candidate.AppImage --appimage-extract > /evidence/launch/extract-candidate.log
+run_window extracted-old /tmp/candidate-dir/squashfs-root/AppRun
+# Diagnostic substitution changes only the client provider. It is not a deployable package.
+cp /usr/lib64/libwayland-client.so.0.26.0 /tmp/candidate-dir/squashfs-root/usr/lib/x86_64-linux-gnu/libwayland-client.so.0.20.0
+sha256sum /tmp/candidate-dir/squashfs-root/usr/lib/x86_64-linux-gnu/libwayland-client.so.0.20.0 > /evidence/launch/substituted-client.sha256
+run_window substituted-client /tmp/candidate-dir/squashfs-root/AppRun

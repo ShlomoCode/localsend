@@ -31,6 +31,7 @@ su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baselin
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-current /evidence/current.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-repacked /evidence/repacked-baseline.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh candidate /evidence/repacked-candidate.AppImage'
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-client /evidence/repacked-cursor-egl.AppImage libwayland-client.so.0'
 emerge --verbose --getbinpkg dev-libs/wayland
 find /var/db/pkg -maxdepth 2 -type d | sort > /evidence/installed-after.txt
 find /usr/lib* /lib* -name 'libwayland*' > /evidence/wayland-after.txt
@@ -42,4 +43,7 @@ emerge --pretend --verbose --getbinpkg x11-libs/gtk+ x11-libs/libxkbcommon media
 emerge --verbose --getbinpkg --jobs=2 x11-libs/gtk+ x11-libs/libxkbcommon media-libs/mesa dev-libs/weston
 emerge --info > /evidence/wayland-info.txt
 gcc /diagnostic/gtk-control.c -o /tmp/gtk-control $(pkg-config --cflags --libs gtk+-3.0)
+readelf -Ws /usr/lib64/libEGL_mesa.so.0 > /evidence/mesa-egl-symbols.txt
+readelf -Ws /usr/lib64/libwayland-client.so.0 > /evidence/host-client-symbols.txt
+readelf -Ws /evidence/package-candidate/AppDir/usr/lib/x86_64-linux-gnu/libwayland-client.so.0 > /evidence/candidate-client-symbols.txt
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/wayland.sh'
