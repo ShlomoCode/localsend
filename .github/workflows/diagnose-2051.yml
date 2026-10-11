@@ -1,6 +1,12 @@
 name: Diagnose 2051 Android Open
 on:
   workflow_dispatch:
+    inputs:
+      scenario:
+        description: Destination experiment
+        type: choice
+        default: saf
+        options: [saf, direct-history]
   push:
     branches: [codex/diagnose-2051-open]
     paths: [.github/workflows/diagnose-2051.yml, support/diagnostics/2051/**]
@@ -8,6 +14,8 @@ jobs:
   reproduce:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      ISSUE2051_SCENARIO: ${{ inputs.scenario || 'saf' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check diagnostic syntax

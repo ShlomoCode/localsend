@@ -1,7 +1,7 @@
-import subprocess, time, pathlib, xml.etree.ElementTree as ET, re, json, urllib.request, hashlib, shlex, signal
+import os, subprocess, time, pathlib, xml.etree.ElementTree as ET, re, json, urllib.request, hashlib, shlex, signal
 ROOT = pathlib.Path("evidence")
 S, R = "emulator-5556", "emulator-5554"
-SAF = True
+SAF = os.environ.get("ISSUE2051_SCENARIO", "saf") == "saf"
 sessions = {}
 
 def adb(serial, *args, binary=False):
@@ -54,11 +54,11 @@ def choose_saf_destination():
     click(R, "Settings", "saf-before-settings")
     for index in range(8):
         xml = snapshot(R, "saf-settings-" + str(index))
-        if "Downloads" in labels(xml):
+        if "(Downloads)" in labels(xml):
             break
         request("POST", "/session/" + sessions[R] + "/actions", {"actions": [{"type": "pointer", "id": "scrollfinger", "parameters": {"pointerType": "touch"}, "actions": [{"type": "pointerMove", "duration": 0, "x": 160, "y": 500}, {"type": "pointerDown", "button": 0}, {"type": "pointerMove", "duration": 600, "x": 160, "y": 200}, {"type": "pointerUp", "button": 0}]}]})
         time.sleep(2)
-    click(R, "Downloads", "saf-before-destination")
+    click(R, "(Downloads)", "saf-before-destination")
     xml = snapshot(R, "saf-directory-picker")
     if "Issue2051" not in labels(xml):
         click(R, "Show roots", "saf-before-roots")
