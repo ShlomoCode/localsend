@@ -20,9 +20,9 @@ version=$(pkg-config --modversion atspi-2)
 [[ $version == 2.52.* ]] || { printf "Expected libatspi 2.52.x, found %s\n" "$version" >&2; exit 3; }
 printf "%s\n" "$version" > "$out/libatspi-version.txt"
 dpkg-query -W libatspi2.0-0 libatspi2.0-dev libglib2.0-0 libglib2.0-dev > "$out/package-versions.txt" 2>&1 || true
-pkg-config --cflags --libs atspi-2 glib-2.0 > "$out/build-flags.txt"
+pkg-config --cflags --libs atspi-2 glib-2.0 gobject-2.0 > "$out/build-flags.txt"
 # Intentional word splitting for the pkg-config compiler flags.
-cc -std=c11 -Wall -Wextra -O0 -g "$here/geometry-client.c" -o "$out/geometry-client" $(pkg-config --cflags --libs atspi-2 glib-2.0) 2> "$out/build.log"
+cc -std=c11 -Wall -Wextra -O0 -g "$here/geometry-client.c" -o "$out/geometry-client" $(pkg-config --cflags --libs atspi-2 glib-2.0 gobject-2.0) 2> "$out/build.log"
 sha256sum "$here/geometry-client.c" "$out/geometry-client" > "$out/fixture-sha256.txt"
 if [[ -n ${4:-} ]]; then
   window=$4
