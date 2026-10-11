@@ -26,7 +26,8 @@ jobs:
         run: |
           $sdk="$env:GITHUB_WORKSPACE/flutter-sdk"
           $folder="$env:RUNNER_TEMP/font_probe"
-          & "$sdk/bin/flutter.bat" create --platforms windows --project-name font_probe $folder
+          & "$sdk/bin/flutter.bat" create --no-pub --platforms windows --project-name font_probe $folder
+          @('name: font_probe', 'environment:', '  sdk: ">=3.5.0 <4.0.0"', 'dependencies:', '  flutter:', '    sdk: flutter', 'flutter:', '  uses-material-design: true') | Set-Content "$folder/pubspec.yaml"
           Copy-Item support/diagnostics/font-probe/main.dart "$folder/lib/main.dart"
           Set-Location $folder
           & "$sdk/bin/flutter.bat" build windows --release
