@@ -23,6 +23,7 @@ collect_evidence() {
     for required_file in session.done release/capture-manifest.json current-base/capture-manifest.json; do
       if [ ! -s "evidence/cloud/$required_file" ]; then collection_status=1; fi
     done
+    if [ "${WITH_CANDIDATE:-false}" = true ] && [ ! -s evidence/cloud/candidate/capture-manifest.json ]; then collection_status=1; fi
   fi
   printf '%s\n' "$collection_status" > evidence/cloud/collection-status.txt
   if [ "$host_status" = 0 ] && [ "$collection_status" != 0 ]; then host_status=1; fi
@@ -44,6 +45,14 @@ grep -qx c1ce322fb3acf08e44f329b8b7208b8b0d91e244 /tmp/tray3484/baseline/provena
 test ! -s /tmp/tray3484/baseline/provenance/source-status-before.txt
 test ! -s /tmp/tray3484/baseline/provenance/source-status-after.txt
 cp -a /tmp/tray3484/baseline/provenance evidence/cloud/current-base-provenance
+if [ "${WITH_CANDIDATE:-false}" = true ]; then
+  (cd /tmp/issue3484-candidate-build && sha256sum -c source-bundle.tar.gz.sha256)
+  grep -qx 9e228bb4facc2d4677afe1e6e21828adb7b83dba /tmp/issue3484-candidate-build/provenance/source-sha.txt
+  test ! -s /tmp/issue3484-candidate-build/provenance/source-status-before.txt
+  test ! -s /tmp/issue3484-candidate-build/provenance/source-status-after.txt
+  cp -a /tmp/issue3484-candidate-build/provenance evidence/cloud/candidate-provenance
+  cp /tmp/issue3484-candidate-build/source-bundle.tar.gz.sha256 evidence/cloud/candidate-bundle-sha256.txt
+fi
 curl -fL --retry 3 https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2 -o /home/runner/tray3484/arch.qcow2
 sha256sum /home/runner/tray3484/arch.qcow2 > evidence/cloud/cloud-image-sha256.txt
 qemu-img resize /home/runner/tray3484/arch.qcow2 24G
@@ -94,6 +103,9 @@ grep -qx guest-evidence-share evidence/cloud/share-guest-sentinel.txt
 grep -qx guest-input-share /tmp/tray3484/input/share-guest-sentinel.txt
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no support/diagnostics/3484/guest.sh support/diagnostics/3484/wayland-session.sh probe@127.0.0.1:/work/support/diagnostics/3484/
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no /tmp/tray3484/baseline/source-bundle.tar.gz probe@127.0.0.1:/work/source-bundle.tar.gz
+if [ "${WITH_CANDIDATE:-false}" = true ]; then
+  scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no /tmp/issue3484-candidate-build/source-bundle.tar.gz probe@127.0.0.1:/work/candidate-bundle.tar.gz
+fi
 ssh "${ssh_opts[@]}" probe@127.0.0.1 "sudo bash /work/support/diagnostics/3484/guest.sh '${ARCH_DATE:-latest}'" > evidence/cloud/provision.log 2>&1
 guest_uid=$(ssh "${ssh_opts[@]}" probe@127.0.0.1 'id -u investigator')
 printf 'runner-uid=%s\nrunner-gid=%s\nguest-investigator-uid=%s\n' "$(id -u)" "$(id -g)" "$guest_uid" > evidence/cloud/share-user-identity.txt

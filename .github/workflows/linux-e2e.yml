@@ -7,8 +7,52 @@ on:
         type: choice
         default: latest
         options: [latest, '2026-09-29']
+      candidate:
+        description: Build the isolated native-name candidate and compare real hover
+        type: boolean
+        default: false
+concurrency:
+  group: issue3484-tray-diagnostic
+  cancel-in-progress: false
 jobs:
+  build-candidate:
+    if: inputs.candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: diagnostic
+      - uses: actions/checkout@v6
+        with:
+          ref: 9e228bb4facc2d4677afe1e6e21828adb7b83dba
+          path: candidate-source
+          fetch-depth: 2
+      - name: Install same source-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev pkg-config binutils jq
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Install same Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Build exact minimal candidate with enforced locks
+        env:
+          PROBE_SOURCE_DIR: ${{ github.workspace }}/candidate-source
+          PROBE_BUILD_DIR: /tmp/issue3484-candidate-build
+        run: |
+          export PROBE_FLUTTER="$(command -v flutter)"
+          bash diagnostic/support/diagnostics/3484/build-candidate.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue3484-candidate-build
+          path: /tmp/issue3484-candidate-build/
   arch-tray:
+    needs: build-candidate
+    if: ${{ !cancelled() && (!inputs.candidate || needs.build-candidate.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -16,10 +60,16 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        if: inputs.candidate
+        with:
+          name: issue3484-candidate-build
+          path: /tmp/issue3484-candidate-build
       - name: Arch Hyprland VM and real Quickshell hover
         env:
           ARCH_DATE: ${{ inputs.archive_date || 'latest' }}
           GH_TOKEN: ${{ github.token }}
+          WITH_CANDIDATE: ${{ inputs.candidate }}
         run: |
           bash support/diagnostics/3484/vm.sh
       - name: Preserve evidence

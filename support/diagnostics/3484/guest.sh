@@ -71,6 +71,14 @@ USER
 printf '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  /work/source-bundle.tar.gz\n' | sha256sum -c -
 mkdir /opt/current-base
 tar -xf /work/source-bundle.tar.gz -C /opt/current-base
+if [ -f /work/candidate-bundle.tar.gz ]; then
+  expected_candidate_hash=$(awk '{print $1}' /work/evidence/cloud/candidate-bundle-sha256.txt)
+  printf '%s  /work/candidate-bundle.tar.gz\n' "$expected_candidate_hash" | sha256sum -c -
+  mkdir /opt/candidate
+  tar -xf /work/candidate-bundle.tar.gz -C /opt/candidate
+  test -x /opt/candidate/localsend_app
+  sha256sum /work/candidate-bundle.tar.gz > /work/evidence/cloud/guest-candidate-bundle-sha256.txt
+fi
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'GETTY'
 [Unit]

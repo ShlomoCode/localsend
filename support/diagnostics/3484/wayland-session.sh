@@ -95,12 +95,19 @@ case_finish() {
 }
 trap case_finish EXIT
 mkdir -p "$out/$app_case" "$HOME/cases/$app_case/data" "$HOME/cases/$app_case/config"
-if [ "$app_case" = release ]; then app_binary=/opt/localsend/localsend; else app_binary=/opt/current-base/localsend_app; fi
+if [ "$app_case" = release ]; then
+  app_binary=/opt/localsend/localsend
+elif [ "$app_case" = candidate ]; then
+  app_binary=/opt/candidate/localsend_app
+else
+  app_binary=/opt/current-base/localsend_app
+fi
 XDG_DATA_HOME="$HOME/cases/$app_case/data" XDG_CONFIG_HOME="$HOME/cases/$app_case/config" "$app_binary" > "$out/$app_case/localsend.log" 2>&1 &
 app_pid=$!
 printf '%s\n' "$app_pid" > "$out/$app_case/app-pid.txt"
 sleep 15
 kill -0 "$app_pid"
+hyprctl clients -j > "$out/$app_case/window-properties.json"
 quickshell -p "$OMARCHY_PATH/shell/shell.qml" ipc call shell debugBarGeometry > "$out/bar-geometry.txt" 2>&1 || true
 busctl --user list > "$out/$app_case/dbus-names.txt" 2> "$out/$app_case/dbus-names-error.txt" || true
 busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > "$out/$app_case/tray-items.txt" 2>&1 || true
@@ -179,7 +186,9 @@ fi
 kill -0 "$app_pid"
 )
 session_status=0
-for app_case in release current-base; do
+app_cases=(release current-base)
+if [ -x /opt/candidate/localsend_app ]; then app_cases+=(candidate); fi
+for app_case in "${app_cases[@]}"; do
   set +e
   capture_case "$app_case"
   case_status=$?
