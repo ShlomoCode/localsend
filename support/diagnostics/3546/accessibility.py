@@ -7,6 +7,7 @@ import os
 import shlex
 from pathlib import Path
 import pyatspi
+import dbus
 
 
 def describe(node, depth=0):
@@ -121,31 +122,57 @@ def quit_via_menu(pid, stage):
     service, path = item["address"].split("/", 1)
     detail = subprocess.run(["busctl", "--user", "introspect", service, "/" + path, "org.kde.StatusNotifierItem"], capture_output=True, text=True)
     Path(f"evidence/{stage}-sni.txt").write_text(detail.stdout + detail.stderr)
-    click(find("Show hidden icons", "button"))
-    node = find("org.localsend.localsend_app", "button")
-    bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-    # The icon is at the leading edge of the popup row, not the label center.
-    subprocess.run(["xdotool", "mousemove", str(bounds.x + 10), str(bounds.y + bounds.height // 2), "click", "1"], check=True)
-    time.sleep(1)
-    snapshot(stage + "-left-tray-menu")
+    # Invoke the application-owned menu leaf through the standard desktop API.
+    # This dispatches the original Quit callback, with no process signal/config edits.
+    bus = dbus.SessionBus()
+    properties = dbus.Interface(bus.get_object(service, "/" + path), "org.freedesktop.DBus.Properties")
+    menu_path = str(properties.Get("org.kde.StatusNotifierItem", "Menu"))
+    menu = dbus.Interface(bus.get_object(service, menu_path), "com.canonical.dbusmenu")
+    revision, layout = menu.GetLayout(0, -1, dbus.Array([], signature="s"))
+    leaves = []
+    def collect(entry):
+        entry_id, props, children = entry
+        record = {"id": int(entry_id), "properties": {str(k): str(v) for k, v in props.items()}, "children": []}
+        for child in children:
+            record["children"].append(collect(child))
+        if str(props.get("label", "")) == "Quit LocalSend" and not children:
+            leaves.append(int(entry_id))
+        return record
+    trace = {"pid": pid, "bus": service, "sni_path": "/" + path, "menu_path": menu_path, "revision": int(revision), "layout": collect(layout)}
+    Path(f"evidence/{stage}-menu-api.json").write_text(json.dumps(trace, indent=2))
+    assert len(leaves) == 1, f"Expected one original Quit LocalSend leaf, got {leaves}"
+    trace["invocation"] = {"method": "com.canonical.dbusmenu.Event", "id": leaves[0], "event": "clicked", "timestamp": 0}
+    Path(f"evidence/{stage}-menu-api.json").write_text(json.dumps(trace, indent=2))
     try:
-        quit_item = find("Quit LocalSend", "menu item")
-    except RuntimeError:
-        subprocess.run(["xdotool", "mousemove", str(bounds.x + 10), str(bounds.y + bounds.height // 2), "click", "3"], check=True)
-        time.sleep(1)
-        snapshot(stage + "-right-tray-menu")
-        quit_item = find("Quit LocalSend", "menu item")
-    click(quit_item)
+        menu.Event(dbus.Int32(leaves[0]), "clicked", dbus.Int32(0, variant_level=1), dbus.UInt32(0))
+    except dbus.DBusException as error:
+        trace["event_error"] = str(error)
+        Path(f"evidence/{stage}-menu-api.json").write_text(json.dumps(trace, indent=2))
+        if error.get_dbus_name() not in ("org.freedesktop.DBus.Error.NoReply", "org.freedesktop.DBus.Error.Disconnected"):
+            raise
+    def record_exit():
+        trace["process_exit"] = True
+        for _ in range(20):
+            response = subprocess.check_output(["busctl", "--user", "get-property", "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems"], text=True)
+            trace["watcher_after_quit"] = response.strip()
+            trace["sni_unregistered"] = item["address"] not in shlex.split(response)[2:]
+            if trace["sni_unregistered"]:
+                break
+            time.sleep(.25)
+        Path(f"evidence/{stage}-menu-api.json").write_text(json.dumps(trace, indent=2))
+        assert trace["sni_unregistered"], "Quit exited without unregistering original SNI"
     for _ in range(40):
         try:
             exited, _ = os.waitpid(pid, os.WNOHANG)
             if exited == pid:
+                record_exit()
                 return
         except ChildProcessError:
             pass
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
+            record_exit()
             return
         time.sleep(.25)
     raise RuntimeError("LocalSend's tray Quit action did not stop the application")
