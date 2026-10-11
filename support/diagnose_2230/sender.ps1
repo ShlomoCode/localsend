@@ -111,7 +111,7 @@ try {
   Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json | Set-Content (Join-Path $evidence 'windows-listeners.json')
   $startupDeadline=[DateTime]::UtcNow.AddSeconds(30)
   do {
-    $listener=@(Get-NetTCPConnection -State Listen -LocalPort 53317 -ErrorAction SilentlyContinue | Where-Object OwningProcess -eq $app.Id)
+    $listener=@(Get-NetTCPConnection -State Listen -LocalPort 41631 -ErrorAction SilentlyContinue | Where-Object OwningProcess -eq $app.Id)
     if($listener.Count -gt 0) { break }
     Start-Sleep -Seconds 1
   } until([DateTime]::UtcNow -ge $startupDeadline)

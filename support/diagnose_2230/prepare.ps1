@@ -5,6 +5,7 @@ $evidence=Join-Path $root 'evidence/2230'
 Start-Transcript -Path (Join-Path $evidence 'prepare.log')
 try {
   wsl --list --verbose
+  netsh interface ipv4 show excludedportrange protocol=tcp | Out-File (Join-Path $evidence 'windows-excluded-tcp-ports.txt')
   if($LASTEXITCODE -ne 0) { throw 'WSL inventory failed.' }
   $linuxRoot=(& wsl -d Ubuntu-24.04 -u root -- wslpath -a $root.Replace('\','/')).Trim()
   if($LASTEXITCODE -ne 0) { throw 'WSL path mapping failed.' }
@@ -19,7 +20,7 @@ try {
   Expand-Archive $zip $appDir
   $exe=@(Get-ChildItem $appDir -Recurse -Filter localsend_app.exe)
   if($exe.Count -ne 1) { throw 'Original Windows archive has no unique application.' }
-  $settings=@{'flutter.ls_version'=2;'flutter.ls_alias'='Windows2230';'flutter.ls_port'=53317;'flutter.ls_https'=$false;'flutter.ls_quick_save'=$false;'flutter.ls_locale'='en';'flutter.ls_auto_finish'=$false}
+  $settings=@{'flutter.ls_version'=2;'flutter.ls_alias'='Windows2230';'flutter.ls_port'=41631;'flutter.ls_https'=$false;'flutter.ls_quick_save'=$false;'flutter.ls_locale'='en';'flutter.ls_auto_finish'=$false}
   $settings | ConvertTo-Json | Set-Content (Join-Path $exe[0].DirectoryName 'settings.json') -Encoding UTF8
   $exe[0].FullName | Set-Content (Join-Path $evidence 'windows-executable.txt')
   Remove-Item $zip
