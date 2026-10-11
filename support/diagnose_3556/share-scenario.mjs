@@ -126,7 +126,14 @@ export default async function shareScenario({session,wd,output}){
   report.cpuSamples.push(sample);save('cpu-samples.json',report.cpuSamples);
  }
  async function findChooserTarget(entry,name){
-  const deadline=Date.now()+60000,maxScrolls=8;let scrolls=0,index=0,canScrollMore=true;
+  function itemPositions(xml){
+   const list=nodes(xml),container=list.find(n=>n['resource-id']==='android:id/resolver_list');
+   const top=Number(container?.bounds?.match(/^\[\d+,(\d+)\]/)?.[1]);
+   return list.filter(n=>n.package==='android'&&n.class==='android.widget.TextView'&&n['resource-id']==='android:id/text1'&&n.text&&n.text!=='1 item')
+    .map(n=>({label:n.text,bounds:n.bounds,relativeY:Number(n.bounds?.match(/^\[\d+,(\d+)\]/)?.[1])-top}));
+  }
+  const deadline=Date.now()+60000,maxScrolls=8;
+  let scrolls=0,index=0,lastLayout=null,stableObservations=0,falseGestures=0,swipeUsed=false;
   entry.chooserSearch={startedUtc:new Date().toISOString(),maxScrolls,timeoutMs:60000,observations:[],
    documentation:'https://github.com/appium/appium-uiautomator2-driver/blob/master/docs/android-mobile-gestures.md#mobile-scrollgesture'};
   do{
@@ -137,21 +144,54 @@ export default async function shareScenario({session,wd,output}){
     entry.chooserSearch.status='target-observed';entry.chooserSearch.scrolls=scrolls;entry.chooserSearch.finishedUtc=new Date().toISOString();
     save(name+'-result.json',entry);return observed;
    }
-   if(!canScrollMore)throw Error('Native chooser reached its observed scroll end without a LocalSend target');
-   const containers=list.filter(n=>n.package==='android'&&n['resource-id']==='android:id/resolver_list'&&n.scrollable==='true'&&n.displayed==='true'&&n.enabled==='true');
+   const containers=list.filter(n=>n.package==='android'&&n['resource-id']==='android:id/resolver_list'&&n.displayed==='true'&&n.enabled==='true');
    if(!containers.length){await sleep(1000);continue;}
    assert.equal(containers.length,1,'Native chooser resolver list is ambiguous');
-   assert(scrolls<maxScrolls,'Native chooser exhausted the bounded scroll count without LocalSend');
+   const spinner=list.some(n=>n.displayed==='true'&&(/ProgressBar$/.test(n.class||'')||/progressbar/i.test(n['resource-id']||'')));
+   const layout=JSON.stringify(list.filter(n=>n.package==='android'&&(n.text||n['resource-id']==='android:id/resolver_list'||n['resource-id']==='android:id/contentPanel'))
+    .map(n=>({text:n.text,bounds:n.bounds,resourceId:n['resource-id'],scrollable:n.scrollable})));
+   const changed=layout!==lastLayout;
+   if(changed){lastLayout=layout;stableObservations=1;falseGestures=0;}else stableObservations++;
+   entry.chooserSearch.observations.push({utc:observed.utc,snapshot:observed.name,layoutChanged:changed,stableObservations,spinner,
+    spinnerDetection:'Accessible ProgressBar only; a custom painted spinner can be present without this flag. See saved PNG.',scrolls,falseGestures});
+   save(name+'-result.json',entry);
+   // A Samsung sheet can expand without scrolling its app grid. Settle fresh layout before another gesture.
+   // A false gesture result is local to that attempt, never proof that the native chooser search is finished.
+   if(stableObservations<2||scrolls>=maxScrolls||(falseGestures>=2&&(spinner||swipeUsed))){
+    await sleep(Math.min(1500,Math.max(0,deadline-Date.now())));continue;
+   }
    const element=await wd('POST',base+'/element',{using:'id',value:containers[0]['resource-id']}),elementId=id(element);
    const rect=await wd('GET',base+'/element/'+elementId+'/rect');
    assert(rect.width>0&&rect.height>0&&rect.x>=0&&rect.y>=0&&rect.x+rect.width<=observed.width&&rect.y+rect.height<=observed.height,'Chooser scroll container has invalid current screen bounds');
-   const action={utc:new Date().toISOString(),label:'Scroll observed native chooser resolver list',resourceId:containers[0]['resource-id'],rect,direction:'down',percent:0.75};
+   const fallback=falseGestures>=2;
+   const action={utc:new Date().toISOString(),label:fallback?'Swipe observed native chooser resolver list':'Scroll observed native chooser resolver list',
+    resourceId:containers[0]['resource-id'],rect,direction:'down',percent:0.75,method:fallback?'W3C touch swipe':'mobile: scrollGesture'};
+   action.itemsBefore=itemPositions(observed.xml);
    report.actions.push(action);entry.chooserSearch.observations.push(action);save(name+'-result.json',entry);
-   // Official mobile:scrollGesture accepts a current element ID and reports whether it can scroll farther.
-   canScrollMore=await wd('POST',base+'/execute/sync',{script:'mobile: scrollGesture',args:[{elementId,direction:'down',percent:0.75}]});
-   assert(typeof canScrollMore==='boolean','Chooser scroll returned no supported can-scroll boolean');
-   action.canScrollMore=canScrollMore;scrolls++;entry.chooserSearch.scrolls=scrolls;
-   await snap(name+'-chooser-after-scroll-'+String(scrolls).padStart(2,'0'));save(name+'-result.json',entry);
+   if(fallback){
+    // One real swipe derived entirely from the freshly observed list rect; it selects no app or intent.
+    const x=Math.round(rect.x+rect.width/2),startY=Math.round(rect.y+rect.height*0.85),endY=Math.round(rect.y+rect.height*0.2);
+    action.start={x,y:startY};action.end={x,y:endY};swipeUsed=true;
+    await wd('POST',base+'/actions',{actions:[{type:'pointer',id:'chooser3556',parameters:{pointerType:'touch'},actions:[
+     {type:'pointerMove',duration:0,origin:'viewport',x,y:startY},{type:'pointerDown',button:0},{type:'pause',duration:100},
+     {type:'pointerMove',duration:800,origin:'viewport',x,y:endY},{type:'pointerUp',button:0}]}]});
+   }else{
+    // Official mobile:scrollGesture accepts a current element ID; false may reflect sheet expansion/readiness.
+    const canScrollMore=await wd('POST',base+'/execute/sync',{script:'mobile: scrollGesture',args:[{elementId,direction:'down',percent:0.75}]});
+    assert(typeof canScrollMore==='boolean','Chooser scroll returned no supported can-scroll boolean');
+    action.canScrollMore=canScrollMore;falseGestures=canScrollMore?0:falseGestures+1;
+   }
+   scrolls++;entry.chooserSearch.scrolls=scrolls;
+   const after=await snap(name+'-chooser-after-scroll-'+String(scrolls).padStart(2,'0'));
+   action.itemsAfter=itemPositions(after.xml);
+   action.itemPositionChanges=action.itemsBefore.flatMap(before=>{
+    const matches=action.itemsAfter.filter(item=>item.label===before.label);
+    return matches.length===1&&Number.isFinite(before.relativeY)&&Number.isFinite(matches[0].relativeY)&&before.relativeY!==matches[0].relativeY?
+     [{label:before.label,beforeRelativeY:before.relativeY,afterRelativeY:matches[0].relativeY}]:[];
+   });
+   action.itemMovementObserved=action.itemPositionChanges.length>0;
+   action.movementLimit='Item Y positions are relative to the current resolver list, so sheet expansion alone is not counted as item scrolling; no movement is not an end-of-list proof';
+   save(name+'-result.json',entry);
    await sleep(500);
   }while(Date.now()<deadline);
   throw Error('Native chooser did not expose LocalSend within the bounded 60-second observed search');
