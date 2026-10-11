@@ -1,4 +1,4 @@
-param([string]$Executable,[string]$CandidateExecutable,[string]$EvidenceDirectory)
+param([string]$Executable,[string]$CandidateExecutable,[bool]$ReverseFavorites=$false,[string]$EvidenceDirectory)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
 Add-Type @"
@@ -181,8 +181,12 @@ Screenshot "sender-send"
 # The favorite icon was visually located at (576,212) in the retained release screenshot.
 Click 576 212
 Screenshot "favorites-empty"
-foreach ($favorite in @(@{ip="10.0.20.2";alias="My Desktop (Home Lan)"},@{ip="100.95.193.205";alias="My Desktop (NetBird)"})) {
- $snapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-empty"} else {"favorites-first"}
+$favoriteOrder=@(@{ip="10.0.20.2";alias="My Desktop (Home Lan)"},@{ip="100.95.193.205";alias="My Desktop (NetBird)"})
+if($ReverseFavorites) {[array]::Reverse($favoriteOrder)}
+$favoriteOrder | ConvertTo-Json | Set-Content "$EvidenceDirectory/actual-favorite-insertion-order.json"
+$favoriteIndex=0
+foreach ($favorite in $favoriteOrder) {
+ $snapshot = if ($favoriteIndex -eq 0) {"favorites-empty"} else {"favorites-first"}
  PrimaryButton $snapshot
  Screenshot "add-$($favorite.ip)"
  Click 500 400
@@ -196,10 +200,10 @@ foreach ($favorite in @(@{ip="10.0.20.2";alias="My Desktop (Home Lan)"},@{ip="10
  Screenshot "filled-$($favorite.ip)"
  PrimaryButton "filled-$($favorite.ip)"
  Start-Sleep -Seconds 3
- $listSnapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-first"} else {"favorites-second"}
+ $listSnapshot = if ($favoriteIndex -eq 0) {"favorites-first"} else {"favorites-second"}
  Screenshot $listSnapshot
  $storedNow = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
- $expected = if($favorite.ip -eq "10.0.20.2") {1} else {2}
+ $expected = $favoriteIndex+1
  if (@($storedNow.'flutter.ls_favorites').Count -lt $expected -or -not $storedNow.'flutter.ls_favorites') {
   Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -in @(53317,53318)} | Select-Object LocalAddress,LocalPort,RemoteAddress,State,OwningProcess | ConvertTo-Json | Set-Content "$EvidenceDirectory/listeners-at-favorite-error.json"
   $controls=@()
@@ -214,12 +218,12 @@ foreach ($favorite in @(@{ip="10.0.20.2";alias="My Desktop (Home Lan)"},@{ip="10
   Screenshot "favorite-error-details"
   throw "Favorite submit did not reach the Favorites list; diagnostics retained"
  }
-
+ $favoriteIndex++
 }
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 $favorites = @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
 $favorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-before-scan.json"
-if ($favorites.Count -ne 2 -or $favorites[0].alias -ne "My Desktop (Home Lan)" -or $favorites[1].alias -ne "My Desktop (NetBird)") {throw "UI input did not store the intended favorite names"}
+if ($favorites.Count -ne 2 -or $favorites[0].alias -ne $favoriteOrder[0].alias -or $favorites[1].alias -ne $favoriteOrder[1].alias) {throw "UI input did not store the intended favorite names and insertion order"}
 if ($favorites[0].fingerprint -ne $favorites[1].fingerprint) {throw "Favorites do not refer to the same real peer identity"}
 Word "Cancel" "favorites-second"
 
@@ -231,7 +235,9 @@ Screenshot "favorites-after-scan"
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-after-scan.json"
 # The two Edit pencil centers were verified on the actual two-row Favorites dialog.
-foreach ($edit in @(@{alias="My Desktop (Home Lan)";y=358;ip="10.0.20.2"},@{alias="My Desktop (NetBird)";y=414;ip="100.95.193.205"})) {
+$homeY=if($ReverseFavorites){414}else{358}
+$netbirdY=if($ReverseFavorites){358}else{414}
+foreach ($edit in @(@{alias="My Desktop (Home Lan)";y=$homeY;ip="10.0.20.2"},@{alias="My Desktop (NetBird)";y=$netbirdY;ip="100.95.193.205"})) {
  Click 588 $edit.y
  $editSnapshot="edit-$($edit.ip)"
  Screenshot $editSnapshot
