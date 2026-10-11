@@ -180,7 +180,7 @@ try:
         print("INPUT_HISTORY_ICON", buttons[0].get("bounds"), flush=True)
         touch(R, (a+c)//2, (b+d)//2)
         history = snapshot(R, "B-history")
-history = snapshot(R, "B-history-before-menu")
+        history = snapshot(R, "B-history-before-menu")
         entry = next(n for n in ET.fromstring(history).iter() if n.get("content-desc", "").startswith("a.txt\n"))
         a,b,c,d = map(int, re.findall(r"\d+", entry.get("bounds")))
         # Screenshot confirms overflow icon at x281 inside the first entry; anchor to its captured right bound.

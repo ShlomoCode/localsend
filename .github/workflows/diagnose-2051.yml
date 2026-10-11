@@ -10,6 +10,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Check diagnostic syntax
+        run: python3 -m py_compile support/diagnostics/2051/scenario.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
