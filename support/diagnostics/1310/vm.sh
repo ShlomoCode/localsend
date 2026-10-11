@@ -42,4 +42,4 @@ for n in $(seq 1 180); do
 done
 test "$ready" = 1
 scp "${copy[@]}" support/diagnostics/1310/guest.sh support/diagnostics/1310/actions.sh probe@127.0.0.1:/home/probe/
-timeout 1000 ssh "${opts[@]}" probe@127.0.0.1 'bash /home/probe/guest.sh' | tee evidence/scenario.log
+timeout 1000 ssh "${opts[@]}" probe@127.0.0.1 "PACKAGE_FORMAT=${PACKAGE_FORMAT:-tar} bash /home/probe/guest.sh" | tee evidence/scenario.log

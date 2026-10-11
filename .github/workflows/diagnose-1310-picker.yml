@@ -6,6 +6,10 @@ on:
         type: choice
         options: [ubuntu, mx]
         default: ubuntu
+      package_format:
+        type: choice
+        options: [tar, appimage, deb]
+        default: tar
 permissions:
   contents: read
 jobs:
@@ -15,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Normal XFCE release controls
+        env:
+          PACKAGE_FORMAT: ${{ inputs.package_format || 'tar' }}
         run: |
           if [ '${{ inputs.desktop }}' = mx ]; then
             bash support/diagnostics/1310/mx.sh

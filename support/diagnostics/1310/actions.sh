@@ -15,15 +15,36 @@ click_label() {
 }
 for version in 1.14.0 1.18.2; do
   mkdir -p "releases/$version"
-  curl -fL --retry 3 -o "releases/$version.tar.gz" "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-linux-x86-64.tar.gz"
-  sha256sum "releases/$version.tar.gz" >> evidence/release-hashes.txt
-  tar xf "releases/$version.tar.gz" -C "releases/$version"
-  binary=$(find "releases/$version" -name localsend_app -type f | head -1)
-  ldd "$binary" > "evidence/$version-ldd.txt"
+  package_format=${PACKAGE_FORMAT:-tar}
+  case "$package_format" in
+    tar)
+      curl -fL --retry 3 -o "releases/$version.tar.gz" "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-linux-x86-64.tar.gz"
+      sha256sum "releases/$version.tar.gz" >> evidence/release-hashes.txt
+      tar xf "releases/$version.tar.gz" -C "releases/$version"
+      binary=$(find "releases/$version" -name localsend_app -type f | head -1)
+      ;;
+    appimage)
+      curl -fL --retry 3 -o "releases/$version.AppImage" "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-linux-x86-64.AppImage"
+      sha256sum "releases/$version.AppImage" >> evidence/release-hashes.txt
+      chmod +x "releases/$version.AppImage"
+      binary="releases/$version.AppImage"
+      ;;
+    deb)
+      curl -fL --retry 3 -o "releases/$version.deb" "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-linux-x86-64.deb"
+      sha256sum "releases/$version.deb" >> evidence/release-hashes.txt
+      sudo apt-get install -y "$(pwd)/releases/$version.deb"
+      dpkg -V localsend > "evidence/$version-package-verification.txt"
+      binary=$(dpkg -L localsend | awk '/\/localsend_app$/{print;exit}')
+      ;;
+    *) exit 2;;
+  esac
+  printf '%s %s %s\n' "$version" "$package_format" "$binary" >> evidence/artifact-identity.txt
+  ldd "$binary" > "evidence/$version-ldd.txt" 2>&1 || true
   "$binary" > "evidence/$version-app.log" 2>&1 &
   pid=$!
   sleep 15
-  window=$(xdotool search --onlyvisible --pid "$pid" | head -1)
+  window=$(xdotool search --onlyvisible --name '^LocalSend$' | head -1)
+  xprop -id "$window" _NET_WM_PID WM_CLASS >> evidence/app-window-identity.txt
   xdotool windowsize "$window" 1050 780 windowmove "$window" 70 60 windowactivate --sync "$window"
   sleep 3
   snapshot "$version-start"
@@ -43,6 +64,7 @@ for version in 1.14.0 1.18.2; do
   mkdir -p payload
   printf 'Issue 1310 real file selection control\n' > payload/control.txt
   sha256sum payload/control.txt >> evidence/payload-sha256.txt
+  if grep -Eiq '"(Open File|Select.*file|Choose.*file)"' "evidence/$version-after-file-windows.txt"; then
   xdotool key ctrl+l
   xdotool type --clearmodifiers --delay 30 "$(pwd)/payload/control.txt"
   xdotool key Return
@@ -52,6 +74,7 @@ for version in 1.14.0 1.18.2; do
     xdotool key Return
     sleep 2
     snapshot "$version-file-selected-confirmed"
+  fi
   fi
   xdotool key Escape
   sleep 2
@@ -64,7 +87,8 @@ for version in 1.14.0 1.18.2; do
   xdotool key Escape
   sleep 2
   { systemctl --user status xdg-desktop-portal xdg-desktop-portal-gtk --no-pager || true; journalctl --user -u xdg-desktop-portal -u xdg-desktop-portal-gtk --no-pager || true; busctl --user list || true; } > "evidence/$version-portal-state.txt"
-  kill "$pid"
+  app_pid=$(xprop -id "$window" _NET_WM_PID | awk '{print $NF}')
+  kill "$app_pid" "$pid" 2>/dev/null || true
   sleep 3
 done
 printf 'Actual UI actions completed; inspect screenshots for picker verdicts.\n' > evidence/complete.txt
