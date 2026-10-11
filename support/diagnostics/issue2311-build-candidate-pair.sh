@@ -24,6 +24,7 @@ printf 'stage=%s\nbaseline_source=%s\ncandidate_source=%s\ngal_base_source=%s\ng
 
 cd "$workspace/candidate"
 fvm --version > "$evidence/fvm-version.txt"
+fvm flutter --version > "$evidence/flutter-bootstrap.log" 2>&1
 fvm flutter --version --machine > "$evidence/flutter-version.json"
 rustc --version --verbose > "$evidence/rust-version.txt"
 java -version > "$evidence/java-version.txt" 2>&1
