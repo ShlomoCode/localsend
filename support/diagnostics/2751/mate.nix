@@ -1,5 +1,5 @@
 let
-  revision = "ac62194c3917d5f474c1a844b6fd6da2db95077d";
+  revision = "6132ff3ee5a9509d0aeb66a01a7d662c6384289b";
   nixpkgs = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${revision}.tar.gz";
 in
 import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
@@ -23,7 +23,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     user = nodes.machine.users.users.alice;
     env = "DISPLAY=:0.0 XAUTHORITY=${user.home}/.Xauthority DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${toString user.uid}/bus";
   in ''
-    import json, shlex
+    import shlex
     start_all()
     machine.wait_for_x()
     machine.wait_for_file("${user.home}/.Xauthority")

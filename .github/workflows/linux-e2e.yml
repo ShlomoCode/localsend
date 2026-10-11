@@ -18,6 +18,7 @@ jobs:
           df -h
       - name: Run the unmodified NixOS 25.05 package on MATE
         run: |
+          set -euo pipefail
           mkdir -p evidence
           nix-build support/diagnostics/2751/mate.nix -A driver --no-out-link | tee evidence/driver-path.txt
           driver=$(tail -1 evidence/driver-path.txt)
