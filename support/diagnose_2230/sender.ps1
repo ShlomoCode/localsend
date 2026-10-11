@@ -24,7 +24,7 @@ function Snapshot([string]$Label) {
     $bitmap.Save($image,[Drawing.Imaging.ImageFormat]::Png)
   } finally { $bitmap.Dispose() }
   $json=Join-Path $evidence ($name+'.json')
-  $worker=Start-Process "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -ArgumentList @('-NoProfile','-File',('"'+$PSScriptRoot+'/ocr.ps1"'),'-Image',('"'+$image+'"'),'-Result',('"'+$json+'"'),'-DeadlineUtc',[DateTime]::UtcNow.AddSeconds(15).ToString('o')) -PassThru -WindowStyle Hidden
+  $worker=Start-Process "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -ArgumentList @('-NoProfile','-File',('"'+$PSScriptRoot+'/ocr.ps1"'),'-Image',('"'+$image+'"'),'-Result',('"'+$json+'"'),'-DeadlineUtc',[DateTime]::UtcNow.AddSeconds(15).ToString('o')) -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $evidence ($name+'-ocr-error.txt')) -RedirectStandardOutput (Join-Path $evidence ($name+'-ocr-output.txt'))
   if(-not $worker.WaitForExit(17000)) { $worker.Kill(); throw 'Native OCR readiness timeout.' }
   $ocr=Get-Content $json -Raw | ConvertFrom-Json
   if($ocr.status -ne 'recognized') { throw ('Native OCR unavailable: '+$ocr.error) }
@@ -85,6 +85,14 @@ try {
   $app=Start-Process $exe -PassThru
   Start-Sleep -Seconds 5
   [void](Snapshot 'startup')
+  Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json | Set-Content (Join-Path $evidence 'windows-listeners.json')
+  $startupDeadline=[DateTime]::UtcNow.AddSeconds(30)
+  do {
+    $listener=@(Get-NetTCPConnection -State Listen -LocalPort 53317 -ErrorAction SilentlyContinue | Where-Object OwningProcess -eq $app.Id)
+    if($listener.Count -gt 0) { break }
+    Start-Sleep -Seconds 1
+  } until([DateTime]::UtcNow -ge $startupDeadline)
+  if($listener.Count -eq 0) { throw 'Original Windows application has no owned listener; supported startup gate unmet.' }
   $linuxRoot=(& wsl -d Ubuntu-24.04 -u tester -- wslpath -a (Get-Location).Path.Replace('\','/')).Trim()
   $ip=(& wsl -d Ubuntu-24.04 -u tester -- bash -lc "hostname -I | cut -d' ' -f1").Trim()
   if($ip -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'No valid WSL receiver IPv4 address.' }

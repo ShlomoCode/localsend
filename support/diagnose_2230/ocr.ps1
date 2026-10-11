@@ -1,13 +1,3 @@
-  $frame=$full.Clone($rect,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  try {
-   $framePath=Join-Path $OutputDirectory "$name-window.png"; $frame.Save($framePath,[Drawing.Imaging.ImageFormat]::Png); $report.imageCount++
-   $digest=Get-BitmapDigest $frame
-  } finally { $frame.Dispose() }
- } finally { $full.Dispose() }
- $ocrScript=Join-Path $OutputDirectory 'native-ocr.ps1'
- if(-not (Test-Path $ocrScript)) {
-  # Framework Windows PowerShell supports native WinRT projection independently of pwsh's runtime.
-  [IO.File]::WriteAllText($ocrScript,@'
 param([string]$Image,[string]$Result,[string]$DeadlineUtc)
 $ErrorActionPreference='Stop'
 $deadline=[DateTime]::Parse($DeadlineUtc).ToUniversalTime()
@@ -22,7 +12,7 @@ try {
   $method=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
   $task=$method.MakeGenericMethod($Type).Invoke($null,@($Operation))
   $remaining=[int][Math]::Max(0,($deadline-[DateTime]::UtcNow).TotalMilliseconds)
-  if($remaining -le 0 -or -not $task.Wait($remaining)) { throw 'Native OCR worker deadline expired.' }
+  if($remaining -le 0 -or -not $task.Wait($remaining)) { throw 'Native OCR deadline expired.' }
   return $task.Result
  }
  $file=Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Image)) ([Windows.Storage.StorageFile])
