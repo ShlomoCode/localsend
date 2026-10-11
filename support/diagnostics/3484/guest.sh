@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euxo pipefail
-pacman -Syu --noconfirm
+archive_date=${1:-latest}
+printf '%s\n' "$archive_date" > /work/evidence/cloud/arch-snapshot.txt
+if [ "$archive_date" != latest ]; then
+  printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "${archive_date//-//}" > /etc/pacman.d/mirrorlist
+  pacman -Syyuu --noconfirm
+else
+  pacman -Syu --noconfirm
+fi
 pacman -S --noconfirm base-devel git curl jq gtk3 libayatana-appindicator libayatana-indicator fuse2 xdg-user-dirs quickshell hyprland xorg-xwayland grim tesseract tesseract-data-eng mesa ttf-dejavu flameshot inotify-tools power-profiles-daemon sudo
 pacman -Q > /work/evidence/cloud/package-versions.txt
 cat /etc/os-release > /work/evidence/cloud/os-release.txt

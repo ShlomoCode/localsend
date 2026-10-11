@@ -35,7 +35,7 @@ for i in $(seq 1 90); do
 done
 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo mkdir -p /work/support/diagnostics/3484 /work/evidence/cloud; sudo chown -R probe:probe /work'
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no support/diagnostics/3484/guest.sh support/diagnostics/3484/wayland-session.sh probe@127.0.0.1:/work/support/diagnostics/3484/
-ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo bash /work/support/diagnostics/3484/guest.sh' > evidence/cloud/provision.log 2>&1
+ssh "${ssh_opts[@]}" probe@127.0.0.1 "sudo bash /work/support/diagnostics/3484/guest.sh '${ARCH_DATE:-latest}'" > evidence/cloud/provision.log 2>&1
 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo reboot' || true
 ready=0
 for i in $(seq 1 120); do

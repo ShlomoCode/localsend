@@ -1,6 +1,12 @@
 name: Diagnose Linux tray hover 3484
 on:
   workflow_dispatch:
+    inputs:
+      archive_date:
+        description: Coherent Arch repository snapshot (latest or report date)
+        type: choice
+        default: latest
+        options: [latest, '2026-09-29']
 jobs:
   arch-tray:
     runs-on: ubuntu-24.04
@@ -8,6 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Arch Hyprland VM and real Quickshell hover
+        env:
+          ARCH_DATE: ${{ inputs.archive_date || 'latest' }}
         run: |
           bash support/diagnostics/3484/vm.sh
       - name: Preserve evidence
