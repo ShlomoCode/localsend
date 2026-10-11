@@ -1,0 +1,1344 @@
+{
+  "runId": "38136480853",
+  "classification": "outer-scenario-timeout-with-progressing-partial-save",
+  "scope": "Read-only retained-artifact audit; no application execution",
+  "setup": {
+    "stage": "real-app-pair",
+    "exit_code": 124,
+    "classification": "inspect-case-results"
+  },
+  "timeoutEvidence": {
+    "source": "support/diagnostics/2414-vm-pair.sh:110",
+    "outerScenarioLimitSeconds": 3000,
+    "perCaseSaveWindowSeconds": 2400,
+    "largeCaseResultAbsent": true,
+    "interpretation": "Repeated input probes and checkpoint consumed scenario time before the large save; outer timeout interrupted before its normal 40-minute completion check."
+  },
+  "caseResults": [
+    {
+      "count": 5,
+      "failure": null,
+      "classification": "completed-real-app-transfer",
+      "options_click_guest_monotonic": 88.287376262,
+      "options_first_observed_screenshot_guest_monotonic": 89.333447912,
+      "options_first_observed_seconds": 1.0460716500000018,
+      "options_assertion_seconds_including_ocr": 2.428117264000008,
+      "timing_note": "First matching screenshot capture completion, including SSH input/capture overhead; not isolated paint latency.",
+      "options_interactions": {
+        "count": 5,
+        "classification": "wheel-and-editor-cancel-observed",
+        "deadline_note": "A 45-second observation deadline is an automation/discovery result, not evidence of hang or OOM.",
+        "geometry": "WINDOW=4194307\nX=2\nY=40\nWIDTH=1000\nHEIGHT=700\nSCREEN=0",
+        "before_wheel": {
+          "rows": {
+            "file-00000.txt": {
+              "left": 418,
+              "top": 241,
+              "center_y": 247
+            },
+            "file-00002.txt": {
+              "left": 418,
+              "top": 297,
+              "center_y": 303
+            },
+            "file-00003.txt": {
+              "left": 418,
+              "top": 353,
+              "center_y": 359
+            },
+            "file-00004.txt": {
+              "left": 418,
+              "top": 409,
+              "center_y": 415
+            },
+            "file-00001.txt": {
+              "left": 418,
+              "top": 465,
+              "center_y": 471
+            }
+          },
+          "capture": {
+            "output": "",
+            "started": 92.435773507,
+            "completed": 92.487178283
+          }
+        },
+        "wheel_down": {
+          "classification": "all-five-rows-fit-viewport",
+          "rows": {
+            "file-00000.txt": {
+              "left": 418,
+              "top": 241,
+              "center_y": 247
+            },
+            "file-00002.txt": {
+              "left": 418,
+              "top": 297,
+              "center_y": 303
+            },
+            "file-00003.txt": {
+              "left": 418,
+              "top": 353,
+              "center_y": 359
+            },
+            "file-00004.txt": {
+              "left": 418,
+              "top": 409,
+              "center_y": 415
+            },
+            "file-00001.txt": {
+              "left": 418,
+              "top": 465,
+              "center_y": 471
+            }
+          },
+          "positions_unchanged_within_3px": true,
+          "input_guest_monotonic": {
+            "output": "",
+            "started": 93.862174833,
+            "completed": 94.587623877
+          },
+          "first_matching_capture_guest_monotonic": {
+            "output": "",
+            "started": 96.156640841,
+            "completed": 96.211102076
+          },
+          "last_nonmatching_capture_guest_monotonic": null,
+          "capture_start_since_input_started_seconds": 2.2944660080000006,
+          "capture_end_since_input_started_seconds": 2.3489272430000057,
+          "total_seconds_including_ssh_and_ocr": 3.7061643879999906,
+          "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+        },
+        "wheel_up": {
+          "classification": "original-rows-and-positions-restored",
+          "input_guest_monotonic": {
+            "output": "",
+            "started": 97.585745799,
+            "completed": 98.313154013
+          },
+          "first_matching_capture_guest_monotonic": {
+            "output": "",
+            "started": 98.884537915,
+            "completed": 98.936753304
+          },
+          "last_nonmatching_capture_guest_monotonic": null,
+          "capture_start_since_input_started_seconds": 1.2987921160000013,
+          "capture_end_since_input_started_seconds": 1.3510075050000125,
+          "total_seconds_including_ssh_and_ocr": 2.8025257609999983,
+          "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+        },
+        "editor_original_filename": "file-00000.txt",
+        "editor_original_ocr_tokens": [
+          "Case2414Files5/fi",
+          "e-00000.txt"
+        ],
+        "dialog_source_expectation": {
+          "release": "v1.17.0",
+          "path": "app/lib/widget/dialogs/file_name_input_dialog.dart",
+          "title": "Enter file name",
+          "original_label": "Original:",
+          "autofocus": true,
+          "cancel_label": "Cancel",
+          "note": "Runtime OCR must establish these observations; source alone is not a passed probe."
+        },
+        "editor_target": {
+          "absolute_xy": [
+            741,
+            256
+          ],
+          "observed_row": {
+            "left": 418,
+            "top": 241,
+            "center_y": 247
+          },
+          "reference": "38111506442/files-5000-options-visible.png"
+        },
+        "editor_open": {
+          "classification": "file-name-dialog-observed",
+          "input_guest_monotonic": {
+            "output": "",
+            "started": 100.369854296,
+            "completed": 100.473904434
+          },
+          "first_matching_capture_guest_monotonic": {
+            "output": "",
+            "started": 101.372776107,
+            "completed": 101.423609362
+          },
+          "last_nonmatching_capture_guest_monotonic": null,
+          "capture_start_since_input_started_seconds": 1.0029218110000073,
+          "capture_end_since_input_started_seconds": 1.0537550659999937,
+          "total_seconds_including_ssh_and_ocr": 3.7482326720000003,
+          "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+        },
+        "input_mode_repeats": [
+          {
+            "mode": "typing",
+            "repeat": 0,
+            "original_filename": "file-00000.txt",
+            "burst": {
+              "mode": "typing",
+              "folder": "/home/probe/evidence/files-5-input-typing-0",
+              "helper_pid": 6233,
+              "xinput_pid": 6234,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst.",
+              "select_all": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+a"
+                ],
+                "started": 106.632254347,
+                "utc_ns": 1791719042228001811,
+                "completed": 106.666875219,
+                "stdout": "",
+                "stderr": ""
+              },
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "type",
+                  "--clearmodifiers",
+                  "--delay",
+                  "40",
+                  "Probe2414.txt"
+                ],
+                "started": 106.667084475,
+                "utc_ns": 1791719042262831569,
+                "completed": 106.965135244,
+                "stdout": "",
+                "stderr": ""
+              },
+              "classification": "input-and-frame-burst-retained",
+              "errors": [],
+              "completed": 114.967023557,
+              "xi2_raw_key_event_headers": 33
+            },
+            "raw_batch_local": "evidence/files-5-input-typing-0",
+            "batch_analysis": {
+              "mode": "typing",
+              "frame_count": 94,
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "type",
+                  "--clearmodifiers",
+                  "--delay",
+                  "40",
+                  "Probe2414.txt"
+                ],
+                "started": 106.667084475,
+                "utc_ns": 1791719042262831569,
+                "completed": 106.965135244,
+                "stdout": "",
+                "stderr": ""
+              },
+              "field_roi_absolute": {
+                "left": 345,
+                "top": 353,
+                "width": 320,
+                "height": 53
+              },
+              "capture_duration_median_seconds": 0.06641778749999361,
+              "capture_duration_max_seconds": 0.11736781300000132,
+              "actual_frame_start_gap_median_seconds": 0.09999885800000641,
+              "actual_frame_start_gap_max_seconds": 0.11744956299999387,
+              "first_exact_draft_ocr_frame": {
+                "frame": "frame-0019.png",
+                "started": 107.458963157,
+                "completed": 107.526235727,
+                "target_interval_seconds": 0.1,
+                "field_ocr_tokens_raw": [
+                  "Probe2414.txt"
+                ],
+                "exact_draft_ocr_match": true,
+                "since_input_start": {
+                  "started": 0.7918786820000037,
+                  "completed": 0.8591512520000038
+                },
+                "since_input_exit": {
+                  "started": 0.49382791300000406,
+                  "completed": 0.5611004830000041
+                }
+              },
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation."
+            },
+            "draft_after_burst": {
+              "classification": "draft-and-original-visible-in-dialog",
+              "capture": {
+                "first_matching_capture": {
+                  "output": "",
+                  "started": 134.499906894,
+                  "completed": 134.557258847
+                },
+                "last_nonmatching_capture": {
+                  "output": "",
+                  "started": 131.444531515,
+                  "completed": 131.49959974
+                },
+                "assertion_seconds_including_ocr": 5.687494139999984
+              }
+            },
+            "cancel_observed_token": {
+              "level": "5",
+              "page_num": "1",
+              "block_num": "1",
+              "par_num": "1",
+              "line_num": "1",
+              "word_num": "1",
+              "left": 483,
+              "top": 441,
+              "width": 46,
+              "height": 11,
+              "conf": "72.289429",
+              "text": "Cancel",
+              "band": "cancel",
+              "ocr_text_raw": "Cancel"
+            },
+            "cancel": {
+              "classification": "original-filenames-restored-without-draft",
+              "rows": {
+                "file-00000.txt": {
+                  "left": 418,
+                  "top": 241,
+                  "center_y": 247
+                },
+                "file-00002.txt": {
+                  "left": 418,
+                  "top": 297,
+                  "center_y": 303
+                },
+                "file-00003.txt": {
+                  "left": 418,
+                  "top": 353,
+                  "center_y": 359
+                },
+                "file-00004.txt": {
+                  "left": 418,
+                  "top": 409,
+                  "center_y": 415
+                },
+                "file-00001.txt": {
+                  "left": 418,
+                  "top": 465,
+                  "center_y": 471
+                }
+              },
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 137.118538563,
+                "completed": 137.222603214
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 138.118885012,
+                "completed": 138.171275773
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 1.0003464490000056,
+              "capture_end_since_input_started_seconds": 1.0527372100000036,
+              "total_seconds_including_ssh_and_ocr": 2.3899222299999963,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            }
+          },
+          {
+            "mode": "paste",
+            "repeat": 0,
+            "original_filename": "file-00000.txt",
+            "editor_open": {
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 139.502104593,
+                "completed": 139.606514904
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 140.508144357,
+                "completed": 140.569224687
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 1.0060397639999792,
+              "capture_end_since_input_started_seconds": 1.0671200939999892,
+              "total_seconds_including_ssh_and_ocr": 3.695364054999999,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "burst": {
+              "mode": "paste",
+              "folder": "/home/probe/evidence/files-5-input-paste-0",
+              "helper_pid": 7036,
+              "xinput_pid": 7037,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst.",
+              "clipboard_pid": 7038,
+              "select_all": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+a"
+                ],
+                "started": 144.565407353,
+                "utc_ns": 1791719080161154908,
+                "completed": 144.595150252,
+                "stdout": "",
+                "stderr": ""
+              },
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+v"
+                ],
+                "started": 144.595344806,
+                "utc_ns": 1791719080191091719,
+                "completed": 144.635974421,
+                "stdout": "",
+                "stderr": ""
+              },
+              "classification": "input-and-frame-burst-retained",
+              "errors": [],
+              "completed": 152.661803875,
+              "xi2_raw_key_event_headers": 10
+            },
+            "raw_batch_local": "evidence/files-5-input-paste-0",
+            "batch_analysis": {
+              "mode": "paste",
+              "frame_count": 92,
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+v"
+                ],
+                "started": 144.595344806,
+                "utc_ns": 1791719080191091719,
+                "completed": 144.635974421,
+                "stdout": "",
+                "stderr": ""
+              },
+              "field_roi_absolute": {
+                "left": 345,
+                "top": 353,
+                "width": 320,
+                "height": 53
+              },
+              "capture_duration_median_seconds": 0.0656162245000047,
+              "capture_duration_max_seconds": 0.07255289899998729,
+              "actual_frame_start_gap_median_seconds": 0.10000102600000105,
+              "actual_frame_start_gap_max_seconds": 0.10111118000000374,
+              "first_exact_draft_ocr_frame": {
+                "frame": "frame-0017.png",
+                "started": 145.195936579,
+                "completed": 145.263419153,
+                "target_interval_seconds": 0.1,
+                "field_ocr_tokens_raw": [
+                  "Probe2414.txt"
+                ],
+                "exact_draft_ocr_match": true,
+                "since_input_start": {
+                  "started": 0.6005917729999908,
+                  "completed": 0.6680743469999868
+                },
+                "since_input_exit": {
+                  "started": 0.5599621580000189,
+                  "completed": 0.6274447320000149
+                }
+              },
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation."
+            },
+            "draft_after_burst": {
+              "classification": "draft-and-original-visible-in-dialog",
+              "capture": {
+                "first_matching_capture": {
+                  "output": "",
+                  "started": 190.197628436,
+                  "completed": 190.249113022
+                },
+                "last_nonmatching_capture": {
+                  "output": "",
+                  "started": 187.088286053,
+                  "completed": 187.141273864
+                },
+                "assertion_seconds_including_ocr": 24.123968942999966
+              }
+            },
+            "cancel_observed_token": {
+              "level": "5",
+              "page_num": "1",
+              "block_num": "1",
+              "par_num": "1",
+              "line_num": "1",
+              "word_num": "1",
+              "left": 483,
+              "top": 441,
+              "width": 46,
+              "height": 11,
+              "conf": "72.289429",
+              "text": "Cancel",
+              "band": "cancel",
+              "ocr_text_raw": "Cancel"
+            },
+            "cancel": {
+              "classification": "original-filenames-restored-without-draft",
+              "rows": {
+                "file-00000.txt": {
+                  "left": 418,
+                  "top": 241,
+                  "center_y": 247
+                },
+                "file-00002.txt": {
+                  "left": 418,
+                  "top": 297,
+                  "center_y": 303
+                },
+                "file-00003.txt": {
+                  "left": 418,
+                  "top": 353,
+                  "center_y": 359
+                },
+                "file-00004.txt": {
+                  "left": 418,
+                  "top": 409,
+                  "center_y": 415
+                },
+                "file-00001.txt": {
+                  "left": 418,
+                  "top": 465,
+                  "center_y": 471
+                }
+              },
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 192.885874906,
+                "completed": 192.990879869
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 193.878140806,
+                "completed": 193.931247307
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 0.9922659000000067,
+              "capture_end_since_input_started_seconds": 1.0453724010000087,
+              "total_seconds_including_ssh_and_ocr": 2.5017439889999764,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "clipboard_release": {
+              "clipboard_released": true,
+              "guest_monotonic": 195.36754135
+            }
+          },
+          {
+            "mode": "typing",
+            "repeat": 1,
+            "original_filename": "file-00000.txt",
+            "editor_open": {
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 195.665170611,
+                "completed": 195.769534685
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 196.65233995,
+                "completed": 196.713840904
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 0.9871693389999905,
+              "capture_end_since_input_started_seconds": 1.0486702929999865,
+              "total_seconds_including_ssh_and_ocr": 3.672166659000027,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "burst": {
+              "mode": "typing",
+              "folder": "/home/probe/evidence/files-5-input-typing-1",
+              "helper_pid": 8476,
+              "xinput_pid": 8477,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst.",
+              "select_all": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+a"
+                ],
+                "started": 200.414749544,
+                "utc_ns": 1791719136010497419,
+                "completed": 200.448239923,
+                "stdout": "",
+                "stderr": ""
+              },
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "type",
+                  "--clearmodifiers",
+                  "--delay",
+                  "40",
+                  "Probe2414.txt"
+                ],
+                "started": 200.448425711,
+                "utc_ns": 1791719136044173016,
+                "completed": 200.749456192,
+                "stdout": "",
+                "stderr": ""
+              },
+              "classification": "input-and-frame-burst-retained",
+              "errors": [],
+              "completed": 208.816558464,
+              "xi2_raw_key_event_headers": 33
+            },
+            "raw_batch_local": "evidence/files-5-input-typing-1",
+            "batch_analysis": {
+              "mode": "typing",
+              "frame_count": 95,
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "type",
+                  "--clearmodifiers",
+                  "--delay",
+                  "40",
+                  "Probe2414.txt"
+                ],
+                "started": 200.448425711,
+                "utc_ns": 1791719136044173016,
+                "completed": 200.749456192,
+                "stdout": "",
+                "stderr": ""
+              },
+              "field_roi_absolute": {
+                "left": 345,
+                "top": 353,
+                "width": 320,
+                "height": 53
+              },
+              "capture_duration_median_seconds": 0.06600155300000665,
+              "capture_duration_max_seconds": 0.07379712700000596,
+              "actual_frame_start_gap_median_seconds": 0.10000198349999323,
+              "actual_frame_start_gap_max_seconds": 0.10120252300001198,
+              "first_exact_draft_ocr_frame": {
+                "frame": "frame-0020.png",
+                "started": 201.347316616,
+                "completed": 201.41345054,
+                "target_interval_seconds": 0.1,
+                "field_ocr_tokens_raw": [
+                  "Probe2414.txt"
+                ],
+                "exact_draft_ocr_match": true,
+                "since_input_start": {
+                  "started": 0.8988909050000018,
+                  "completed": 0.965024829000015
+                },
+                "since_input_exit": {
+                  "started": 0.5978604240000038,
+                  "completed": 0.663994348000017
+                }
+              },
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation."
+            },
+            "draft_after_burst": {
+              "classification": "draft-and-original-visible-in-dialog",
+              "capture": {
+                "first_matching_capture": {
+                  "output": "",
+                  "started": 235.363577871,
+                  "completed": 235.417710558
+                },
+                "last_nonmatching_capture": {
+                  "output": "",
+                  "started": 232.191794261,
+                  "completed": 232.245265732
+                },
+                "assertion_seconds_including_ocr": 11.931772446999958
+              }
+            },
+            "cancel_observed_token": {
+              "level": "5",
+              "page_num": "1",
+              "block_num": "1",
+              "par_num": "1",
+              "line_num": "1",
+              "word_num": "1",
+              "left": 483,
+              "top": 441,
+              "width": 46,
+              "height": 11,
+              "conf": "72.289429",
+              "text": "Cancel",
+              "band": "cancel",
+              "ocr_text_raw": "Cancel"
+            },
+            "cancel": {
+              "classification": "original-filenames-restored-without-draft",
+              "rows": {
+                "file-00000.txt": {
+                  "left": 418,
+                  "top": 241,
+                  "center_y": 247
+                },
+                "file-00002.txt": {
+                  "left": 418,
+                  "top": 297,
+                  "center_y": 303
+                },
+                "file-00003.txt": {
+                  "left": 418,
+                  "top": 353,
+                  "center_y": 359
+                },
+                "file-00004.txt": {
+                  "left": 418,
+                  "top": 409,
+                  "center_y": 415
+                },
+                "file-00001.txt": {
+                  "left": 418,
+                  "top": 465,
+                  "center_y": 471
+                }
+              },
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 237.988791991,
+                "completed": 238.092498402
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 238.975427566,
+                "completed": 239.026297643
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 0.9866355750000082,
+              "capture_end_since_input_started_seconds": 1.037505651999993,
+              "total_seconds_including_ssh_and_ocr": 2.4455681549999895,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            }
+          },
+          {
+            "mode": "paste",
+            "repeat": 1,
+            "original_filename": "file-00000.txt",
+            "editor_open": {
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 240.424549454,
+                "completed": 240.529095437
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 241.428232272,
+                "completed": 241.483672639
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 1.0036828180000157,
+              "capture_end_since_input_started_seconds": 1.0591231850000042,
+              "total_seconds_including_ssh_and_ocr": 3.738663336000002,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "burst": {
+              "mode": "paste",
+              "folder": "/home/probe/evidence/files-5-input-paste-1",
+              "helper_pid": 9478,
+              "xinput_pid": 9479,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst.",
+              "clipboard_pid": 9480,
+              "select_all": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+a"
+                ],
+                "started": 245.259860512,
+                "utc_ns": 1791719180855608027,
+                "completed": 245.292372946,
+                "stdout": "",
+                "stderr": ""
+              },
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+v"
+                ],
+                "started": 245.292620948,
+                "utc_ns": 1791719180888368163,
+                "completed": 245.33621927,
+                "stdout": "",
+                "stderr": ""
+              },
+              "classification": "input-and-frame-burst-retained",
+              "errors": [],
+              "completed": 253.357167769,
+              "xi2_raw_key_event_headers": 10
+            },
+            "raw_batch_local": "evidence/files-5-input-paste-1",
+            "batch_analysis": {
+              "mode": "paste",
+              "frame_count": 92,
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+v"
+                ],
+                "started": 245.292620948,
+                "utc_ns": 1791719180888368163,
+                "completed": 245.33621927,
+                "stdout": "",
+                "stderr": ""
+              },
+              "field_roi_absolute": {
+                "left": 345,
+                "top": 353,
+                "width": 320,
+                "height": 53
+              },
+              "capture_duration_median_seconds": 0.06674411449999695,
+              "capture_duration_max_seconds": 0.07182563800000707,
+              "actual_frame_start_gap_median_seconds": 0.09999930399999357,
+              "actual_frame_start_gap_max_seconds": 0.10160733699999014,
+              "first_exact_draft_ocr_frame": {
+                "frame": "frame-0017.png",
+                "started": 245.89249344,
+                "completed": 245.959364792,
+                "target_interval_seconds": 0.1,
+                "field_ocr_tokens_raw": [
+                  "Probe2414.txt"
+                ],
+                "exact_draft_ocr_match": true,
+                "since_input_start": {
+                  "started": 0.5998724920000029,
+                  "completed": 0.6667438439999955
+                },
+                "since_input_exit": {
+                  "started": 0.5562741700000231,
+                  "completed": 0.6231455220000157
+                }
+              },
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation."
+            },
+            "draft_after_burst": {
+              "classification": "draft-and-original-visible-in-dialog",
+              "capture": {
+                "first_matching_capture": {
+                  "output": "",
+                  "started": 284.870557152,
+                  "completed": 284.92551054
+                },
+                "last_nonmatching_capture": {
+                  "output": "",
+                  "started": 281.828745612,
+                  "completed": 281.879796649
+                },
+                "assertion_seconds_including_ocr": 17.953287070000044
+              }
+            },
+            "cancel_observed_token": {
+              "level": "5",
+              "page_num": "1",
+              "block_num": "1",
+              "par_num": "1",
+              "line_num": "1",
+              "word_num": "1",
+              "left": 483,
+              "top": 441,
+              "width": 46,
+              "height": 11,
+              "conf": "72.289429",
+              "text": "Cancel",
+              "band": "cancel",
+              "ocr_text_raw": "Cancel"
+            },
+            "cancel": {
+              "classification": "original-filenames-restored-without-draft",
+              "rows": {
+                "file-00000.txt": {
+                  "left": 418,
+                  "top": 241,
+                  "center_y": 247
+                },
+                "file-00002.txt": {
+                  "left": 418,
+                  "top": 297,
+                  "center_y": 303
+                },
+                "file-00003.txt": {
+                  "left": 418,
+                  "top": 353,
+                  "center_y": 359
+                },
+                "file-00004.txt": {
+                  "left": 418,
+                  "top": 409,
+                  "center_y": 415
+                },
+                "file-00001.txt": {
+                  "left": 418,
+                  "top": 465,
+                  "center_y": 471
+                }
+              },
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 287.42596993,
+                "completed": 287.533664833
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 288.397520899,
+                "completed": 288.454218469
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 0.9715509690000204,
+              "capture_end_since_input_started_seconds": 1.0282485390000033,
+              "total_seconds_including_ssh_and_ocr": 2.4366454480000357,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "clipboard_release": {
+              "clipboard_released": true,
+              "guest_monotonic": 289.865773777
+            }
+          },
+          {
+            "mode": "typing",
+            "repeat": 2,
+            "original_filename": "file-00000.txt",
+            "editor_open": {
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 290.155872435,
+                "completed": 290.259710799
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 291.161336639,
+                "completed": 291.212055444
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 1.0054642040000203,
+              "capture_end_since_input_started_seconds": 1.0561830089999944,
+              "total_seconds_including_ssh_and_ocr": 3.7020457039999997,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "burst": {
+              "mode": "typing",
+              "folder": "/home/probe/evidence/files-5-input-typing-2",
+              "helper_pid": 10726,
+              "xinput_pid": 10727,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst.",
+              "select_all": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+a"
+                ],
+                "started": 294.932501039,
+                "utc_ns": 1791719230528248353,
+                "completed": 294.965608092,
+                "stdout": "",
+                "stderr": ""
+              },
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "type",
+                  "--clearmodifiers",
+                  "--delay",
+                  "40",
+                  "Probe2414.txt"
+                ],
+                "started": 294.9657837,
+                "utc_ns": 1791719230561530774,
+                "completed": 295.262667382,
+                "stdout": "",
+                "stderr": ""
+              },
+              "classification": "input-and-frame-burst-retained",
+              "errors": [],
+              "completed": 303.264530942,
+              "xi2_raw_key_event_headers": 33
+            },
+            "raw_batch_local": "evidence/files-5-input-typing-2",
+            "batch_analysis": {
+              "mode": "typing",
+              "frame_count": 94,
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "type",
+                  "--clearmodifiers",
+                  "--delay",
+                  "40",
+                  "Probe2414.txt"
+                ],
+                "started": 294.9657837,
+                "utc_ns": 1791719230561530774,
+                "completed": 295.262667382,
+                "stdout": "",
+                "stderr": ""
+              },
+              "field_roi_absolute": {
+                "left": 345,
+                "top": 353,
+                "width": 320,
+                "height": 53
+              },
+              "capture_duration_median_seconds": 0.06585889749999296,
+              "capture_duration_max_seconds": 0.07564797700001691,
+              "actual_frame_start_gap_median_seconds": 0.09999965899999097,
+              "actual_frame_start_gap_max_seconds": 0.10026970399997026,
+              "first_exact_draft_ocr_frame": {
+                "frame": "frame-0019.png",
+                "started": 295.763568384,
+                "completed": 295.829375532,
+                "target_interval_seconds": 0.1,
+                "field_ocr_tokens_raw": [
+                  "Probe2414.txt"
+                ],
+                "exact_draft_ocr_match": true,
+                "since_input_start": {
+                  "started": 0.7977846840000211,
+                  "completed": 0.8635918319999973
+                },
+                "since_input_exit": {
+                  "started": 0.5009010019999778,
+                  "completed": 0.566708149999954
+                }
+              },
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation."
+            },
+            "draft_after_burst": {
+              "classification": "draft-and-original-visible-in-dialog",
+              "capture": {
+                "first_matching_capture": {
+                  "output": "",
+                  "started": 331.96753001,
+                  "completed": 332.026102297
+                },
+                "last_nonmatching_capture": {
+                  "output": "",
+                  "started": 328.663632871,
+                  "completed": 328.716184723
+                },
+                "assertion_seconds_including_ocr": 14.924083510000003
+              }
+            },
+            "cancel_observed_token": {
+              "level": "5",
+              "page_num": "1",
+              "block_num": "1",
+              "par_num": "1",
+              "line_num": "1",
+              "word_num": "1",
+              "left": 483,
+              "top": 441,
+              "width": 46,
+              "height": 11,
+              "conf": "72.289429",
+              "text": "Cancel",
+              "band": "cancel",
+              "ocr_text_raw": "Cancel"
+            },
+            "cancel": {
+              "classification": "original-filenames-restored-without-draft",
+              "rows": {
+                "file-00000.txt": {
+                  "left": 418,
+                  "top": 241,
+                  "center_y": 247
+                },
+                "file-00002.txt": {
+                  "left": 418,
+                  "top": 297,
+                  "center_y": 303
+                },
+                "file-00003.txt": {
+                  "left": 418,
+                  "top": 353,
+                  "center_y": 359
+                },
+                "file-00004.txt": {
+                  "left": 418,
+                  "top": 409,
+                  "center_y": 415
+                },
+                "file-00001.txt": {
+                  "left": 418,
+                  "top": 465,
+                  "center_y": 471
+                }
+              },
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 334.489765135,
+                "completed": 334.594519882
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 335.460644974,
+                "completed": 335.513492227
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 0.9708798389999629,
+              "capture_end_since_input_started_seconds": 1.0237270919999446,
+              "total_seconds_including_ssh_and_ocr": 2.408549782000023,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            }
+          },
+          {
+            "mode": "paste",
+            "repeat": 2,
+            "original_filename": "file-00000.txt",
+            "editor_open": {
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 336.893488601,
+                "completed": 336.999407696
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 337.894709039,
+                "completed": 337.952185335
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 1.0012204380000185,
+              "capture_end_since_input_started_seconds": 1.0586967340000228,
+              "total_seconds_including_ssh_and_ocr": 3.701149014000009,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "burst": {
+              "mode": "paste",
+              "folder": "/home/probe/evidence/files-5-input-paste-2",
+              "helper_pid": 11831,
+              "xinput_pid": 11832,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst.",
+              "clipboard_pid": 11833,
+              "select_all": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+a"
+                ],
+                "started": 341.678618597,
+                "utc_ns": 1791719277274365912,
+                "completed": 341.717118355,
+                "stdout": "",
+                "stderr": ""
+              },
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+v"
+                ],
+                "started": 341.717578403,
+                "utc_ns": 1791719277313325456,
+                "completed": 341.757706601,
+                "stdout": "",
+                "stderr": ""
+              },
+              "classification": "input-and-frame-burst-retained",
+              "errors": [],
+              "completed": 349.775679848,
+              "xi2_raw_key_event_headers": 10
+            },
+            "raw_batch_local": "evidence/files-5-input-paste-2",
+            "batch_analysis": {
+              "mode": "paste",
+              "frame_count": 92,
+              "input": {
+                "argv": [
+                  "xdotool",
+                  "key",
+                  "--clearmodifiers",
+                  "ctrl+v"
+                ],
+                "started": 341.717578403,
+                "utc_ns": 1791719277313325456,
+                "completed": 341.757706601,
+                "stdout": "",
+                "stderr": ""
+              },
+              "field_roi_absolute": {
+                "left": 345,
+                "top": 353,
+                "width": 320,
+                "height": 53
+              },
+              "capture_duration_median_seconds": 0.06619570799998087,
+              "capture_duration_max_seconds": 0.07236625699999877,
+              "actual_frame_start_gap_median_seconds": 0.1000040879999915,
+              "actual_frame_start_gap_max_seconds": 0.10199196699994673,
+              "first_exact_draft_ocr_frame": {
+                "frame": "frame-0017.png",
+                "started": 342.311019591,
+                "completed": 342.37815334,
+                "target_interval_seconds": 0.1,
+                "field_ocr_tokens_raw": [
+                  "Probe2414.txt"
+                ],
+                "exact_draft_ocr_match": true,
+                "since_input_start": {
+                  "started": 0.5934411879999857,
+                  "completed": 0.6605749369999785
+                },
+                "since_input_exit": {
+                  "started": 0.5533129899999949,
+                  "completed": 0.6204467389999877
+                }
+              },
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation."
+            },
+            "draft_after_burst": {
+              "classification": "draft-and-original-visible-in-dialog",
+              "capture": {
+                "first_matching_capture": {
+                  "output": "",
+                  "started": 381.353712006,
+                  "completed": 381.410237138
+                },
+                "last_nonmatching_capture": {
+                  "output": "",
+                  "started": 378.217272444,
+                  "completed": 378.269580549
+                },
+                "assertion_seconds_including_ocr": 17.998771397999974
+              }
+            },
+            "cancel_observed_token": {
+              "level": "5",
+              "page_num": "1",
+              "block_num": "1",
+              "par_num": "1",
+              "line_num": "1",
+              "word_num": "1",
+              "left": 483,
+              "top": 441,
+              "width": 46,
+              "height": 11,
+              "conf": "72.289429",
+              "text": "Cancel",
+              "band": "cancel",
+              "ocr_text_raw": "Cancel"
+            },
+            "cancel": {
+              "classification": "original-filenames-restored-without-draft",
+              "rows": {
+                "file-00000.txt": {
+                  "left": 418,
+                  "top": 241,
+                  "center_y": 247
+                },
+                "file-00002.txt": {
+                  "left": 418,
+                  "top": 297,
+                  "center_y": 303
+                },
+                "file-00003.txt": {
+                  "left": 418,
+                  "top": 353,
+                  "center_y": 359
+                },
+                "file-00004.txt": {
+                  "left": 418,
+                  "top": 409,
+                  "center_y": 415
+                },
+                "file-00001.txt": {
+                  "left": 418,
+                  "top": 465,
+                  "center_y": 471
+                }
+              },
+              "input_guest_monotonic": {
+                "output": "",
+                "started": 383.856997467,
+                "completed": 383.961548292
+              },
+              "first_matching_capture_guest_monotonic": {
+                "output": "",
+                "started": 384.828194364,
+                "completed": 384.88468162
+              },
+              "last_nonmatching_capture_guest_monotonic": null,
+              "capture_start_since_input_started_seconds": 0.9711968970000271,
+              "capture_end_since_input_started_seconds": 1.0276841529999956,
+              "total_seconds_including_ssh_and_ocr": 2.424141254999995,
+              "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."
+            },
+            "clipboard_release": {
+              "clipboard_released": true,
+              "guest_monotonic": 386.274292156
+            }
+          }
+        ],
+        "input_order": "typing,paste alternated three times; same instrumentation in five-file control and 5000-file case"
+      },
+      "back_first_observed_seconds": 3.0479828249999628,
+      "saved_files": 5,
+      "verified_complete_files": 5,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 394.801600422,
+      "content_valid": true
+    }
+  ],
+  "progress": {
+    "samples": 226,
+    "intervals": 225,
+    "first": {
+      "host_monotonic": 780.949995876,
+      "saved_files": 8,
+      "verified_complete_files": 8,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 706.378916529,
+      "content_valid": false
+    },
+    "last": {
+      "host_monotonic": 3124.021147442,
+      "saved_files": 4602,
+      "verified_complete_files": 4602,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 3049.45419736,
+      "content_valid": false
+    },
+    "elapsedGuestSeconds": 2343.075280831,
+    "everyIntervalIncreases": true,
+    "observedFilesPerSecond": 1.9606711050148942,
+    "finalCountHashComplete": true
+  },
+  "memory": {
+    "samples": 5232,
+    "pids": [
+      13777
+    ],
+    "starttimeTicks": [
+      "39807"
+    ],
+    "peakRssMiB": 1163.85546875,
+    "peakPssMiB": 1130.1591796875,
+    "minimumAvailableMiB": 546.87890625
+  },
+  "kernelOomMatches": [],
+  "interpretation": "All retained progress intervals increase. The last 4602 files are hash-complete. No retained stall, corruption, or kernel OOM is established; full 5000-file completion is not established either.",
+  "limitations": [
+    "Outer deadline terminates the observer; it alone cannot identify an app failure.",
+    "Progress averages include SSH and fixture verification.",
+    "Input observer overhead is separately documented in input-comparison-analysis.md."
+  ],
+  "kernelScanNote": "The only broad oom_reaper text match is the idle kernel worker in the final ps listing, not an OOM journal event."
+}
