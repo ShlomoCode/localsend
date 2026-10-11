@@ -142,11 +142,12 @@ def select_file(swin, fixture, stage):
     locate("Recent", stage + "-chooser-ready", 20)
     chooser = run("xdotool", "search", "--onlyvisible", "--name", "Select|Choose|Open").split()[-1]
     focus(chooser)
-    click(locate("Home", stage + "-home"))
-    time.sleep(1)
-    click(locate(fixture.name, stage + "-file-row"))
-    screen(stage + "-native-file-selected")
-    click(locate("Open", stage + "-open"))
+    # Use the native chooser's normal location field. The automatically
+    # selected first row uses white-on-blue text that sparse OCR omits.
+    run("xdotool", "key", "--clearmodifiers", "ctrl+l")
+    run("xdotool", "type", "--clearmodifiers", "--", str(fixture))
+    screen(stage + "-native-file-location")
+    run("xdotool", "key", "--clearmodifiers", "Return")
     time.sleep(1)
     focus(swin)
     locate("Selection", stage + "-selected", roi=(200, 20, 800, 350))
