@@ -60,22 +60,20 @@ state() {
 for repeat in 1 2; do
   label="default-$repeat"
   launch_settings "$label"
-  screen_size=$(xdpyinfo | sed -n 's/.*dimensions:[[:space:]]*\([0-9]*x[0-9]*\).*/\1/p')
-  ffmpeg -nostdin -y -f x11grab -video_size "$screen_size" -framerate 15 -i "$DISPLAY" -t 10 -c:v libx264 -pix_fmt yuv420p "$OUT/$label-toggle.mp4" > "$OUT/$label-recording.log" 2>&1 &
-  recording_pid=$!
+  start_ui_recording "$label-toggle"
   date -u --iso-8601=ns > "$OUT/$label-inputs.txt"
   row_y=$(require_switch_state 'Autostart after login' "$label-before-click" OFF)
   xdotool mousemove --window "$wid" 825 "$row_y" click 1
   printf 'click window=(825,%s): OCR-identified Autostart after login\n' "$row_y" >> "$OUT/$label-inputs.txt"
-  sleep 3
+  wait_observed_transition 'Autostart after login' "$label-enable" ON sandbox-enabled
   state "$label-enabled"
-  require_switch_state 'Autostart after login' "$label-after-click" ON > /dev/null
   xdotool windowactivate "$wid" key alt+F4
   echo 'Alt+F4: actual app close' >> "$OUT/$label-inputs.txt"
   sleep 4
+  wait_app_exit "$label-close"
   flatpak ps --columns=instance,application,pid > "$OUT/$label-after-close.txt"
   if grep -q org.localsend.localsend_app "$OUT/$label-after-close.txt"; then exit 31; fi
-  wait "$recording_pid"
+  stop_ui_recording
   launch_settings "$label-reopened"
   state "$label-reopened"
   require_switch_state 'Autostart after login' "$label-reopened-observed" OFF > /dev/null
@@ -89,11 +87,11 @@ flatpak override --user --show org.localsend.localsend_app > "$OUT/permission-co
 launch_settings permission
 row_y=$(require_switch_state 'Autostart after login' permission-before-click OFF)
 xdotool mousemove --window "$wid" 825 "$row_y" click 1
-sleep 3
+wait_observed_transition 'Autostart after login' permission-enable ON host-native-enabled
 state permission-enabled
-require_switch_state 'Autostart after login' permission-enabled-observed ON > /dev/null
 xdotool windowactivate "$wid" key alt+F4
 sleep 4
+wait_app_exit permission-close
 launch_settings permission-reopened
 state permission-reopened
 require_switch_state 'Autostart after login' permission-reopened-observed ON > /dev/null

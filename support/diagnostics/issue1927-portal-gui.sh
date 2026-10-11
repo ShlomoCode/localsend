@@ -5,8 +5,15 @@ mkdir -p evidence/candidate
 OUT=$(realpath evidence/candidate)
 source /home/mint/ui.sh
 { flatpak info --user org.localsend.localsend_app; flatpak info --user --show-metadata org.localsend.localsend_app; } > "$OUT/identity.txt"
-dbus-monitor --session "interface='org.freedesktop.portal.Request'" > "$OUT/portal-responses.txt" 2>&1 &
-monitor_pid=$!
+start_portal_monitor() {
+  local label=$1
+  if [ -n "${monitor_pid:-}" ]; then kill "$monitor_pid" 2>/dev/null || true; fi
+  dbus-monitor --session "interface='org.freedesktop.portal.Request'" > "$OUT/$label-portal-responses.txt" 2>&1 &
+  monitor_pid=$!
+  sleep 1
+  kill -0 "$monitor_pid"
+}
+start_portal_monitor initial
 launch_settings() {
   local label=$1
   flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
@@ -31,25 +38,25 @@ snapshot() {
   if [ -n "${wid:-}" ]; then import -window "$wid" "$OUT/$label-settings.png"; fi
 }
 click_recorded() {
-  local label=$1 phrase=$2 before=$3 after=$4 y
+  local label=$1 phrase=$2 before=$3 after=$4 entry_kind=$5 y
   y=$(require_switch_state "$phrase" "$label-before-click" "$before")
-  ffmpeg -nostdin -y -f x11grab -video_size 1280x800 -framerate 15 -i "$DISPLAY" -t 10 -c:v libx264 -pix_fmt yuv420p "$OUT/$label.mp4" > "$OUT/$label-recording.log" 2>&1 &
-  recording_pid=$!
+  start_ui_recording "$label"
   date -u --iso-8601=ns > "$OUT/$label-inputs.txt"
   xdotool mousemove --window "$wid" 825 "$y" click 1
   printf 'Actual Settings click at window=(825,%s)\n' "$y" >> "$OUT/$label-inputs.txt"
-  sleep 4
+  wait_observed_transition "$phrase" "$label-transition" "$after" "$entry_kind"
   snapshot "$label"
-  require_switch_state "$phrase" "$label-after-click" "$after" > /dev/null
-  wait "$recording_pid"
+  sleep 2
+  stop_ui_recording
 }
 launch_settings initial
-click_recorded enable 'Autostart after login' OFF ON
+click_recorded enable 'Autostart after login' OFF ON host-flatpak-visible
 # An actual host entry, not a remembered preference, gates the causal experiment.
 test -f "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 grep -q 'flatpak' "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 xdotool windowactivate "$wid" key alt+F4
 sleep 4
+wait_app_exit enable-close
 flatpak ps --columns=instance,application,pid > "$OUT/enable-after-close.txt"
 launch_settings enabled-reopened
 snapshot enabled-reopened
@@ -57,15 +64,17 @@ require_switch_state 'Autostart after login' enabled-reopened-observed ON > /dev
 flatpak kill org.localsend.localsend_app
 wid=''
 relogin
+start_portal_monitor visible-login
 pgrep -x localsend > "$OUT/visible-login-pid.txt"
 xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/visible-login-window.txt"
 snapshot visible-login
 launch_settings visible-login-settings
-click_recorded hidden 'Start hidden' OFF ON
+click_recorded hidden 'Start hidden' OFF ON host-flatpak-hidden
 grep -q -- '--hidden' "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 flatpak kill org.localsend.localsend_app
 wid=''
 relogin
+start_portal_monitor hidden-login
 pgrep -x localsend > "$OUT/hidden-login-pid.txt"
 xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/hidden-login-window.txt" || true
 test ! -s "$OUT/hidden-login-window.txt"
@@ -74,19 +83,21 @@ snapshot hidden-login
 launch_settings hidden-login-foreground
 pgrep -x localsend > "$OUT/hidden-foreground-pid.txt"
 cmp "$OUT/hidden-login-pid.txt" "$OUT/hidden-foreground-pid.txt"
-click_recorded visible-again 'Start hidden' ON OFF
+click_recorded visible-again 'Start hidden' ON OFF host-flatpak-visible
 if grep -q -- '--hidden' "$HOME/.config/autostart/org.localsend.localsend_app.desktop"; then exit 24; fi
 flatpak kill org.localsend.localsend_app
 wid=''
 relogin
+start_portal_monitor visible-again-login
 pgrep -x localsend > "$OUT/visible-again-login-pid.txt"
 xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/visible-again-login-window.txt"
 snapshot visible-again-login
 launch_settings disable-before
-click_recorded disable 'Autostart after login' ON OFF
+click_recorded disable 'Autostart after login' ON OFF host-absent
 test ! -e "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 xdotool windowactivate "$wid" key alt+F4
 sleep 4
+wait_app_exit disable-close
 launch_settings disabled-reopened
 snapshot disabled-reopened
 require_switch_state 'Autostart after login' disabled-reopened-observed OFF > /dev/null

@@ -1,5 +1,26 @@
 #!/usr/bin/env bash
 # Actual visible UI controls: wait for app initialization and identify rows by text.
+stop_ui_recording() {
+  local result=0
+  if [ -z "${recording_pid:-}" ]; then return 0; fi
+  # A command-substitution subshell must never stop its parent's recording.
+  if [ "${recording_owner:-}" != "$BASHPID" ]; then return 0; fi
+  kill -INT "$recording_pid" 2>/dev/null || true
+  wait "$recording_pid" || result=$?
+  recording_pid=''
+  printf 'ffmpeg_exit=%s\n' "$result" >> "$OUT/recording-results.txt"
+  # ffmpeg returns 255 after the requested SIGINT; the MP4 is finalized.
+  [ "$result" = 0 ] || [ "$result" = 255 ]
+}
+trap stop_ui_recording EXIT
+start_ui_recording() {
+  local label=$1
+  ffmpeg -nostdin -y -f x11grab -video_size 1280x800 -framerate 15 -i "$DISPLAY" -t 360 -c:v libx264 -pix_fmt yuv420p "$OUT/$label.mp4" > "$OUT/$label-recording.log" 2>&1 &
+  recording_pid=$!
+  recording_owner=$BASHPID
+  sleep 1
+  kill -0 "$recording_pid"
+}
 stabilize_window() {
   sleep 8
   xdotool windowactivate --sync "$wid"
@@ -10,34 +31,104 @@ stabilize_window() {
 }
 settings_row_y() {
   local phrase=$1 label=$2 y
-  import -window "$wid" "$OUT/$label-locate.png"
-  test "$(identify -format '%wx%h' "$OUT/$label-locate.png")" = 1000x700
-  tesseract "$OUT/$label-locate.png" "$OUT/$label-locate" tsv > "$OUT/$label-ocr.log" 2>&1
+  import -window "$wid" "$OUT/$label-locate.png" || return 1
+  test "$(identify -format '%wx%h' "$OUT/$label-locate.png")" = 1000x700 || return 1
+  tesseract "$OUT/$label-locate.png" "$OUT/$label-locate" tsv > "$OUT/$label-ocr.log" 2>&1 || return 1
+  row_y_from_tsv "$phrase" "$label"
+}
+row_y_from_tsv() {
+  local phrase=$1 label=$2 y
+  case "$phrase" in
+    'Minimize to') phrase='Minimize to the System Tray/Menu Bar when closing';;
+    'Start hidden') phrase='Autostart: Start hidden';;
+  esac
   y=$(awk -F '\t' -v phrase="$phrase" '
-    NR > 1 && $1 == 5 && $11 >= 0 {
+    NR > 1 && $1 == 5 && $11 >= 50 && $7 >= 340 && $7+$9 < 745 {
       key=$2 "/" $3 "/" $4 "/" $5
       text[key]=text[key] " " $12
-      if (!(key in top) || $7 < top[key]) top[key]=$7
-      if (!(key in bottom) || $7+$9 > bottom[key]) bottom[key]=$7+$9
+      if (!(key in top) || $8 < top[key]) top[key]=$8
+      if (!(key in bottom) || $8+$10 > bottom[key]) bottom[key]=$8+$10
     }
-    END {for (key in text) if (index(text[key], phrase)) print int((top[key]+bottom[key])/2)}
-  ' "$OUT/$label-locate.tsv")
-  [[ "$y" =~ ^[0-9]+$ ]]
+    END {for (key in text) {sub(/^ /,"",text[key]); if (text[key]==phrase) print int((top[key]+bottom[key])/2)}}
+  ' "$OUT/$label-locate.tsv") || return 1
+  [[ "$y" =~ ^[0-9]+$ ]] || return 1
   printf '%s\n' "$y"
 }
 observed_switch_state() {
-  local y=$1 label=$2 image="$OUT/$2-locate.png" state
+  local y=$1 label=$2 image="$OUT/$2-locate.png" state left right
   # The retained source renders establish the switch at x=798..849 for
   # this checked 1000x700 layout. Preserve its entire row association/crop.
-  convert "$image" -crop "64x40+790+$((y-20))" "$OUT/$label-switch.png"
-  state=$(convert "$image" -crop "4x6+803+$((y-3))" -scale 1x1! -format '%[fx:r<0.3 && g-r>0.15 ? 1 : (g-r<0.08 ? 0 : 2)]' info:)
+  convert "$image" -crop "64x40+790+$((y-20))" "$OUT/$label-switch-$y.png" || return 1
+  left=$(convert "$image" -crop "4x4+812+$((y-2))" -scale 1x1! -format '%[fx:r] %[fx:g] %[fx:b]' info:) || return 1
+  right=$(convert "$image" -crop "4x4+834+$((y-2))" -scale 1x1! -format '%[fx:r] %[fx:g] %[fx:b]' info:) || return 1
+  printf '%s row_y=%s left_rgb=%s right_rgb=%s\n' "$label" "$y" "$left" "$right" >> "$OUT/switch-colors.txt"
+  state=$(awk -v left="$left" -v right="$right" 'BEGIN {
+    split(left,l," "); split(right,r," ");
+    white=(r[1]>.9 && r[2]>.9 && r[3]>.9);
+    teal=(l[1]<.08 && l[2]>.33 && l[2]<.50 && l[3]>.29 && l[3]<.46);
+    min=l[1]; max=l[1]; for(i=2;i<=3;i++){if(l[i]<min)min=l[i];if(l[i]>max)max=l[i]}
+    gray=(l[1]>.35 && l[1]<.52 && l[2]>.39 && l[2]<.56 && l[3]>.38 && l[3]<.55 && max-min<.08);
+    print white && teal ? 1 : (white && gray ? 0 : 2);
+  }') || return 1
   case "$state" in 1) printf 'ON\n';; 0) printf 'OFF\n';; *) return 1;; esac
 }
+observed_switch_row() {
+  local phrase=$1 label=$2 y observed
+  y=$(settings_row_y "$phrase" "$label") || return 1
+  # Calibrate fixed source layout/theme/scaling against independent known
+  # controls in this same fresh frame. Empty background cannot mean OFF.
+  local calibration_y calibration_state
+  calibration_y=$(row_y_from_tsv 'Minimize to' "$label") || return 1
+  calibration_state=$(observed_switch_state "$calibration_y" "$label") || return 1
+  test "$calibration_state" = OFF || return 1
+  calibration_y=$(row_y_from_tsv Animations "$label") || return 1
+  calibration_state=$(observed_switch_state "$calibration_y" "$label") || return 1
+  test "$calibration_state" = ON || return 1
+  observed=$(observed_switch_state "$y" "$label") || return 1
+  printf '%s label=%s row_y=%s observed=%s\n' "$(date -u --iso-8601=ns)" "$phrase" "$y" "$observed" >> "$OUT/observed-switch-states.txt"
+  printf '%s %s\n' "$y" "$observed"
+}
 require_switch_state() {
-  local phrase=$1 label=$2 expected=$3 y observed
-  y=$(settings_row_y "$phrase" "$label")
-  observed=$(observed_switch_state "$y" "$label")
-  printf '%s label=%s row_y=%s observed=%s expected=%s\n' "$(date -u --iso-8601=ns)" "$phrase" "$y" "$observed" "$expected" >> "$OUT/observed-switch-states.txt"
-  test "$observed" = "$expected"
+  local phrase=$1 label=$2 expected=$3 result y observed
+  result=$(observed_switch_row "$phrase" "$label") || return 1
+  read -r y observed <<< "$result"
+  test "$observed" = "$expected" || return 1
   printf '%s\n' "$y"
+}
+desktop_entry_ready() {
+  local kind=$1 entry="$HOME/.config/autostart/org.localsend.localsend_app.desktop" pid
+  case "$kind" in
+    sandbox-enabled)
+      pid=$(pgrep -n -x localsend) || return 1
+      sudo test -f "/proc/$pid/root$entry";;
+    host-native-enabled) test -f "$entry";;
+    host-flatpak-visible) test -f "$entry" && grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && ! grep -q -- '--hidden' "$entry";;
+    host-flatpak-hidden) test -f "$entry" && grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && grep -q -- '--hidden' "$entry";;
+    host-absent) test ! -e "$entry";;
+    *) return 1;;
+  esac
+}
+wait_observed_transition() {
+  local phrase=$1 label=$2 expected=$3 entry_kind=$4 result y observed attempt
+  for attempt in $(seq 1 65); do
+    result=$(observed_switch_row "$phrase" "$label-attempt-$attempt") || {
+      printf 'unknown UI/geometry/label: %s attempt=%s\n' "$label" "$attempt" >> "$OUT/inconclusive-transitions.txt"
+      return 1
+    }
+    read -r y observed <<< "$result"
+    if [ "$observed" = "$expected" ] && desktop_entry_ready "$entry_kind"; then return 0; fi
+    sleep 1
+  done
+  printf 'transition timeout: %s expected_ui=%s entry=%s\n' "$label" "$expected" "$entry_kind" >> "$OUT/inconclusive-transitions.txt"
+  return 1
+}
+wait_app_exit() {
+  local label=$1 attempt
+  for attempt in $(seq 1 20); do
+    flatpak ps --columns=instance,application,pid > "$OUT/$label-instance-check.txt" || return 1
+    if ! grep -q org.localsend.localsend_app "$OUT/$label-instance-check.txt"; then return 0; fi
+    sleep 1
+  done
+  printf 'app-exit timeout: %s\n' "$label" >> "$OUT/inconclusive-transitions.txt"
+  return 1
 }
