@@ -1,5 +1,8 @@
 name: Diagnose 2414 source builds
 on:
+  push:
+    branches: [codex/diagnose-2414-many-files]
+    paths: [.github/workflows/diagnose-2414-causal-build.yml]
   workflow_dispatch:
     inputs:
       revision:
@@ -30,7 +33,7 @@ jobs:
       - name: Select pinned source and SDK
         id: source
         env:
-          REVISION: ${{ inputs.revision }}
+          REVISION: ${{ inputs.revision || 'pair' }}
         run: |
           bash -n diagnostics/support/diagnostics/2414-causal-build.sh
           bash diagnostics/support/diagnostics/2414-causal-build.sh select
@@ -41,13 +44,13 @@ jobs:
           cache: false
       - name: Build actual application bundles sequentially
         env:
-          REVISION: ${{ inputs.revision }}
+          REVISION: ${{ inputs.revision || 'pair' }}
         run: bash diagnostics/support/diagnostics/2414-causal-build.sh build
       - name: Upload binaries and build provenance
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: issue-2414-source-${{ inputs.revision }}-${{ github.run_id }}
+          name: issue-2414-source-${{ inputs.revision || 'pair' }}-${{ github.run_id }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
