@@ -71,7 +71,7 @@ jobs:
           if [ '${{ inputs.apk }}' = current-c1ce ]; then
             adb shell getprop ro.product.cpu.abilist | grep arm64-v8a
             gh run download 38107226429 --repo ShlomoCode/localsend --name issue2462-current-android --dir /tmp/issue1864-current
-            mapfile -t ISSUE_CURRENT_APKS < <(rg --files /tmp/issue1864-current | rg '/app-release.apk$')
+            mapfile -t ISSUE_CURRENT_APKS < <(find /tmp/issue1864-current -type f -name app-release.apk)
             [ "${#ISSUE_CURRENT_APKS[@]}" = 1 ]
             cp "${ISSUE_CURRENT_APKS[0]}" evidence-cloud/current-c1ce.apk
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/current-c1ce.apk
