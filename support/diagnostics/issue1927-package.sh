@@ -20,6 +20,20 @@ for variant in baseline candidate; do
   # installation, metadata, libraries, and unchanged stock sandbox permissions.
   ruby -ryaml -rjson -e '
     manifest = YAML.load_file(ARGV[0])
+    # CMake 4/current 26.08 SDK selects lib64, which the stock follow-on
+    # pkg-config build cannot find. Normalize normal build installation only;
+    # the same adjustment applies to both packages and adds no app permission.
+    normalize = lambda do |modules|
+      modules.each do |m|
+        next unless m.is_a?(Hash)
+        if m["buildsystem"] == "cmake-ninja"
+          m["config-opts"] ||= []
+          m["config-opts"] << "-DCMAKE_INSTALL_LIBDIR=lib"
+        end
+        normalize.call(m["modules"]) if m["modules"]
+      end
+    end
+    normalize.call(manifest.fetch("modules"))
     app = manifest.fetch("modules").find { |m| m.is_a?(Hash) && m["name"] == "localsend" }
     app["sources"] = app.fetch("sources").reject { |s| s["dest-filename"] == "LocalSend.tar.gz" }
     app["sources"].unshift({"type"=>"file", "path"=>ARGV[1], "dest-filename"=>"LocalSend.tar.gz"})
