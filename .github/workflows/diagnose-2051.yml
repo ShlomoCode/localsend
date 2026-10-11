@@ -11,9 +11,6 @@ on:
         description: Optional immutable historical control build run
         type: string
         default: ''
-  push:
-    branches: [codex/diagnose-2051-open]
-    paths: [.github/workflows/diagnose-2051.yml, support/diagnostics/2051/**]
 jobs:
   reproduce:
     runs-on: ubuntu-24.04
