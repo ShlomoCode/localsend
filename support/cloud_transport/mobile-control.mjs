@@ -82,7 +82,15 @@ try {
    // for a completed control whose device_logs_url uses api.browserstack.com.
    const logUrl=new URL(detail.device_logs_url);
    if(logUrl.protocol!=='https:'||!['api.browserstack.com','api-cloud.browserstack.com'].includes(logUrl.hostname)||logUrl.pathname!==`/app-automate/builds/${detail.build_hashed_id}/sessions/${session}/devicelogs`)throw new Error('Unexpected device log URL');
-   const logResponse=await fetch(logUrl,{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+   const logAttempts=[];let logResponse;
+   for(let attempt=0;attempt<9;attempt++){
+    logResponse=await fetch(logUrl,{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+    logAttempts.push({utc:new Date().toISOString(),status:logResponse.status});
+    writeFileSync('evidence/device-log-retrieval.json',JSON.stringify(logAttempts,null,2));
+    if(logResponse.status!==404||attempt===8)break;
+    // Completed sessions can advertise logs before their processing finishes.
+    await logResponse.text();await new Promise(ok=>setTimeout(ok,15000));
+   }
    if(!logResponse.ok)throw new Error('Device logs HTTP '+logResponse.status);
    let log=await logResponse.text();
    for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token,auth])if(secret)log=log.replaceAll(secret,'[redacted]');
