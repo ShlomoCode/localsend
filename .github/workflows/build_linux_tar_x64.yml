@@ -10,6 +10,10 @@ on:
         description: Package the existing source-built c1ce Linux artifact
         type: boolean
         default: false
+      old_libc_run:
+        description: Existing packed artifacts to retry only the Focal gate
+        type: string
+        default: ''
 jobs:
   gentoo:
     runs-on: ubuntu-24.04
@@ -17,24 +21,38 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v6
-        if: inputs.evidence_run == '' && inputs.use_c1ce
+        if: inputs.evidence_run == '' && inputs.old_libc_run == '' && inputs.use_c1ce
         with:
           name: issue2754-c1ce-flutter3419-linux-x64
           path: evidence/main-source
           github-token: ${{ github.token }}
           run-id: 38132747719
       - name: Inspect official artifact and prepare Gentoo
-        if: inputs.evidence_run == ''
+        if: inputs.evidence_run == '' && inputs.old_libc_run == ''
         env:
           USE_C1CE: ${{ inputs.use_c1ce }}
         run: bash support/diagnostics/2690/inspect.sh
       - uses: actions/download-artifact@v6
-        if: inputs.evidence_run != ''
+        if: inputs.evidence_run != '' || inputs.old_libc_run != ''
         with:
-          name: issue2690-evidence-${{ inputs.evidence_run }}
+          name: issue2690-evidence-${{ inputs.evidence_run || inputs.old_libc_run }}
           path: evidence/cloud
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.evidence_run }}
+          run-id: ${{ inputs.evidence_run || inputs.old_libc_run }}
+      - name: Retry Focal with existing artifacts
+        if: inputs.old_libc_run != ''
+        run: |
+          printf '%s\n' '${{ inputs.old_libc_run }}' > evidence/cloud/old-libc-input-run.txt
+          sha256sum -c evidence/cloud/repacked-new-client.sha256
+          sha256sum -c evidence/cloud/repacked-candidate.sha256
+          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage
+          mv evidence/cloud/launch/results.tsv evidence/cloud/launch/prior-results.tsv
+          curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage -o evidence/cloud/current.AppImage
+          echo '19f21613d1834f6caa69517113670461a3f10b80a2a315f86548c0663d9c0aaf  evidence/cloud/current.AppImage' | sha256sum -c -
+          chmod a+x evidence/cloud/current.AppImage
+          docker pull ubuntu:20.04
+          docker image inspect ubuntu:20.04 > evidence/cloud/old-libc-image.json
+          docker run --privileged --name issue2690-old-libc -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" ubuntu:20.04 bash /diagnostic/old-libc.sh > evidence/cloud/old-libc.log 2>&1
       - name: Compact existing evidence
         if: inputs.evidence_run != ''
         run: |

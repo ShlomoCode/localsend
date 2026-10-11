@@ -2,7 +2,8 @@
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y libgtk-3-dev libgl1-mesa-dri libegl1-mesa libgl1 xvfb xterm xdotool dwm x11-apps gcc pkg-config fonts-dejavu-core dbus-x11 libfuse2
+apt-get install -y libgtk-3-dev libgl1-mesa-dri libegl1-mesa libgl1 xvfb xterm xdotool dwm x11-apps gcc pkg-config fonts-dejavu-core dbus-x11 libfuse2 fuse
+command -v fusermount
 cat /etc/os-release > /evidence/old-libc-os.txt
 ldd --version > /evidence/old-libc-version.txt
 dpkg-query -W > /evidence/old-libc-packages.txt
