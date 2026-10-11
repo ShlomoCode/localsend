@@ -4,8 +4,8 @@ export default async function({session,wd}) {
  const prefix=`/session/${session}`,observations=[];
  const settingsPackage='(@package="com.android.settings" or starts-with(@package,"com.oplus.") or starts-with(@package,"com.oneplus."))';
  const appIdentity=`//*[@text="LocalSend" and ${settingsPackage}]`;
- const heading=label=>`//*[@text="${label}" and ${settingsPackage} and (@heading="true" or contains(@resource-id,"toolbar") or contains(@resource-id,"title"))] | //*[@content-desc="${label}" and ${settingsPackage} and contains(@resource-id,"toolbar")]`;
- const appInfoHeading=`//*[${settingsPackage} and @text="App info" and (@heading="true" or contains(@resource-id,"toolbar") or contains(@resource-id,"title"))]`;
+ const heading=label=>`//*[@text="${label}" and ${settingsPackage} and (@heading="true" or contains(@resource-id,"toolbar") or contains(@resource-id,"title") or ancestor::*[${settingsPackage} and contains(@resource-id,"toolbar")])] | //*[@content-desc="${label}" and ${settingsPackage} and contains(@resource-id,"toolbar")]`;
+ const appInfoHeading=heading('App info');
  const textTarget=(text,screen='true()')=>({using:'xpath',value:`//*[@text="${text}" and ${settingsPackage} and (${screen})]`});
  const appInfoScreen=`count(${appIdentity})>0 and count(${appInfoHeading})>0`;
  async function ready(label,targets,options={}){return await waitForNativeControl({wd,prefix,label:'settings-'+label,choices:targets,requireClickable:false,...options});}
@@ -35,6 +35,11 @@ export default async function({session,wd}) {
  }catch(error){await unavailableSnapshot('app-policy');observations.push({screen:'app-info-or-battery-usage',unavailable:true,error:String(error)});}
  try{
   await intent('android.settings.BATTERY_SAVER_SETTINGS');
+  if(process.env.BS_DEVICE==='OnePlus 13R'){
+   const overview=await ready('battery-overview',[{using:'xpath',value:'//*[@package="com.oplus.battery" and @text="Power saving settings" and @resource-id="android:id/title" and count(//*[@package="com.oplus.battery" and @text="Battery"]/ancestor::*[@resource-id="com.oplus.battery:id/consumption_toolbar"])>0]/ancestor::*[@package="com.oplus.battery" and @clickable="true"][1]'}],{requireClickable:true});
+   await capture('battery-overview',overview);observations.push({screen:'battery-overview',settingValuesVerified:false});
+   await wd('POST',prefix+'/element/'+overview['element-6066-11e4-a52e-4f735466cecf']+'/click',{}, {timeoutMs:10000});
+  }
   const saverLabels=['Battery Saver','Power saving mode','Power saving','Super power saving mode'];
   const saver=await ready('battery-saver',saverLabels.map(label=>({using:'xpath',value:heading(label)})),{requireEnabled:false});
   await capture('battery-saver',saver);observations.push({screen:'battery-saver',settingValuesVerified:false,requiresVisualPolicyReview:true});

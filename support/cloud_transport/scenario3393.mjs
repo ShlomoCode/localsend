@@ -24,7 +24,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
  const destinationUri='content://com.android.externalstorage.documents/tree/primary%3ADocuments';
  const appTarget=label=>({using:'xpath',value:`//*[@package="${appPackage}" and @content-desc="${label}" and @clickable="true"]`});
  const destinationTarget={using:'xpath',value:`//*[@package="${appPackage}" and contains(@content-desc,"${destinationUri}")]`};
- const editTarget={using:'xpath',value:'(//*[@package="org.localsend.localsend_app" and starts-with(@content-desc,"Save to folder")]/android.widget.Button[not(@content-desc) and @clickable="true"])[1]'},documentRow={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents"]/ancestor::*[@clickable="true"][1]'},folderTarget={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @text="Use this folder" and @clickable="true"]'};
+ const editTarget={using:'xpath',value:'(//*[@package="org.localsend.localsend_app" and starts-with(@content-desc,"Save to folder")]/android.widget.Button[not(@content-desc) and @clickable="true"])[1]'},documentRow={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents"]/ancestor::*[@clickable="true"][1]'},folderTarget={using:'xpath',value:'//*[@package="com.google.android.documentsui" and translate(@text,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="use this folder" and @clickable="true"]'};
  async function ready(label,target,options={}) {return await waitForNativeControl({wd,prefix,label,...target,...options});}
  async function clickElement(element,label){
   const record={started:new Date().toISOString(),elementId:element['element-6066-11e4-a52e-4f735466cecf'],readiness:element.readiness};
@@ -75,7 +75,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await click('Options');await source('calibration-options');
   const edit=await ready('calibration-edit',editTarget,{sourceIncludes:['pane-title="Options"']});
   await clickElement(edit,'calibration-edit');
-  await ready('calibration-picker-observed',documentRow,{sourceIncludes:['package="com.google.android.documentsui"','text="Use this folder"']});
+  await ready('calibration-picker-observed',documentRow,{sourceIncludes:['package="com.google.android.documentsui"']});
   const entered=Date.now();await source('calibration-native-picker');await lifecycle('calibration-native-picker');await ui('snapshot',0,0,'windows-calibration-native-picker');
   const shot=await wd('GET',`/session/${session}/screenshot`);writeFileSync('evidence/calibration-native-picker.png',Buffer.from(shot,'base64'));
   await new Promise(resolve=>setTimeout(resolve,10000));
