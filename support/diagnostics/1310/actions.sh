@@ -31,6 +31,14 @@ click_label() {
     point=$(awk -F '\t' '$12=="File" && $11>60{fx=$7+$9/2;fy=$8+$10/2} $12=="Text" && $11>60{tx=$7+$9/2;ty=$8+$10/2} END{if(fx && tx>fx && tx-fx<300 && ty-fy<20 && fy-ty<20) print int((fx+tx)/2),int((fy+ty)/2)}' "evidence/$snap.tsv")
     if test -n "$point"; then printf 'Folder anchored between observed File and Text controls\n' >> evidence/input.log; fi
   fi
+  if test -z "$point" && test "$word" = Done && awk -F '\t' '$12=="new" && $11>60{n=1}$12=="1.18.0" && $11>60{v=1}END{exit !(n&&v)}' "evidence/$snap.tsv"; then
+    # Reviewed raw 1.18 What's new frames show this ordinary Done button.
+    # Anchor only on that current page, at its observed title-relative row.
+    title_y=$(awk -F '\t' '$12=="new" && $11>60{print int($8+$10/2);exit}' "evidence/$snap.tsv")
+    eval "$(xdotool getwindowgeometry --shell "$window")"
+    point="$((X + WIDTH * 76 / 100)) $((title_y + 227))"
+    printf 'Done anchored to reviewed current Whats new page %s\n' "$point" >> evidence/input.log
+  fi
   test -n "$point"
   printf '%s %s %s\n' "$(date --iso-8601=ns)" "$word" "$point" >> evidence/input.log
   xdotool mousemove --sync $point click 1
@@ -105,7 +113,7 @@ for version in 1.14.0 1.18.2; do
   snapshot "$version-start"
   # Dismiss the ordinary first-start language prompt if the release shows it.
   if awk -F '\t' '$12=="Confirm"{found=1}END{exit !found}' "evidence/$version-start.tsv"; then click_label "$version-confirm" Confirm; fi
-  if awk -F '\t' '$12=="Done"{found=1}END{exit !found}' "evidence/$version-start.tsv"; then click_label "$version-whats-new" Done; fi
+  if awk -F '\t' '$12=="Done" || $12=="1.18.0"{found=1}END{exit !found}' "evidence/$version-start.tsv"; then click_label "$version-whats-new" Done; fi
   click_label "$version-send" Send
   geometry=$(xdotool getdisplaygeometry | tr ' ' x)
   ffmpeg -y -f x11grab -framerate 10 -video_size "$geometry" -i "$DISPLAY" -t 16 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "evidence/$version-file.mp4" > "evidence/$version-video.log" 2>&1 &

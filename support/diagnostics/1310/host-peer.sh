@@ -51,6 +51,14 @@ for n in $(seq 1 120); do
     continue
   fi
   point=$(awk -F '\t' '$12=="Accept" && $11>60 {print int($7+$9/2),int($8+$10/2);exit}' evidence/host-peer/current.tsv)
+  if test -z "$point" && awk -F '\t' '$12=="wants" && $11>60{w=1}$12=="send" && $11>60{s=1}$12=="file" && $11>60{f=1}END{exit !(w&&s&&f)}' evidence/host-peer/current.tsv; then
+    # Reviewed raw request frames show Accept at the right bottom of the
+    # actual compact receiver window. Require its current request text first.
+    window=$(xdotool search --onlyvisible --name '^LocalSend$' | head -1)
+    eval "$(xdotool getwindowgeometry --shell "$window")"
+    point="$((X + WIDTH * 67 / 100)) $((Y + HEIGHT - 50))"
+    printf 'Accept anchored to reviewed current request window %s\n' "$point" >> evidence/host-peer/input.log
+  fi
   if test -n "$point"; then
     cp evidence/host-peer/current.png evidence/host-peer/before-accept.png
     printf '%s Accept %s\n' "$(date --iso-8601=ns)" "$point" >> evidence/host-peer/input.log
