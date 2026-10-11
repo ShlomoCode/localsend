@@ -123,7 +123,10 @@ def quit_via_menu(pid, stage):
     snapshot(stage + "-quit-shortcut-before")
     active = subprocess.check_output(["xdotool", "getwindowfocus", "getwindowname"], text=True).strip()
     assert active == "LocalSend", f"Quit shortcut focus is {active!r}"
-    subprocess.run(["xdotool", "key", "ctrl+q"], check=True)
+    # Activate a Flutter control as well as its native top-level window.
+    subprocess.run(["xdotool", "mousemove", "294", "229", "click", "1"], check=True)
+    time.sleep(.5)
+    subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+q"], check=True)
     for _ in range(40):
         try:
             exited, _ = os.waitpid(pid, os.WNOHANG)

@@ -8,6 +8,8 @@ dbus-update-activation-environment --all
 export KDE_SKIP_SYSTEMD_BOOT=1
 mkdir -p /run/dbus
 dbus-daemon --system --fork || true
+NetworkManager --no-daemon > evidence/networkmanager.log 2>&1 &
+sleep 2
 startplasma-x11 > evidence/plasma.log 2>&1 &
 sleep 30
 plasma-apply-lookandfeel -a org.kde.breezedark.desktop
