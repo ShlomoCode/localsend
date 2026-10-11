@@ -262,7 +262,7 @@ try {
  Click 576 212
  Snap 'empty'
  AssertCount 0
- if($env:RECORD_GROUP -ne 'remaining') {
+ if($env:RECORD_GROUP -eq 'all') {
  Chapter 'Add a favorite through a real HTTP registration to the peer app'
  PrimaryButton 'empty'
  Snap 'add'
@@ -309,6 +309,7 @@ try {
  Snap 'deleted'
  AssertCount 0
  }
+ if($env:RECORD_GROUP -ne 'large') {
  Chapter 'Failed addition to closed localhost port - open error details'
  $addStart=if($env:RECORD_GROUP -eq 'remaining'){'empty'}else{'deleted'}
  PrimaryButton $addStart
@@ -335,6 +336,18 @@ try {
  Start-Sleep -Seconds 2
  AssertCount 1
  Snap 'recovered-add'
+ } else {
+ Chapter 'Prepare a real peer favorite for the enlarged-text diagnostic'
+ PrimaryButton 'empty'
+ Snap 'large-setup-add'
+ Field 'Address' 'large-setup-add' '127.0.0.1'
+ Field 'Port' 'large-setup-add' '53317'
+ Snap 'large-setup-filled'
+ RequireText 'large-setup-filled' '53317'
+ PrimaryButton 'large-setup-filled'
+ Start-Sleep -Seconds 2
+ AssertCount 1
+ }
  Chapter 'Diagnostic setup: persisted 12-entry list; actual UI and networking'
  Stop-Process -Id $sender.Id -Force
  $profile=Stored
@@ -356,6 +369,7 @@ try {
  Word 'Send' 'long-home'
  Click 576 212
  Snap 'long-top'
+ if($env:RECORD_GROUP -ne 'large') {
  Chapter 'Long favorites list: scroll to bottom and back to top'
  Scroll $true
  Snap 'long-bottom'
@@ -388,6 +402,7 @@ try {
  Snap 'small-bottom'
  Word 'Cancel' 'small-bottom'
  Snap 'small-cancelled'
+ }
  # Windows Accessibility text scale is a diagnostic OS setting, applied before restart.
  Chapter 'Windows Accessibility text scale 150% (diagnostic OS setting)'
  Stop-Process -Id $sender.Id -Force
