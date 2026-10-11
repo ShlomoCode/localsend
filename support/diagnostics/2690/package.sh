@@ -37,7 +37,7 @@ cp evidence/cloud/package-candidate/AppImageBuilder.yml "$task_dir/AppImageBuild
 # A causal diagnostic: retain filename, symlinks and existing AppRun/runtime bytes.
 # --skip-build repackages this AppDir without redeploying the old apt client.
 cp "$client_dir/client-jammy.so" "$task_dir/AppDir/usr/lib/x86_64-linux-gnu/libwayland-client.so.0.20.0"
-docker run --rm --privileged -v "$task_dir:/work" -w /work appimagecrafters/appimage-builder:1.1.0 appimage-builder --recipe AppImageBuilder.yml --skip-build --skip-script --skip-test > evidence/cloud/package-new-client.log 2>&1
+docker run --rm --privileged -v "$task_dir:/work" -w /work appimagecrafters/appimage-builder:1.1.0 appimage-builder --recipe AppImageBuilder.yml --skip-build --skip-test > evidence/cloud/package-new-client.log 2>&1
 cp "$task_dir"/*.AppImage evidence/cloud/repacked-new-client.AppImage
 sha256sum evidence/cloud/repacked-new-client.AppImage > evidence/cloud/repacked-new-client.sha256
 (cd "$task_dir/AppDir" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > evidence/cloud/inventory-new-client.txt

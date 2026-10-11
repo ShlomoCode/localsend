@@ -23,7 +23,7 @@ readelf -Ws client-jammy.so > client-jammy-symbols.txt
 readelf --version-info client-jammy.so > client-jammy-versions.txt
 sha256sum client-jammy.so > client-jammy.sha256
 for symbol in wl_fixes_interface wl_display_create_queue_with_name wl_display_dispatch_queue_timeout; do
-  awk -v symbol="$symbol" '$7 != "UND" && $8 == symbol { found = 1 } END { exit !found }' client-jammy-symbols.txt
+  awk -v symbol="$symbol" '$5 == "GLOBAL" && $6 == "DEFAULT" && $7 != "UND" && $8 == symbol { found = 1 } END { exit !found }' client-jammy-symbols.txt
 done
 floor=$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' client-jammy-versions.txt | sort -Vu | tail -1)
 printf '%s\n' "$floor" > client-jammy-glibc-floor.txt
