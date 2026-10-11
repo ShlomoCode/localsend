@@ -13,34 +13,36 @@ void main() {
   setUp(() {
     controller = TextEditingController(text: 'Original alias');
     saved = [];
-    systemName = Completer<String?>();
   });
 
   Future<void> mount(WidgetTester tester) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: ThemeData(inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder())),
-      home: Scaffold(
-        body: TextFieldWithActions(
-          name: 'Alias',
-          controller: controller,
-          onSubmitted: saved.add,
-          actionsBuilder: (setDraft) => [
-            IconButton(
-              icon: const Icon(Icons.casino),
-              onPressed: () => setDraft('Random alias'),
-            ),
-            IconButton(
-              icon: const Icon(Icons.desktop_windows_rounded),
-              onPressed: () async {
-                final name = await systemName.future;
-                if (name == null) return;
-                setDraft(name);
-              },
-            ),
-          ],
+    systemName = Completer<String?>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder())),
+        home: Scaffold(
+          body: TextFieldWithActions(
+            name: 'Alias',
+            controller: controller,
+            onSubmitted: saved.add,
+            actionsBuilder: (setDraft) => [
+              IconButton(
+                icon: const Icon(Icons.casino),
+                onPressed: () => setDraft('Random alias'),
+              ),
+              IconButton(
+                icon: const Icon(Icons.desktop_windows_rounded),
+                onPressed: () async {
+                  final name = await systemName.future;
+                  if (name == null) return;
+                  setDraft(name);
+                },
+              ),
+            ],
+          ),
         ),
       ),
-    ));
+    );
     await tester.pumpAndSettle();
     // Unmount before disposing the externally owned controller.
     addTearDown(() async {
