@@ -718,6 +718,12 @@ Future<void> _handleFileUpload({
       filePath = target.displayPath;
     }
 
+    await finalizeFileSaveTarget(
+      target: target,
+      androidSdkInt: config.androidSdkInt,
+      saveToGallery: shouldSaveToGallery,
+    );
+
     _logger.info('Saved ${dartFile.fileName}.');
     emit(
       HttpServerFileUploadResultEvent(
