@@ -26,6 +26,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          architecture: x64
       - name: Prepare isolated relay capability
         shell: pwsh
         run: |
