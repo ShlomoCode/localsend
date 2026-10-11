@@ -89,8 +89,9 @@ foreach ($network in @(@{name="bug2381-home";ip="10.0.20.2"},@{name="bug2381-net
  New-VMSwitch -Name $network.name -SwitchType Internal | Out-Null
  $nic = Get-NetAdapter -Name "vEthernet ($($network.name))"
  Set-NetIPInterface -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -Dhcp Disabled
- New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress $network.ip -PrefixLength 16 -SkipAsSource $true -PolicyStore ActiveStore | Out-Null
+ New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress $network.ip -PrefixLength 16 -SkipAsSource $false -PolicyStore ActiveStore | Out-Null
 }
+Start-Sleep -Seconds 3
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
 Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status | ConvertTo-Json | Set-Content "$EvidenceDirectory/adapters.json"
 $apps = @{}
