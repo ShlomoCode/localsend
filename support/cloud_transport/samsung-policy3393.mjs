@@ -63,14 +63,25 @@ function context({session, wd}, phase) {
     const outcome = await ready('app-info-or-policy', [target(`${appName}[${appIdentity}]`), target(`${policyRadio('Unrestricted')}[${policyGuard}]`)], {requireClickable: false});
     await capture('app-info-or-policy', outcome.readiness.sourceFile);
     if (outcome.readiness.choice === 1) return;
+    const recycler = `//*[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/recycler_view" and @scrollable="true" and @displayed="true"]`;
+    const version = `//*[@package="${settingsPackage}" and @class="android.widget.TextView" and @resource-id="android:id/summary" and @text="Version 1.18.2" and @displayed="true"]`;
+    const buttonBar = `//*[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/button_bar" and @displayed="true"]`;
+    const button = (id, text) => `${buttonBar}//android.widget.Button[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/${id}" and @text="${text}" and @displayed="true" and @enabled="true" and @clickable="true"]`;
+    const continuationIdentity = `count(${heading('App info')})=1 and count(${version})=1 and count(${buttonBar})=1 and count(${button('button1', 'Open')})=1 and count(${button('button3', 'Uninstall')})=1 and count(${button('button4', 'Force stop')})=1 and count(${recycler})=1`;
+    // LocalSend's visible name was verified above. A source-derived scroll can
+    // remove that header from the native tree. Only this uninterrupted owned
+    // flow may use the captured version, buttons, and recycler as continuity
+    // evidence; they do not independently establish the app's visible name.
+    let scrolledFromVerifiedAppInfo = false;
+    const activeAppIdentity = () => scrolledFromVerifiedAppInfo ? continuationIdentity : appIdentity;
     const batteryTitle = `//*[@package="${settingsPackage}" and @text="Battery" and @displayed="true"]`;
-    const batteryTarget = target(`${batteryTitle}/ancestor-or-self::*[@package="${settingsPackage}" and @clickable="true"][1][${appIdentity} and count(${batteryTitle})=1]`);
-    const containerTarget = target(`//*[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/recycler_view" and @scrollable="true" and @displayed="true"][${appIdentity}]`);
+    const batteryTarget = () => target(`${batteryTitle}/ancestor-or-self::*[@package="${settingsPackage}" and @clickable="true"][1][${activeAppIdentity()} and count(${batteryTitle})=1]`);
+    const containerTarget = () => target(`${recycler}[${activeAppIdentity()} and count(${recycler})=1]`);
     for (let attempt = 0; attempt <= 5; attempt++) {
-      const control = await ready(`battery-or-scroll-${attempt}`, [batteryTarget, containerTarget], {requireClickable: false});
+      const control = await ready(`battery-or-scroll-${attempt}`, [batteryTarget(), containerTarget()], {requireClickable: false});
       await capture(`battery-or-scroll-${attempt}`, control.readiness.sourceFile);
       if (control.readiness.choice === 0) {
-        const button = await ready('battery-click', [batteryTarget]);
+        const button = await ready('battery-click', [batteryTarget()]);
         await capture('before-battery-click', button.readiness.sourceFile);
         await call('POST', `${prefix}/element/${button[elementKey]}/click`, {});
         await capture('after-battery-click');
@@ -92,7 +103,9 @@ function context({session, wd}, phase) {
         ]}]});
       } finally { await call('DELETE', `${prefix}/actions`); }
       await capture('after-scroll');
-      await ready('app-info-after-scroll', [target(`${heading('App info')}[${appIdentity}]`)], {requireClickable: false});
+      scrolledFromVerifiedAppInfo = true;
+      const continued = await ready('app-info-after-scroll', [target(`${heading('App info')}[${activeAppIdentity()}]`)], {requireClickable: false});
+      await capture('app-info-continuity-verified', continued.readiness.sourceFile);
     }
   }
   async function observePolicy(name) {
