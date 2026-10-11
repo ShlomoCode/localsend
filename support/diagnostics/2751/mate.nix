@@ -13,14 +13,8 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: let
   '';
   officialLauncher = pkgs.buildFHSEnv {
     name = "localsend_app";
-    targetPkgs = p: [
-      p.gtk3 p.glib p.pango p.harfbuzz p.atk p.cairo p.gdk-pixbuf
-      p.libayatana-appindicator p.libayatana-indicator p.libayatana-ido p.libdbusmenu p.dbus
-      p.libGL p.libepoxy p.libxkbcommon p.fontconfig p.freetype p.fribidi p.libthai p.libdatrie
-      p.xorg.libX11 p.xorg.libXext p.xorg.libXrender p.xorg.libXrandr p.xorg.libXcursor
-      p.xorg.libXinerama p.xorg.libXi p.xorg.libXfixes p.xorg.libSM p.xorg.libICE
-      p.openssl p.stdenv.cc.cc.lib
-    ];
+    includeClosures = true;
+    targetPkgs = p: [ p.gtk3 p.libayatana-appindicator p.libGL p.openssl p.stdenv.cc.cc.lib ];
     runScript = pkgs.writeShellScript "localsend-official-launch" ''
       ${pkgs.glibc.bin}/bin/ldd ${officialBundle}/localsend_app > /tmp/evidence/official-ldd.txt
       exec ${officialBundle}/localsend_app "$@"
