@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { relay } from '../cloud_transport/relay.mjs';
 
 // Synthetic loopback transport checks only; this runner never starts LocalSend.
@@ -19,6 +20,7 @@ const sample = setInterval(() => {
 }, 500);
 const delayTimers = new Set();
 const requests = new Set(), targetSockets = new Set(), targets = new Map(), expectedOpens = [];
+const clientStates = [];
 const relays = [], pulls = [];
 let stopping = false, watchdog;
 const delay = ms => new Promise(resolve => {
@@ -54,18 +56,21 @@ const target = net.createServer({ allowHalfOpen: true }, socket => {
 });
 function request(port, token, path, { method = 'GET', body, headers = {}, open = false } = {}) {
   let resolve, reject;
+  const state = { port, path, method, startedElapsedMs: performance.now(), responseStatus: null, responseEnded: false, closed: false, error: null };
   const response = new Promise((a, b) => { resolve = a; reject = b; });
   // Aborted requests deliberately reject; attach a handler before any destruction.
   response.catch(() => {});
   const req = http.request({ host: '127.0.0.1', port, method, path, headers: { authorization: `Bearer ${token}`, ...headers } }, res => {
+    state.responseStatus = res.statusCode;
     const chunks = [];
     res.on('data', chunk => chunks.push(chunk));
-    res.on('error', reject);
-    res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    res.on('error', error => { state.error = error.message; reject(error); });
+    res.on('end', () => { state.responseEnded = true; resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }); });
   });
+  clientStates.push({ state, req });
   requests.add(req);
-  req.on('error', reject);
-  req.on('close', () => requests.delete(req));
+  req.on('error', error => { state.error = error.message; reject(error); });
+  req.on('close', () => { state.closed = true; requests.delete(req); });
   if (!open) req.end(body);
   return { req, response };
 }
@@ -126,18 +131,49 @@ async function sparse(r) {
   const bytes = chunks.reduce((n, chunk) => n + chunk.length, 0);
   const digest = createHash('sha256').update(Buffer.concat(chunks)).digest('hex');
   const u = upload(r, id);
-  const begin = Date.now();
+  const begin = performance.now();
+  evidence.sparse = { requiredOpenDurationMs: 310000, clock: 'performance.now', checkpointLimit: 600, checkpointsDropped: 0, checkpoints: [] };
+  const checkpoint = phase => {
+    const state = { phase, openDurationMs: performance.now() - begin, stopping, requestDestroyed: u.req.destroyed,
+      requestWritableEnded: u.req.writableEnded, targetBytes: t.bytes, targetReadableEof: t.digest !== null,
+      upload: r.owned.status().uploads[id] ?? null };
+    if (evidence.sparse.checkpoints.length >= evidence.sparse.checkpointLimit) {
+      evidence.sparse.checkpoints.shift(); evidence.sparse.checkpointsDropped++;
+    }
+    evidence.sparse.checkpoints.push(state);
+    return state;
+  };
+  const waitDeadline = async deadline => {
+    const timeout = deadline + 15000;
+    while (performance.now() < deadline) {
+      const state = checkpoint('waiting-for-deadline');
+      assert(!state.stopping, 'Sparse deadline wait stopped');
+      assert(!state.requestDestroyed, 'Sparse upload ended during deadline wait');
+      assert(performance.now() < timeout, 'Sparse deadline wait exceeded finite allowance');
+      await delay(Math.max(1, Math.min(1000, deadline - performance.now())));
+    }
+    checkpoint('deadline-reached');
+    assert(performance.now() < timeout, 'Sparse deadline exceeded finite allowance');
+  };
   for (let index = 0; index < chunks.length - 1; index++) {
-    await delay(Math.max(0, begin + index * 25000 - Date.now()));
-    assert(!stopping && !u.req.destroyed, 'Sparse upload ended before request EOF');
+    await waitDeadline(begin + index * 25000);
+    const state = checkpoint('before-sparse-chunk');
+    assert(!state.stopping, 'Sparse upload stopped before request EOF');
+    assert(!state.requestDestroyed, 'Sparse upload ended before request EOF');
     u.req.write(chunks[index]);
     await until(() => t.bytes >= (index + 1) * 1024, 'Sparse chunk delivery');
-    if (index % 2 === 0) console.log(`relay synthetic progress: ${r.mode} ${Math.floor((Date.now() - begin) / 1000)}s`);
+    if (index % 2 === 0) console.log(`relay synthetic progress: ${r.mode} ${Math.floor((performance.now() - begin) / 1000)}s`);
   }
-  await delay(Math.max(0, begin + 310000 - Date.now()));
-  const openDurationMs = Date.now() - begin;
-  assert(!stopping && openDurationMs >= 310000 && !u.req.destroyed, 'Request did not remain open beyond Node default 300 seconds');
-  assert(!r.owned.status().uploads[id].requestEof, 'Sparse request EOF arrived before the final chunk');
+  await waitDeadline(begin + 310000);
+  const state = checkpoint('before-final-chunk');
+  const openDurationMs = state.openDurationMs;
+  assert(!state.stopping, 'Sparse check stopped before final chunk');
+  assert(openDurationMs >= 310000, 'Request did not remain open beyond Node default 300 seconds');
+  assert(!state.requestDestroyed, 'Sparse request destroyed before final chunk');
+  assert(!state.requestWritableEnded, 'Sparse client request ended before final chunk');
+  assert(state.upload !== null, 'Sparse relay upload state missing before final chunk');
+  assert(!state.upload.requestEof, 'Sparse request EOF arrived before the final chunk');
+  assert(!state.targetReadableEof, 'Sparse target reached readable EOF before final chunk');
   u.req.write(chunks.at(-1));
   await until(() => t.bytes === bytes, 'Sparse final chunk delivery');
   const received = await finishAndCheck(r, id, u, bytes, digest);
@@ -183,7 +219,6 @@ async function run() {
   check('second-peer-healthy-hash', await finishAndCheck(r, 'healthy', u, payload.length, createHash('sha256').update(payload).digest('hex')));
   await coalescedBatch(relays[1]);
   await sparse(relays[0]);
-  evidence.uploads = Object.fromEntries(relays.map(r => [r.mode, r.owned.status().uploads]));
 }
 let failure;
 try {
@@ -191,6 +226,15 @@ try {
   evidence.success = true;
 } catch (error) { failure = error; evidence.error = error.message; }
 finally {
+  // Snapshot before cleanup destroys requests or alters relay state, on success and failure.
+  evidence.stateBeforeCleanup = { stopping, elapsedMs: Date.now() - started,
+    clients: clientStates.map(({ state, req }) => ({ ...state, destroyed: req.destroyed, writableEnded: req.writableEnded,
+      writableFinished: req.writableFinished, writableLength: req.writableLength })),
+    targets: Object.fromEntries([...targets].map(([id, t]) => [id, { bytes: t.bytes, sha256: t.digest,
+      destroyed: t.socket.destroyed, readableEnded: t.socket.readableEnded, writableEnded: t.socket.writableEnded }])) };
+  evidence.relayStateBeforeCleanup = Object.fromEntries(relays.map(r => [r.mode, r.owned.status()]));
+  evidence.uploads = Object.fromEntries(relays.map(r => [r.mode, evidence.relayStateBeforeCleanup[r.mode].uploads]));
+  evidence.relayTraceBeforeCleanup = Object.fromEntries(relays.map(r => [r.mode, structuredClone(r.owned.trace)]));
   clearTimeout(watchdog); clearInterval(sample); stopping = true;
   for (const pending of delayTimers) { clearTimeout(pending.timer); pending.resolve(); }
   delayTimers.clear();
