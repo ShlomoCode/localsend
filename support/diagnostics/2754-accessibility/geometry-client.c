@@ -10,6 +10,11 @@ static GHashTable *seen;
 static gboolean truncated;
 static gint64 started;
 static unsigned call_id;
+static AtspiAccessible *chain[15];
+static AtspiComponent *chain_components[15];
+static gboolean chain_eligible[15];
+static unsigned cycles, revisits;
+static gboolean tree_gap;
 
 static void string(const char *s) {
   putchar('"');
@@ -52,7 +57,7 @@ static void rect(const AtspiRect *r) {
   if (!r) { printf("null"); return; }
   printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}", r->x,r->y,r->width,r->height);
 }
-static void geometry(AtspiAccessible *a, AtspiComponent *c, gboolean target, gboolean eligible) {
+static void geometry(AtspiAccessible *a, AtspiComponent *c, gboolean target, gboolean focused_target, gboolean eligible, unsigned depth) {
   for (int coord = 0; coord < 2; coord++) {
     GError *e = NULL; gint64 t = enter(coord == 0 ? "GetExtentsSCREEN" : "GetExtentsWINDOW",a);
     AtspiRect *r = atspi_component_get_extents(c, coord == 0 ? ATSPI_COORD_TYPE_SCREEN : ATSPI_COORD_TYPE_WINDOW, &e);
@@ -67,6 +72,25 @@ static void geometry(AtspiAccessible *a, AtspiComponent *c, gboolean target, gbo
       }
       t = enter(coord == 0 ? "GetAccessibleAtPointSCREEN" : "GetAccessibleAtPointWINDOW",a); AtspiAccessible *hit = atspi_component_get_accessible_at_point(c,x,y,coord,&e);
       begin("GetAccessibleAtPoint",a,t,e); printf(",\"coordinate\":\"%s\",\"point\":[%d,%d],\"result\":",coord == 0 ? "SCREEN" : "WINDOW",x,y); if(hit) identity(hit); else printf("null"); end(&e); if(hit) g_object_unref(hit);
+      /* Public contract returns a child, not necessarily the deepest field.
+       * Keep its identity and the traversal chain; validation checks routing. */
+      if (focused_target) for(unsigned j=0;j<depth;j++) {
+        if(!chain_components[j] || !chain_eligible[j]) {
+          printf("{\"kind\":\"ancestor_skipped\",\"identity\":"); identity(chain[j]);
+          printf(",\"target_identity\":"); identity(a);
+          printf(",\"coordinate\":\"%s\",\"reason\":\"no Component or ineligible state\"}\n",coord==0?"SCREEN":"WINDOW");
+          continue;
+        }
+        t=enter("AncestorContains",chain[j]);
+        gboolean contains=atspi_component_contains(chain_components[j],x,y,coord,&e);
+        begin("AncestorContains",chain[j],t,e); printf(",\"target_identity\":"); identity(a);
+        printf(",\"coordinate\":\"%s\",\"point\":[%d,%d],\"result\":%s",coord==0?"SCREEN":"WINDOW",x,y,contains?"true":"false"); end(&e);
+        t=enter("AncestorGetAccessibleAtPoint",chain[j]);
+        hit=atspi_component_get_accessible_at_point(chain_components[j],x,y,coord,&e);
+        begin("AncestorGetAccessibleAtPoint",chain[j],t,e); printf(",\"target_identity\":"); identity(a);
+        printf(",\"coordinate\":\"%s\",\"point\":[%d,%d],\"result\":",coord==0?"SCREEN":"WINDOW",x,y);
+        if(hit) identity(hit); else printf("null"); end(&e); if(hit) g_object_unref(hit);
+      }
     }
     if (target && (!eligible || !extent_ok || !r || r->width <= 0 || r->height <= 0 || r->x == -1 || r->y == -1)) {
       printf("{\"kind\":\"skipped\",\"op\":\"Contains/GetAccessibleAtPoint\",\"identity\":"); identity(a);
@@ -78,7 +102,18 @@ static void geometry(AtspiAccessible *a, AtspiComponent *c, gboolean target, gbo
 static void walk(AtspiAccessible *a, unsigned depth) {
   if (nodes >= max_nodes || depth > max_depth) { truncated = TRUE; return; }
   AtspiObject *o = ATSPI_OBJECT(a); char *key = g_strdup_printf("%s:%s",o->app && o->app->bus_name ? o->app->bus_name : "",o->path ? o->path : "");
-  if (g_hash_table_contains(seen,key)) { g_free(key); return; }
+  if (g_hash_table_contains(seen,key)) {
+    gboolean cycle=FALSE;
+    for(unsigned j=0;j<depth;j++) {
+      AtspiObject *ancestor=ATSPI_OBJECT(chain[j]);
+      if(g_strcmp0(o->path,ancestor->path)==0 && o->app==ancestor->app) cycle=TRUE;
+    }
+    if(cycle) cycles++; else revisits++;
+    printf("{\"kind\":\"%s\",\"identity\":",cycle?"cycle":"revisit"); identity(a);
+    printf(",\"parent_identity\":"); identity(depth?chain[depth-1]:NULL); puts("}"); fflush(stdout);
+    g_free(key); return;
+  }
+  chain[depth]=a;
   g_hash_table_add(seen,key); nodes++;
   GError *e = NULL; gint64 t = enter("ClearCacheSingle",a);
   atspi_accessible_clear_cache_single(a);
@@ -102,7 +137,9 @@ static void walk(AtspiAccessible *a, unsigned depth) {
   begin("RoleName",a,t,NULL); printf(",\"result\":"); string(role_name); end(&e);
   printf("{\"kind\":\"node\",\"identity\":"); identity(a); printf(",\"depth\":%u,\"role\":%d,\"name\":",depth,role); string(name);
   printf(",\"role_name\":"); string(role_name); g_free(role_name);
-  printf(",\"component\":%s,\"editable_text\":%s,\"focused\":%s,\"editable_state\":%s,\"defunct\":%s,\"visible\":%s,\"showing\":%s,\"geometry_eligible\":%s}\n",c?"true":"false",et?"true":"false",focused?"true":"false",editable?"true":"false",defunct?"true":"false",visible?"true":"false",showing?"true":"false",state && !defunct && visible && showing?"true":"false"); fflush(stdout);
+  printf(",\"component\":%s,\"editable_text\":%s,\"focused\":%s,\"editable_state\":%s,\"defunct\":%s,\"visible\":%s,\"showing\":%s,\"geometry_eligible\":%s,\"ancestry\":[",c?"true":"false",et?"true":"false",focused?"true":"false",editable?"true":"false",defunct?"true":"false",visible?"true":"false",showing?"true":"false",state && !defunct && visible && showing?"true":"false");
+  for(unsigned j=0;j<depth;j++) {if(j) putchar(','); identity(chain[j]);}
+  puts("]}"); fflush(stdout);
   t = enter("GetInterfaces",a); GArray *interfaces = atspi_accessible_get_interfaces(a);
   begin("GetInterfaces",a,t,NULL); printf(",\"result\":[");
   if (interfaces) for (guint i = 0; i < interfaces->len; i++) {
@@ -112,17 +149,30 @@ static void walk(AtspiAccessible *a, unsigned depth) {
   }
   printf("]"); end(&e); if (interfaces) g_array_free(interfaces,TRUE);
   if (et) { editable_nodes++; if(focused) focused_editable++; }
-  if(c) { geometry(a,c,et != NULL || focused,state && !defunct && visible && showing); g_object_unref(c); }
+  chain_components[depth]=c; chain_eligible[depth]=state && !defunct && visible && showing;
+  if(c) geometry(a,c,et != NULL || focused,et != NULL && focused,chain_eligible[depth],depth);
   if(et) g_object_unref(et);
   if(state) g_object_unref(state);
   g_free(name);
   t = enter("GetChildCount",a); int count = atspi_accessible_get_child_count(a,&e); begin("GetChildCount",a,t,e); printf(",\"result\":%d",count); end(&e);
+  if(count<0) {
+    tree_gap=TRUE;
+    printf("{\"kind\":\"tree_gap\",\"identity\":"); identity(a); puts(",\"reason\":\"negative child count\"}"); fflush(stdout);
+  }
   for(int i=0;i<count && nodes<max_nodes;i++) {
     t = enter("GetChildAtIndex",a); AtspiAccessible *child = atspi_accessible_get_child_at_index(a,i,&e);
     begin("GetChildAtIndex",a,t,e); printf(",\"index\":%d,\"result\":",i); if(child) identity(child); else printf("null"); end(&e);
-    if(child) { walk(child,depth+1); g_object_unref(child); }
+    if(child) {
+      printf("{\"kind\":\"edge\",\"identity\":"); identity(a); printf(",\"index\":%d,\"child_identity\":",i); identity(child); puts("}"); fflush(stdout);
+      walk(child,depth+1); g_object_unref(child);
+    } else {
+      tree_gap=TRUE;
+      printf("{\"kind\":\"tree_gap\",\"identity\":"); identity(a);
+      printf(",\"index\":%d,\"reason\":\"advertised child returned null\"}\n",i); fflush(stdout);
+    }
   }
   if(count > 0 && nodes>=max_nodes) truncated=TRUE;
+  if(c) g_object_unref(c);
 }
 int main(int argc, char **argv) {
   if(argc != 3) { fprintf(stderr,"usage: geometry-client PID LABEL\n"); return 2; }
@@ -165,8 +215,8 @@ int main(int argc, char **argv) {
     }
     g_object_unref(app);
   }
-  printf("{\"kind\":\"summary\",\"application_found\":%s,\"nodes\":%u,\"editable_nodes\":%u,\"focused_editable_nodes\":%u,\"truncated\":%s,\"screen_reader_speech_tested\":false,\"editing_actions_tested\":false}\n",found?"true":"false",nodes,editable_nodes,focused_editable,truncated?"true":"false");
+  printf("{\"kind\":\"summary\",\"application_found\":%s,\"nodes\":%u,\"editable_nodes\":%u,\"focused_editable_nodes\":%u,\"cycles\":%u,\"revisits\":%u,\"truncated\":%s,\"screen_reader_speech_tested\":false,\"editing_actions_tested\":false}\n",found?"true":"false",nodes,editable_nodes,focused_editable,cycles,revisits,truncated?"true":"false");
   g_object_unref(desktop); g_hash_table_unref(seen);
   t=enter("Exit",NULL); int exit_status=atspi_exit(); begin("Exit",NULL,t,NULL); printf(",\"result\":%d",exit_status); end(&e);
-  return found && !truncated ? 0 : 5;
+  return found && !truncated && !cycles && !tree_gap ? 0 : 5;
 }

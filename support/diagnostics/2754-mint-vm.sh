@@ -56,6 +56,11 @@ printf "759c9b5a2ad26eb9844b24f7da1696c705ff5fe07924a749f385f435176c2306  /home/
 ssh-keygen -q -t ed25519 -N "" -f /tmp/issue2754-mint/id
 cp /tmp/issue2754-mint/id.pub /tmp/issue2754-mint/seed/id.pub
 sed "s@/home/probe@/home/mint@g" support/diagnostics/2754-ui.py > /tmp/issue2754-mint/seed/ui.py
+cp support/diagnostics/2754-recording-clips.py /tmp/issue2754-mint/seed/recording-clips.py
+{
+ printf 'diagnostic_commit=%s\n' "$(git rev-parse HEAD)"
+ sha256sum support/diagnostics/2754-mint-vm.sh support/diagnostics/2754-ui.py support/diagnostics/2754-recording-clips.py
+} > /tmp/issue2754-mint/seed/recording-source.txt
 if [ "$probe_capture_geometry" = 1 ]; then
  cp -a support/diagnostics/2754-accessibility /tmp/issue2754-mint/seed/
 fi
@@ -72,6 +77,9 @@ trap 'status=$?; echo "BOOTSTRAP_EXIT phase=$phase status=$status"; if [ -n "$mo
 mkdir -p /home/mint/.ssh /home/mint/evidence /home/mint/support/diagnostics
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/ui.py /home/mint/support/diagnostics/2754-ui.py
+cp /mnt/recording-clips.py /home/mint/support/diagnostics/2754-recording-clips.py
+cp /mnt/recording-source.txt /home/mint/evidence/recording-source.txt
+sha256sum /home/mint/support/diagnostics/2754-ui.py /home/mint/support/diagnostics/2754-recording-clips.py > /home/mint/evidence/recording-staged-source.sha256
 if [ -d /mnt/2754-accessibility ]; then
  cp -a /mnt/2754-accessibility /home/mint/support/diagnostics/
 fi
@@ -186,8 +194,9 @@ cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
 geometry_packages=()
 if [ "$PROBE_CAPTURE_GEOMETRY" = 1 ]; then
- geometry_packages=(build-essential pkg-config libatspi2.0-dev libglib2.0-dev jq)
+ geometry_packages=(build-essential pkg-config libatspi2.0-dev libglib2.0-dev libx11-dev jq)
  test -f support/diagnostics/2754-accessibility/capture-geometry.sh
+ test -f support/diagnostics/2754-accessibility/x11-window.c
 fi
 engine_packages=()
 if [ "$PROBE_ENGINE_VARIANT" != official ]; then
@@ -362,7 +371,14 @@ cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
 export APP_EXECUTABLE=$(cat evidence/app-executable.txt)
 screen_size=$(xrandr | sed -n "s/.*current \([0-9]*\) x \([0-9]*\),.*/\1x\2/p")
-ffmpeg -nostdin -y -f x11grab -framerate 10 -video_size "$screen_size" -i :0 -c:v libx264 -preset ultrafast evidence/scenario.mp4 > evidence/video.log 2>&1 &
+set +e
+date -u '+%FT%TZ' > evidence/recording-start-request.txt
+ffmpeg -version > evidence/recording-ffmpeg-version.txt
+# Preserve X11 wall-clock PTS for exact alignment to UI event wall timestamps.
+# Draw the real pointer; no synthetic frames, cuts, or input overlay are inserted.
+recording_args=(ffmpeg -nostdin -y -copyts -f x11grab -use_wallclock_as_timestamps 1 -draw_mouse 1 -framerate 10 -video_size "$screen_size" -i :0 -an -vsync 0 -c:v libx264 -preset ultrafast -crf 25 -avoid_negative_ts disabled evidence/scenario.mp4)
+printf '%s\n' "${recording_args[@]}" > evidence/recording-command-args.txt
+"${recording_args[@]}" > evidence/video.log 2>&1 &
 video_pid=$!
 set +e
 # Optional geometry validity is retained by the UI driver separately from causal timing.
@@ -377,8 +393,18 @@ if [ "$PROBE_ENGINE_VARIANT" != official ]; then
  grep -qx 'mapped_selected_aot=true' evidence/engine-process-map-check.txt || status=1
  grep -qx 'loader_gate_before_ui=true' evidence/engine-loader-deadline.txt || status=1
 fi
+printf 'ui_and_loader_exit_status=%s\n' "$status" > evidence/recording-ui-status.txt
 kill -INT "$video_pid"
 wait "$video_pid"
+recording_status=$?
+printf 'recorder_exit_status=%s\n' "$recording_status" > evidence/recording-exit-status.txt
+case "$recording_status" in 0|255) ;; *) status=1 ;; esac
+# Extract short continuous source intervals only after all timed UI work finishes.
+# Failures retain source/status and cannot turn a causal or geometry result into a pass.
+PROBE_CLOUD_RECORDING=1 PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_ENGINE_VARIANT="$PROBE_ENGINE_VARIANT" python3 support/diagnostics/2754-recording-clips.py > evidence/recording-clips.log 2>&1
+clip_status=$?
+printf 'clip_exit_status=%s\n' "$clip_status" >> evidence/recording-exit-status.txt
+[ "$clip_status" = 0 ] || status=1
 sudo journalctl -b --no-pager > evidence/journal.txt
 exit "$status"
 GUEST

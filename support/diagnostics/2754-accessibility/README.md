@@ -4,7 +4,7 @@ This external AT-SPI client captures the real LocalSend accessibility tree and c
 
 ## Run in Mint
 
-Install the cloud packages `build-essential`, `pkg-config`, `libatspi2.0-dev`, `libglib2.0-dev`, `xdotool`, `jq`, and `coreutils`. The script requires libatspi 2.52.x and records the exact installed package versions and fixture hashes.
+Install the cloud packages `build-essential`, `pkg-config`, `libatspi2.0-dev`, `libglib2.0-dev`, `libx11-dev`, `xdotool`, `jq`, and `coreutils`. The script requires libatspi 2.52.x and records the exact installed package versions, compiler flags, and source/binary hashes for both clients.
 
 1. Stage this whole directory at `/home/mint/support/diagnostics/2754-accessibility`, next to the cloud UI driver. Retain the selected app/bridge identity and mapped-library evidence from the launcher.
 2. Set `PROBE_CAPTURE_GEOMETRY=1` and `PROBE_BRIDGE_VARIANT` in the existing Mint UI invocation, preserving its `APP_EXECUTABLE`, `DISPLAY`, and D-Bus session environment. For example, inside the bootstrapped Mint guest:
@@ -18,7 +18,7 @@ Install the cloud packages `build-essential`, `pkg-config`, `libatspi2.0-dev`, `
 
 The UI driver supplies `PROBE_CLOUD_GEOMETRY=1` only to its capture subprocess. The capture script checks that flag, Linux Mint, the `mint` user, the exact staged `/home/mint` path, and the cloud bootstrap marker before compiling or querying anything. Direct invocation from a local checkout is rejected. Its internal interface remains `capture-geometry.sh PID LABEL OUTPUT_DIR [WINDOW_ID]`. It rejects a window whose observed PID differs, compiles inside Mint, captures the tree, requests a move of 80 by 60 pixels, records the observed host position, captures again, and restores the original position through an EXIT trap.
 
-The UI capture subprocess has a 450-second deadline and a five-second kill grace; the driver has a 465-second subprocess deadline. Give the complete cloud UI scenario at least 1500 seconds to allow both the original timing cases and this separate phase. Keep stock and A runs in separate retained cloud evidence directories. A capture process returning zero means it completed its queries; invalid A-only geometry must remain a failure in the recorded comparison rather than becoming a correction claim.
+The UI capture subprocess has a 450-second deadline and a five-second kill grace; the driver has a 465-second subprocess deadline. Give the complete cloud UI scenario at least 1500 seconds to allow both the original timing cases and this separate phase. Keep stock and A runs in separate retained cloud evidence directories. The script returns zero only when `geometry-comparison.json` has `probe_status: "pass"`; it returns 9 for an incomplete or failed comparison. Setup or parsing failures also return nonzero and preserve an initial `incomplete` comparison plus the raw files produced so far. The optional phase remains separate from the original causal timing cases.
 
 ## Read the evidence
 
@@ -30,14 +30,21 @@ The configured method timeout and startup grace are both 1500 ms. This bounds or
 
 Run 22 found the selected A application root in about 12 ms, then reached the outer deadline before emitting a node. The old output has no entry record for the next operation, so it cannot distinguish cache setup, GetName, internal state refresh, or deferred-message dispatch. In the exact 2.52 source, the cache setters only change fields; `GetName` tests the cache and otherwise reads `org.freedesktop.DBus.Properties.Get`. That cache test may refresh an existing state set. Property and method wrappers dispatch queued messages after their D-Bus reply. These are source-backed candidate locations, not a validated cause. `ATSPI_NO_CACHE` only prevents cached-property hits in this source; it does not suppress the asynchronous application-bus-address/GetItems exchanges. The fixture continues to use public live queries and does not substitute cached root data for role/name/state assertions. Both run-22 geometry probes remain unknown.
 
-`host-before.json` and `host-after.json` come from `xdotool getwindowgeometry --shell`; the script parses the output without executing it. `geometry-comparison.json` retains these observed coordinates and reports, for each identical bus/path pair:
+`host-before.json` and `host-after.json` come from `xdotool getwindowgeometry --shell`; the script parses the output without executing it. Independently, `x11-window.c` observes the actual supplied client window ID with `XGetWindowAttributes` and translates its interior origin `(0,0)` to its root window with `XTranslateCoordinates`. It also records `_NET_WM_PID`, optional `_NET_FRAME_EXTENTS`, and the separate X11 ancestor bounds from `XQueryTree`. Ancestor windows are retained as window-manager evidence, rather than assumed to be a particular decoration layout. Xlib observations are bounded to 10 seconds plus two seconds kill grace. The raw observer JSON, stderr, parse errors and process status are retained even on failure. Separate observations at the end of both query processes must agree with each phase's initial client bounds/PID. This checks for motion or resizing during a probe at its endpoints; it cannot detect a move away and back between observations.
 
-- whether usable SCREEN rectangles fit inside the observed host window;
+`geometry-comparison.json` retains these independent observations and reports, for each identical bus/path pair:
+
+- whether usable SCREEN rectangles fit inside the independently observed client window;
+- whether SCREEN minus WINDOW equals the independently observed client SCREEN origin, with equal dimensions in both coordinate systems;
 - whether SCREEN coordinates change by the observed host move;
 - whether WINDOW rectangles remain identical;
-- per-coordinate query-presence flags, node eligibility, query errors, focused editable nodes, point-query identities, skipped probes, and process exit/deadline results.
+- per-coordinate query completion, node eligibility, query errors, phase-scoped focused editable nodes and point-query identities, skipped probes, and process exit/deadline results.
 
-All-minus-one socket/plug rectangles fail the usable-geometry checks. No observed move, missing editable field, truncated tree, timeout, error, or absent matching component must be treated as a geometry pass. Compare point-query result identities with the focused editable node identities in the same phase; null hits and unsupported methods remain unresolved. A successful tree listing alone does not establish keyboard editing, accessible actions, speech output, or a fix for issue 2754. Nested screen rectangles should be inspected alongside the captured host geometry because clipping, decorations, and popup windows can affect containment.
+The global gate requires exactly two successful inner process exits, one complete nontruncated tree summary per phase, matched query entry/return IDs, no query errors or tree revisits/cycles/gaps, one eligible focused editable target per phase, complete live target queries, and identical target identity/ancestry before and after. A negative child count or a null result for an advertised child index records `tree_gap`, even without GError, and makes the client fail. It requires an actual move with unchanged client/host dimensions; no move, a failed move command or a resize is incomplete. Geometry checks apply to the focused field and its eligible Component ancestors, including field-rectangle containment in ancestor bounds in both coordinate systems. Failed or unsupported geometry stays visible in the raw records and cannot produce a pass. A wrong constant SCREEN offset fails origin calibration even when rectangles track the move and remain inside the window.
+
+Node records retain the traversal ancestry; every parent-to-child traversal has an explicit `edge` identity/index record. A previously visited identity produces `revisit`, or `cycle` when it appears in the active traversal path. Neither is silently dropped. At the focused editable field's center, each eligible Component ancestor receives `Contains` and `GetAccessibleAtPoint` in both coordinate systems. The comparison requires Contains true and a returned child on the recorded path toward the field; the child need not be the deepest field. At least one such ancestor must be observed, and every recorded path link must have an edge. Ancestors without a Component interface or meaningful visible/showing state are explicitly skipped. The gate asserts no fixed native AtkSocket parent shape. A leaf's own GetAccessibleAtPoint may legitimately return null under the public child-returning contract; its completed result is retained, and ancestor routing supplies the positive path evidence. The original own-node inside/outside point probes remain in place for every focused or editable node.
+
+All-minus-one socket/plug rectangles fail the usable-geometry checks. No observed move, missing editable field, truncated tree, timeout, error, or absent matching component must be treated as a geometry pass. Null ancestor hits and unsupported methods remain unresolved; the field's own null child hit is interpreted under the public contract described above. A successful tree listing alone does not establish keyboard editing, accessible actions, speech output, or a fix for issue 2754. Nested screen rectangles should be inspected alongside the captured client/window-manager geometry because clipping, decorations, and popup windows can affect containment. The EXIT trap records restoration command status and a fresh observed window geometry; restoring coordinates through a window manager is an attempted action whose actual result remains visible for review.
 
 ## API provenance
 
@@ -64,4 +71,15 @@ f3950265e70f62de3b3b072f52547312b2e4fd770ace3533e7cc88e6b8fdaac1  atspi/atspi-mi
 ae12995f42fc6c65dfa22b4345409c78745fdb8b9db6ff2b9a7f23371c046fbe  dbind/dbind.c
 ```
 
-Cloud compilation and real-application execution remain required. No local build, app run, or reproduction was performed while preparing these files.
+The independent observer was checked against the official [libX11 1.8.7 source archive](https://www.x.org/releases/individual/lib/libX11-1.8.7.tar.xz). This is an API provenance reference; the cloud's actual installed libX11 version is recorded separately. The archive's public `Xlib.h` supplies the signatures and ownership rules, and its man pages specify coordinate translation, interior width/height, window-tree allocation, and CARDINAL property representation. `XGetWindowProperty` returns format-32 values in a long array; returned property and child arrays are freed with `XFree`. `_NET_FRAME_EXTENTS` is optional diagnostic evidence and never used as a guessed correction offset.
+
+```text
+05f267468e3c851ae2b5c830bcf74251a90f63f04dd7c709ca94dc155b7e99ee  libX11-1.8.7.tar.xz
+748265b305975ae8396cdb310bcafa47d338211c977bfda9bf88d187a3a37c03  include/X11/Xlib.h
+618accd4fa3038338c36d1830eac44c2bbbcb8e907617ac25d85d5f871223920  man/XTranslateCoordinates.man
+a55e147151dc1499822a0747dcae87b9829aceedf204970a972a4cc244f9e316  man/XGetWindowAttributes.man
+bf6b1a6aadca606ce1f99e9816a2350a3292729c40a07ef669882a575f883bc5  man/XQueryTree.man
+20ae86c3906c6e2f187b9ed1c30b3117edb185cc980e2c28c203ee6a76497295  man/XGetWindowProperty.man
+```
+
+Cloud compilation and real-application execution remain required. Only shell/filter syntax and diff checks were performed locally; no local build, app run, fixture evaluation or reproduction was performed while preparing these files. A pass describes this geometry snapshot in the real Text-dialog phase, not speech, editing/action behavior, every window type, or every future geometry state. Run 22 remains unknown and cannot be upgraded by these later fixture changes.
