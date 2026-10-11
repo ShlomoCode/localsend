@@ -1,6 +1,11 @@
 name: Issue 1591 iOS byte proxy
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/issue1591-investigation]
+    paths:
+      - .github/workflows/issue1591-ios-proxy.yml
+      - support/diagnostics/issue1591-ios-proxy/**
 permissions:
   contents: read
 concurrency:
