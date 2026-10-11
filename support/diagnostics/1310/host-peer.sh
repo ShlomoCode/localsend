@@ -25,6 +25,14 @@ for n in $(seq 1 120); do
   fi
   scrot evidence/host-peer/current.png
   tesseract evidence/host-peer/current.png evidence/host-peer/current tsv >/dev/null 2>&1
+  confirm=$(awk -F '\t' '$12=="Confirm" && $11>60 {print int($7+$9/2),int($8+$10/2);exit}' evidence/host-peer/current.tsv)
+  if test -n "$confirm"; then
+    cp evidence/host-peer/current.png evidence/host-peer/first-launch-confirm.png
+    printf '%s Confirm %s\n' "$(date --iso-8601=ns)" "$confirm" >> evidence/host-peer/input.log
+    xdotool mousemove --sync $confirm click 1
+    sleep 3
+    continue
+  fi
   point=$(awk -F '\t' '$12=="Accept" && $11>60 {print int($7+$9/2),int($8+$10/2);exit}' evidence/host-peer/current.tsv)
   if test -n "$point"; then
     cp evidence/host-peer/current.png evidence/host-peer/before-accept.png
