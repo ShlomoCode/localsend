@@ -67,7 +67,7 @@ public final class RelayService extends Service {
     c.setConnectTimeout(10000);c.setReadTimeout(30000);c.setRequestMethod(method);c.setRequestProperty("Authorization","Bearer "+token);
     try{
       if(body!=null){byte[] data=body.getBytes("UTF-8");c.setDoOutput(true);c.setFixedLengthStreamingMode(data.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream out=c.getOutputStream()){out.write(data);}}
-      if(c.getResponseCode()!=200)throw new IOException("Relay response "+c.getResponseCode());
+      int status=c.getResponseCode();if(status!=200){trace("http-status:"+method+":"+path+":"+status,"-");throw new IOException("Relay response "+status);}
       return read(c.getInputStream());
     }catch(Exception e){trace("http-failure:"+method+":"+path+":"+e.getClass().getSimpleName(),"-");throw e;}finally{c.disconnect();}
   }

@@ -128,6 +128,8 @@ jobs:
           name: issue3393-physical-control
           path: |
             evidence
+            !evidence/release/**
+            !evidence/**/*.zip
             mobile-control-results.json
             mobile-control-final-status.json
             mobile-control-error.txt

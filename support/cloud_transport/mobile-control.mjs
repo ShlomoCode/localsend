@@ -41,7 +41,10 @@ try {
   assert.equal(reply.count,size);assert.equal(reply.sha256,expected);results.push({bytes:size,byteExact:true,replyAfterHalfClose:true});console.log('Physical control passed '+size+' bytes');
  }
  writeFileSync('mobile-control-results.json',JSON.stringify({device:caps['appium:deviceName'],os:caps['appium:platformVersion'],results,metrics:r.status()},null,2));
- await clickText('Stop helper');await clickText('Relay to LocalSend');
+ await clickText('Stop helper');
+ const drainStart=Date.now();while(r.status().pollPending && Date.now()-drainStart<25000)await new Promise(ok=>setTimeout(ok,250));
+ writeFileSync('evidence/helper-poll-drain.json',JSON.stringify({elapsedMs:Date.now()-drainStart,status:r.status()},null,2));
+ assert(!r.status().pollPending,'Old helper poll did not drain');await clickText('Relay to LocalSend');
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});
  await new Promise(ok=>setTimeout(ok,4000));
  const source=await wd('GET',`/session/${session}/source`);writeFileSync('localsend-source.xml',source);
