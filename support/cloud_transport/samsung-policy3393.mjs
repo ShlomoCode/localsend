@@ -5,18 +5,20 @@ const appPackage = 'org.localsend.localsend_app';
 const settingsPackage = 'com.android.settings';
 const powerPackage = 'com.samsung.android.lool';
 const elementKey = 'element-6066-11e4-a52e-4f735466cecf';
-const policies = Object.freeze(['Unrestricted', 'Optimised', 'Restricted']);
+const policies = Object.freeze(['Unrestricted', 'Optimized', 'Restricted']);
 const appName = `//*[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/entity_header_title" and @text="LocalSend"]`;
 const heading = text => `//*[@package="${settingsPackage}" and @class="android.widget.TextView" and @text="${text}" and @displayed="true"]`;
 const appIdentity = `count(${heading('App info')})=1 and count(${appName})=1`;
-// The Battery screen has not been captured. Require its identity and all three
-// labelled radio controls before borrowing the policy; do not infer a fallback.
-const policyIdentity = `count(${heading('Battery')})=1 and count(//*[@package="${settingsPackage}" and @text="LocalSend" and @displayed="true"])=1`;
-const radios = `//*[@package="${settingsPackage}" and @class="android.widget.RadioButton" and @checkable="true" and @displayed="true"]`;
-const labelNode = policy => `//*[@package="${settingsPackage}" and @text="${policy}" and @displayed="true"]`;
-const policyRow = policy => `${labelNode(policy)}/ancestor-or-self::*[@package="${settingsPackage}" and count(.//android.widget.RadioButton[@checkable="true" and @displayed="true"])=1][1]`;
-const policyRadio = policy => `${policyRow(policy)}//android.widget.RadioButton[@package="${settingsPackage}" and @checkable="true" and @displayed="true"]`;
-const policyGuard = `${policyIdentity} and count(${radios})=3 and count(${radios}[@checked="true"])=1 and count(${radios}[@checked="false"])=2 and ${policies.map(policy => `count(${labelNode(policy)})=1 and count(${policyRadio(policy)})=1`).join(' and ')}`;
+// Use the Battery page captured on the Samsung Android 15 en-US device:
+// its header names LocalSend 1.18.2, and each clickable row owns one checkbox.
+const policyHeader = `//*[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/entity_header" and @displayed="true"][count(.//android.widget.TextView[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/entity_header_title" and @text="LocalSend" and @displayed="true"])=1 and count(.//android.widget.TextView[@package="${settingsPackage}" and @resource-id="${settingsPackage}:id/entity_header_summary" and @text="Version 1.18.2" and @displayed="true"])=1]`;
+const policyIdentity = `count(${heading('Battery')})=1 and count(${policyHeader})=1`;
+const radioNode = `android.widget.RadioButton[@package="${settingsPackage}" and @resource-id="android:id/checkbox" and @checkable="true" and @clickable="false" and @enabled="true" and @displayed="true"]`;
+const radios = `//${radioNode}`;
+const labelNode = policy => `//android.widget.TextView[@package="${settingsPackage}" and @resource-id="android:id/title" and @text="${policy}" and @displayed="true"]`;
+const policyRow = policy => `${labelNode(policy)}/ancestor::android.widget.LinearLayout[@package="${settingsPackage}" and @clickable="true" and @enabled="true" and @displayed="true" and count(.//${radioNode})=1][1]`;
+const policyRadio = policy => `${policyRow(policy)}//${radioNode}`;
+const policyGuard = `${policyIdentity} and count(${radios})=3 and count(${radios}[@checked="true"])=1 and count(${radios}[@checked="false"])=2 and ${policies.map(policy => `count(${labelNode(policy)})=1 and count(${policyRow(policy)})=1 and count(${policyRadio(policy)})=1`).join(' and ')}`;
 const target = value => ({using: 'xpath', value});
 let contextSequence = 0;
 
