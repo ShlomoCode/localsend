@@ -16,7 +16,7 @@ click_word() {
     # Full-window OCR misses the actual white Accept label in the retained
     # 1.11.1 approval view. Use exact OCR of its observed label rectangle.
     [[ $(identify -format '%wx%h' "evidence/$name.png") == 1000x700 ]]
-    convert "evidence/$name.png" -crop 80x30+548+635 -resize 400% -negate "evidence/$name-label.png"
+    convert "evidence/$name.png" -crop 62x24+555+638 -resize 400% -negate "evidence/$name-label.png"
     tesseract "evidence/$name-label.png" "evidence/$name-label" --psm 7 >/dev/null 2>&1
     if [[ $(tr -d '[:space:]' < "evidence/$name-label.txt") == Accept ]]; then
       printf '%s window=%s click=585,650 exact-cropped-label=Accept\n' "$(date --iso-8601=ns)" "$wid" >> evidence/input-timings.txt
