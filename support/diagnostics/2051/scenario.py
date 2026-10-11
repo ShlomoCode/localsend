@@ -126,10 +126,12 @@ try:
     time.sleep(2)
     click(R, "Done", "A-receiver-before-done")
     click(S, "Done", "A-sender-before-done")
-    _, saved = transfer("ISSUE2051_CONTENT_B\n", "B")
+    b_complete, saved = transfer("ISSUE2051_CONTENT_B\n", "B")
     numbered = next(pathlib.Path(item["path"]).name for item in saved if item["content"] == "ISSUE2051_CONTENT_B\n")
-    b_viewer = open_actual(numbered, "B-open")
-    result = {"saved_B_filename": numbered, "viewer_has_A": "ISSUE2051_CONTENT_A" in b_viewer, "viewer_has_B": "ISSUE2051_CONTENT_B" in b_viewer}
+    displayed = next(value.split("\n")[0] for value in labels(b_complete) if "(20 B)" in value)
+    print("B_FILE_IDENTITY", {"saved": numbered, "displayed": displayed}, flush=True)
+    b_viewer = open_actual(displayed, "B-open")
+    result = {"saved_B_filename": numbered, "displayed_B_filename": displayed, "viewer_has_A": "ISSUE2051_CONTENT_A" in b_viewer, "viewer_has_B": "ISSUE2051_CONTENT_B" in b_viewer}
     (ROOT / "result.json").write_text(json.dumps(result, indent=2))
     print("RESULT", result, flush=True)
     if not result["viewer_has_A"] and not result["viewer_has_B"]:
