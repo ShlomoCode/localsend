@@ -12,7 +12,10 @@ using System.Runtime.InteropServices;
 public static class Input1549 {
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect1549 rect);
 }
+public struct Rect1549 { public int Left, Top, Right, Bottom; }
 '@
 function Screenshot($name) {
  $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -102,6 +105,7 @@ function Upgrade($name,$route,$running) {
  else { $args = @('upgrade','--manifest',"`"$manifest`"",'--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
  $start = Get-Date
  $up = Start-Process $wgPath -ArgumentList $args -PassThru -RedirectStandardOutput "$ev/$name-winget-upgrade.txt" -RedirectStandardError "$ev/$name-winget-error.txt"
+ $retainedHandle = $up.Handle
  $timeline = @()
  while (-not $up.HasExited) {
   $timeline += @{ Time = (Get-Date).ToUniversalTime().ToString('o'); Processes = @(Get-Process localsend_app -ErrorAction SilentlyContinue | Select-Object Id, MainWindowHandle, MainWindowTitle, Responding) }
@@ -115,9 +119,24 @@ function Upgrade($name,$route,$running) {
 }
 try {
  $route = if ($source151 -eq 0) { 'source' } else { 'local-manifest' }
- Upgrade 'exited-control' $route $false
- Upgrade 'running-default-1' $route $true
- Upgrade 'running-default-2' $route $true
+ ResetBaseline 'ui-tray-probe'
+ $app = Start-Process "$env:ProgramFiles/LocalSend/localsend_app.exe" -PassThru
+ Start-Sleep 15
+ $app.Refresh()
+ if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'App failed to create window' }
+ [Input1549]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
+ $rect = New-Object Rect1549
+ [Input1549]::GetWindowRect($app.MainWindowHandle, [ref]$rect) | Out-Null
+ $rect | ConvertTo-Json | Set-Content "$ev/ui-probe-rect.json"
+ Snapshot 'ui-probe-home'
+ [Input1549]::SetCursorPos($rect.Right-64, $rect.Bottom-44) | Out-Null
+ [Input1549]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [Input1549]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+ Start-Sleep 2
+ Snapshot 'ui-probe-settings'
+ $window = [System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+ $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+ $elements | ForEach-Object { @{ Name = $_.Current.Name; Type = $_.Current.ControlType.ProgrammaticName; Bounds = [string]$_.Current.BoundingRectangle } } | ConvertTo-Json | Set-Content "$ev/ui-probe-tree.json"
+ Get-ChildItem "$env:APPDATA/LocalSend", "$env:APPDATA/org.localsend" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length | ConvertTo-Json | Set-Content "$ev/ui-probe-profile-files.json"
 } finally {
  foreach ($logRoot in @("$env:LOCALAPPDATA/Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir", "$env:LOCALAPPDATA/Microsoft/WinGet/DiagOutputDir")) {
   if (Test-Path $logRoot) { Copy-Item "$logRoot/*" $ev -Force -ErrorAction Continue }
