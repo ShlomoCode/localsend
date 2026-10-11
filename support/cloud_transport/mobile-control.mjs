@@ -70,6 +70,7 @@ try {
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
  assert(session,'Session ID missing');writeFileSync(process.platform==='win32'?'C:/tmp/helper/session-id':'/tmp/helper/session-id',session);
+ if(sourceComparison)writeFileSync('evidence/browserstack-session.json',JSON.stringify({session},null,2));
  console.log('BrowserStack control session created for '+caps['appium:deviceName']);
  await new Promise(ok=>setTimeout(ok,3000));await clickText('Start socket control');
  await new Promise(ok=>setTimeout(ok,2500));

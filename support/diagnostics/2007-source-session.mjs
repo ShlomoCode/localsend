@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import {mkdirSync,readFileSync,symlinkSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import physicalControl from './2007-physical-control.mjs';
@@ -62,7 +61,7 @@ export default async function(context){
   try{
    if(index>0){
     arm.install.priorPackage=await context.wd('GET',prefix+'/appium/device/current_package');
-    arm.install.priorPid=await shell('pidof org.localsend.localsend_app');
+    arm.install.priorProcess=await shell('dumpsys meminfo org.localsend.localsend_app');
     arm.install.requestedUtc=new Date().toISOString();save();
     arm.install.terminateResult=await context.wd('POST',prefix+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});
     await context.wd('POST',prefix+'/execute/sync',{script:'mobile:installApp',args:[{appPath:arm.appUrl}]});
@@ -71,17 +70,33 @@ export default async function(context){
    await context.wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    // physicalControl owns initial readiness and the normal receive/permission
    // flow. Source identity verification must not add an earlier UI gate.
-   arm.install.packagePath=await shell('pm path org.localsend.localsend_app');
-   writeFileSync('evidence/installed-package-path.json',JSON.stringify(arm.install.packagePath,null,2));
-   const encodedPath=typeof arm.install.packagePath==='string'?arm.install.packagePath:JSON.stringify(arm.install.packagePath);
-   const paths=[...encodedPath.matchAll(/package:(\/data\/app\/[A-Za-z0-9_+./=~-]+\.apk)/g)].map(match=>match[1]);
-   assert.equal(paths.length,1,'Source arm must have exactly one normal installed APK');
-   const installed=Buffer.from(await context.wd('POST',prefix+'/appium/device/pull_file',{path:paths[0]}),'base64');
-   arm.install.installedApkSha256=createHash('sha256').update(installed).digest('hex');
-   arm.install.pid=await shell('pidof org.localsend.localsend_app');
-   arm.install.packageInfo=await shell('dumpsys package org.localsend.localsend_app');
+   arm.install.inspectionMethod='Public Android PackageManager + SigningInfo + read-only FileInputStream SHA-256';
+   arm.install.inspectionRequestedUtc=new Date().toISOString();save();
+   await context.wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.cloudtransport'});
+   const inspect=await waitForNativeControl({wd:context.wd,prefix,using:'accessibility id',value:'Inspect LocalSend APK',label:armName+'-public-apk-inspection'});
+   await context.wd('POST',`${prefix}/element/${inspect['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
+   await waitForNativeControl({wd:context.wd,prefix,using:'xpath',value:'//*[starts-with(@text,"APK inspection complete") or starts-with(@text,"APK inspection failed") or starts-with(@text,"APK inspection report write failed")]',label:armName+'-apk-inspection-result',timeoutMs:60000});
+   const inspectionUi=await context.wd('GET',prefix+'/source');
+   writeFileSync('evidence/apk-inspection-result.xml',inspectionUi);
+   assert(!inspectionUi.includes('APK inspection report write failed'),'PackageInspection own external-files JSON write failed; see retained result XML');
+   const inspectionBytes=Buffer.from(await context.wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Android/data/org.localsend.cloudtransport/files/localsend-apk-inspection.json'}),'base64');
+   writeFileSync('evidence/installed-apk-inspection.json',inspectionBytes);
+   const inspection=JSON.parse(inspectionBytes.toString('utf8'));
+   arm.install.inspection=inspection;
+   arm.install.installedApkSha256=inspection.baseApk?.sha256;
+   await context.wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+   arm.install.process=await shell('dumpsys meminfo org.localsend.localsend_app');
    arm.install.verifiedUtc=new Date().toISOString();
    writeFileSync('evidence/source-install.json',JSON.stringify(arm,null,2));save();
+   assert(inspection.successful,`Installed APK inspection failed at ${inspection.failedOperation}: ${inspection.errorType}: ${inspection.error}`);
+   assert(inspection.inspectionId&&!summary.arms.slice(0,index).some(previous=>previous.install.inspection?.inspectionId===inspection.inspectionId),'Inspection report must be a fresh button-triggered result');
+   assert(inspection.readOnly&&inspection.packageName==='org.localsend.localsend_app');
+   assert(inspection.baseApk?.stableWhileRead,'Installed APK changed during its read-only inspection');
+   assert(inspection.baseApk.bytes>0,'Installed APK byte count missing');
+   assert.equal(inspection.splitApks?.length,0,'Normal source APK must not become a split installation');
+   const expectedSignature=readFileSync(join(process.env.ISSUE_2007_BUILD_PAIR_DIR,label,'apk-signature.txt'),'utf8').match(/^Signer #1 certificate SHA-256 digest: ([a-f0-9]+)$/m)?.[1];
+   assert(expectedSignature,'Immutable source APK signing certificate metadata missing');
+   assert.deepEqual(inspection.signingCertificateSha256,[expectedSignature],'Installed signing certificate must match the normal source APK signer');
    assert.equal(arm.install.installedApkSha256,arm.apkSha256,'Installed APK must equal the immutable signed source-build APK; no cloud rewriting');
    process.env.ISSUE_2007_RELEASE=`source-${label}-${provenance.source_sha}`;
    Object.assign(process.env,{ISSUE_2007_FIXTURE_NAME:arm.fixtureName,ISSUE_2007_FIXTURE_SEED:run,ISSUE_2007_STORAGE_OBSERVER:'1',ISSUE_2007_OBSERVER_PREPARED:index===0?'0':'1',ISSUE_2007_REPEAT_RESEND:'0',ISSUE_2007_BASELINE_ONLY:'0',ISSUE_2007_RETRY_INTERVENTION:'',ISSUE_2007_FINALIZE_INTERVENTION:'',ISSUE_2007_SCAN_COMPARISON:'0',ISSUE_2007_DELETE_TIMING:'absence',ISSUE_2007_DELETE_ACTION:'trash',ISSUE_2007_VARIANT:'unchanged',ISSUE_2007_POST_DELETE_WAIT:'0',ISSUE_2007_RESTART_RECEIVER:'0',ISSUE_2007_DESTINATION:'downloads',ISSUE_2007_PRESERVE_DESTINATION:index===0?'0':'1'});

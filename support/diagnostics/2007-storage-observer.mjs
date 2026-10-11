@@ -18,7 +18,7 @@ export function storageObserver({wd,prefix,session}) {
   assert(report.readOnly&&report.allFilesAccess,'Observer lacks declared read-only mode or storage visibility permission');
   const identities=[];
   for(const appId of new Set(['org.localsend.localsend_app','com.google.android.providers.media.module','com.sec.android.app.myfiles',report.mediaProvider?.packageName].filter(Boolean))){
-   for(const command of ['dumpsys meminfo '+appId,'pidof '+appId]){
+   for(const command of ['dumpsys meminfo '+appId]){
     const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({error:String(error)}));
     identities.push({command,result});
    }
