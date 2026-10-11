@@ -197,7 +197,7 @@ $sender=$apps.sender
 $chapters=New-Object System.Collections.ArrayList
 $psi=New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName=$Ffmpeg
-$psi.Arguments="-y -loglevel error -f gdigrab -framerate 20 -draw_mouse 1 -offset_x 0 -offset_y 0 -video_size 992x720 -i desktop -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p `"$EvidenceDirectory/raw.mp4`""
+$psi.Arguments="-y -loglevel error -f gdigrab -framerate 20 -draw_mouse 1 -offset_x 0 -offset_y 0 -video_size 1000x760 -i desktop -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p `"$EvidenceDirectory/raw.mp4`""
 $psi.UseShellExecute=$false
 $psi.RedirectStandardInput=$true
 $capture=New-Object System.Diagnostics.Process
@@ -271,7 +271,7 @@ try {
  Word 'Saved' 'saved'
  Start-Sleep -Seconds 2
  Snap 'connected'
- if(!(Import-Csv "$EvidenceDirectory/connected.tsv" -Delimiter "`t" | Where-Object {$_.text -eq 'receiver'})) {throw 'Successful peer result not visible'}
+ if(!(Import-Csv "$EvidenceDirectory/connected.tsv" -Delimiter "`t" | Where-Object {$_.text -eq 'selection'})) {throw 'Successful favorite connection did not advance to Add to selection'}
  Esc
  Click 576 212
  Snap 'reopen'
@@ -392,7 +392,7 @@ try {
  }
  $srt | Set-Content -Encoding UTF8 "$EvidenceDirectory/captions.srt"
  Push-Location $EvidenceDirectory
- & $Ffmpeg -y -loglevel error -i raw.mp4 -vf "subtitles=captions.srt:force_style='FontSize=14,Outline=1,MarginV=12'" -c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p -movflags +faststart favorites-demo.mp4
+ & $Ffmpeg -y -loglevel error -i raw.mp4 -vf "pad=iw:ih+64:0:0:black,subtitles=captions.srt:force_style='FontSize=14,Outline=1,MarginV=12'" -c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p -movflags +faststart favorites-demo.mp4
  Pop-Location
  Stop-Transcript
 }

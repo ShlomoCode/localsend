@@ -33,9 +33,12 @@ jobs:
         working-directory: app
         run: |
           dart pub global activate fvm
-          dart pub global run fvm:fvm use 3.41.9 --force
-          dart pub global run fvm:fvm flutter pub get
-          dart pub global run fvm:fvm flutter build windows --release
+          & "$env:PUB_CACHE\bin\fvm.bat" use 3.41.9 --force
+          if ($LASTEXITCODE -ne 0) {throw 'FVM setup failed'}
+          & "$env:PUB_CACHE\bin\fvm.bat" flutter pub get
+          if ($LASTEXITCODE -ne 0) {throw 'pub get failed'}
+          & "$env:PUB_CACHE\bin\fvm.bat" flutter build windows --release
+          if ($LASTEXITCODE -ne 0) {throw 'Windows build failed'}
       - uses: actions/download-artifact@v6
         if: ${{ inputs.build_run != '' }}
         with:
