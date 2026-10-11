@@ -10,7 +10,9 @@ import time
 import pyatspi
 
 role = os.environ['ROLE']
-out = pathlib.Path('/evidence') / role
+evidence = pathlib.Path(os.environ.get('EVIDENCE_ROOT', '/evidence'))
+out = evidence / role
+out.mkdir(parents=True, exist_ok=True)
 events = []
 app_bounds = None
 
@@ -43,7 +45,8 @@ def click(label, name, optional=False):
                 if node.name == label and node.getState().contains(pyatspi.STATE_SHOWING):
                     action = node.queryAction()
                     if action.nActions:
-                        matches.append((node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS).y, action))
+                        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+                        matches.append((bounds.y, action, bounds))
                 for child in node:
                     visit(child, depth + 1)
             except (NotImplementedError, RuntimeError):
@@ -52,7 +55,12 @@ def click(label, name, optional=False):
         if matches:
             matches.sort(key=lambda item: item[0])
             log('semantic-click', label=label)
-            matches[-1][1].doAction(0)
+            if label.endswith('.txt'):
+                bounds = matches[-1][2]
+                command('xdotool', 'mousemove', str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2), 'click', '1')
+                log('accessible-row-pointer', label=label, x=bounds.x, y=bounds.y, width=bounds.width, height=bounds.height)
+            else:
+                matches[-1][1].doAction(0)
             time.sleep(2)
             return True
     rows = snapshot(name)
@@ -90,7 +98,7 @@ def click(label, name, optional=False):
 
 def start():
     global app_bounds
-    app = subprocess.Popen(['/home/probe/squashfs-root/AppRun'], stdout=open(out / ('app-' + str(len(events)) + '.log'), 'w'), stderr=subprocess.STDOUT)
+    app = subprocess.Popen([os.environ.get('APP_EXECUTABLE', '/home/probe/squashfs-root/AppRun')], stdout=open(out / ('app-' + str(len(events)) + '.log'), 'w'), stderr=subprocess.STDOUT)
     time.sleep(12)
     windows = command('xdotool', 'search', '--onlyvisible', '--name', 'LocalSend').stdout.splitlines()
     if not windows:
@@ -120,9 +128,9 @@ if role == 'receiver':
     (out / 'ready').touch()
     receipts = []
     saved_versions = {}
-    deadline = time.monotonic() + 500
+    deadline = time.monotonic() + int(os.environ.get('RECEIVER_LIFETIME', '500'))
     iteration = 0
-    while time.monotonic() < deadline and not pathlib.Path('/evidence/sender/done').exists():
+    while time.monotonic() < deadline and not (evidence / 'sender/done').exists():
         iteration += 1
         click('Accept', 'receiver-' + str(iteration), optional=True)
         click('Done', 'receiver-done-' + str(iteration), optional=True)
@@ -136,7 +144,7 @@ if role == 'receiver':
                 (archive / path.name).write_bytes(data)
                 (out / 'receipts.json').write_text(json.dumps(receipts, indent=2))
                 log('saved-file', **receipts[-1])
-        if receipts and pathlib.Path('/evidence/sender/ack-' + str(len(receipts))).exists():
+        if receipts and (evidence / ('sender/ack-' + str(len(receipts)))).exists():
             # Reset only this test's archived fixture after a confirmed GUI transfer.
             for path in pathlib.Path('/home/probe/Downloads').glob('*.txt'):
                 if path.name in ('whatever.txt', 'another.txt'):
@@ -160,7 +168,7 @@ else:
     (fixture / 'another.txt').symlink_to('whatever.txt')
     log('fixture', link=os.readlink(fixture / 'another.txt'), size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
     deadline = time.monotonic() + 90
-    while not pathlib.Path('/evidence/receiver/ready').exists():
+    while not (evidence / 'receiver/ready').exists():
         if time.monotonic() > deadline:
             raise RuntimeError('Receiver GUI readiness deadline')
         time.sleep(2)
@@ -186,11 +194,26 @@ else:
             rows = snapshot(case + '-selection')
             log('selection', case=case, visible_text=' '.join(r['text'] for r in rows if r['text']))
             # The receiver advertises its random alias; the device card includes Linux.
-            alias_path = pathlib.Path('/evidence/receiver/alias.txt')
+            alias_path = evidence / 'receiver/alias.txt'
             device_label = alias_path.read_text().split()[-1] if alias_path.exists() else 'Linux'
-            receipt_path = pathlib.Path('/evidence/receiver/receipts.json')
+            receipt_path = evidence / 'receiver/receipts.json'
             receipt_count = len(json.loads(receipt_path.read_text())) if receipt_path.exists() else 0
-            if not click(device_label, case + '-device', optional=True):
+            if os.environ.get('MANUAL_PEER'):
+                # Historical SendTab renders ads_click 70px after Nearby devices.
+                # Anchor the real GUI action to observed text, then require dialog labels.
+                nearby = [r for r in rows if r['text'].strip() == 'devices']
+                if not nearby:
+                    raise RuntimeError('Manual-address GUI anchor absent')
+                anchor = nearby[0]
+                x = int(anchor['left']) + int(anchor['width']) + 70
+                y = int(anchor['top']) + int(anchor['height']) // 2
+                log('manual-address-click', x=x, y=y)
+                command('xdotool', 'mousemove', str(x), str(y), 'click', '1')
+                time.sleep(2)
+                click('IP', case + '-ip-mode')
+                command('xdotool', 'type', '--clearmodifiers', '--delay', '30', os.environ['MANUAL_PEER'])
+                click('Confirm', case + '-address-confirm')
+            elif not click(device_label, case + '-device', optional=True):
                 log('harness-blocker', case=case, reason='Receiver device card not located; preserve actual screen before fallback')
                 raise RuntimeError('Device discovery/card location needs inspection')
             receipt_deadline = time.monotonic() + 60
@@ -203,7 +226,7 @@ else:
                     log('verified-transfer', case=case, **result)
                     (out / ('ack-' + str(len(received)))).touch()
                     clear_deadline = time.monotonic() + 20
-                    while not pathlib.Path('/evidence/receiver/cleared-' + str(len(received))).exists():
+                    while not (evidence / ('receiver/cleared-' + str(len(received)))).exists():
                         if time.monotonic() > clear_deadline:
                             raise RuntimeError('Receiver fixture cleanup deadline')
                         time.sleep(1)
