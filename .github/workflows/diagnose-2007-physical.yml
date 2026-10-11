@@ -7,9 +7,11 @@ on:
         options: [unchanged, changed, renamed]
         default: unchanged
         description: Actual resend file variant after permanent deletion
-  push:
-    branches: [codex/bug-2007-diagnostics]
-    paths: [.github/workflows/diagnose-2007-physical.yml]
+      deletion_timing:
+        type: choice
+        options: [absence, acknowledged, requested]
+        default: absence
+        description: Release resend after observed absence, native deletion acknowledgement, or Delete request
 jobs:
   original-app-control:
     runs-on: ubuntu-24.04
@@ -23,6 +25,7 @@ jobs:
       BS_DEVICE: Vivo Y21
       BS_OS: '11.0'
       ISSUE_2007_VARIANT: ${{ inputs.scenario || 'unchanged' }}
+      ISSUE_2007_DELETE_TIMING: ${{ inputs.deletion_timing || 'absence' }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-physical-control.mjs
     steps:
       - uses: actions/checkout@v6

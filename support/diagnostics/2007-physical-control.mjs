@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 
 export default async function({session,wd,senderHost,senderPort,transportStatus}) {
  const prefix=`/session/${session}`;
+ const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
  await wd('POST',prefix+'/appium/settings',{settings:{waitForIdleTimeout:0}});
  async function snapshot(stage){
   writeFileSync(`evidence/android-${stage}.xml`,await wd('GET',prefix+'/source'));
@@ -18,6 +19,20 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(Date.now()>end)throw new Error('Desktop GUI milestone timeout: '+file);
    await new Promise(r=>setTimeout(r,500));
   }
+ }
+ async function closeReceiverFinished(){
+  let done;
+  const deadline=Date.now()+5000;
+  do {
+   done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'}).catch(error=>{
+    if(!String(error).includes('no such element'))throw error;
+    return null;
+   });
+   if(done)break;
+   await new Promise(r=>setTimeout(r,100));
+  } while(Date.now()<deadline);
+  assert(done,'Original receiver Finished screen did not render its actual Done button');
+  await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
  }
  writeFileSync('evidence/browserstack-session.json',JSON.stringify({session,device:'Vivo Y21',os:'Android 11'},null,2));
  let receiverReady=false;
@@ -33,6 +48,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   return null;
  });
  assert.equal(before,null,'Baseline A.txt already exists on the device; do not mistake an old file for this transfer');
+ const beforeNumbered=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A-2.txt'}).catch(error=>{
+  if(!String(error).includes('No such file or directory'))throw error;
+  return null;
+ });
+ assert.equal(beforeNumbered,null,'Baseline A-2.txt already exists; numbered-path observation would be ambiguous');
  writeFileSync('evidence/baseline-path-absence.json',JSON.stringify({path:'/sdcard/Download/A.txt',absent:true,utc:new Date().toISOString()},null,2));
  const desktop=spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
@@ -76,6 +96,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:'Vivo Y21',os:'Android 11',release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:'/sdcard/Download/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
+  if(deletionTiming!=='absence'){
+   await snapshot('receiver-finished-before-files');
+   await closeReceiverFinished();
+   await snapshot('receiver-ready-before-files');
+  }
   // Inspect the physical device's legitimate file-manager entry point only
   // after saved-file byte equality succeeds. No file is deleted here.
   await wd('POST',prefix+'/appium/device/press_keycode',{keycode:3});
@@ -118,10 +143,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await waitFile('evidence/resend-address-ready',90000);
    const deleteUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+confirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   const deleteClickReturnedUtc=new Date().toISOString();
+   if(deletionTiming==='requested')writeFileSync('evidence/resend-ready','Actual native Delete request returned; no deletion acknowledgement or absence gate\n');
    let absenceError;
    let absent;
    const absenceObservations=[];
    let firstToastObservedUtc;
+   let firstEmptyListObservedUtc;
    const deletionDeadline=Date.now()+10000;
    do {
     let pathObservedUtc;
@@ -131,35 +159,33 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
       absenceError=String(error);
       return null;
      }).then(value=>{pathObservedUtc=new Date().toISOString();return value;}),
-     wd('GET',prefix+'/source').then(source=>({source,utc:new Date().toISOString()})),
+     wd('GET',prefix+'/source').then(source=>{
+      const utc=new Date().toISOString();
+      if(deletionTiming==='acknowledged'&&(source.includes('1 file deleted')||source.includes("There's nothing here.")))writeFileSync('evidence/resend-ready','Actual deletion toast or empty list observed; path existence does not gate resend\n');
+      return {source,utc};
+     }),
     ]);
     absent=pathValue;
     const toastVisible=sourceObservation.source.includes('1 file deleted');
+    const emptyListVisible=sourceObservation.source.includes("There's nothing here.");
     if(toastVisible&&!firstToastObservedUtc)firstToastObservedUtc=sourceObservation.utc;
+    if(emptyListVisible&&!firstEmptyListObservedUtc)firstEmptyListObservedUtc=sourceObservation.utc;
     const sourceFile=`evidence/android-delete-observation-${absenceObservations.length}.xml`;
     writeFileSync(sourceFile,sourceObservation.source);
-    absenceObservations.push({pathObservedUtc,pathExists:absent!==null,sourceObservedUtc:sourceObservation.utc,toastVisible,sourceFile});
-    writeFileSync('evidence/deletion-path-observations.json',JSON.stringify({deleteUtc,firstToastObservedUtc,observations:absenceObservations,absenceError},null,2));
-    if(absent===null)break;
+    absenceObservations.push({pathObservedUtc,pathExists:absent!==null,sourceObservedUtc:sourceObservation.utc,toastVisible,emptyListVisible,sourceFile});
+    writeFileSync('evidence/deletion-path-observations.json',JSON.stringify({deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,observations:absenceObservations,absenceError},null,2));
+    if(deletionTiming==='requested'||(deletionTiming==='acknowledged'&&(toastVisible||emptyListVisible))||(deletionTiming==='absence'&&absent===null))break;
     await new Promise(r=>setTimeout(r,100));
    } while(Date.now()<deletionDeadline);
-   assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
-   const pathAbsenceUtc=absenceObservations.at(-1).pathObservedUtc;
-   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,pathAbsenceUtc,firstToastObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
+   if(deletionTiming==='absence')assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
+   if(deletionTiming==='acknowledged')assert(firstToastObservedUtc||firstEmptyListObservedUtc,'Native UI never acknowledged deletion');
+   const pathAbsenceUtc=absent===null?absenceObservations.at(-1).pathObservedUtc:null;
+   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:'/sdcard/Download/A.txt',pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
-   let done;
-   const doneDeadline=Date.now()+5000;
-   do {
-    done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'}).catch(error=>{
-     if(!String(error).includes('no such element'))throw error;
-     return null;
-    });
-    if(done)break;
-    await new Promise(r=>setTimeout(r,100));
-   } while(Date.now()<doneDeadline);
-   assert(done,'Original receiver Finished screen did not render its actual Done button');
-   await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
+   if(deletionTiming==='absence'){
+    await closeReceiverFinished();
+    writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
+   }
    await waitFile('evidence/resend-requested',90000);
    const resendInput=JSON.parse(readFileSync('evidence/resend-input.json','utf8'));
    const resendExpected=readFileSync(resendInput.path);
@@ -174,26 +200,37 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const acceptUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+secondAccept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    let saved;
+   let receiverSource='';
    for(let attempt=0;attempt<10;attempt++){
     await new Promise(r=>setTimeout(r,1000));
     await snapshot('after-resend-accept-'+attempt);
+    receiverSource=readFileSync(`evidence/android-after-resend-accept-${attempt}.xml`,'utf8');
     const value=await wd('POST',prefix+'/appium/device/pull_file',{path:resendDestination}).catch(error=>{
      if(!String(error).includes('No such file or directory'))throw error;
      return null;
     });
     if(value!==null){
      saved=Buffer.from(value,'base64');
-     if(saved.equals(resendExpected))break;
+     if(saved.equals(resendExpected)&&receiverSource.includes('100%, Finished')&&receiverSource.includes('&#10;Done'))break;
     }
    }
    const byteExact=saved?.equals(resendExpected)??false;
+   const receiverFileDone=receiverSource.includes('100%, Finished')&&receiverSource.includes('&#10;Done');
+   const numberedEncoded=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A-2.txt'}).catch(error=>{
+    if(!String(error).includes('No such file or directory'))throw error;
+    return null;
+   });
+   const numbered=numberedEncoded===null?null:Buffer.from(numberedEncoded,'base64');
+   const numberedByteExact=numbered?.equals(resendExpected)??false;
+   if(numbered)writeFileSync('evidence/android-numbered-A-2.txt',numbered);
+   const actualSavedPath=receiverFileDone?(numberedByteExact?'/sdcard/Download/A-2.txt':byteExact?resendDestination:null):null;
    const submission=JSON.parse(readFileSync('evidence/resend-submission.json','utf8'));
    if(saved)writeFileSync('evidence/android-resaved-'+resendInput.name,saved);
-   writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deleteUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name==='A.txt',fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
+   writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name==='A.txt',fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
    writeFileSync('evidence/resend-completed','Resend outcome observed; inspect byteExact and endpoint evidence\n');
    await new Promise(r=>desktop.once('exit',r));
    assert.equal(desktop.exitCode,0,'Desktop resend observation did not complete');
-   if(saved)assert(byteExact,'Resaved file differs from selected original file');
+   if(saved&&!numberedByteExact)assert(byteExact,'Resaved file differs from selected original file');
   }
  } finally {
   if(desktop.exitCode===null)desktop.kill('SIGTERM');
