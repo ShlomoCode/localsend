@@ -25,7 +25,10 @@ for n in $(seq 1 120); do
     printf 'real receiver saved file\n' > evidence/host-peer/result.txt
     exit 0
   fi
-  scrot evidence/host-peer/current.png
+  # scrot preserves an existing filename by adding a suffix. Capture an
+  # explicit unique frame and update the OCR input to these current pixels.
+  scrot "evidence/host-peer/frame-$n.png"
+  cp "evidence/host-peer/frame-$n.png" evidence/host-peer/current.png
   tesseract evidence/host-peer/current.png evidence/host-peer/current --psm 11 tsv >/dev/null 2>&1
   confirm=$(awk -F '\t' '$12=="Confirm" && $11>60 {print int($7+$9/2),int($8+$10/2);exit}' evidence/host-peer/current.tsv)
   if test -n "$confirm"; then
