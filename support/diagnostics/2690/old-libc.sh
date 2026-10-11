@@ -11,6 +11,7 @@ gcc /diagnostic/gtk-control.c -o /tmp/gtk-control $(pkg-config --cflags --libs g
 useradd -m -s /bin/bash tester
 chmod -R a+rX /evidence
 chmod 777 /evidence/launch
+chown -R tester:tester /evidence/launch
 Xvfb :99 -screen 0 1920x1080x24 +extension GLX > /evidence/old-libc-xvfb.log 2>&1 &
 sleep 3
 su tester -c 'DISPLAY=:99 GDK_BACKEND=x11 TRACE_LOADER=1 dbus-run-session -- bash /diagnostic/launch.sh observe-old-libc-current /evidence/current.AppImage'

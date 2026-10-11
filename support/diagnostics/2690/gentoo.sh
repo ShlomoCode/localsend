@@ -54,4 +54,4 @@ gcc /diagnostic/gtk-control.c -o /tmp/gtk-control $(pkg-config --cflags --libs g
 readelf -Ws /usr/lib64/libEGL_mesa.so.0 > /evidence/mesa-egl-symbols.txt
 readelf -Ws /usr/lib64/libwayland-client.so.0 > /evidence/host-client-symbols.txt
 readelf -Ws /evidence/package-candidate/AppDir/usr/lib/x86_64-linux-gnu/libwayland-client.so.0 > /evidence/candidate-client-symbols.txt
-su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/wayland.sh'
+su tester -c 'DISPLAY=:99 WAYLAND_FRESH_HOME=1 dbus-run-session -- bash /diagnostic/wayland.sh'

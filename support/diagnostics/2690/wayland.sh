@@ -19,6 +19,12 @@ test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
 run_window() {
   label=$1
   executable=$2
+  if [[ ${WAYLAND_FRESH_HOME:-0} == 1 ]]; then
+    export HOME="/tmp/wayland-home-$label"
+    export XDG_CONFIG_HOME="$HOME/.config"
+    export XDG_CACHE_HOME="$HOME/.cache"
+    mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+  fi
   set +e
   LD_DEBUG=libs,versions LD_DEBUG_OUTPUT=/evidence/launch/loader-$label "$executable" > /evidence/launch/wayland-$label.log 2>&1 &
   process_pid=$!
@@ -50,6 +56,13 @@ run_window() {
   cat /evidence/launch/wayland-$label.log
 }
 run_window gtk-control /tmp/gtk-control
+if [[ ${WAYLAND_FOCUSED:-0} == 1 ]]; then
+  run_window current /evidence/current.AppImage
+  run_window candidate /evidence/repacked-candidate.AppImage
+  run_window new-client /evidence/repacked-new-client.AppImage
+  run_window current-after /evidence/current.AppImage
+  exit 0
+fi
 run_window original /evidence/original.AppImage
 run_window current /evidence/current.AppImage
 run_window repacked-baseline /evidence/repacked-baseline.AppImage
