@@ -105,7 +105,10 @@ jobs:
           Start-Process node -ArgumentList support/cloud_transport/local.mjs -RedirectStandardOutput C:/tmp/local.stdout.txt -RedirectStandardError C:/tmp/local.stderr.txt
           $deadline=(Get-Date).AddSeconds(70)
           while(-not (Test-Path C:/tmp/helper/local-ready) -and (Get-Date) -lt $deadline){Start-Sleep 2}
-          if(-not (Test-Path C:/tmp/helper/local-ready)){throw 'BrowserStack Local did not become ready'}
+          if(-not (Test-Path C:/tmp/helper/local-ready)){
+            Get-Content C:/tmp/local.stdout.txt,C:/tmp/local.stderr.txt -ErrorAction SilentlyContinue
+            throw 'BrowserStack Local did not become ready'
+          }
       - name: Upload single-run helper
         shell: pwsh
         run: |
@@ -128,6 +131,8 @@ jobs:
             helper-failure.png
             localsend-source.xml
             C:/tmp/helper/session-id
+            C:/tmp/local.stdout.txt
+            C:/tmp/local.stderr.txt
           retention-days: 14
   windows11-sender-ui:
     if: inputs.scenario == 'windows11-sender-ui'
