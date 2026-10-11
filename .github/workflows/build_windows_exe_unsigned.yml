@@ -10,11 +10,21 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install WinGet if unavailable
-        shell: pwsh
+        shell: powershell
         run: |
           if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-            Install-Module Microsoft.WinGet.Client -Repository PSGallery -Force -Scope CurrentUser
-            Repair-WinGetPackageManager -AllUsers -Force -Latest
+            $ProgressPreference = 'SilentlyContinue'
+            New-Item -ItemType Directory -Force evidence/cloud | Out-Null
+            $bootstrap = Join-Path $env:RUNNER_TEMP 'winget1549'
+            New-Item -ItemType Directory -Force $bootstrap | Out-Null
+            Invoke-WebRequest 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx' -OutFile "$bootstrap/vclibs.appx"
+            Invoke-WebRequest 'https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.8.6' -OutFile "$bootstrap/xaml.zip"
+            Expand-Archive "$bootstrap/xaml.zip" "$bootstrap/xaml"
+            Add-AppxPackage "$bootstrap/vclibs.appx"
+            Add-AppxPackage "$bootstrap/xaml/tools/AppX/x64/Release/Microsoft.UI.Xaml.2.8.appx"
+            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.8.1911/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile "$bootstrap/winget.msixbundle"
+            Get-ChildItem $bootstrap -File | Get-FileHash | ConvertTo-Json | Set-Content evidence/cloud/bootstrap-hashes.json
+            Add-AppxPackage "$bootstrap/winget.msixbundle"
           }
       - name: Measure original release upgrade
         shell: powershell
