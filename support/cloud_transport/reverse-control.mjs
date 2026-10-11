@@ -17,11 +17,12 @@ const sockets=new Map();const readers=[];let next=0,running=true;
 const listener=net.createServer({allowHalfOpen:true},s=>{
  const id='android-'+(++next);sockets.set(id,s);
  readers.push((async()=>{
-  await push({id,kind:'open'});
+  const opening=push({id,kind:'open'});
   // Async iteration destroys the simulated accepted socket at readable EOF.
   // Preserve its writable half, as Android Socket does, for the target reply.
   await new Promise((ok,no)=>{
-   let pending=Promise.resolve();
+   // Install listeners synchronously: zero-byte FIN can arrive while open POST awaits.
+   let pending=opening;
    s.on('data',data=>{s.pause();pending=pending.then(()=>push({id,kind:'data',data:data.toString('base64')}));pending.then(()=>s.resume(),no);});
    s.once('end',()=>pending.then(ok,no));s.once('error',no);
   });
