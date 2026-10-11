@@ -76,12 +76,27 @@ jobs:
           cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
           gpu_args=(-device virtio-vga -display none -vnc 127.0.0.1:1)
           if [ "$GRAPHICS" = virgl ]; then
+            touch /tmp/localsend-vm/virgl
             Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX > evidence/vm/host-xvfb.log 2>&1 &
             export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEODRIVER=x11
             for i in $(seq 1 20); do if xdpyinfo >/dev/null 2>&1; then break; fi; sleep 1; done
             glxinfo -B > evidence/vm/host-glx.txt
             gpu_args=(-device virtio-vga-gl -display sdl,gl=on)
           fi
+          cat > /tmp/localsend-vm/capture <<'CAPTURE'
+          #!/bin/bash
+          set -euo pipefail
+          target=$1
+          if [ -f /tmp/localsend-vm/virgl ]; then
+            DISPLAY=:99 import -window root "$target"
+          else
+            ppm="${target%.png}.ppm"
+            printf 'screendump %s\n' "$ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor
+            sudo chown "$(id -u):$(id -g)" "$ppm"
+            convert "$ppm" "$target"
+          fi
+          CAPTURE
+          chmod +x /tmp/localsend-vm/capture
           sudo --preserve-env=DISPLAY,LIBGL_ALWAYS_SOFTWARE,SDL_VIDEODRIVER qemu-system-x86_64 \
             -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 6144 \
             -drive file=/home/runner/localsend-vm/ubuntu.img,if=virtio,format=qcow2 \
@@ -226,10 +241,7 @@ jobs:
           echo "launcher=$!"
           GUEST
             sleep 25
-            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$kind.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
-            test -s "evidence/vm/$kind.ppm"
-            sudo chown "$(id -u):$(id -g)" "evidence/vm/$kind.ppm"
-            convert "evidence/vm/$kind.ppm" "evidence/vm/$kind.png"
+            /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/$kind.png"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind" > "evidence/vm/$kind-state.txt" 2>&1 <<'GUEST'
           set -u
           kind=$1
@@ -369,10 +381,7 @@ jobs:
           echo "launcher=$!"
           GUEST
             sleep 25
-            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$label.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
-            test -s "evidence/vm/$label.ppm"
-            sudo chown "$(id -u):$(id -g)" "evidence/vm/$label.ppm"
-            convert "evidence/vm/$label.ppm" "evidence/vm/$label.png"
+            /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/$label.png"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $label" > "evidence/vm/$label-state.txt" 2>&1 <<'GUEST'
           label=$1
           ps -eo pid,ppid,stat,pcpu,comm,args | grep -E 'localsend|flatpak' | grep -v grep || true
@@ -445,9 +454,7 @@ jobs:
           echo "MODE=$mode DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY launcher=$!"
           GUEST
             sleep 25
-            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$label.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
-            sudo chown "$(id -u):$(id -g)" "evidence/vm/$label.ppm"
-            convert "evidence/vm/$label.ppm" "evidence/vm/$label.png"
+            /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/$label.png"
             timeout 50 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $label" > "evidence/vm/$label-state.txt" 2>&1 <<'GUEST'
           label=$1
           date -u
@@ -460,8 +467,11 @@ jobs:
             ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm
             cat "/proc/$app_pid/maps"
             sudo nsenter -t "$app_pid" -n ss -lntup | grep 53317 || true
+            printf 'MAIN_TASK_SAMPLE_HZ=%s\n' "$(getconf CLK_TCK)"
+            date +%s.%N
             cat "/proc/$app_pid/task/$app_pid/stat"
             sleep 5
+            date +%s.%N
             cat "/proc/$app_pid/task/$app_pid/stat"
             if ! sudo nsenter -t "$app_pid" -n ss -lntup | grep -q 'tcp.*LISTEN.*53317'; then
               timeout 12 sudo gdb -q -batch -p "$app_pid" -ex 'info proc mappings' -ex 'thread apply all bt 16' || true
@@ -469,6 +479,9 @@ jobs:
           fi
           pkill -x localsend || true
           GUEST
+            if [ "$mode" = fresh ]; then
+              timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'mv "$HOME/.var/app/org.localsend.localsend_app" "$HOME/localsend-profile-fresh-observed"; mv "$HOME/localsend-profile-before-fresh" "$HOME/.var/app/org.localsend.localsend_app"'
+            fi
             sleep 3
           done
 
