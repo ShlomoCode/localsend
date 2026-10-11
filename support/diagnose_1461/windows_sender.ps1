@@ -175,18 +175,33 @@ function LabelBounds($s,[string]$label){
  if($found.Count -ne 1){throw "Label not unique in live UI: $label ($($found.Count) OCR matches)"};return $found[0]
 }
 function Click([string]$label){
- Focus;$s=Snapshot ('before-'+$label);$b=LabelBounds $s $label;$w=Window
- if([ReceiverNative]::GetForegroundWindow() -ne $appHwnd -or $w.Left -ne $s.window.Left -or $w.Top -ne $s.window.Top -or $w.Width -ne $s.window.Width -or $w.Height -ne $s.window.Height){throw 'Window changed before input.'}
- if(-not (FreshPixels $s)){throw 'Visible pixels changed during semantic observation; input withheld.'}
- [SenderInput]::Click([int]($b.x+$b.width/2),[int]($b.y+$b.height/2));$report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');label=$label;bounds=$b;evidence=$s.screenshot};Start-Sleep -Milliseconds 400
+ Focus
+ # Retry readiness observations only. Once a click is sent, this function never replays it.
+ for($attempt=1;$attempt -le 3;$attempt++){
+  $s=Snapshot ('before-'+$label+'-'+$attempt);$b=LabelBounds $s $label
+  $verified=Snapshot ('verify-'+$label+'-'+$attempt);$current=LabelBounds $verified $label
+  $sameBounds=$b.x -eq $current.x -and $b.y -eq $current.y -and $b.width -eq $current.width -and $b.height -eq $current.height
+  $stable=$sameBounds -and (FreshPixels $s $b) -and (FreshPixels $verified $current)
+  if(-not $stable){$report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='control-readiness-retry';label=$label;attempt=$attempt;sameBounds=$sameBounds;before=$s.screenshot;verification=$verified.screenshot};Persist;Start-Sleep -Milliseconds 250;continue}
+  [SenderInput]::Click([int]($current.x+$current.width/2),[int]($current.y+$current.height/2));$report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');label=$label;bounds=$current;evidence=$s.screenshot;verification=$verified.screenshot;readinessAttempt=$attempt};Start-Sleep -Milliseconds 400;return
+ }
+ throw "Observed control did not stabilize within three readiness observations: $label. No input was sent."
 }
 function BitmapDigest([Drawing.Bitmap]$bitmap){
  $lock=$bitmap.LockBits([Drawing.Rectangle]::new(0,0,$bitmap.Width,$bitmap.Height),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
  try{$bytes=[byte[]]::new([Math]::Abs($lock.Stride)*$bitmap.Height);[Runtime.InteropServices.Marshal]::Copy($lock.Scan0,$bytes,0,$bytes.Length);for($i=3;$i -lt $bytes.Length;$i+=4){$bytes[$i]=0};$hash=[Security.Cryptography.SHA256]::Create();try{return [BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','')}finally{$hash.Dispose()}}finally{$bitmap.UnlockBits($lock)}
 }
-function FreshPixels($s){
- $w=Window;$old=[Drawing.Bitmap]::new($s.screenshot);$fresh=[Drawing.Bitmap]::new($w.Width,$w.Height)
- try{$g=[Drawing.Graphics]::FromImage($fresh);try{$g.CopyFromScreen($w.Left,$w.Top,0,0,$fresh.Size)}finally{$g.Dispose()};return (BitmapDigest $old) -eq (BitmapDigest $fresh)}finally{$old.Dispose();$fresh.Dispose()}
+function FreshPixels($s,$bounds){
+ $w=Window
+ if([ReceiverNative]::GetForegroundWindow() -ne $appHwnd -or $w.Hwnd -ne $s.window.Hwnd -or $w.Left -ne $s.window.Left -or $w.Top -ne $s.window.Top -or $w.Width -ne $s.window.Width -or $w.Height -ne $s.window.Height){return $false}
+ # Compare only the observed semantic label plus two pixels. A rotating logo or
+ # blinking caret elsewhere in this window does not invalidate this control.
+ $left=[int][Math]::Floor($bounds.x-$w.Left)-2;$top=[int][Math]::Floor($bounds.y-$w.Top)-2
+ $right=[int][Math]::Ceiling($bounds.x-$w.Left+$bounds.width)+2;$bottom=[int][Math]::Ceiling($bounds.y-$w.Top+$bounds.height)+2
+ if($left -lt 0 -or $top -lt 0 -or $right -gt $w.Width -or $bottom -gt $w.Height -or $right -le $left -or $bottom -le $top){return $false}
+ $region=[Drawing.Rectangle]::new($left,$top,$right-$left,$bottom-$top)
+ $full=[Drawing.Bitmap]::new($s.screenshot);$old=$null;$fresh=$null
+ try{$old=$full.Clone($region,[Drawing.Imaging.PixelFormat]::Format32bppArgb);$fresh=[Drawing.Bitmap]::new($region.Width,$region.Height);$g=[Drawing.Graphics]::FromImage($fresh);try{$g.CopyFromScreen($w.Left+$left,$w.Top+$top,0,0,$fresh.Size)}finally{$g.Dispose()};return (BitmapDigest $old) -eq (BitmapDigest $fresh)}finally{if($old){$old.Dispose()};if($fresh){$fresh.Dispose()};$full.Dispose()}
 }
 function Favorites {
  try{Click 'Favorites';return}catch{$report.actions+=@{name='Favorites semantic lookup unavailable';error=$_.Exception.Message}}
@@ -196,7 +211,7 @@ function Favorites {
  for($x=$start;$x -le $end -and $count -lt 48;$x+=12){$count++;Focus;[void][SenderInput]::SetCursorPos($x,$y);$report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='toolbar-hover';x=$x;y=$y};Persist;Start-Sleep -Milliseconds 900;$observed=Snapshot ('hover-'+$count)
   try{$tooltip=LabelBounds $observed 'Favorites'}catch{continue}
   if([ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw 'Foreground changed during hover.'}
-  if(-not (FreshPixels $observed)){continue}
+  if(-not (FreshPixels $observed $tooltip)){continue}
   [SenderInput]::Click($x,$y);$report.actions+=@{name='Favorites tooltip hover target';x=$x;y=$y;tooltip=$tooltip;evidence=$observed.screenshot};Start-Sleep -Milliseconds 500;return
  };throw 'No observed Favorites tooltip within bounded toolbar hover search.'
 }

@@ -82,6 +82,7 @@ async function normalWifiDisconnect(){
  assert.equal(switches[0].checked,'true','Wi-Fi must be on before normal disconnect');
  const elements=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.Switch'});assert.equal(elements.length,1);
  const element=elements[0]['element-6066-11e4-a52e-4f735466cecf']||elements[0].ELEMENT;
+ report.wifiSwitchMayHaveChanged=true;
  await wd('POST',base()+'/element/'+element+'/click',{});report.actions.push({utc:new Date().toISOString(),label:'Normal Android Settings Wi-Fi off',before:switches[0]});
  const off=await wait(s=>nodes(s).some(n=>n.class==='android.widget.Switch'&&n.checked==='false'),30000,'System Wi-Fi did not switch off');await snap('wifi-off',off);
  report.wifiDisconnectObserved=true;
@@ -148,7 +149,7 @@ finally{
  }catch(e){report.cleanupErrors.push(redact(e.message));}}
  if(child&&!childExit){try{await command('stop');}catch{child.kill();}}
  // Restore only this owned device's Wi-Fi before session cleanup when the normal switch was changed.
- if(session&&report.wifiDisconnectObserved){try{const xml=await source();const sw=nodes(xml).filter(n=>n.class==='android.widget.Switch'&&n.checked==='false');if(sw.length===1){const e=await wd('POST',base()+'/element',{using:'class name',value:'android.widget.Switch'});await wd('POST',base()+'/element/'+(e['element-6066-11e4-a52e-4f735466cecf']||e.ELEMENT)+'/click',{});await snap('wifi-restored');}}catch(e){report.cleanupErrors.push(redact(e.message));}}
+ if(session&&report.wifiSwitchMayHaveChanged){try{const xml=await source();const sw=nodes(xml).filter(n=>n.class==='android.widget.Switch'&&n.checked==='false');if(sw.length===1){const e=await wd('POST',base()+'/element',{using:'class name',value:'android.widget.Switch'});await wd('POST',base()+'/element/'+(e['element-6066-11e4-a52e-4f735466cecf']||e.ELEMENT)+'/click',{});await snap('wifi-restored');}}catch(e){report.cleanupErrors.push(redact(e.message));}}
  if(session){try{await wd('DELETE',base());}catch(e){report.cleanupErrors.push(redact(e.message));}}
  try{await r.stop();}catch(e){report.cleanupErrors.push(redact(e.message));}
  save('relay-trace.json',r.trace);save('relay-status.json',r.status());report.finishedUtc=new Date().toISOString();save('results.json',report);
