@@ -17,9 +17,9 @@ in pkgs.runCommand "localsend-2751-helper-preflight" {} ''
   ${pkgs.coreutils}/bin/cat inventory > copied
   ${pkgs.coreutils}/bin/env PREFLIGHT=passed ${pkgs.bash}/bin/bash -c 'test "$PREFLIGHT" = passed'
   ${pkgs.util-linux}/bin/script -q -e -c '${pkgs.shadow.su}/bin/su --help' su-options
-  ${pkgs.ffmpeg}/bin/ffmpeg -hide_banner -h demuxer=x11grab > recorder-demuxer
+  ${pkgs.ffmpeg-full}/bin/ffmpeg -hide_banner -h demuxer=x11grab > recorder-demuxer
   ${pkgs.gnugrep}/bin/grep 'X11 screen capture' recorder-demuxer
-  ${pkgs.ffmpeg}/bin/ffmpeg -hide_banner -h encoder=libx264 > recorder-encoder
+  ${pkgs.ffmpeg-full}/bin/ffmpeg -hide_banner -h encoder=libx264 > recorder-encoder
   ${pkgs.gnugrep}/bin/grep 'Encoder libx264' recorder-encoder
   mkdir "$out"
   cp pids processes resolved checksum inventory copied su-options recorder-demuxer recorder-encoder "$out/"

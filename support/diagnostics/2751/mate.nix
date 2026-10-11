@@ -33,7 +33,7 @@ in {
     networking.networkmanager.enable = true;
     programs.nm-applet.enable = true;
     programs.localsend.enable = appRoute == "nix";
-    system.extraDependencies = [ pkgs.ffmpeg ];
+    system.extraDependencies = [ pkgs.ffmpeg-full ];
     environment.systemPackages = (with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick ])
       ++ [ (if killallPackage == "busybox" then pkgs.lib.lowPrio pkgs.busybox else pkgs.psmisc) ]
       ++ pkgs.lib.optional (appRoute == "official") officialLauncher;
@@ -133,7 +133,7 @@ in {
                 assert int(geometry["WIDTH"]) == 565 and int(geometry["HEIGHT"]) == 435, geometry
             if label.endswith("gui"):
                 user_command("${pkgs.coreutils}/bin/date +%s.%N > /tmp/recordings/" + label + "-recording-start.txt")
-                user_command("${pkgs.bash}/bin/bash -c '${pkgs.ffmpeg}/bin/ffmpeg -y -hide_banner -f x11grab -framerate 10 -video_size 3840x2160 -i :0.0 -t 10 -c:v libx264 -preset ultrafast -crf 28 /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-ffmpeg.log 2>&1 &' ")
+                user_command("${pkgs.bash}/bin/bash -c '${pkgs.ffmpeg-full}/bin/ffmpeg -y -hide_banner -f x11grab -framerate 10 -video_size 3840x2160 -i :0.0 -t 10 -c:v libx264 -preset ultrafast -crf 28 /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-ffmpeg.log 2>&1 &' ")
                 machine.wait_until_succeeds("${pkgs.gnugrep}/bin/grep -q 'Output #0' /tmp/recordings/" + label + "-ffmpeg.log", timeout=30)
                 user_command("${pkgs.coreutils}/bin/date +%s.%N > /tmp/recordings/" + label + "-input-time.txt")
                 try:
@@ -172,8 +172,8 @@ in {
                     assert current_panel_pid != previous_gui_panel_pid, (label, current_panel_pid)
                 previous_gui_panel_pid = current_panel_pid
             if label.endswith("gui"):
-                machine.succeed("${pkgs.ffmpeg}/bin/ffprobe -v error -show_format -show_streams -of json /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-video.json")
-                machine.succeed("${pkgs.ffmpeg}/bin/ffprobe -v error -select_streams v -show_frames -show_entries frame=best_effort_timestamp_time,pkt_duration_time -of json /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-pts.json")
+                machine.succeed("${pkgs.ffmpeg-full}/bin/ffprobe -v error -show_format -show_streams -of json /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-video.json")
+                machine.succeed("${pkgs.ffmpeg-full}/bin/ffprobe -v error -select_streams v -show_frames -show_entries frame=best_effort_timestamp_time,pkt_duration_time -of json /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-pts.json")
                 machine.succeed("${pkgs.coreutils}/bin/sha256sum /tmp/recordings/" + label + ".mp4 > /tmp/recordings/" + label + "-video-sha256.txt")
                 machine.succeed("${pkgs.coreutils}/bin/cp /tmp/recordings/" + label + "* /tmp/evidence/")
             user_command("xwininfo -root -tree > /tmp/evidence/" + label + "-windows.txt")
