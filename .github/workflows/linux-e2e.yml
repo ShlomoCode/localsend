@@ -22,7 +22,7 @@ jobs:
           mkdir -p evidence
           nix-build support/diagnostics/2751/mate.nix -A driver --no-out-link | tee evidence/driver-path.txt
           driver=$(tail -1 evidence/driver-path.txt)
-          "$driver/bin/nixos-test-driver" --output-directory "$PWD/evidence" 2>&1 | tee evidence/test-driver.log
+          "$driver/bin/nixos-test-driver" --no-interactive -o "$PWD/evidence" 2>&1 | tee evidence/test-driver.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
