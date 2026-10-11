@@ -91,24 +91,35 @@ export async function setOnePlusBackground({session, wd, enabled, requireInitial
     await openAppInfo('open-app-info');
     let battery;
     if (!enabled) {
-      // The observed App info intent can resurface the pending OEM enable dialog.
+      // The observed App info intent can resume the OEM dialog or policy screen.
       event('inspect-pending-enable-dialog');
-      const outcome = await ready('restore-app-info-outcome', [enableDialogTarget('cancel'), batteryTarget]);
+      const restoreChoices = [enableDialogTarget('cancel'), batteryTarget, ...stateChoices('switch')];
+      let outcome = await ready('restore-app-info-outcome', restoreChoices, {requireClickable: false});
       if (outcome.readiness.choice === 0) {
         event('pending-enable-dialog-observed', {readiness: outcome.readiness});
         await clickDialogOnce('cancel');
         await openAppInfo('reopen-app-info-after-cancel');
-        battery = await ready('battery-row', [batteryTarget]);
+        outcome = await ready('restore-after-cancel-outcome', restoreChoices, {requireClickable: false});
+        if (outcome.readiness.choice === 0) throw new Error('The enable dialog remained after the single Cancel click');
       } else {
         event('pending-enable-dialog-not-observed');
-        battery = outcome;
+      }
+      if (outcome.readiness.choice === 1) {
+        battery = await ready('battery-row', [batteryTarget]);
+      } else {
+        const checked = outcome.readiness.choice === 3;
+        await observedState(outcome, checked);
+        await snapshot('restore-policy-resumed', outcome.readiness.sourceFile);
+        event('restore-policy-screen-observed', {checked, readiness: outcome.readiness});
       }
     } else {
       battery = await ready('battery-row', [batteryTarget]);
     }
-    await snapshot('app-info-before', battery.readiness.sourceFile);
-    event('open-battery-usage', {readiness: battery.readiness});
-    await call('POST', `${prefix}/element/${battery[elementKey]}/click`, {});
+    if (battery) {
+      await snapshot('app-info-before', battery.readiness.sourceFile);
+      event('open-battery-usage', {readiness: battery.readiness});
+      await call('POST', `${prefix}/element/${battery[elementKey]}/click`, {});
+    }
 
     const initialSwitch = await ready('initial-switch', stateChoices('switch'), {requireClickable: false, sourceIncludes: ['text="LocalSend"', 'text="Power consumption controls"']});
     const initial = initialSwitch.readiness.choice === 1;

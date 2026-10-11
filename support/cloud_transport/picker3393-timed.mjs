@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const exec=promisify(execFile);
 
-export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false}) {
+export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false,semanticSelectionAfterHold=false}) {
  const prefix=`/session/${session}`;
  function phase(caseName,name){const event={phase:name,utc:new Date().toISOString()};writeFileSync(`evidence/${caseName}-phase.json`,JSON.stringify(event,null,2));appendFileSync(`evidence/${caseName}-phases.jsonl`,JSON.stringify(event)+'\n');}
  async function returnToOptions(caseName){
@@ -30,34 +30,59 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case',caseName]);
   await approvalReady(`${caseName}-pending`);
   await click('Options',caseName);
-  // Obtain current native identity and geometry in a separate, recorded preflight.
-  const preflightStarted=Date.now();
-  phase(caseName,'preflight');
-  await clickElement(await ready(`${caseName}-preflight-edit`,editTarget,{sourceIncludes:['pane-title="Options"']}),`${caseName}-preflight-edit`);
-  const preflight=await ready(`${caseName}-preflight-picker`,{}, {choices:[{...folderTarget,sourceIncludes:['class="android.widget.TextView" text="Documents"']},documentRow],sourceIncludes:['package="com.google.android.documentsui"']});
-  if(preflight.readiness.choice===1)await clickElement(preflight,`${caseName}-preflight-documents`);
-  const folder=await ready(`${caseName}-preflight-folder`,folderTarget,{sourceIncludes:['class="android.widget.TextView" text="Documents"']});
-  const folderRect=folder.readiness.rect;
-  await lifecycle(`${caseName}-preflight-native-picker`);
-  await returnToOptions(caseName);
-  writeFileSync(`evidence/${caseName}-preflight-exposure.json`,JSON.stringify({started:new Date(preflightStarted).toISOString(),returned:new Date().toISOString(),elapsedMs:Date.now()-preflightStarted,separateNativeExposure:true,resetDuringThisPhaseCannotBeAttributedToTimedBatch:true},null,2));
+  let folderRect;
+  if(!semanticSelectionAfterHold){
+   // Obtain current native identity and geometry in a separate, recorded preflight.
+   const preflightStarted=Date.now();
+   phase(caseName,'preflight');
+   await clickElement(await ready(`${caseName}-preflight-edit`,editTarget,{sourceIncludes:['pane-title="Options"']}),`${caseName}-preflight-edit`);
+   const preflight=await ready(`${caseName}-preflight-picker`,{}, {choices:[{...folderTarget,sourceIncludes:['class="android.widget.TextView" text="Documents"']},documentRow],sourceIncludes:['package="com.google.android.documentsui"']});
+   if(preflight.readiness.choice===1)await clickElement(preflight,`${caseName}-preflight-documents`);
+   const folder=await ready(`${caseName}-preflight-folder`,folderTarget,{sourceIncludes:['class="android.widget.TextView" text="Documents"']});
+   folderRect=folder.readiness.rect;
+   await lifecycle(`${caseName}-preflight-native-picker`);
+   await returnToOptions(caseName);
+   writeFileSync(`evidence/${caseName}-preflight-exposure.json`,JSON.stringify({started:new Date(preflightStarted).toISOString(),returned:new Date().toISOString(),elapsedMs:Date.now()-preflightStarted,separateNativeExposure:true,resetDuringThisPhaseCannotBeAttributedToTimedBatch:true},null,2));
+  }
   await ui('snapshot',0,0,`windows-${caseName}-before-timed-opening`);
   const edit=await ready(`${caseName}-timed-edit`,editTarget,{sourceIncludes:['pane-title="Options"','/storage/emulated/0/Download']});
   const center=rect=>({x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)});
-  const opening=center(edit.readiness.rect),selection=center(folderRect);
+  const opening=center(edit.readiness.rect);
   const actions=[{type:'pointer',id:'folder-picker-touch',parameters:{pointerType:'touch'},actions:[
    {type:'pointerMove',duration:0,origin:'viewport',...opening},
    {type:'pointerDown',button:0},{type:'pause',duration:125},{type:'pointerUp',button:0},
-   {type:'pause',duration:dwellMs-125},
-   {type:'pointerMove',duration:0,origin:'viewport',...selection},
-   {type:'pointerDown',button:0},{type:'pause',duration:125},{type:'pointerUp',button:0}
+   {type:'pause',duration:dwellMs-125}
   ]}];
+  if(!semanticSelectionAfterHold)actions[0].actions.push(
+   {type:'pointerMove',duration:0,origin:'viewport',...center(folderRect)},
+   {type:'pointerDown',button:0},{type:'pause',duration:125},{type:'pointerUp',button:0}
+  );
   phase(caseName,'timed-actions');
-  const started=Date.now(),timing={started:new Date().toISOString(),scheduledOpeningToFolderClickMs:dwellMs,timingObservedViaVideo:false,requiresVideoValidation:true,selectionGeometrySource:'same-case native preflight; video must confirm timed reopening in Documents',folderRect,editRect:edit.readiness.rect,noRpcBetweenOpeningAndSelection:true,actions};
+  const started=Date.now(),timing={started:new Date().toISOString(),timingObservedViaVideo:false,requiresVideoValidation:true,editRect:edit.readiness.rect,actions,...(semanticSelectionAfterHold?{
+   scheduledOpeningToHoldEndMs:dwellMs,noRpcBetweenOpeningAndHoldEnd:true,selectionAfterNativeReadiness:true,exactWallClockDwellClaimed:false
+  }:{scheduledOpeningToFolderClickMs:dwellMs,selectionGeometrySource:'same-case native preflight; video must confirm timed reopening in Documents',folderRect,noRpcBetweenOpeningAndSelection:true})};
   writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));
   try{await wd('POST',prefix+'/actions',{actions},{timeoutMs:dwellMs+10000});timing.completed=true;}
   catch(error){timing.error=String(error);throw error;}
   finally{timing.ended=new Date().toISOString();timing.requestElapsedMs=Date.now()-started;writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));}
+  if(semanticSelectionAfterHold){
+   phase(caseName,'native-readiness-after-hold');
+   await source(`${caseName}-after-timed-hold`);
+   writeFileSync(`evidence/${caseName}-after-timed-hold.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
+   await lifecycle(`${caseName}-after-timed-hold`);
+   await ui('snapshot',0,0,`windows-${caseName}-after-timed-hold`);
+   // A Documents row at the storage root is not the current Documents folder.
+   const documentsFolder={...folderTarget,sourceIncludes:['text="Documents" resource-id="com.google.android.documentsui:id/breadcrumb_text"']};
+   const rootDocumentsRow={...documentRow,sourceIncludes:['text="Files on OnePlus 13R" resource-id="com.google.android.documentsui:id/header_title"']};
+   const current=await ready(`${caseName}-native-picker-after-hold`,{}, {choices:[documentsFolder,rootDocumentsRow],sourceIncludes:['package="com.google.android.documentsui"']});
+   if(current.readiness.choice===1)await clickElement(current,`${caseName}-documents-after-hold`);
+   const folderButton=await ready(`${caseName}-use-folder-after-hold`,documentsFolder,{sourceIncludes:documentsFolder.sourceIncludes});
+   timing.folderSelectionAttempted=new Date().toISOString();timing.folderSelectionReadiness=folderButton.readiness;
+   writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));
+   await clickElement(folderButton,`${caseName}-use-folder-after-hold`);
+   timing.folderSelectionCompleted=new Date().toISOString();
+   writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));
+  }
   await source(`${caseName}-after-timed-selection`);
   writeFileSync(`evidence/${caseName}-after-timed-selection.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
   await lifecycle(`${caseName}-after-timed-selection`);
@@ -80,6 +105,6 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
   writeFileSync(`evidence/${caseName}-saved-hash.json`,JSON.stringify({fileName,size:data.length,senderSha256:senderHash,savedSha256:savedHash,verified:savedHash===senderHash},null,2));
   if(savedHash!==senderHash)throw new Error(`${caseName}: saved hash differs from actual Windows fixture`);
   phase(caseName,'saved-hash-verified');
-  results.push({case:caseName,fileName,destination:'/sdcard/Documents',savedContentVerified:true,savedSha256:savedHash,scheduledOpeningToFolderClickMs:dwellMs,timingObservedViaVideo:false,requiresVideoValidation:true});
+  results.push({case:caseName,fileName,destination:'/sdcard/Documents',savedContentVerified:true,savedSha256:savedHash,timingObservedViaVideo:false,requiresVideoValidation:true,...(semanticSelectionAfterHold?{scheduledOpeningToHoldEndMs:dwellMs,selectionAfterNativeReadiness:true,exactWallClockDwellClaimed:false}:{scheduledOpeningToFolderClickMs:dwellMs})});
  }
 }

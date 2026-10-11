@@ -80,7 +80,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   const {default:observeSettings}=await import('./settings3393.mjs');await observeSettings({session,wd});
   if(policyOn){
    const {default:timedPicker}=await import('./picker3393-timed.mjs');
-   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true});
+   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true});
    return;
   }
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case','picker-calibration']);
