@@ -13,6 +13,16 @@ jobs:
   reproduce:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: '26.08'
+            app-commit: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
+            runtime-commit: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
+          - runtime: '25.08'
+            app-commit: 31f3f559da9fc85ec88a82923e3d7287a873240573cbb9d6bd54bf4a26ad1ccd
+            runtime-commit: d27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf
     steps:
       - name: Check out diagnostic branch
         uses: actions/checkout@v4
@@ -27,15 +37,16 @@ jobs:
       - name: Run reproduction harness in a D-Bus session
         shell: bash
         env:
-          EXPECTED_APP_COMMIT: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
-          EXPECTED_RUNTIME_COMMIT: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
+          RUNTIME_BRANCH: ${{ matrix.runtime }}
+          EXPECTED_APP_COMMIT: ${{ matrix.app-commit }}
+          EXPECTED_RUNTIME_COMMIT: ${{ matrix.runtime-commit }}
           OUT: ${{ github.workspace }}/evidence
         run: dbus-run-session -- bash support/diagnostics/repro-flatpak-3553.sh
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: localsend-flatpak-font-cache-reproduction
+          name: localsend-flatpak-font-cache-runtime-${{ matrix.runtime }}
           path: evidence/
           if-no-files-found: warn
           retention-days: 14

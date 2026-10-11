@@ -10,6 +10,12 @@ OUT="$(realpath "$OUT")"
 exec > >(tee -a "$OUT/run.log") 2>&1
 
 declare -a GROUP_PIDS=()
+untrack_group() {
+  local index
+  for index in "${!GROUP_PIDS[@]}"; do
+    if [[ "${GROUP_PIDS[$index]}" == "$1" ]]; then unset 'GROUP_PIDS[index]'; fi
+  done
+}
 cleanup() {
   local p
   for p in "${GROUP_PIDS[@]:-}"; do
@@ -24,6 +30,7 @@ cleanup() {
 trap cleanup EXIT
 
 cache_dir="$HOME/.cache/fontconfig"
+app_cache_dir="$HOME/.var/app/org.localsend.localsend_app/cache"
 baseline="$OUT/cache-snapshots/baseline"
 mkdir -p "$cache_dir"
 fc-cache -f > "$OUT/host-fc-cache.txt" 2>&1 || true
@@ -35,10 +42,38 @@ cache_manifest() {
   : > "$target/manifest.txt"
   while IFS= read -r -d '' f; do
     cp -a "$f" "$target/" 2>/dev/null || true
-    stat -c '%n %s bytes %y' "$f" >> "$target/manifest.txt" 2>&1 || true
+    stat -c '%n %F %s bytes inode=%i links=%h %y' "$f" >> "$target/manifest.txt" 2>&1 || true
+    if [[ -L "$f" ]]; then readlink "$f" >> "$target/manifest.txt"; fi
     sha256sum "$f" >> "$target/manifest.txt" 2>&1 || true
     od -An -tx1 -N32 "$f" >> "$target/manifest.txt" 2>&1 || true
   done < <(find "$cache_dir" -maxdepth 1 \( -type f -o -type l \) -print0 2>/dev/null)
+  # upload-artifact dereferences symlinks; tar retains the original aliases.
+  tar -czf "$target.tar.gz" -C "$cache_dir" .
+}
+
+save_app_cache() {
+  mkdir -p "$app_cache_dir"
+  tar -czf "$1" -C "$app_cache_dir" .
+}
+
+reset_app_cache() {
+  save_app_cache "$OUT/app-cache-before-$1.tar.gz"
+  rm -rf "$app_cache_dir"
+  mkdir -p "$app_cache_dir"
+}
+
+restore_app_cache() {
+  rm -rf "$app_cache_dir"
+  mkdir -p "$app_cache_dir"
+  if [[ "$suspect_cache_state" == warm ]]; then
+    tar -xzf "$OUT/app-cache-before-warm-$suspect_version.tar.gz" -C "$app_cache_dir"
+  fi
+}
+
+restore_brave_cache() {
+  rm -rf "$cache_dir"
+  mkdir -p "$cache_dir"
+  tar -xzf "$OUT/cache-snapshots/brave-$1.tar.gz" -C "$cache_dir"
 }
 
 restore_baseline() {
@@ -120,6 +155,7 @@ launch_case() {
     timeout 4s tail --pid="$pid" -f /dev/null 2>/dev/null || true
     kill -KILL -- "-$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
+    untrack_group "$pid"
     return 0
   fi
   echo "$app_pid" > "$dir/localsend.pid"
@@ -149,6 +185,7 @@ launch_case() {
   timeout 4s tail --pid="$pid" -f /dev/null 2>/dev/null || true
   kill -KILL -- "-$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+  untrack_group "$pid"
 }
 
 wait_for_window() {
@@ -209,12 +246,17 @@ rm -f "$deb"
 
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user --noninteractive -y flathub org.localsend.localsend_app
-flatpak update --user --noninteractive -y org.localsend.localsend_app || true
+runtime_branch="${RUNTIME_BRANCH:-26.08}"
+flatpak install --user --noninteractive -y flathub "org.freedesktop.Platform/x86_64/$runtime_branch"
+flatpak update --user --noninteractive -y --commit="$EXPECTED_RUNTIME_COMMIT" "org.freedesktop.Platform/x86_64/$runtime_branch"
+flatpak update --user --noninteractive -y --commit="$EXPECTED_APP_COMMIT" org.localsend.localsend_app
 environment
 actual_app_commit=$(flatpak info --user --show-commit org.localsend.localsend_app)
-actual_runtime_commit=$(flatpak info --user --show-commit org.freedesktop.Platform/x86_64/26.08)
+actual_runtime_ref=$(flatpak info --user --show-runtime org.localsend.localsend_app)
+actual_runtime_commit=$(flatpak info --user --show-commit "$actual_runtime_ref")
 if [[ "$actual_app_commit" != "${EXPECTED_APP_COMMIT:-a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c}" || \
-      "$actual_runtime_commit" != "${EXPECTED_RUNTIME_COMMIT:-92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df}" ]]; then
+      "$actual_runtime_commit" != "${EXPECTED_RUNTIME_COMMIT:-92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df}" || \
+      "$actual_runtime_ref" != "org.freedesktop.Platform/x86_64/$runtime_branch" ]]; then
   printf 'Expected app/runtime commits differ: app=%s runtime=%s\n' "$actual_app_commit" "$actual_runtime_commit" | tee -a "$OUT/infrastructure-failures.txt"
   exit 5
 fi
@@ -235,10 +277,15 @@ if ! awk -F '\t' '$1=="clean_deb" && $2=="started" {found=1} END {exit !found}' 
 fi
 
 launch_case clean_flatpak 'flatpak run --user org.localsend.localsend_app'
+save_app_cache "$OUT/app-cache-warm-baseline.tar.gz"
 suspect_version=""
+suspect_cache_state=""
 
 for version in 1.96.61 1.96.59; do
   restore_baseline
+  rm -rf "$app_cache_dir"
+  mkdir -p "$app_cache_dir"
+  tar -xzf "$OUT/app-cache-warm-baseline.tar.gz" -C "$app_cache_dir"
   brave_deb="$TMP/brave-browser_${version}_amd64.deb"
   curl --fail --location --retry 3 "https://github.com/brave/brave-browser/releases/download/v${version}/brave-browser_${version}_amd64.deb" -o "$brave_deb"
   sha256sum "$brave_deb" >> "$OUT/brave-deb-sha256.txt"
@@ -261,6 +308,7 @@ for version in 1.96.61 1.96.59; do
   timeout 4s tail --pid="$brave_pid" -f /dev/null 2>/dev/null || true
   kill -KILL -- "-$brave_pid" 2>/dev/null || true
   wait "$brave_pid" 2>/dev/null || true
+  untrack_group "$brave_pid"
 
   # Brave writes its normal host cache in place; no cache bytes are fabricated.
   if ! find "$cache_dir" -maxdepth 1 -name '*cache-12' -type f -print -quit | grep -q .; then
@@ -268,9 +316,18 @@ for version in 1.96.61 1.96.59; do
     exit 4
   fi
   cache_manifest "$OUT/cache-snapshots/brave-$version"
+  save_app_cache "$OUT/app-cache-before-warm-$version.tar.gz"
   launch_case "flatpak_after_brave_$version" 'flatpak run --user org.localsend.localsend_app'
   if awk -F '\t' -v label="flatpak_after_brave_$version" '$1==label && $2=="hang_candidate" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
     suspect_version="$version"
+    suspect_cache_state=warm
+  fi
+  restore_brave_cache "$version"
+  reset_app_cache "cold-$version"
+  launch_case "flatpak_cold_cache_after_brave_$version" 'flatpak run --user org.localsend.localsend_app'
+  if awk -F '\t' -v label="flatpak_cold_cache_after_brave_$version" '$1==label && $2=="hang_candidate" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
+    suspect_version="$version"
+    suspect_cache_state=cold
   fi
   launch_case "deb_after_brave_$version" "$deb_exe"
   cache_snapshot="$OUT/cache-snapshots/active-$version"
@@ -280,21 +337,25 @@ done
 
 if [[ -n "$suspect_version" ]]; then
   # Move generated cache aside as one unit, test empty, then restore the exact bytes.
-  rm -rf "$cache_dir"
-  mkdir -p "$cache_dir"
-  cp -a "$OUT/cache-snapshots/brave-$suspect_version"/. "$cache_dir/"
-  rm -f "$cache_dir/manifest.txt"
+  printf 'version=%s app_cache=%s\n' "$suspect_version" "$suspect_cache_state" > "$OUT/suspect.txt"
+  restore_brave_cache "$suspect_version"
+  restore_app_cache
+  launch_case flatpak_suspect_repeat 'flatpak run --user org.localsend.localsend_app'
   cache_manifest "$OUT/cache-snapshots/retry-suspect"
   moved="$OUT/cache-snapshots/moved-aside"
   rm -rf "$moved"
   mv "$cache_dir" "$moved"
   mkdir -p "$cache_dir"
+  restore_app_cache
   launch_case flatpak_after_cache_moved 'flatpak run --user org.localsend.localsend_app'
   rm -rf "$cache_dir"
   mkdir -p "$cache_dir"
   cp -a "$moved"/. "$cache_dir/"
   cache_manifest "$OUT/cache-snapshots/restored"
+  restore_app_cache
   launch_case flatpak_after_cache_restore 'flatpak run --user org.localsend.localsend_app'
+  restore_brave_cache "$suspect_version"
+  restore_app_cache
   launch_case flatpak_after_cache_restore_repeat 'flatpak run --user org.localsend.localsend_app'
   restore_baseline
 fi
