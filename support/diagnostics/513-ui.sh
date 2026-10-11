@@ -165,10 +165,17 @@ button false
 sleep 2
 capture 18-receiver-pending
 # The default receiver requires its actual Accept button.
-move 745 650
+record receive-accept
+move 615 720
 button true
 button false
 sleep 5
 capture 19-after-accept
+wait "$record_pid"
+move 80 700
+button true
+button false
+capture 20-sender-result
 /home/runner/513-vm/ssh 'sudo find /home/receiver/Downloads -maxdepth 2 -type f -exec sha256sum {} \; -exec wc -c {} \; ; sha256sum /home/probe/Documents/513-control.txt; cat /home/probe/513-peer.log' > evidence/vm/transfer-result.txt 2>&1
+/home/runner/513-vm/ssh 'sudo cmp /home/probe/Documents/513-control.txt /home/receiver/Downloads/513-control.txt && printf "ACTUAL_APP_TRANSFER_HASH_AND_CONTENT_PASS\n"' >> evidence/vm/transfer-result.txt 2>&1
 /home/runner/513-vm/ssh 'cat /home/probe/513-peer.log; flatpak documents; sudo ls -la /home/receiver/Downloads; sudo ip netns exec issue513peer ss -lntup' > evidence/vm/peer-state.txt 2>&1
