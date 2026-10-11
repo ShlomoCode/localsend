@@ -1,0 +1,17 @@
+name: Diagnose 2861 Windows text-size settings
+on:
+  workflow_dispatch:
+jobs:
+  observe:
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Inspect supported Windows text-size UI
+        shell: powershell
+        run: ./support/diagnostics/text-size2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/text-size-evidence
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: text-size-evidence
+          path: ${{ runner.temp }}/text-size-evidence

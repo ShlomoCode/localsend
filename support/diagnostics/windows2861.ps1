@@ -89,6 +89,8 @@ foreach($version in @('1.17.0','1.18.2','current')) {foreach($locale in @('en','
  $appdir=Split-Path $exe
  @{'flutter.ls_port'=53361;'flutter.ls_alias'='Bug2861';'flutter.ls_locale'=$locale;'flutter.ls_theme'='dark';'flutter.ls_save_window_placement'=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 "$appdir/settings.json"
  Get-FileHash $exe -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-executable.json"
+ Get-FileHash "$appdir/data/app.so" -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-aot.json"
+ Get-ChildItem $source -Recurse -Filter source-commit.txt|ForEach-Object {Copy-Item $_.FullName "$EvidenceDirectory/$name-source-commit.txt"}
  New-NetFirewallRule -DisplayName "Bug2861 $name inbound" -Direction Inbound -Program $exe -Action Allow -Profile Any|Out-Null
  $script:p=Start-Process $exe -WorkingDirectory $appdir -PassThru
  try {
