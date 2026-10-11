@@ -1,0 +1,35 @@
+name: Retain issue 2007 existing session video
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        type: string
+        required: true
+        description: Existing original app control run; does not allocate a device
+jobs:
+  retain-video:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v5
+        with:
+          repository: ShlomoCode/localsend
+          run-id: ${{ inputs.run_id }}
+          name: issue-2007-original-app-control-${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Preserve recording and packet timestamps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          node --check support/diagnostics/2007-video-evidence.mjs
+          node support/diagnostics/2007-video-evidence.mjs evidence
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue-2007-video-${{ inputs.run_id }}
+          path: evidence/
