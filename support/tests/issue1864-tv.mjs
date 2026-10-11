@@ -25,8 +25,14 @@ async function snapshot(name) {
   fs.writeFileSync(`${out}/${name}.png`, execFileSync('adb', ['exec-out', 'screencap', '-p']));
   fs.writeFileSync(`${out}/${name}-window.txt`, adb('shell', 'dumpsys', 'window', 'windows'));
   fs.writeFileSync(`${out}/${name}-activity.txt`, adb('shell', 'dumpsys', 'activity', 'activities'));
-  execFileSync('tesseract', [`${out}/${name}.png`, `${out}/${name}-ocr`, '--psm', '11', 'tsv'], { timeout: 30000 });
   return fs.readFileSync(`${out}/${name}.xml`, 'utf8');
+}
+function ocr(name) {
+  const path=`${out}/${name}-ocr.tsv`;
+  if (!fs.existsSync(path)) execFileSync('tesseract', [`${out}/${name}.png`, `${out}/${name}-ocr`, '--psm', '11', 'tsv'], {
+    timeout:45000,env:{...process.env,OMP_THREAD_LIMIT:'1'},
+  });
+  return fs.readFileSync(path,'utf8');
 }
 function nodes(xml) {
   return [...xml.matchAll(/<[\w.$-]+\s+([^>]+)>?/g)].map(m => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a => [a[1], a[2]])));
@@ -37,7 +43,7 @@ async function mouseNode(label, name) {
   let bounds;
   if (node) bounds = [...node.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
   else {
-    const words = fs.readFileSync(`${out}/${name}-before-ocr.tsv`, 'utf8').trim().split('\n').slice(1).map(line => line.split('\t'));
+    const words = ocr(`${name}-before`).trim().split('\n').slice(1).map(line => line.split('\t'));
     const hits = words.filter(w => w[11] === label && Number(w[10]) > 65);
     if (hits.length !== 1) throw new Error(`Missing or ambiguous visible OCR label ${label}; inspect ${name}-before.png`);
     const word = hits[0];
@@ -122,7 +128,7 @@ function selectedCount(xml, name) {
   if (labels.includes('Confirm')) return 0;
   const label = labels.find(label => /^Confirm \(\d+\/999\)$/.test(label));
   if (label) return Number(label.match(/\((\d+)/)[1]);
-  const words=fs.readFileSync(`${out}/${name}-ocr.tsv`,'utf8').trim().split('\n').slice(1).map(line=>line.split('\t')).filter(w=>Number(w[10])>40).map(w=>w[11]).join(' ');
+  const words=ocr(name).trim().split('\n').slice(1).map(line=>line.split('\t')).filter(w=>Number(w[10])>40).map(w=>w[11]).join(' ');
   const match=words.match(/Confirm\s*\((\d+)\s*\/\s*999\)/);
   return match ? Number(match[1]) : /\bConfirm\b/.test(words) ? 0 : null;
 }
