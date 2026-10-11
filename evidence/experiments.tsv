@@ -1,0 +1,2 @@
+id	variable	action	actual_result	evidence	substantive
+E00	metadata	read full issue and release dates	version and OS unknown; v1.17 plausible	STATUS.md	no

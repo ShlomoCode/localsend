@@ -1,0 +1,32 @@
+name: Diagnose 2414 receive Options original release
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2414-many-files]
+    paths: [.github/workflows/diagnose-2414-many-files.yml]
+jobs:
+  actual-app-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install supported desktop and original release
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
+          sudo systemctl start NetworkManager
+          mkdir -p evidence released/base
+          curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o released/baseline.tar.gz
+          sha256sum released/baseline.tar.gz > evidence/artifact-sha256.txt
+          tar xf released/baseline.tar.gz -C released/base
+          uname -a > evidence/environment.txt
+          free -m >> evidence/environment.txt
+          lscpu >> evidence/environment.txt
+      - name: Real directory selection and receive Options control
+        run: |
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1200x800x24' bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/openbox.log 2>&1 & python3 support/diagnostics/2414-ui.py' > evidence/ui-input.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2414-release-harness-${{ github.run_id }}
+          path: evidence/
