@@ -16,7 +16,7 @@ in pkgs.runCommand "localsend-2751-helper-preflight" {} ''
   ${pkgs.findutils}/bin/find scratch -type f -exec ${pkgs.coreutils}/bin/sha256sum {} \; > inventory
   ${pkgs.coreutils}/bin/cat inventory > copied
   ${pkgs.coreutils}/bin/env PREFLIGHT=passed ${pkgs.bash}/bin/bash -c 'test "$PREFLIGHT" = passed'
-  ${pkgs.shadow.su}/bin/su --help > su-options
+  ${pkgs.util-linux}/bin/script -q -e -c '${pkgs.shadow.su}/bin/su --help' su-options
   mkdir "$out"
   cp pids processes resolved checksum inventory copied su-options "$out/"
 ''
