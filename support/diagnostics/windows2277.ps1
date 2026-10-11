@@ -51,6 +51,7 @@ $cases=@()
 for($trial=1;$trial -le $Repeat;$trial++){foreach($animations in @($false,$true)){$cases+=@{animations=$animations;trial=$trial}}}
 foreach($case in $cases) {
  $animations=$case.animations
+ $backBefore=@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count
  $name=if($animations){'animations-on'}else{'animations-off'}
  if($Repeat -gt 1){$name+='-'+$case.trial}
  $folder="$EvidenceDirectory/$name-app"
@@ -66,6 +67,7 @@ foreach($case in $cases) {
   Start-Sleep -Seconds 2;Screenshot "$name-initial"
   $stored=Get-Content "$folder/settings.json" -Raw|ConvertFrom-Json
   @{animations=$stored.'flutter.ls_enable_animations';port=$stored.'flutter.ls_port';locale=$stored.'flutter.ls_locale'}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-profile.json"
+  if($stored.'flutter.ls_enable_animations' -ne $animations){throw 'Stored animations setting differs from the case'}
   Word 'Send' "$name-initial";Screenshot "$name-send"
   Word 'Text' "$name-send";Screenshot "$name-text-dialog"
   $prompt=Import-Csv "$EvidenceDirectory/$name-text-dialog.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'message'}|Select-Object -First 1
@@ -85,7 +87,9 @@ foreach($case in $cases) {
   # A single click on the Material back arrow, whose location is checked in retained screenshot.
   Click 28 60 'Back-single'
   foreach($delay in @(100,500,1500,5000)) {Start-Sleep -Milliseconds $delay;Screenshot "$name-after-back-$delay"}
-  $results+=@{case=$name;status='scenario-reached';error=$null}
+  $final=Get-Content "$EvidenceDirectory/$name-after-back-5000-state.json" -Raw|ConvertFrom-Json
+  $outcome=if($final.blackFraction -gt 0.95){'black-window'}elseif($final.words -contains 'Selection'){'returned-send'}else{'other-state'}
+  $results+=@{case=$name;status='scenario-reached';outcome=$outcome;backCount=(@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count-$backBefore);pid=$final.pid;hwnd=$final.hwnd;exited=$final.exited;error=$null}
  } catch {$results+=@{case=$name;status='harness-or-app-blocker';error=$_.Exception.ToString()}}
  finally {
   $script:actions|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/inputs.json"
