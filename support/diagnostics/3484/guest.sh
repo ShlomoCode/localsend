@@ -24,8 +24,11 @@ cd /home/investigator
 mkdir pkg
 curl -fLsS 'https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=localsend-bin' -o pkg/PKGBUILD
 cp pkg/PKGBUILD /work/evidence/cloud/PKGBUILD
+grep -qx 'pkgver=1.18.2' pkg/PKGBUILD
+grep -qx 'pkgrel=2' pkg/PKGBUILD
 cd pkg
 makepkg --noconfirm --syncdeps --install
+printf 'cc42a4f3eacdcb25ec31f0016b1272acb003145ab30484db8965450e20c72cd2  LocalSend-1.18.2-linux-x86-64.deb\n' | sha256sum -c -
 sha256sum LocalSend-*.deb *.pkg.tar.zst > /work/evidence/cloud/artifact-sha256.txt
 cd /home/investigator
 curl -fLsS https://api.github.com/repos/brenoperucchi/omarchy/tarball/31bd80daa4613ffdee995ac27467fce5a2990806 -o omarchy.tar.gz

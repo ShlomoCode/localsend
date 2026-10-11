@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 mkdir -p evidence/cloud /home/runner/tray3484 /tmp/tray3484
+collect_evidence() {
+  host_status=$?
+  trap - EXIT
+  set +e
+  printf '%s\n' "$host_status" > evidence/cloud/host-original-exit-status.txt
+  collection_status=1
+  if declare -p ssh_opts >/dev/null 2>&1; then
+    timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo journalctl -b --no-pager' > evidence/cloud/guest-journal.log 2>&1
+    timeout 60 scp -r -i /tmp/tray3484/key -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 probe@127.0.0.1:/work/evidence/cloud/. evidence/cloud/ > evidence/cloud/collection.log 2>&1
+    collection_status=$?
+  fi
+  printf '%s\n' "$collection_status" > evidence/cloud/collection-status.txt
+  if [ "$host_status" = 0 ] && [ "$collection_status" != 0 ]; then host_status=1; fi
+  printf '%s\n' "$host_status" > evidence/cloud/host-exit-status.txt
+  if [ -S /tmp/tray3484/monitor ]; then
+    printf 'screendump %s\n' "$PWD/evidence/cloud/guest-final.ppm" | timeout 10 sudo socat - UNIX-CONNECT:/tmp/tray3484/monitor > evidence/cloud/monitor-collection.log 2>&1
+    sudo chown -R "$(id -u):$(id -g)" evidence/cloud
+    convert evidence/cloud/guest-final.ppm evidence/cloud/guest-final.png 2>> evidence/cloud/collection.log
+  fi
+  exit "$host_status"
+}
+trap collect_evidence EXIT
 sudo apt-get update
-sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client imagemagick unzip
+sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client imagemagick unzip jq
 gh api repos/ShlomoCode/localsend/actions/artifacts/11700370485/zip > /tmp/tray3484/baseline.zip
 unzip -q /tmp/tray3484/baseline.zip -d /tmp/tray3484/baseline
 printf '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  /tmp/tray3484/baseline/source-bundle.tar.gz\n' | sha256sum -c -
@@ -56,7 +78,9 @@ for i in $(seq 1 600); do
     if [ "$event_seq" -gt "$last_seq" ]; then
       abs_x=$((pointer_x * 32767 / 1279))
       abs_y=$((pointer_y * 32767 / 799))
-      printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":%s}},{"type":"abs","data":{"axis":"y","value":%s}}]}}\n' "$abs_x" "$abs_y" | timeout 5 sudo socat -t 1 - UNIX-CONNECT:/tmp/tray3484/qmp >> evidence/cloud/input-qmp.log
+      printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","id":"pointer-%s","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":%s}},{"type":"abs","data":{"axis":"y","value":%s}}]}}\n' "$event_seq" "$abs_x" "$abs_y" | timeout 5 sudo socat -t 1 - UNIX-CONNECT:/tmp/tray3484/qmp > /tmp/tray3484/qmp-response.jsonl
+      cat /tmp/tray3484/qmp-response.jsonl >> evidence/cloud/input-qmp.log
+      jq -s -e --arg event "pointer-$event_seq" 'any(.[]; .id == $event and has("return") and (has("error") | not))' /tmp/tray3484/qmp-response.jsonl > /dev/null
       ssh "${ssh_opts[@]}" probe@127.0.0.1 "printf '%s\\n' '$event_seq' > /work/input/ack"
       printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$event_seq" "$pointer_x" "$pointer_y" >> evidence/cloud/input-events.tsv
       last_seq=$event_seq
@@ -65,11 +89,5 @@ for i in $(seq 1 600); do
   if ssh "${ssh_opts[@]}" probe@127.0.0.1 'test -f /work/evidence/cloud/session.done'; then ready=1; break; fi
   sleep 1
 done
-ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo journalctl -b --no-pager' > evidence/cloud/guest-journal.log
-ssh "${ssh_opts[@]}" probe@127.0.0.1 'tail -100 /work/evidence/cloud/hyprland.log'
-scp -r -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no probe@127.0.0.1:/work/evidence/cloud/. evidence/cloud/
-printf 'screendump %s\n' "$PWD/evidence/cloud/guest-final.ppm" | sudo socat - UNIX-CONNECT:/tmp/tray3484/monitor
-sudo chown -R "$(id -u):$(id -g)" evidence/cloud
-convert evidence/cloud/guest-final.ppm evidence/cloud/guest-final.png
 test "$ready" = 1
-test "$(cat evidence/cloud/session.done)" = 0
+test "$(ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /work/evidence/cloud/session.done')" = 0
