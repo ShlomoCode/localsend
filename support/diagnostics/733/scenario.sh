@@ -46,7 +46,15 @@ sudo chown -R sender:sender /home/sender/app
 sudo apt-get install -y libayatana-appindicator3-1
 printf 'LocalSend issue733 ordinary Downloads control\n' | sudo tee /home/sender/Downloads/733-control.txt >/dev/null
 sudo chown sender:sender /home/sender/Downloads/733-control.txt
-sha256sum /home/sender/Downloads/733-control.txt > evidence/source-sha256.txt
+sudo sha256sum /home/sender/Downloads/733-control.txt > evidence/source-sha256.txt
+# Start the receiver again with the real peer interface already present.
+flatpak kill org.localsend.localsend_app
+sleep 2
+flatpak run --user org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
+sleep 8
+receiver_wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1)
+xdotool windowmove "$receiver_wid" 0 0
+xdotool windowsize "$receiver_wid" 1000 700
 nohup sudo ip netns exec issue733sender runuser -l sender -c "env DISPLAY=$DISPLAY XDG_RUNTIME_DIR=/run/user/$(id -u sender) dbus-run-session -- /home/sender/app/localsend_app" > evidence/sender.log 2>&1 < /dev/null &
 sleep 10
 xdotool search --onlyvisible --name '^LocalSend$' > evidence/windows.txt
@@ -63,3 +71,24 @@ sudo cat "/proc/$receiver_pid/root/.flatpak-info" > evidence/receiver-flatpak-in
 sudo ls -ld "/proc/$receiver_pid/root/home/mint/Downloads" /home/mint/Downloads > evidence/initial-destination.txt
 sudo stat -Lc '%d:%i %n' "/proc/$receiver_pid/root/home/mint/Downloads" /home/mint/Downloads >> evidence/initial-destination.txt
 echo 'PREPARATION_ONLY_NO_TRANSFER_VERDICT' > evidence/result.txt
+sender_wid=''
+for wid in $(cat evidence/windows.txt); do
+  [[ "$wid" == "$receiver_wid" ]] || sender_wid=$wid
+done
+test -n "$sender_wid"
+xdotool windowmove "$sender_wid" 0 0
+xdotool windowsize "$sender_wid" 1000 700
+sudo apt-get install -y jq
+prefs=$(find "$HOME/.var/app/org.localsend.localsend_app" -name shared_preferences.json -print -quit)
+test -n "$prefs"
+# Retain settings/history only; do not emit the generated TLS private context.
+jq 'with_entries(select(.key|test("alias|destination|receive_history|quick_save")))' "$prefs" > evidence/receiver-settings-before.json
+receiver_alias=$(jq -r 'to_entries[]|select(.key|endswith("ls_alias"))|.value' "$prefs")
+test -n "$receiver_alias"
+receiver_alias_word=${receiver_alias%% *}
+source /home/mint/transfer.sh
+select_fixture 733-control.txt normal
+send_and_approve 733-control.txt normal "$receiver_alias_word"
+sudo cmp /home/sender/Downloads/733-control.txt /home/mint/Downloads/733-control.txt
+sudo sha256sum /home/mint/Downloads/733-control.txt > evidence/normal-host-sha256.txt
+echo ACTUAL_TWO_APP_NORMAL_DOWNLOADS_HASH_PASS > evidence/result.txt

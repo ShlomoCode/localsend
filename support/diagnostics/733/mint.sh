@@ -22,6 +22,7 @@ printf '116578dda0e03f1421c214acdd66043b586e7afc7474e0796c150ac164a90a2a  /home/
 ssh-keygen -q -t ed25519 -N '' -f /tmp/issue733-mint/id
 cp /tmp/issue733-mint/id.pub /tmp/issue733-mint/seed/id.pub
 cp support/diagnostics/733/scenario.sh /tmp/issue733-mint/seed/scenario.sh
+cp support/diagnostics/733/transfer.sh /tmp/issue733-mint/seed/transfer.sh
 cp evidence/package/historical.flatpak /tmp/issue733-mint/seed/
 cat > /tmp/issue733-mint/seed/bootstrap.sh <<'BOOT'
 #!/bin/bash
@@ -30,6 +31,7 @@ exec > >(tee /tmp/issue733-bootstrap.log /dev/ttyS0) 2>&1
 mkdir -p /home/mint/.ssh /home/mint/evidence
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/scenario.sh /home/mint/scenario.sh
+cp /mnt/transfer.sh /home/mint/transfer.sh
 cp /mnt/historical.flatpak /home/mint/
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
