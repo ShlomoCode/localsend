@@ -15,12 +15,22 @@ public static class W3393 {
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder s,int n);
  [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
  public delegate bool EnumProc(IntPtr h,IntPtr data);
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc callback,IntPtr data);
  public struct Point { public int X,Y; }
  public static object[] Children(IntPtr parent) {
   var rows=new System.Collections.Generic.List<object>();
   EnumChildWindows(parent,(h,data)=>{uint pid;GetWindowThreadProcessId(h,out pid);var s=new StringBuilder(256);GetClassName(h,s,256);Rect r;GetWindowRect(h,out r);rows.Add(new{hwnd=h.ToInt64(),parent=GetParent(h).ToInt64(),pid=pid,cls=s.ToString(),rect=r});return true;},IntPtr.Zero);
+  return rows.ToArray();
+ }
+ [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback,IntPtr data);
+ public static object[] OwnedWindows(uint targetPid) {
+  var rows=new System.Collections.Generic.List<object>();
+  EnumWindows((h,data)=>{uint pid;GetWindowThreadProcessId(h,out pid);if(pid==targetPid){var cls=new StringBuilder(256);var title=new StringBuilder(512);GetClassName(h,cls,256);GetWindowText(h,title,512);rows.Add(new{hwnd=h.ToInt64(),pid=pid,cls=cls.ToString(),title=title.ToString(),visible=IsWindowVisible(h),enabled=IsWindowEnabled(h)});}return true;},IntPtr.Zero);
   return rows.ToArray();
  }
  public struct Rect { public int L,T,R,B; }
@@ -63,4 +73,6 @@ try {if(-not $captured){throw 'Window capture failed'};$image.Save((Join-Path $P
 $element=[System.Windows.Automation.AutomationElement]::FromHandle($window)
 $elements=$element.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 @($elements|ForEach-Object{@{name=$_.Current.Name;role=$_.Current.ControlType.ProgrammaticName}})|ConvertTo-Json -Depth 4|Set-Content "evidence/$Label-ui.json"
-@{action=$Action;x=$X;y=$Y;targetX=$point.X;targetY=$point.Y;targetClass=$targetClass.ToString();appPid=$appPid;targetPid=$viewPid;utc=[DateTime]::UtcNow.ToString('o');window=$window.ToInt64();view=$view.ToInt64()}|ConvertTo-Json|Set-Content "evidence/$Label-action.json"
+$foreground=[W3393]::GetForegroundWindow()
+$foregroundPid=0u;[void][W3393]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)
+@{action=$Action;x=$X;y=$Y;targetX=$point.X;targetY=$point.Y;targetClass=$targetClass.ToString();appPid=$appPid;targetPid=$viewPid;utc=[DateTime]::UtcNow.ToString('o');window=$window.ToInt64();view=$view.ToInt64();foregroundHwnd=$foreground.ToInt64();foregroundPid=$foregroundPid;ownedWindows=[W3393]::OwnedWindows($appPid)}|ConvertTo-Json -Depth 6|Set-Content "evidence/$Label-action.json"
