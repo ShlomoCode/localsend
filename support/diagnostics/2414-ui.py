@@ -70,7 +70,7 @@ for count in [5,5000]:
             apps.append((p,window(actual_pid)))
         receiver,rwin=apps[0]; sender,swin=apps[1]
         stop=threading.Event(); sampler=threading.Thread(target=metrics,args=(receiver.pid,stop,out/(case+'-metrics.jsonl'))); sampler.start()
-        focus(swin); screen(case+'-send-observed'); click(96,188); click(*locate('Folder',case+'-folder'))
+        focus(swin); screen(case+'-send-observed'); click(96,188); screen(case+'-folder-observed'); click(514,150)
         screen(case+'-picker'); run('xdotool','key','ctrl+l'); run('xdotool','type','--clearmodifiers',str(fixture)); run('xdotool','key','Return'); time.sleep(1)
         # GTK directory picker enters the directory; select its Open button.
         words=screen(case+'-picker-entered')
@@ -81,7 +81,7 @@ for count in [5,5000]:
         focus(rwin); option_xy=locate('Options',case+'-receive',30)
         started=time.monotonic(); click(*option_xy)
         try:
-            locate('Destination',case+'-options',30)
+            locate('Save',case+'-options',30)
             render=time.monotonic()-started
             screen(case+'-options-visible')
             # Back arrow is visible in the retained Options screenshot; Flutter's native route toolbar.

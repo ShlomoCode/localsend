@@ -57,6 +57,7 @@ set -euo pipefail
 cd /home/probe
 mkdir -p evidence released/base
 sudo systemctl start NetworkManager
+bash 2414-network.sh
 curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o released/baseline.tar.gz
 sha256sum released/baseline.tar.gz > evidence/artifact-sha256.txt
 tar xf released/baseline.tar.gz -C released/base
