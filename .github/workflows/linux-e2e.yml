@@ -114,6 +114,12 @@ jobs:
           chmod +x packages/*.AppImage
           (cd baseline && ../packages/baseline.AppImage --appimage-extract > ../evidence/baseline-extract.log)
           (cd candidate && ../packages/candidate.AppImage --appimage-extract > ../evidence/candidate-extract.log)
+          (cd baseline/squashfs-root && find . \( -type f -o -type l \) | sort) > evidence/baseline-files.txt
+          (cd candidate/squashfs-root && find . \( -type f -o -type l \) | sort) > evidence/candidate-files.txt
+          comm -23 evidence/baseline-files.txt evidence/candidate-files.txt > evidence/baseline-only.txt
+          comm -13 evidence/baseline-files.txt evidence/candidate-files.txt > evidence/candidate-only.txt
+          while IFS= read -r path; do file -h "baseline/squashfs-root/$path"; done < evidence/baseline-only.txt > evidence/baseline-only-types.txt
+          ! grep -Ei 'lib(gtk|gdk|glib|gio|gobject|gnome)' evidence/baseline-only.txt
           sha256sum baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app | tee evidence/packaged-executables.sha256
           cmp baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app
           (cd baseline/squashfs-root && find . -type f \( -name '*.so' -o -name '*.so.*' \) -print0 | sort -z | xargs -0 sha256sum) > evidence/baseline-libraries.sha256
