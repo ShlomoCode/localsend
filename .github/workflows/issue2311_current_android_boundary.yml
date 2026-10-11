@@ -1,0 +1,70 @@
+name: Issue 2311 current Android gallery boundary
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_tagged:
+        description: Also build the APK with gallery boundary observations
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue2311-android-source-build
+  cancel-in-progress: false
+
+jobs:
+  current_boundary:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout diagnostic infrastructure
+        uses: actions/checkout@v6
+        with:
+          path: diagnostics
+          persist-credentials: false
+
+      - name: Checkout exact current app source
+        uses: actions/checkout@v6
+        with:
+          repository: ShlomoCode/localsend
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: current
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install current source Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+
+      - name: Install current source Rust SDK and Android ARM64 target
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add --toolchain 1.97.1 aarch64-linux-android
+
+      - name: Build current control and optional tagged APK
+        shell: bash
+        env:
+          ANDROID_KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+          ANDROID_KEY_STORE: ${{ secrets.ANDROID_KEY_STORE }}
+          RUSTUP_TOOLCHAIN: '1.97.1'
+          BUILD_TAGGED: ${{ inputs.build_tagged }}
+        run: bash diagnostics/support/diagnostics/issue2311-build-current-boundary.sh "$GITHUB_WORKSPACE/current" "$GITHUB_WORKSPACE/issue2311-current-build-evidence"
+
+      - name: Upload current APKs and source build evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: issue2311-current-boundary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: issue2311-current-build-evidence/
+          if-no-files-found: error
+          retention-days: 30
