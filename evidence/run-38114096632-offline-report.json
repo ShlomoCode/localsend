@@ -1,0 +1,46 @@
+{
+  "run": "38114096632",
+  "frame": "/tmp/localsend-bug-2414/evidence/run-38114096632/final/files-5-editor-open-0.png",
+  "title_original_cancel": true,
+  "original_filename_observed": true,
+  "cancel_tokens_absolute": [
+    {
+      "level": "5",
+      "page_num": "1",
+      "block_num": "1",
+      "par_num": "1",
+      "line_num": "1",
+      "word_num": "1",
+      "left": 483,
+      "top": 441,
+      "width": 46,
+      "height": 11,
+      "conf": "80.373039",
+      "text": "Cancel",
+      "band": "cancel",
+      "ocr_text_raw": "Cancel"
+    }
+  ],
+  "normalized_tokens": [
+    {
+      "raw": "Case2414Files5/file-O0000.txt",
+      "normalized": "Case2414Files5/file-00000.txt",
+      "band": "PSM6"
+    },
+    {
+      "raw": "Case2414Files5/file-O0000.txt",
+      "normalized": "Case2414Files5/file-00000.txt",
+      "band": "PSM6"
+    },
+    {
+      "raw": "Case2414Files5/file-O0000.txt",
+      "normalized": "Case2414Files5/file-00000.txt",
+      "band": "original"
+    },
+    {
+      "raw": "Case2414Files5/file-O0000.txt",
+      "normalized": "Case2414Files5/file-00000.txt",
+      "band": "field"
+    }
+  ]
+}

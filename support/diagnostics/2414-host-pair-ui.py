@@ -97,6 +97,45 @@ def dialog_screen(stage, count):
             word["top"] = int(word["top"]) // 3 + top
             for key in ("width", "height"):
                 word[key] = int(word[key]) // 3
+        # PSM 6 omits the buttons and confuses O with 0 in this fixture. Read
+        # observed foreground lines separately; all bands share the title anchor.
+        bands = [("title", 15, 18, width - 30, 48),
+                 ("original", 15, 68, width - 30, 38),
+                 ("field", 15, 108, width - 30, 53),
+                 ("buttons", 15, 178, width - 30, 55),
+                 ("cancel", width - 230, 178, 105, 55)]
+        roi["bands"] = []
+        for name, band_left, band_top, band_width, band_height in bands:
+            band_image = OUT / (stage + "-dialog-" + name + "-band.png")
+            band_ocr = OUT / (stage + "-dialog-" + name + "-band-ocr.png")
+            execute(["convert", str(crop), "-crop", f"{band_width}x{band_height}+{band_left}+{band_top}",
+                     "+repage", str(band_image)])
+            execute(["convert", str(band_image), "-resize", "300%", str(band_ocr)])
+            band_text = execute(["tesseract", str(band_ocr), "stdout", "--psm", "7", "tsv"])
+            (OUT / (stage + "-dialog-" + name + "-band.tsv")).write_text(band_text)
+            roi["bands"].append({"name": name, "left": band_left, "top": band_top,
+                                 "width": band_width, "height": band_height, "psm": 7})
+            band_words = list(csv.DictReader(io.StringIO(band_text), delimiter="\t", quoting=csv.QUOTE_NONE))
+            for word in band_words:
+                word["text"] = word.get("text") or ""
+                word["left"] = int(word["left"]) // 3 + left + band_left
+                word["top"] = int(word["top"]) // 3 + top + band_top
+                for key in ("width", "height"):
+                    word[key] = int(word[key]) // 3
+                word["band"] = name
+            # The full buttons band remains diagnostic. The isolated Cancel
+            # token supplies its real bounds, avoiding a merged button label.
+            if name != "buttons":
+                foreground.extend(band_words)
+        for word in foreground:
+            word["ocr_text_raw"] = word["text"]
+            # Only the known ASCII fixture filename suffix is normalized.
+            # Title, labels, directory prefix and Probe2414.txt remain literal.
+            word["text"] = re.sub(r"file-([0-9Oo]{5})\.txt\b",
+                                  lambda match: "file-" + match.group(1).replace("O", "0").replace("o", "0") + ".txt",
+                                  word["text"])
+        (OUT / (stage + "-dialog-roi.json")).write_text(json.dumps(roi, indent=2))
+        (OUT / (stage + "-dialog-absolute-words.json")).write_text(json.dumps(foreground, indent=2))
         return foreground, timing
     # No title means no proven dialog crop. Retain the full frame as discovery
     # evidence and let the same bounded predicate wait for its appearance.
