@@ -5,6 +5,19 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class Desktop2381 {
+ [StructLayout(LayoutKind.Sequential)] public struct WindowPoint {public int x,y;}
+ [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(WindowPoint point);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,System.Text.StringBuilder value,int size);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h,uint message,IntPtr wParam,string value);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,System.Text.StringBuilder value,int size);
+ public static string NativeFilename(string value) {
+  var h=WindowFromPoint(new WindowPoint {x=400,y=442});
+  var name=new System.Text.StringBuilder(128);GetClassName(h,name,name.Capacity);
+  if(name.ToString()!="Edit") throw new Exception("Filename point is not a native Edit control: "+name);
+  SendMessage(h,12,IntPtr.Zero,value);
+  var actual=new System.Text.StringBuilder(2048);GetWindowText(h,actual,actual.Capacity);
+  return actual.ToString();
+ }
  [StructLayout(LayoutKind.Sequential)] public struct KeyboardInput {public ushort vk,scan;public uint flags,time;public UIntPtr extra;}
  [StructLayout(LayoutKind.Sequential)] public struct MouseInput {public int x,y;public uint data,flags,time;public UIntPtr extra;}
  [StructLayout(LayoutKind.Explicit)] public struct InputUnion {[FieldOffset(0)] public KeyboardInput keyboard;[FieldOffset(0)] public MouseInput mouse;}
@@ -76,12 +89,19 @@ function FillNativeFilename([string]$path,[string]$snapshot) {
   if($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) {break}
   $element=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
  }
- if(-not $pattern) {throw "Native filename edit control does not expose ValuePattern"}
  $fullPath=(Resolve-Path $path).Path
- $pattern.SetValue($fullPath)
- Start-Sleep -Milliseconds 500
- $actual=$pattern.Current.Value
- @{inputApi="native UI Automation ValuePattern";requested=$fullPath;displayed=$actual;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$snapshot-filename-input.json"
+ if($pattern) {
+  $pattern.SetValue($fullPath)
+  Start-Sleep -Milliseconds 500
+  $actual=$pattern.Current.Value
+  $inputApi="native UI Automation ValuePattern"
+ } else {
+  # Some hosted native dialogs expose no UI Automation ValuePattern. The
+  # documented Win32 Edit-control API provides the same input/readback action.
+  $actual=[Desktop2381]::NativeFilename($fullPath)
+  $inputApi="native Win32 Edit WM_SETTEXT/GetWindowText (class verified)"
+ }
+ @{inputApi=$inputApi;requested=$fullPath;displayed=$actual;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$snapshot-filename-input.json"
  if($actual -cne $fullPath) {throw "Native filename control did not retain the exact fixture path"}
 }
 function Word([string]$word,[string]$snap) {
