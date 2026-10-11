@@ -1,0 +1,13 @@
+# Issue 3556 native TCP gate
+
+Manual, fork-only Windows Server 2022 workflow. The parent must reserve this issue's one BrowserStack session before dispatch; the cloud controller refreshes the device catalog and verifies a free account slot immediately before creating the session. Shared workflow concurrency prevents overlapping issue 3556 diagnostic jobs. Other issues may use the remaining account capacity.
+
+The job builds and privately uploads a separate native helper, then opens one physical Samsung Galaxy S20 / Android 10 App Automate session with one owned BrowserStack Local process. It does not build, modify, or launch LocalSend. The helper starts only after the controller observes and touches its native button.
+
+The helper first authenticates to `http://bs-local.com:8080/health` and checks the fresh embedded run marker. It then resolves that same hostname with native DNS, records every returned address, and connects a native Socket to the first address on port 53317 with a ten-second connect bound. This deliberately exposes the selected address rather than silently substituting loopback or an HTTP relay. A successful HTTP probe does not establish raw TCP support.
+
+Each of the deterministic 0, 1 and 65,537-byte cases flushes and half-closes Android output. The real runner listener on `0.0.0.0:53317` records byte count, SHA-256 and readable EOF, writes a JSON response containing the fresh marker/count/hash, flushes, then half-closes output. Android reads through EOF and verifies all three values. Read deadlines and a 25-second per-case socket-close watchdog bound stalled cases; DNS has a ten-second future deadline. The controller stops on the first native failure and never starts a larger transfer.
+
+Artifacts include native phases/timestamps, exception class and redacted message, observed XML and screenshots, authenticated HTTP evidence, native DNS and connect evidence, runner EOF/hash records, provider admission, and cleanup results. Credentials, authentication token, and private uploaded-app references are redacted. The capability-bearing APK remains in runner temporary storage and is deleted after use; it is never an evidence artifact.
+
+Run syntax checks, Java compilation and all runtime validation only in this owned Actions job. A pass is a tiny synthetic transport result, not an original-app reproduction, sustained-throughput result, or 16 GB result. The runner OS differs from the reported Windows 10 environment; the reporter's Android OS is unknown. The parent may separately authorize an original-app 64 MiB direct-path gate after reviewing a pass, or investigate a streaming diagnostic HTTP transport after a failure.
