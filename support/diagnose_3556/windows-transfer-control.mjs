@@ -6,6 +6,7 @@ import {spawn} from 'node:child_process';
 import net from 'node:net';
 import {createHash} from 'node:crypto';
 import {relay} from '../cloud_transport/relay.mjs';
+import shareScenario from './share-scenario.mjs';
 
 // Drive the unmodified apps. This 1 MiB control cannot establish 16GB throughput.
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -25,13 +26,16 @@ const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Sam
  boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','1 MiB control cannot extrapolate stable throughput or 16GB behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
+let sessionCreationAttempted=false;
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
 const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317});
 async function wd(method,url,body){
  const started=Date.now();
- const response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{
+ let response;
+ try{
+ response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{
   method,headers:{authorization:auth,'content-type':'application/json'},
-  body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
+  body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(url==='/session'?300000:120000)});
  const json=await response.json();
  // Never retain capabilities containing private uploaded-app references.
  appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
@@ -39,9 +43,34 @@ async function wd(method,url,body){
   status:response.status,elapsedMs:Date.now()-started}))+'\n');
  if(!response.ok||json.value?.error)throw Error('WebDriver '+response.status+' '+redact(json.value?.error||'invalid response')+' '+redact(String(json.value?.message||'').slice(0,600)));
  return json.value;
+ }catch(error){
+  appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
+   utc:new Date(started).toISOString(),method,path:url,body:url==='/session'?'[private capability references omitted]':body,
+   status:response?.status||null,elapsedMs:Date.now()-started,error:String(error.message||error)}))+'\n');
+  throw error;
+ }
 }
 const base=()=>'/session/'+session;
 async function source(){return wd('GET',base()+'/source');}
+async function recoverOwnedStartupSession(){
+ // A timed-out POST can still allocate a device. Resolve only this unique Actions build.
+ const get=async url=>{
+  const response=await fetch('https://api-cloud.browserstack.com/app-automate/'+url,{
+   headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+  assert(response.ok,'Owned startup lookup failed: '+response.status);return response.json();
+ };
+ const builds=await get('builds.json');
+ const owned=builds.map(b=>b.automation_build).filter(b=>b.name==='issue3556-'+process.env.GITHUB_RUN_ID);
+ assert(owned.length<=1,'Owned startup build identity is ambiguous');
+ if(!owned.length)return;
+ const sessions=(await get('builds/'+owned[0].hashed_id+'/sessions.json')).map(s=>s.automation_session);
+ assert(sessions.length<=1,'Owned startup session identity is ambiguous');
+ save('startup-session-status.json',sessions.map(s=>({id:s.hashed_id,status:s.status,reason:s.reason,duration:s.duration})));
+ if(sessions[0]?.status==='running'){
+  session=sessions[0].hashed_id;
+  save('session.json',{session,recoveredAfterStartupFailure:true,device:report.device,android:report.android});
+ }
+}
 async function snap(name,xml){
  const text=xml||await source();save(name+'.xml',text);
  const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
@@ -200,7 +229,12 @@ async function addFavorite(){
  // Hide it before waiting for fields, including when the preceding app rotated the device.
  await hideFavoriteKeyboard('initial');
  await snap('favorite-edit-keyboard-hidden-initial');
- const xml=await waitFor(s=>visibleFavoriteFields(s).length===3,30000,'Favorite dialog must expose exactly three visible EditTexts');
+ let xml;const fieldDeadline=Date.now()+30000;
+ do{
+  xml=await source();if(visibleFavoriteFields(xml).length===3)break;
+  await hideFavoriteKeyboard('waiting-for-visible-fields');await sleep(500);
+ }while(Date.now()<fieldDeadline);
+ assert.equal(visibleFavoriteFields(xml).length,3,'Favorite dialog must expose exactly three visible EditTexts');
  await snap('favorite-edit-before',xml);
  // v1.18.2 FavoriteEditDialog orders name, IP, and port; verify observed field bounds.
  const elements=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.EditText'});
@@ -213,8 +247,10 @@ async function addFavorite(){
  for(let i=0;i<fields.length;i++){
   await wd('POST',base()+'/element/'+fields[i].id+'/clear',{});
   await wd('POST',base()+'/element/'+fields[i].id+'/value',{text:values[i],value:[...values[i]]});
+  fields[i].observedText=await wd('GET',base()+'/element/'+fields[i].id+'/text');
+  assert.equal(fields[i].observedText,values[i],'Favorite field did not retain the intended value');
  }
- save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i]})));
+ save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i],observedText:f.observedText})));
  await snap('favorite-edit-filled');
  await hideFavoriteKeyboard('before-confirm');
  const confirmSource=await waitFor(s=>nodes(s).some(n=>(n['content-desc']==='Confirm'||n.text==='Confirm')&&
@@ -234,6 +270,7 @@ try{
  assert(Number.isFinite(plan.parallel_sessions_running)&&Number.isFinite(plan.parallel_sessions_max_allowed),'BrowserStack live capacity is unavailable');
  assert(plan.parallel_sessions_running<plan.parallel_sessions_max_allowed,'No live BrowserStack slot');
  await r.start();startedRelay=true;
+ sessionCreationAttempted=true;
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{
   platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2',
   'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],
@@ -276,9 +313,12 @@ try{
  await snap('file-picker-recent');await ui('textContains('+JSON.stringify(name)+')');
  const selected=await waitFor(s=>labels(s).some(v=>/Selection\nFiles: 1\nSize: 1\.0 MB/.test(v)),60000,'LocalSend did not show Selection, one file, and 1.0 MB');
  await snap('selected-one-file',selected);await addFavorite();
- const metricsBefore=r.status();report.sendUtc=new Date().toISOString();const sendStart=Date.now();
+ const metricsBefore=r.status();
  // Favorite selection registers again and then startSession sends the already selected file.
- await ui('descriptionContains("issue3556-cloud-receiver")');
+ const favorite=await wd('POST',base()+'/element',{using:'-android uiautomator',value:'new UiSelector().descriptionContains("issue3556-cloud-receiver")'});
+ const favoriteRect=await wd('GET',base()+'/element/'+elementId(favorite)+'/rect');
+ report.sendUtc=new Date().toISOString();const sendStart=Date.now();
+ await touch(favoriteRect,'Select registered issue3556-cloud-receiver favorite');
  await snap('send-first-frame');
  const end=sendStart+600000;let androidFinished=false,verifiedAt=null,waits=0;
  do{
@@ -307,20 +347,24 @@ try{
    report.transport={before:metricsBefore,after:metricsAfter,
     windowsToAndroidBytes:metricsAfter.fromSender-metricsBefore.fromSender,
     androidToWindowsBytes:metricsAfter.fromDevice-metricsBefore.fromDevice,
-    scope:'Transport counts include TLS and protocol traffic. Elapsed time includes registration, approval, network, saving, and up to 5s polling delay; 1 MiB only.'};
+    scope:'Transport counts include TLS and protocol traffic. Elapsed time starts immediately before the favorite touch and includes registration, approval, network and saving; observation lag is recorded separately. 1 MiB only.'};
    await snap('android-finished',xml);break;
   }
   await sleep(5000);
  }while(Date.now()<end);
  assert.equal(report.status,'passed','Ten-minute app-to-app control did not reach Android Finished and verified Windows save');
+ save('app-control-results.json',report);
  console.log('1 MiB Android-to-Windows app control passed; no 16GB or stable-throughput claim.');
+ if(process.env.SHARE_AFTER_CONTROL==='1'){
+  report.shareScenario=await shareScenario({session,wd,output});
+ }
 }catch(error){
  report.status='incomplete';report.error=redact(error.stack||error);
  if(session)await snap('failure').catch(()=>{});
  process.exitCode=1;
 }finally{
  try{await stopPhysicalServer();}catch(error){report.cleanupErrors.push('Temporary control server stop: '+redact(error.message));process.exitCode=1;}
- if(receiver&&!receiverExit){
+ try{if(receiver&&!receiverExit){
   writeFileSync(path.join(windowsOutput,'stop'),'stop');
   await Promise.race([receiverDone,sleep(15000)]);
   if(!receiverExit){
@@ -329,9 +373,14 @@ try{
    await Promise.race([new Promise(ok=>{killer.once('exit',ok);killer.once('error',ok);}),sleep(10000)]);
    await Promise.race([receiverDone,sleep(5000)]);
   }
- }
+ }}catch(error){report.cleanupErrors.push('Owned receiver shutdown: '+redact(error.message));process.exitCode=1;}
  report.receiverExit=receiverExit;report.finishedUtc=new Date().toISOString();
  for(const log of receiverLogs)log.end();
+ if(!session&&sessionCreationAttempted){
+  try{await recoverOwnedStartupSession();}catch(error){
+   report.cleanupErrors.push('Owned startup session lookup: '+redact(error.message));process.exitCode=1;
+  }
+ }
  if(session){
   try{await wd('DELETE',base());}catch(error){
    report.cleanupErrors.push('Owned session delete: '+redact(error.message));

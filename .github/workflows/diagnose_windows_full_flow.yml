@@ -46,11 +46,12 @@ jobs:
   windows-transfer-control:
     if: inputs.scenario == 'windows-transfer-control'
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 65
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue3556-${{ github.run_id }}
+      SHARE_AFTER_CONTROL: '1'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -70,11 +71,19 @@ jobs:
           New-Item -ItemType Directory -Force evidence | Out-Null
           node --check support/diagnose_3556/windows-transfer-control.mjs
           if($LASTEXITCODE -ne 0){throw 'Controller syntax failed'}
+          node --check support/diagnose_3556/share-scenario.mjs
+          if($LASTEXITCODE -ne 0){throw 'Share callback syntax failed'}
           foreach($script in @('windows-helper-build.ps1','windows-transfer-step.ps1','windows_receiver.ps1')){
             $tokens=$null; $errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD "support/diagnose_3556/$script"),[ref]$tokens,[ref]$errors)
             if($errors.Count -gt 0){throw ($errors | Out-String)}
           }
+          $receiverSource=Get-Content support/diagnose_3556/windows_receiver.ps1 -Raw
+          $nativeOcr=[regex]::Match($receiverSource,"(?s)param\(\[string\]\`$Image,\[string\]\`$Result\).*?(?=\r?\n'@)").Value
+          if(-not $nativeOcr){throw 'Native OCR source not found'}
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($nativeOcr,[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){throw ($errors | Out-String)}
           choco install ffmpeg --yes --no-progress
           if($LASTEXITCODE -ne 0){throw 'ffmpeg install failed'}
           $ffmpeg=(Get-ChildItem C:/ProgramData/chocolatey/lib/ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName

@@ -21,6 +21,8 @@ $report=[ordered]@{
  environmentMismatch='GitHub-hosted Windows Server 2022/2025 differs from the reported Windows 10 Pro.'
  transportBoundary='Android 127.0.0.1:53318 reverse relay to Windows 127.0.0.1:53317; differs from a shared LAN.'
  evidenceLevel='Prepared actual-release UI receiver; inspect cloud evidence before classifying.'
+ acceptCapability=@{status='unverified';scope='Window and listener readiness do not verify an observable Accept control.'}
+ ocrCapability=@{status='not-probed';limitation=$null}
  runner=$env:RUNNER_NAME; runnerImage=$env:ImageOS; runnerImageVersion=$env:ImageVersion
  os=$null; osArchitecture=[Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
  session=$env:SESSIONNAME; archive=$null; executable=$null; processId=$null
@@ -28,6 +30,7 @@ $report=[ordered]@{
  snapshots=@(); actions=@(); savedFiles=@(); errors=@()
 }
 $app=$null; $ruleName=$null; $appHwnd=[IntPtr]::Zero; $exitCode=1
+$nextOcr=[DateTime]::MinValue; $ocrNumber=0; $ocrUnavailable=$false
 function Write-JsonFile($Path,$Value) {
  [IO.File]::WriteAllText("$Path.tmp",(ConvertTo-Json -InputObject $Value -Depth 12),[Text.UTF8Encoding]::new($false))
  Move-Item -LiteralPath "$Path.tmp" -Destination $Path -Force
@@ -136,9 +139,114 @@ function Save-Snapshot([string]$Name) {
  }
  $report.snapshots+=@{ name=$Name; screenshot=$path; state=(Join-Path $OutputDirectory "$Name.json") }
 }
+function Get-BitmapDigest([Drawing.Bitmap]$Bitmap) {
+ $locked=$Bitmap.LockBits([Drawing.Rectangle]::new(0,0,$Bitmap.Width,$Bitmap.Height),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
+ try {
+  $bytes=[byte[]]::new([Math]::Abs($locked.Stride)*$Bitmap.Height)
+  [Runtime.InteropServices.Marshal]::Copy($locked.Scan0,$bytes,0,$bytes.Length)
+  # PNG decoding can normalize alpha; only the visible RGB pixels determine freshness.
+  for($i=3;$i -lt $bytes.Length;$i+=4) { $bytes[$i]=0 }
+  $hash=[Security.Cryptography.SHA256]::Create()
+  try { return [Convert]::ToHexString($hash.ComputeHash($bytes)) } finally { $hash.Dispose() }
+ } finally { $Bitmap.UnlockBits($locked) }
+}
+function Invoke-OcrAccept {
+ # UIA can expose only FLUTTERVIEW in the official release. OCR must prove an incoming dialog first.
+ if($script:ocrUnavailable) { return $false }
+ if([DateTime]::UtcNow -lt $script:nextOcr) { return $false }
+ $script:nextOcr=[DateTime]::UtcNow.AddSeconds(5); $script:ocrNumber++
+ $name='ocr-{0:D3}' -f $script:ocrNumber; Save-Snapshot $name
+ $window=@([ReceiverNative]::All() | Where-Object { $_.Hwnd -eq $appHwnd.ToInt64() -and $_.Visible })
+ if($window.Count -ne 1 -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd) { return $false }
+ $w=$window[0]; $screen=[System.Windows.Forms.SystemInformation]::VirtualScreen
+ $rect=[Drawing.Rectangle]::new($w.Left-$screen.Left,$w.Top-$screen.Top,$w.Width,$w.Height)
+ $full=[Drawing.Bitmap]::new((Join-Path $OutputDirectory "$name.png"))
+ try {
+  if($rect.Left -lt 0 -or $rect.Top -lt 0 -or $rect.Right -gt $full.Width -or $rect.Bottom -gt $full.Height) { return $false }
+  $frame=$full.Clone($rect,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  try {
+   $framePath=Join-Path $OutputDirectory "$name-window.png"; $frame.Save($framePath,[Drawing.Imaging.ImageFormat]::Png)
+   $digest=Get-BitmapDigest $frame
+  } finally { $frame.Dispose() }
+ } finally { $full.Dispose() }
+ $ocrScript=Join-Path $OutputDirectory 'native-ocr.ps1'
+ if(-not (Test-Path $ocrScript)) {
+  # Framework Windows PowerShell supports native WinRT projection independently of pwsh's runtime.
+  [IO.File]::WriteAllText($ocrScript,@'
+param([string]$Image,[string]$Result)
+$ErrorActionPreference='Stop'
+$report=@{status='unsupported';image=$Image;words=@()}
+try {
+ Add-Type -AssemblyName System.Runtime.WindowsRuntime
+ [void][Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime]
+ [void][Windows.Graphics.Imaging.BitmapDecoder,Windows.Foundation,ContentType=WindowsRuntime]
+ [void][Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
+ [void][Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
+ function Await($Operation,[Type]$Type) {
+  $method=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+  $task=$method.MakeGenericMethod($Type).Invoke($null,@($Operation)); $task.Wait(); return $task.Result
+ }
+ $file=Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Image)) ([Windows.Storage.StorageFile])
+ $stream=Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+ try {
+  $decoder=Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+  $bitmap=Await ($decoder.GetSoftwareBitmapAsync([Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8,[Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied)) ([Windows.Graphics.Imaging.SoftwareBitmap])
+  try {
+   $engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new('en-US'))
+   if($null -eq $engine) { throw 'Native Windows OCR en-US language is unavailable.' }
+   $recognized=Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+   $report.status='recognized'; $report.text=$recognized.Text; $report.textAngle=$recognized.TextAngle
+   foreach($line in $recognized.Lines) { foreach($word in $line.Words) {
+    $r=$word.BoundingRect; $report.words+=@{text=$word.Text;x=$r.X;y=$r.Y;width=$r.Width;height=$r.Height}
+   } }
+  } finally { $bitmap.Dispose() }
+ } finally { $stream.Dispose() }
+} catch { $report.error=$_.Exception.ToString() }
+[IO.File]::WriteAllText($Result,(ConvertTo-Json $report -Depth 8),[Text.UTF8Encoding]::new($false))
+'@,[Text.UTF8Encoding]::new($false))
+ }
+ $result=Join-Path $OutputDirectory "$name-recognized.json"
+ try {
+  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$ocrScript+'"'),'-Image',('"'+$framePath+'"'),'-Result',('"'+$result+'"')) -PassThru -WindowStyle Hidden
+  if(-not $worker.WaitForExit(15000)) { $worker.Kill(); throw 'Native Windows OCR exceeded its 15-second bound.' }
+  if(-not (Test-Path $result)) { throw 'Native Windows OCR produced no result.' }
+  $observed=Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
+  if($observed.status -ne 'recognized') { throw "Native Windows OCR unsupported: $($observed.error)" }
+ } catch {
+  # Capability probing happens while idle too. Preserve the limitation without aborting before Send.
+  $script:ocrUnavailable=$true; $report.ocrCapability.status='unsupported'; $report.ocrCapability.limitation=$_.Exception.Message
+  if(-not (Test-Path $result)) { Write-JsonFile $result @{status='unsupported';image=$framePath;error=$_.Exception.ToString();words=@()} }
+  Write-JsonFile $resultPath $report
+  return $false
+ }
+ $report.ocrCapability.status='recognized'
+ $accept=@($observed.words | Where-Object text -CEQ 'Accept')
+ $decline=@($observed.words | Where-Object text -CEQ 'Decline')
+ if($accept.Count -eq 0 -or $decline.Count -eq 0) { return $false }
+ if($accept.Count -ne 1 -or $decline.Count -ne 1 -or $null -ne $observed.textAngle -and [Math]::Abs([double]$observed.textAngle) -gt 1) { throw 'Incoming OCR buttons are ambiguous or rotated; no click.' }
+ $button=$accept[0]; $other=$decline[0]
+ if($button.width -le 0 -or $button.height -le 0 -or $button.x -lt 0 -or $button.y -lt 0 -or $button.x+$button.width -gt $w.Width -or $button.y+$button.height -gt $w.Height -or [Math]::Abs($button.y-$other.y) -gt [Math]::Max($button.height,$other.height)*2) { throw 'Incoming OCR button bounds are invalid; no click.' }
+ Write-JsonFile (Join-Path $OutputDirectory "$name-incoming.json") @{utc=[DateTime]::UtcNow.ToString('o');recognized=$result;screenshot=$framePath;accept=$button;decline=$other;window=$w;visibleRgbSha256=$digest}
+ # Recheck ownership, foreground, geometry and every window pixel immediately before input.
+ $now=@([ReceiverNative]::All() | Where-Object { $_.Hwnd -eq $appHwnd.ToInt64() -and $_.Visible })
+ if($now.Count -ne 1 -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd -or $now[0].Left -ne $w.Left -or $now[0].Top -ne $w.Top -or $now[0].Width -ne $w.Width -or $now[0].Height -ne $w.Height) { return $false }
+ $fresh=[Drawing.Bitmap]::new($w.Width,$w.Height)
+ try {
+  $graphics=[Drawing.Graphics]::FromImage($fresh)
+  try { $graphics.CopyFromScreen($w.Left,$w.Top,0,0,$fresh.Size) } finally { $graphics.Dispose() }
+  if((Get-BitmapDigest $fresh) -ne $digest) { return $false }
+ } finally { $fresh.Dispose() }
+ $x=[int][Math]::Round($w.Left+$button.x+$button.width/2); $y=[int][Math]::Round($w.Top+$button.y+$button.height/2)
+ if(-not [ReceiverNative]::ClickScreen($appHwnd,$x,$y)) { throw 'Could not click the fresh OCR Accept bounds.' }
+ $report.acceptCapability.status='verified-native-ocr-accept'
+ $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='Accept';method='Native Windows OCR unique Accept and Decline, unchanged foreground window pixels';bounds=$button;screenCenter=@{x=$x;y=$y};recognized=$result;screenshot=$framePath}
+ Start-Sleep -Milliseconds 500; Save-Snapshot 'after-accept'; return $true
+}
 function Invoke-Accept {
+ $hasUiaAccept=$false
  foreach($element in (Get-AppElements)) {
   try { $v=$element.Current } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
+  if($v.Name -eq 'Accept') { $hasUiaAccept=$true }
   if($v.Name -ne 'Accept' -or -not $v.IsEnabled -or $v.IsOffscreen -or $v.ControlType -ne [System.Windows.Automation.ControlType]::Button) { continue }
   Save-Snapshot 'incoming-before-accept'; $pattern=$null; $method='UI Automation InvokePattern'
   if($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) {
@@ -149,9 +257,11 @@ function Invoke-Accept {
    $method='Typed native HWND input at observed semantic Accept button bounds'
   }
   $report.actions+=@{ utc=[DateTime]::UtcNow.ToString('o'); name='Accept'; method=$method; bounds=$v.BoundingRectangle.ToString() }
+  $report.acceptCapability.status='verified-uia-accept'
   Start-Sleep -Milliseconds 500; Save-Snapshot 'after-accept'; return $true
  }
- return $false
+ if($hasUiaAccept) { return $false }
+ return Invoke-OcrAccept
 }
 try {
  $report.os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
