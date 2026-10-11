@@ -22,7 +22,7 @@ provision)
   sudo systemctl set-default graphical.target
   sudo systemctl enable --now gdm
   ;;
-integrate)
+integrate|integrate-source)
   session_env
   gsettings set org.gnome.shell disable-user-extensions false
   gsettings set org.gnome.shell enabled-extensions "['issue2433-probe@localsend.test']"
@@ -33,10 +33,14 @@ integrate)
   sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
   sudo flatpak install -y flathub it.mijorus.gearlever
   flatpak info it.mijorus.gearlever > evidence/gearlever-package.txt
-  curl -fL --retry 3 -o /home/probe/LocalSend-1.17.0-linux-x86-64.AppImage https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.AppImage
-  sha256sum /home/probe/LocalSend-1.17.0-linux-x86-64.AppImage > evidence/release.sha256
-  chmod +x /home/probe/LocalSend-1.17.0-linux-x86-64.AppImage
-  flatpak run it.mijorus.gearlever --integrate /home/probe/LocalSend-1.17.0-linux-x86-64.AppImage --yes > evidence/gearlever-integration.txt 2>&1
+  image=/home/probe/baseline.AppImage
+  if [ "$1" = integrate ]; then
+    image=/home/probe/LocalSend-1.17.0-linux-x86-64.AppImage
+    curl -fL --retry 3 -o "$image" https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.AppImage
+  fi
+  sha256sum "$image" > evidence/release.sha256
+  chmod +x "$image"
+  flatpak run it.mijorus.gearlever --integrate "$image" --yes > evidence/gearlever-integration.txt 2>&1
   find ~/.local/share/applications -name '*.desktop' -print -exec cat {} \; > evidence/integrated-desktop.txt
   find ~/.local/share -type f \( -name '*.png' -o -name '*.svg' \) -exec sha256sum {} \; > evidence/integrated-icons.sha256
   cp -a ~/.local/share/applications evidence/desktop-files
@@ -45,7 +49,7 @@ integrate)
   for i in $(seq 1 30); do if probe Inspect > evidence/probe-ready.txt 2>&1; then break; fi; sleep 2; done
   probe Inspect >> evidence/probe-ready.txt
   ;;
-observe)
+observe|observe-source)
   session_env
   desktop=$(find ~/.local/share/applications -name '*.desktop' -exec grep -l '^Name=LocalSend' {} \; | head -1)
   test -n "$desktop"
@@ -80,6 +84,18 @@ observe)
     pkill -x localsend_app || true
     sleep 6
   }
+  if [ "$1" = observe-source ]; then
+    cp "$desktop" evidence/source-baseline.desktop
+    for repeat in 1 2 3; do run_case "source-baseline-$repeat" generic org.localsend.localsend_app; done
+    flatpak run it.mijorus.gearlever --remove /home/probe/AppImages/localsend.appimage --delete --yes > evidence/source-baseline-remove.txt 2>&1
+    chmod +x /home/probe/candidate.AppImage
+    sha256sum /home/probe/candidate.AppImage > evidence/source-candidate.sha256
+    flatpak run it.mijorus.gearlever --integrate /home/probe/candidate.AppImage --yes > evidence/source-candidate-integrate.txt 2>&1
+    cp "$desktop" evidence/source-candidate.desktop
+    sleep 6
+    for repeat in 1 2 3; do run_case "source-candidate-$repeat" matched org.localsend.localsend_app; done
+    exit 0
+  fi
   cp "$desktop" evidence/1.17-original.desktop
   for repeat in 1 2 3; do run_case "1.17-baseline-$repeat" generic localsend_app; done
   printf '\nStartupWMClass=localsend_app\n' >> "$desktop"

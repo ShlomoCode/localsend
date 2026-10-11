@@ -10,6 +10,14 @@ capture() {
   convert "evidence/cloud/$name.ppm" "evidence/cloud/$name.png"
 }
 case "$1" in
+prepare-appdir)
+  mkdir AppDir
+  cp -a source/app/build/linux/x64/release/bundle/. AppDir/
+  for size in 32 128 256; do
+    mkdir -p "AppDir/usr/share/icons/hicolor/${size}x${size}/apps"
+    cp "source/app/assets/img/logo-$size.png" "AppDir/usr/share/icons/hicolor/${size}x${size}/apps/localsend.png"
+  done
+  ;;
 boot)
   sudo apt-get update
   sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick openssh-client
@@ -54,7 +62,12 @@ provision)
     sleep 10
   done
   test "$ready" = 1
-  timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh integrate' 2>&1 | tee evidence/cloud/integration.log
+  if [ "${SOURCE_COMPARISON:-false}" = true ]; then
+    scp "${ssh_opts[@]/-p/-P}" packages-2433/*.AppImage probe@127.0.0.1:/home/probe/
+    timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh integrate-source' 2>&1 | tee evidence/cloud/integration.log
+  else
+    timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh integrate' 2>&1 | tee evidence/cloud/integration.log
+  fi
   capture integrated
   ;;
 observe)
@@ -62,7 +75,9 @@ observe)
   printf 'sendkey ret\n' | timeout 10 sudo socat - UNIX-CONNECT:/tmp/issue2433/monitor
   sleep 3
   capture after-welcome-dismiss
-  timeout 600 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh observe' > evidence/cloud/observe.log 2>&1
+  mode=observe
+  if [ "${SOURCE_COMPARISON:-false}" = true ]; then mode=observe-source; fi
+  timeout 600 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash issue2433-guest.sh $mode" > evidence/cloud/observe.log 2>&1
   capture observation-final
   ;;
 collect)
