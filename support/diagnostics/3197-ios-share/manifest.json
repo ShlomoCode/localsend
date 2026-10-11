@@ -1,0 +1,15 @@
+{
+  "version": "0.0.15",
+  "sourceCommit": "c1ce322fb3acf08e44f329b8b7208b8b0d91e244",
+  "files": {
+    "ios/Models/Classes/ShareHandlerIosViewController.swift": {
+      "originalSha256": "db8767a0e2dac514967467c8c67b2820cd625ac3c70f10afaf42946a0d3379b8",
+      "diagnosticSha256": "fd50100cd40951c75fa85b1cf98729bc78854161a7a9125378034aed5d2a2725"
+    },
+    "ios/Classes/SwiftShareHandlerIosPlatform.swift": {
+      "originalSha256": "3568747c254ed50b709a8604bdf28075c030851cbb449d44496dc80bac8675fb",
+      "diagnosticSha256": "47c9b8473add0efab2267117c241acbda67633356e11a49a65e329fd530ad777"
+    }
+  },
+  "patchSha256": "04477ce3656a97af68636b4b0bd666239f4ae5df55defa39ce744d6df2e30a84"
+}

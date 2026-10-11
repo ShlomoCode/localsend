@@ -1,0 +1,80 @@
+--- a/ios/Models/Classes/ShareHandlerIosViewController.swift
++++ b/ios/Models/Classes/ShareHandlerIosViewController.swift
+@@ -32,0 +33,28 @@
++
++
++    // Diagnostic only: never log payload values or use these groups as fallbacks.
++    private static func observe3197(_ stage: String) {
++        let bundle = Bundle.main.bundleIdentifier ?? ""
++        let host = bundle.split(separator: ".").dropLast().joined(separator: ".")
++        let derived = "group.\(host)"
++        let configured = Bundle.main.object(forInfoDictionaryKey: "AppGroupId") as? String
++        var groups = ["group.org.localsend.localsendApp", derived]
++        if let configured = configured { groups.append(configured) }
++        for group in Set(groups).sorted() {
++            let available = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) != nil
++            let defaults = UserDefaults(suiteName: group)
++            let value = defaults?.object(forKey: "ShareKey")
++            let length = (value as? Data)?.count ?? (value as? String)?.utf8.count ?? -1
++            let record: [String: Any] = [
++                "role": "extension", "stage": stage, "bundle": bundle,
++                "host": host, "derivedGroup": derived,
++                "configuredGroup": configured ?? "", "queriedGroup": group,
++                "containerAvailable": available,
++                "shareKeyPresent": value != nil, "shareKeyLength": length
++            ]
++            if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
++               let line = String(data: data, encoding: .utf8) {
++                NSLog("LS3197_OBSERVE %@", line)
++            }
++        }
++    }
+@@ -49,0 +78 @@
++        Self.observe3197("viewDidLoad.before")
+@@ -53,0 +83 @@
++        Self.observe3197("viewDidLoad.afterLoadIds")
+@@ -59,0 +90 @@
++        Self.observe3197("viewDidAppear.before")
+@@ -60,0 +92 @@
++        Self.observe3197("viewDidAppear.afterInherited")
+@@ -269,0 +302 @@
++        Self.observe3197("ShareKey.write.before")
+@@ -271,0 +305 @@
++        Self.observe3197("ShareKey.write.after")
+--- a/ios/Classes/SwiftShareHandlerIosPlatform.swift
++++ b/ios/Classes/SwiftShareHandlerIosPlatform.swift
+@@ -15,0 +16,28 @@
++
++    // Diagnostic only: never log payload values or use these groups as fallbacks.
++    private static func observe3197(_ stage: String) {
++        let bundle = Bundle.main.bundleIdentifier ?? ""
++        let host = bundle
++        let derived = "group.\(host)"
++        let configured = Bundle.main.object(forInfoDictionaryKey: "AppGroupId") as? String
++        var groups = ["group.org.localsend.localsendApp", derived]
++        if let configured = configured { groups.append(configured) }
++        for group in Set(groups).sorted() {
++            let available = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) != nil
++            let defaults = UserDefaults(suiteName: group)
++            let value = defaults?.object(forKey: "ShareKey")
++            let length = (value as? Data)?.count ?? (value as? String)?.utf8.count ?? -1
++            let record: [String: Any] = [
++                "role": "runner", "stage": stage, "bundle": bundle,
++                "host": host, "derivedGroup": derived,
++                "configuredGroup": configured ?? "", "queriedGroup": group,
++                "containerAvailable": available,
++                "shareKeyPresent": value != nil, "shareKeyLength": length
++            ]
++            if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
++               let line = String(data: data, encoding: .utf8) {
++                NSLog("LS3197_OBSERVE %@", line)
++            }
++        }
++    }
++
+@@ -30,0 +59 @@
++        observe3197("plugin.register")
+@@ -115,0 +145 @@
++        Self.observe3197("handleUrl.before")
+@@ -131,0 +162 @@
++            Self.observe3197("ShareKey.read.after")
