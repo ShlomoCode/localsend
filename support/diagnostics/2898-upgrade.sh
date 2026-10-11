@@ -23,6 +23,8 @@ apt-get update 2>&1 | tee "$E/debian13-apt-update.log"
 apt-get upgrade -y --without-new-pkgs 2>&1 | tee "$E/debian13-upgrade.log"
 apt-get full-upgrade -y 2>&1 | tee "$E/debian13-full-upgrade.log"
 inventory debian13-before-localsend
+if [ "${PROBE_PREPARE_ONLY:-0}" = 1 ]; then exit 0; fi
+
 [ "$(dpkg-query -W -f='${Version}' libappindicator3-1)" = 0.4.92-7 ]
 ! dpkg-query -W -f='${db:Status-Abbrev}' libayatana-appindicator3-1 2>/dev/null | grep -q ^ii
 curl -L --fail --retry 3 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o "$E/LocalSend-1.17.0-linux-x86-64.deb"

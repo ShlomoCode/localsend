@@ -1,4 +1,4 @@
-name: Diagnose 2898 Debian upgrade
+name: Diagnose 2898 Debian upgrade package comparison
 on:
   workflow_dispatch:
 concurrency:
@@ -8,23 +8,55 @@ jobs:
   investigate:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
-      - name: Debian 12 to 13 userspace upgrade and launch
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/bug-2898-debian-dependency
+          path: source
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue2754-c1ce-flutter3419-linux-x64
+          path: /tmp/issue2754-build
+          run-id: 38132747719
+          github-token: ${{ github.token }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.9"
+          channel: stable
+      - name: Package exact current source bundle and historical payload
+        run: bash support/diagnostics/2898-package.sh
+      - name: Preserve valid upgraded pre-installation state
         run: |
           mkdir -p evidence/cloud
           uname -a > evidence/cloud/host-kernel.txt
           lscpu > evidence/cloud/host-cpu.txt
           docker pull debian:bookworm
           docker image inspect debian:bookworm > evidence/cloud/container-image.json
-          docker run --name issue2898 -v "$PWD:/work" debian:bookworm bash /work/support/diagnostics/2898-upgrade.sh
-      - name: Preserve logs
+          docker run --name issue2898-prepare -e PROBE_PREPARE_ONLY=1 -v "$PWD:/work" debian:bookworm bash /work/support/diagnostics/2898-upgrade.sh
+          docker commit issue2898-prepare issue2898:upgraded-preinstall
+          docker image inspect issue2898:upgraded-preinstall > evidence/cloud/preinstall-image.json
+      - name: Install and launch all four packages from identical state
+        run: |
+          set +e
+          result=0
+          for variant in release-baseline release-candidate current-baseline current-candidate; do
+            docker run --name "issue2898-$variant" -e "PROBE_CASE=$variant" -v "$PWD:/work" issue2898:upgraded-preinstall bash /work/support/diagnostics/2898-installed-case.sh
+            status=$?
+            echo "$variant exit_status=$status" | tee -a evidence/cloud/case-results.txt
+            if [ "$status" != 0 ]; then result=1; fi
+          done
+          exit "$result"
+      - name: Preserve evidence on every outcome
         if: always()
         run: |
+          mkdir -p evidence/cloud
           sudo chown -R "$(id -u):$(id -g)" evidence/cloud
-          docker logs issue2898 > evidence/cloud/container-console.log 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: issue2898-debian-upgrade-evidence
+          name: issue2898-package-comparison-evidence
           path: evidence/cloud/
