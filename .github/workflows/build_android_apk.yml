@@ -7,6 +7,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -57,6 +59,7 @@ jobs:
       - name: Check candidate regression behavior
         working-directory: app
         run: |
+          set -o pipefail
           flutter test test/widget/dialogs/text_field_with_actions_test.dart --reporter expanded | tee ../evidence-build/candidate-tests.log
           flutter analyze --no-pub | tee ../evidence-build/analyze.log
           sha256sum lib/pages/tabs/settings_tab.dart lib/widget/dialogs/text_field_with_actions.dart test/widget/dialogs/text_field_with_actions_test.dart > ../evidence-build/validated-source-sha256.txt
