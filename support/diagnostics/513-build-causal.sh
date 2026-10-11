@@ -26,6 +26,11 @@ fvm flutter --version > "$diagnostic_root/evidence/causal/sdk.txt"
 cp app/pubspec.yaml "$build_root/app-pubspec.original"
 cp pubspec.lock "$build_root/lock.original"
 for condition in normal negative positive; do
+  # Each native intervention gets its own checkout, CMake cache and objects.
+  # Switching symlink targets in an existing build can reuse older plugin objects.
+  git -C "$build_root/source" worktree add --detach "$build_root/source-$condition" c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+  cd "$build_root/source-$condition"
+  fvm use 3.41.9 --skip-pub-get
   cp "$build_root/app-pubspec.original" app/pubspec.yaml
   cp "$build_root/lock.original" pubspec.lock
   if [[ "$condition" != normal ]]; then
@@ -34,6 +39,14 @@ for condition in normal negative positive; do
   (cd app && fvm flutter pub get && fvm flutter build linux --release) > "$diagnostic_root/evidence/causal/build-$condition.txt" 2>&1
   cp pubspec.lock "$diagnostic_root/evidence/causal/lock-$condition.yaml"
   git diff > "$diagnostic_root/evidence/causal/source-diff-$condition.patch"
+  plugin_source=$(realpath app/linux/flutter/ephemeral/.plugin_symlinks/desktop_drop)
+  printf 'checkout=%s\nplugin_source=%s\n' "$PWD" "$plugin_source" > "$diagnostic_root/evidence/causal/native-provenance-$condition.txt"
+  sha256sum "$plugin_source/linux/desktop_drop_plugin.cc" "$plugin_source/lib/src/channel.dart" >> "$diagnostic_root/evidence/causal/native-provenance-$condition.txt"
+  native_plugin=$(find app/build/linux/x64/release/bundle -name '*desktop_drop*.so' -print -quit)
+  sha256sum "$native_plugin" >> "$diagnostic_root/evidence/causal/native-provenance-$condition.txt"
+  cp "$native_plugin" "$diagnostic_root/evidence/causal/$condition-desktop-drop.so"
+  strings "$native_plugin" > "$diagnostic_root/evidence/causal/native-strings-$condition.txt"
+  cp app/build/linux/x64/release/.ninja_log "$diagnostic_root/evidence/causal/ninja-$condition.log"
   manifest_root="$build_root/manifest-$condition"
   cp -a "$build_root/flathub" "$manifest_root"
   tar -C app/build/linux/x64/release/bundle -czf "$manifest_root/LocalSend.tar.gz" .
@@ -43,5 +56,9 @@ for condition in normal negative positive; do
   cp "$manifest_root/org.localsend.localsend_app.yml" "$diagnostic_root/evidence/causal/manifest-$condition.yml"
   (cd "$manifest_root" && flatpak-builder --force-clean --repo="$build_root/flatpak-repo" --default-branch="$condition" "$build_root/flatpak-build" org.localsend.localsend_app.yml) > "$diagnostic_root/evidence/causal/package-$condition.txt" 2>&1
   flatpak build-bundle "$build_root/flatpak-repo" "$diagnostic_root/evidence/causal/$condition.flatpak" org.localsend.localsend_app "$condition"
+  ostree --repo="$build_root/flatpak-repo" checkout --user-mode "app/org.localsend.localsend_app/x86_64/$condition" "$build_root/packaged-$condition"
+  packaged_plugin=$(find "$build_root/packaged-$condition/files" -name '*desktop_drop*.so' -print -quit)
+  sha256sum "$packaged_plugin" >> "$diagnostic_root/evidence/causal/native-provenance-$condition.txt"
+  cmp "$native_plugin" "$packaged_plugin"
 done
 sha256sum "$diagnostic_root"/evidence/causal/*.flatpak > "$diagnostic_root/evidence/causal/package-sha256.txt"

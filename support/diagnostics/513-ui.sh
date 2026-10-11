@@ -3,6 +3,21 @@
 set -euo pipefail
 monitor=/home/runner/513-vm/monitor
 qmp=/home/runner/513-vm/qmp
+native_identity() {
+  /home/runner/513-vm/ssh 'sudo bash -s' >> evidence/vm/mapped-native-identity.txt <<'GUEST'
+date -u
+for maps in /proc/[0-9]*/maps; do
+  plugin=$(awk '/desktop_drop.*\.so/ {print $NF; exit}' "$maps" 2>/dev/null) || continue
+  test -n "$plugin" || continue
+  pid=${maps#/proc/}; pid=${pid%/maps}
+  printf 'PID=%s\n' "$pid"
+  tr '\0' ' ' < "/proc/$pid/cmdline"
+  printf '\n'
+  cat "$maps" | grep desktop_drop
+  sha256sum "/proc/$pid/root$plugin"
+done
+GUEST
+}
 capture() {
   local name=$1
   printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/$name.ppm" | timeout 4 sudo socat - UNIX-CONNECT:$monitor >/dev/null
@@ -61,6 +76,7 @@ button true
 button false
 sleep 2
 capture 04b-downloads-app-result
+native_identity
 wait "$record_pid"
 # Relaunch the application to avoid keeping an earlier selection.
 /home/runner/513-vm/ssh 'flatpak kill org.localsend.localsend_app; export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0; nohup flatpak run org.localsend.localsend_app >>/home/probe/513-app.log 2>&1 </dev/null &'
@@ -90,6 +106,7 @@ button true
 button false
 sleep 2
 capture 07b-documents-app-result
+native_identity
 wait "$record_pid"
 # Repeat the exact Documents condition in fresh application processes.
 for repetition in 2 3; do
@@ -111,6 +128,7 @@ for repetition in 2 3; do
   button true
   button false
   capture "repeat-$repetition-result"
+  native_identity
 done
 # Supported file chooser path: same Documents file, without filesystem overrides.
 if [[ "${SOURCE_DROP_SEND:-0}" == 1 ]]; then
