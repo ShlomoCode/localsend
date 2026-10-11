@@ -6,7 +6,7 @@ on:
       renderer:
         description: Diagnostic renderer, unchanged source and historical Flutter
         type: choice
-        options: [impeller, skia]
+        options: [impeller, skia, flutter-metal-layer]
         default: impeller
   push:
     branches: [codex/issue2453-investigation]
@@ -73,13 +73,20 @@ jobs:
           fvm flutter pub get --enforce-lockfile 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
 
       - name: Configure supported diagnostic renderer input
-        if: inputs.renderer == 'skia'
+        if: inputs.renderer != 'impeller'
         working-directory: source/app
         shell: bash
         run: |
           set -euo pipefail
-          /usr/libexec/PlistBuddy -c 'Add :FLTEnableImpeller bool false' ios/Runner/Info.plist
-          test "$(plutil -extract FLTEnableImpeller raw ios/Runner/Info.plist)" = false
+          if [[ '${{ inputs.renderer }}' == skia ]]; then
+            /usr/libexec/PlistBuddy -c 'Add :FLTEnableImpeller bool false' ios/Runner/Info.plist
+            test "$(plutil -extract FLTEnableImpeller raw ios/Runner/Info.plist)" = false
+          elif [[ '${{ inputs.renderer }}' == flutter-metal-layer ]]; then
+            /usr/libexec/PlistBuddy -c 'Add :FLTUseFlutterMetalLayer bool true' ios/Runner/Info.plist
+            test "$(plutil -extract FLTUseFlutterMetalLayer raw ios/Runner/Info.plist)" = true
+          else
+            exit 64
+          fi
           cp ios/Runner/Info.plist "$GITHUB_WORKSPACE/evidence/diagnostic-runner-input.plist"
           git diff -- ios/Runner/Info.plist > "$GITHUB_WORKSPACE/evidence/diagnostic-input.patch"
 
