@@ -82,7 +82,7 @@ capture_case() {
   done > "$dir/windows.txt"
   import -window root "$dir/screenshot.png" 2>&1 || true
   ss -ltnp > "$dir/listeners.txt" 2>&1 || true
-  sudo timeout 8s gdb -q -batch -ex 'set pagination off' -ex 'thread apply all bt' -p "$pid" > "$dir/gdb.txt" 2>&1 || true
+  sudo timeout 8s gdb -q -batch -ex 'set debuginfod enabled off' -ex 'set pagination off' -ex "set sysroot /proc/$pid/root" -ex "attach $pid" -ex 'thread apply all bt' -ex detach > "$dir/gdb.txt" 2>&1 || true
   printf '%s' "$pct"
 }
 
@@ -224,6 +224,9 @@ Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp > "$OUT/xvfb.log" 2>&1 & XVF
 sleep 2
 openbox > "$OUT/openbox.log" 2>&1 & OPENBOX_PID=$!
 sleep 2
+dbus-update-activation-environment DISPLAY
+
+flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "XDG_CACHE_HOME=%s FONTCONFIG_FILE=%s\n" "$XDG_CACHE_HOME" "$FONTCONFIG_FILE"; cat /etc/fonts/conf.d/50-flatpak.conf; ls -l /run/host/user-fonts-cache' > "$OUT/flatpak-fontconfig-host-cache.txt" 2>&1
 
 launch_case clean_deb "$deb_exe"
 if ! awk -F '\t' '$1=="clean_deb" && $2=="started" {found=1} END {exit !found}' "$OUT/summary.tsv"; then

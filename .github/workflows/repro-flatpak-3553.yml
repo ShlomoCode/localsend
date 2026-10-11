@@ -20,6 +20,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb openbox dbus-x11 flatpak imagemagick xdotool x11-utils iproute2 gdb strace fontconfig libgtk-3-0t64 libayatana-appindicator3-1 libgl1-mesa-dri libegl1 libgles2 curl procps
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          sudo curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+          sudo apt-get update
+          sudo apt-get install -y brave-keyring
       - name: Run reproduction harness in a D-Bus session
         shell: bash
         env:
