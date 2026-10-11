@@ -1,8 +1,23 @@
-{ panelFix ? false, panelSize ? 24, minIconSize ? 24, revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
+{ panelFix ? false, panelSize ? 24, minIconSize ? 24, appRoute ? "nix", revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
 let
   nixpkgs = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${revision}.tar.gz";
 in
-import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
+import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: let
+  officialArchive = pkgs.fetchurl {
+    url = "https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz";
+    sha256 = "6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81";
+  };
+  officialBundle = pkgs.runCommand "localsend-official-1.17.0" {} ''
+    mkdir -p "$out"
+    tar -xzf ${officialArchive} -C "$out"
+  '';
+  officialLauncher = pkgs.buildFHSEnv {
+    name = "localsend_app";
+    targetPkgs = p: [ p.gtk3 p.libayatana-appindicator p.libGL p.openssl p.stdenv.cc.cc.lib ];
+    runScript = "${officialBundle}/localsend_app";
+  };
+  payloadRoot = if appRoute == "official" then officialBundle else pkgs.localsend;
+in {
   name = "localsend-2751-mate-4k";
   nodes.machine = { ... }: {
     imports = [ (nixpkgs + "/nixos/tests/common/user-account.nix") ];
@@ -13,8 +28,9 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     services.displayManager.defaultSession = "mate";
     networking.networkmanager.enable = true;
     programs.nm-applet.enable = true;
-    programs.localsend.enable = true;
-    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc ];
+    programs.localsend.enable = appRoute == "nix";
+    environment.systemPackages = (with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc ])
+      ++ pkgs.lib.optional (appRoute == "official") officialLauncher;
     virtualisation.memorySize = 4096;
     virtualisation.cores = 2;
     virtualisation.resolution = { x = 3840; y = 2160; };
@@ -59,8 +75,8 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     machine.succeed("nixos-version > /tmp/evidence/environment.txt")
     machine.succeed("readlink -f $(command -v localsend_app) >> /tmp/evidence/environment.txt")
     machine.succeed("sha256sum $(readlink -f $(command -v localsend_app)) >> /tmp/evidence/environment.txt")
-    machine.succeed("find $(dirname $(dirname $(readlink -f $(command -v localsend_app)))) -type f -exec sha256sum {} \\; > /tmp/evidence/localsend-package-sha256.txt")
-    machine.succeed("printf '%s\\n' '${pkgs.localsend}' '${pkgs.mate.mate-desktop}' '${pkgs.mate.mate-settings-daemon}' >> /tmp/evidence/environment.txt")
+    machine.succeed("find ${payloadRoot} -type f -exec sha256sum {} \\; > /tmp/evidence/localsend-package-sha256.txt")
+    machine.succeed("printf '%s\\n' '${appRoute}' '${payloadRoot}' '${pkgs.mate.mate-desktop}' '${pkgs.mate.mate-settings-daemon}' >> /tmp/evidence/environment.txt")
     machine.succeed("readlink -f $(command -v mate-panel) >> /tmp/evidence/environment.txt")
     machine.succeed("sha256sum $(readlink -f $(command -v mate-panel)) >> /tmp/evidence/environment.txt")
     machine.screenshot("desktop-ready")
