@@ -5,7 +5,7 @@ s = p.call_sync("GetCurrentState", None, Gio.DBusCallFlags.NONE, -1, None).unpac
 if len(sys.argv) > 1:
     scale = float(sys.argv[1])
     monitor = s[1][0]
-    mode = next(m for m in monitor[1] if m[6].get("is-current"))
+    mode = next(m for m in monitor[1] if m[0] == sys.argv[2]) if len(sys.argv) > 2 else next(m for m in monitor[1] if m[6].get("is-current"))
     assert scale in mode[5], (scale, mode[5])
     props = {"layout-mode": GLib.Variant("u", 1)} if s[3].get("supports-changing-layout-mode") else {}
     v = GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})", (s[0], 1, [(0, 0, scale, 0, True, [(monitor[0][0], mode[0], {})])], props))
