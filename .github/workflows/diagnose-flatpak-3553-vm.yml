@@ -4,7 +4,7 @@ on:
 jobs:
   gnome-zoom:
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - name: Install VM tools and prepare Debian 13 guest
         env:
@@ -177,8 +177,8 @@ jobs:
           round=$1
           mkdir -p "evidence/vm/round-$round"
           target="$GITHUB_WORKSPACE/evidence/vm/round-$round"
-          for attempt in $(seq 1 90); do
-            gh api "repos/ShlomoCode/localsend/contents/.diagnostics/3161/command.json?ref=codex/bug-3161-gnome-zoom-diagnostics" --jq .content | base64 -d > /tmp/localsend-vm/command.json
+          for attempt in $(seq 1 1080); do
+            if ! gh api "repos/ShlomoCode/localsend/contents/.diagnostics/3161/command.json?ref=codex/bug-3161-gnome-zoom-diagnostics" --jq .content | base64 -d > /tmp/localsend-vm/command.json; then sleep 10; continue; fi
             if [ "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round" ]; then break; fi
             sleep 10
           done
@@ -188,6 +188,7 @@ jobs:
           export DISPLAY=:99
           qemu_window=$(xdotool search --onlyvisible --name QEMU | head -1)
           xdotool windowfocus "$qemu_window"
+          action_index=0
           jq -c '.actions[]' /tmp/localsend-vm/command.json | while IFS= read -r action; do
             date -u +%FT%T.%N >> "$target/timing.txt"
             printf '%s\n' "$action" >> "$target/timing.txt"
@@ -204,11 +205,14 @@ jobs:
               settings) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-control-center universal-access > /home/probe/evidence/settings.log 2>&1 < /dev/null &' ;;
               calculator) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' ;;
               stop-app) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pkill -x localsend || true; pkill -x localsend_app || true' ;;
+              sample) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u +%FT%T.%N; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then getconf CLK_TCK; cat "/proc/$pid/task/$pid/stat"; sleep 5; date -u +%FT%T.%N; cat "/proc/$pid/task/$pid/stat"; ps -T -p "$pid" -o pid,tid,stat,pcpu,wchan:32,comm; fi' > "$target/sample-$(date +%s).txt" ;;
               stack) timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then sudo gdb -q -batch -p "$pid" -ex "thread apply all bt 16"; fi' > "$target/backtrace.txt" 2>&1 || true ;;
               finish) touch evidence/vm/finished ;;
               *) echo "Unsupported action=$kind"; exit 1 ;;
             esac
             sleep 2
+            action_index=$((action_index + 1))
+            /tmp/localsend-vm/capture "$target/action-$action_index.png"
           done
           /tmp/localsend-vm/capture "$target/screen.png"
           timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; gsettings list-recursively org.gnome.desktop.a11y.magnifier; ps -eLo pid,tid,stat,pcpu,wchan:30,comm | grep -E "localsend|gnome-shell|calculator|control-center"; cat /home/probe/evidence/localsend.log 2>/dev/null || true' > "$target/state.txt"
