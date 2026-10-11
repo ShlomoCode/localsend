@@ -128,6 +128,19 @@ async function remote(key) {
   await pause(650);
 }
 async function record(name, action) {
+  if(process.env.ISSUE1864_RECORDING_STOP==='whole') {
+    if(process.env.ISSUE1864_WHOLE_ACTIVE!=='true') throw new Error('Whole recording requires issue1864-whole.mjs');
+    log({type:'segment',action:'start',name,recording:'whole-variant'});
+    await pause(900);
+    const actionStartedAt=Date.now();
+    log({type:'segment',action:'action-start',name,actionStartedAt});
+    let actionCompletedAt, actionError;
+    try { await action(); actionCompletedAt=Date.now(); await pause(1200); }
+    catch(error) { actionError=error; }
+    finally { log({type:'segment',action:'end',name,actionStartedAt,actionCompletedAt,actionFailed:!!actionError}); }
+    if(actionError) throw actionError;
+    return;
+  }
   const path = `/sdcard/issue1864-recordings/${name}.mp4`;
   const natural=process.env.ISSUE1864_RECORDING_STOP==='natural';
   const requestedDuration=natural ? 15 : 45;

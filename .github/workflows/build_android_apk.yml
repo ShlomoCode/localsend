@@ -27,7 +27,7 @@ on:
       recording_stop:
         description: Diagnostic recorder finalization; inputs remain unchanged
         type: choice
-        options: [signal, natural]
+        options: [signal, natural, whole]
         default: signal
 permissions:
   contents: read
@@ -46,6 +46,9 @@ jobs:
         run: exit 1
       - name: Require traced controls for retained observational pair
         if: inputs.apk == 'source-trace-reuse' && !inputs.focus_trace
+        run: exit 1
+      - name: Require traced source pair for whole-variant recording
+        if: inputs.recording_stop == 'whole' && (!inputs.focus_trace || (inputs.apk != 'source-pair' && inputs.apk != 'source-trace-reuse'))
         run: exit 1
       - uses: actions/setup-java@v5
         if: inputs.apk == 'source-pair'
@@ -207,8 +210,10 @@ jobs:
           ISSUE_APPIUM_PID=$!
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
           curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
+          ISSUE_TV_SCRIPT=support/tests/issue1864-tv.mjs
+          if [ '${{ inputs.recording_stop }}' = whole ]; then ISSUE_TV_SCRIPT=support/tests/issue1864-whole.mjs; fi
           if [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ]; then
-            ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-baseline node support/tests/issue1864-tv.mjs
+            ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-baseline node "$ISSUE_TV_SCRIPT"
             kill "$ISSUE_APPIUM_PID"
             wait "$ISSUE_APPIUM_PID" || true
             mkdir -p evidence-cloud/source-baseline
@@ -221,7 +226,7 @@ jobs:
             appium --port 4723 --log evidence-cloud/appium.log &
             for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
             curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
-            ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-focus node support/tests/issue1864-tv.mjs
+            ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-focus node "$ISSUE_TV_SCRIPT"
             mkdir -p evidence-cloud/source-focus
             find evidence-cloud -maxdepth 1 -type f ! -name '*.apk' ! -name 'source-pair*' -exec mv {} evidence-cloud/source-focus/ \;
             node support/tests/issue1864-pair.mjs
