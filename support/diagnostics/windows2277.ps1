@@ -1,0 +1,80 @@
+param([string]$Executable,[string]$EvidenceDirectory)
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Desktop2277 {
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int z,bool repaint);
+ [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+"@
+New-Item -ItemType Directory -Force $EvidenceDirectory | Out-Null
+Start-Transcript "$EvidenceDirectory/transcript.txt"
+$script:actions=@()
+function Click([int]$x,[int]$y,[string]$label) {
+ $script:actions+=@{utc=[DateTime]::UtcNow.ToString('o');action=$label;x=$x;y=$y;foreground=[Desktop2277]::GetForegroundWindow().ToInt64()}
+ [Desktop2277]::SetCursorPos($x,$y)|Out-Null
+ [Desktop2277]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
+ [Desktop2277]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+}
+function Screenshot([string]$name) {
+ $bmp=New-Object System.Drawing.Bitmap(1000,760)
+ $g=[System.Drawing.Graphics]::FromImage($bmp)
+ $g.CopyFromScreen(0,0,0,0,$bmp.Size)
+ $bmp.Save("$EvidenceDirectory/$name.png",[System.Drawing.Imaging.ImageFormat]::Png)
+ $dark=0;$count=0
+ for($y=70;$y -lt 710;$y+=8) {for($x=25;$x -lt 975;$x+=8) {$p=$bmp.GetPixel($x,$y);$count++;if($p.R -lt 12 -and $p.G -lt 12 -and $p.B -lt 12){$dark++}}}
+ $g.Dispose();$bmp.Dispose()
+ $previous=$ErrorActionPreference;$ErrorActionPreference='Continue'
+ & 'C:/Program Files/Tesseract-OCR/tesseract.exe' "$EvidenceDirectory/$name.png" "$EvidenceDirectory/$name" -l eng --psm 11 tsv 2> "$EvidenceDirectory/$name-ocr-errors.txt"
+ $exitCode=$LASTEXITCODE;$ErrorActionPreference=$previous
+ if($exitCode -ne 0){throw 'OCR failed'}
+ $script:process.Refresh()
+ @{utc=[DateTime]::UtcNow.ToString('o');pid=$script:process.Id;exited=$script:process.HasExited;hwnd=$script:process.MainWindowHandle.ToInt64();foreground=[Desktop2277]::GetForegroundWindow().ToInt64();blackFraction=$dark/$count;words=@(Import-Csv "$EvidenceDirectory/$name.tsv" -Delimiter "`t"|Where-Object{$_.text}|Select-Object -ExpandProperty text)}|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/$name-state.json"
+}
+function Word([string]$word,[string]$snap) {
+ $row=Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"|Where-Object{$_.text -eq $word}|Select-Object -First 1
+ if(!$row){throw "Missing OCR word '$word' in $snap"}
+ Click ([int]$row.left+[int]$row.width/2) ([int]$row.top+[int]$row.height/2) $word
+ Start-Sleep -Milliseconds 800
+}
+Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,OSArchitecture|ConvertTo-Json|Set-Content "$EvidenceDirectory/environment.json"
+@{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;commit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
+Get-FileHash $Executable -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/executable.json"
+Set-Content "$EvidenceDirectory/payload2277.txt" 'LocalSend issue 2277 exact navigation payload'
+$results=@()
+foreach($animations in @($false,$true)) {
+ $name=if($animations){'animations-on'}else{'animations-off'}
+ $folder="$EvidenceDirectory/$name-app"
+ Copy-Item (Split-Path $Executable) $folder -Recurse
+ @{'flutter.ls_port'=53317;'flutter.ls_alias'='Bug2277';'flutter.ls_locale'='en';'flutter.ls_enable_animations'=$animations;'flutter.ls_save_window_placement'=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 "$folder/settings.json"
+ $script:process=Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
+ try {
+  Start-Sleep -Seconds 12;$script:process.Refresh()
+  if(!$script:process.MainWindowHandle){throw 'No LocalSend window'}
+  [Desktop2277]::MoveWindow($script:process.MainWindowHandle,0,0,1000,760,$true)|Out-Null
+  [Desktop2277]::SetForegroundWindow($script:process.MainWindowHandle)|Out-Null
+  Start-Sleep -Seconds 2;Screenshot "$name-initial"
+  Word 'Send' "$name-initial";Screenshot "$name-send"
+  Word 'File' "$name-send"
+  & "$PSScriptRoot/windows_dialog_select.ps1" -TargetProcessId $script:process.Id -Path "$EvidenceDirectory/payload2277.txt" -Mode File | Set-Content "$EvidenceDirectory/$name-picker.json"
+  if($LASTEXITCODE -ne 0){throw 'Native picker did not select file'}
+  Start-Sleep -Seconds 2;Screenshot "$name-selected"
+  Word 'link' "$name-selected";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
+  # A single click on the Material back arrow, whose location is checked in retained screenshot.
+  Click 28 60 'Back-single'
+  foreach($delay in @(100,500,1500,5000)) {Start-Sleep -Milliseconds $delay;Screenshot "$name-after-back-$delay"}
+  $results+=@{case=$name;status='scenario-reached';error=$null}
+ } catch {$results+=@{case=$name;status='harness-or-app-blocker';error=$_.Exception.ToString()}}
+ finally {
+  $script:actions|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/inputs.json"
+  if(!$script:process.HasExited){Stop-Process -Id $script:process.Id -Force}
+  Start-Sleep -Seconds 2
+ }
+}
+$results|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/results.json"
+Stop-Transcript
