@@ -111,7 +111,9 @@ export default async function({session,wd,senderPort,transportStatus}){
   for(const [index,gallery] of ['on','off','on-repeat','off-repeat'].entries()){
    const desired=gallery.startsWith('on');
    await globalGallery(desired,gallery);
-   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,...(index?['-CompletePrevious']:[])]);
+   // The control also leaves the Windows sender on its Finished route.
+   // Close that route before every Explorer Send to invocation.
+   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,'-CompletePrevious']);
    await waitForNativeControl({wd,prefix,label:gallery+'-pending',...target('Accept')});
    await click('Options');await capture(gallery+'-options-before');
    const e=await waitForNativeControl({wd,prefix,label:gallery+'-gallery',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and (@content-desc="On" or @content-desc="Off") and @clickable="true"]'});
