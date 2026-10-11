@@ -84,6 +84,20 @@ async function mouseNode(label, name) {
   await mouseTap(x,y,label);
   await pause(1200);
 }
+async function waitForAppWindow() {
+  for (let attempt=0;attempt<30;attempt++) {
+    const window=adb('shell','dumpsys','window','windows');
+    const blocks=window.split(/(?=  Window #\d+ Window\{)/);
+    const ready=blocks.some(block=>/^  Window #\d+ Window\{[^\n]*org\.localsend\.localsend_app[^\n]*\}:/.test(block)
+      && !block.split('\n')[0].includes('EXITING')
+      && block.includes('Surface: shown=true') && block.includes('mDrawState=HAS_DRAWN'));
+    fs.writeFileSync(`${out}/launch-readiness-${attempt}-window.txt`,window);
+    log({type:'readiness',action:'app-window',attempt,ready,pid:adb('shell','pidof','org.localsend.localsend_app').trim()});
+    if (ready) { await snapshot('launch-ready'); return; }
+    await pause(2000);
+  }
+  throw new Error('Current non-exiting app window did not finish drawing within 60 seconds');
+}
 async function remote(key) {
   log({ type: 'dpad', action: 'keyevent', key });
   adb('shell', 'input', 'dpad', 'keyevent', String(key));
@@ -119,7 +133,7 @@ adb('shell', 'am', 'force-stop', 'com.android.tv.settings');
 adb('shell', 'am', 'force-stop', 'com.android.settings');
 adb('shell', 'am', 'force-stop', 'org.localsend.localsend_app');
 adb('shell', 'am', 'start', '-n', 'org.localsend.localsend_app/.MainActivity');
-await pause(2500);
+await waitForAppWindow();
 await mouseNode('Send', 'open-send');
 await mouseNode('Media', 'open-media');
 await pause(3000);
