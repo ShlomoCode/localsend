@@ -6,16 +6,80 @@ on:
         type: choice
         default: mint
         options: [mint, ubuntu-cinnamon]
+      app_source:
+        type: choice
+        default: official-deb
+        options: [official-deb, c1ce]
+# Serialize the build and VM as one owned diagnostic run, including across dispatches.
+concurrency:
+  group: issue2754-cinnamon-diagnostic
+  cancel-in-progress: false
 jobs:
+  build-c1ce:
+    if: inputs.app_source == 'c1ce'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: diagnostic
+      - name: Initialize build evidence
+        run: mkdir -p /tmp/issue2754-build/provenance
+      - name: Checkout immutable application source
+        uses: actions/checkout@v4
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: source-c1ce
+      - name: Install existing Linux build dependencies
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tee /tmp/issue2754-build/provenance/apt-update.log
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev pkg-config binutils jq 2>&1 | tee /tmp/issue2754-build/provenance/apt-install.log
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Install exact Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Build unmodified c1ce release bundle with enforced locks
+        env:
+          PROBE_SOURCE_DIR: ${{ github.workspace }}/source-c1ce
+          PROBE_BUILD_DIR: /tmp/issue2754-build
+        run: |
+          export PROBE_FLUTTER="$(command -v flutter)"
+          bash diagnostic/support/diagnostics/2754-build-c1ce.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-flutter3419-linux-x64
+          path: /tmp/issue2754-build/
+          if-no-files-found: warn
   cinnamon-vm:
+    needs: build-c1ce
+    if: ${{ !cancelled() && ((inputs.app_source || 'official-deb') == 'official-deb' || needs.build-c1ce.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+      - name: Download exact source bundle and build provenance
+        if: inputs.app_source == 'c1ce'
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-c1ce-flutter3419-linux-x64
+          path: /tmp/issue2754-build
       - name: Run ordinary Cinnamon graphical VM
         env:
           PROBE_ENVIRONMENT: ${{ inputs.environment || 'mint' }}
+          PROBE_APP_SOURCE: ${{ inputs.app_source || 'official-deb' }}
+          PROBE_BUNDLE_TAR: /tmp/issue2754-build/source-bundle.tar.gz
         run: |
+          if [ "$PROBE_APP_SOURCE" = c1ce ]; then
+            test "$PROBE_ENVIRONMENT" = mint
+            (cd /tmp/issue2754-build && sha256sum -c source-bundle.tar.gz.sha256)
+            mkdir -p evidence/cloud/build
+            cp -a /tmp/issue2754-build/provenance evidence/cloud/build/
+            cp /tmp/issue2754-build/source-bundle.tar.gz.sha256 evidence/cloud/build/
+          fi
           if [ "$PROBE_ENVIRONMENT" = mint ]; then
             bash support/diagnostics/2754-mint-vm.sh
           else
@@ -23,7 +87,23 @@ jobs:
           fi
       - name: Preserve readable evidence on every outcome
         if: always()
-        run: sudo chown -R "$(id -u):$(id -g)" evidence/cloud && chmod -R a+rX evidence/cloud
+        run: |
+          mkdir -p evidence/cloud
+          sudo chown -R "$(id -u):$(id -g)" evidence/cloud
+          chmod -R a+rX evidence/cloud
+      - name: Collect compact scenario evidence without videos
+        if: always()
+        run: |
+          mkdir -p /tmp/issue2754-compact
+          rsync -a --exclude='*.mp4' --exclude='*.mkv' --exclude='*.webm' --exclude='*.avi' --exclude='*.ppm' \
+            --exclude='*.tar' --exclude='*.tar.gz' --exclude='*.tgz' --exclude='*.zip' --exclude='*.deb' \
+            --exclude='*.so' --exclude='localsend_app' evidence/cloud/ /tmp/issue2754-compact/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-cinnamon-evidence-compact
+          path: /tmp/issue2754-compact/
+          compression-level: 9
       - uses: actions/upload-artifact@v4
         if: always()
         with:

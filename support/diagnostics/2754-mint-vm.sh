@@ -107,15 +107,43 @@ if [ "$ready" != 1 ]; then
  timeout 30 scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known mint@127.0.0.1:/home/mint/evidence evidence/cloud/guest || true
  exit 1
 fi
+probe_app_source=${PROBE_APP_SOURCE:-official-deb}
+case "$probe_app_source" in
+ official-deb) ;;
+ c1ce)
+  test -f "${PROBE_BUNDLE_TAR:?Missing pinned source bundle}"
+  bundle_directory=$(dirname "$PROBE_BUNDLE_TAR")
+  (cd "$bundle_directory" && sha256sum -c source-bundle.tar.gz.sha256)
+  scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known "$bundle_directory" mint@127.0.0.1:/home/mint/source-artifact
+  ;;
+ *) echo "Unsupported diagnostic source: $probe_app_source" >&2; exit 1 ;;
+esac
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
 timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace
-curl -fL --connect-timeout 20 --max-time 180 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
-sha256sum /tmp/localsend.deb > evidence/release-sha256.txt
-timeout 120 sudo apt-get install -y /tmp/localsend.deb
+if [ "$PROBE_APP_SOURCE" = c1ce ]; then
+ cd /home/mint/source-artifact
+ sha256sum -c source-bundle.tar.gz.sha256 > /home/mint/evidence/source-bundle-verified.txt
+ mkdir -p /home/mint/source-bundle
+ tar -xzf source-bundle.tar.gz -C /home/mint/source-bundle
+ cp -a /home/mint/source-artifact /home/mint/evidence/source-artifact
+ ldd /home/mint/source-bundle/localsend_app > /home/mint/evidence/source-ldd.txt
+ for library in /home/mint/source-bundle/lib/*.so; do ldd "$library" >> /home/mint/evidence/source-ldd.txt; done
+ if grep -q 'not found' /home/mint/evidence/source-ldd.txt; then
+  echo "Pinned bundle runtime dependencies missing; no app scenario attempted" >&2
+  exit 1
+ fi
+ printf '/home/mint/source-bundle/localsend_app\n' > /home/mint/evidence/app-executable.txt
+else
+ curl -fL --connect-timeout 20 --max-time 180 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
+ sha256sum /tmp/localsend.deb > evidence/release-sha256.txt
+ timeout 120 sudo apt-get install -y /tmp/localsend.deb
+ printf 'localsend_app\n' > /home/mint/evidence/app-executable.txt
+fi
+cd /home/mint
 # Use the actual Cinnamon login bus, which need not equal the systemd user bus.
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
 tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt
@@ -134,8 +162,9 @@ timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
+export APP_EXECUTABLE=$(cat evidence/app-executable.txt)
 screen_size=$(xrandr | sed -n "s/.*current \([0-9]*\) x \([0-9]*\),.*/\1x\2/p")
-ffmpeg -y -f x11grab -framerate 10 -video_size "$screen_size" -i :0 -c:v libx264 -preset ultrafast evidence/scenario.mp4 > evidence/video.log 2>&1 &
+ffmpeg -nostdin -y -f x11grab -framerate 10 -video_size "$screen_size" -i :0 -c:v libx264 -preset ultrafast evidence/scenario.mp4 > evidence/video.log 2>&1 &
 video_pid=$!
 set +e
 python3 support/diagnostics/2754-ui.py
