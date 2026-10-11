@@ -1,0 +1,30 @@
+name: Issue 1054 macOS desktop capability smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-1054-macos-smoke]
+    paths:
+      - .github/workflows/diagnose-1054-macos.yml
+      - support/diagnostics/1054-macos-smoke.sh
+permissions:
+  contents: read
+concurrency:
+  group: issue1054-macos-smoke
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: macos-15-intel
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Observe the original macOS application and desktop permissions
+        shell: bash
+        run: bash support/diagnostics/1054-macos-smoke.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue1054-macos-smoke-${{ github.run_id }}
+          path: evidence/macos-smoke/
