@@ -8,6 +8,7 @@ public static class Desktop2381 {
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int z,bool repaint);
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] public static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
  [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
 }
 "@
@@ -39,7 +40,15 @@ function Click([int]$x,[int]$y) {
 }
 function Paste([string]$value) {
  [System.Windows.Forms.Clipboard]::SetText($value)
- [System.Windows.Forms.SendKeys]::SendWait("^v")
+ if ([System.Windows.Forms.Clipboard]::GetText() -ne $value) {throw "Clipboard input control failed"}
+ [Desktop2381]::keybd_event(0x11,0,0,[UIntPtr]::Zero)
+ Start-Sleep -Milliseconds 120
+ [Desktop2381]::keybd_event(0x56,0,0,[UIntPtr]::Zero)
+ Start-Sleep -Milliseconds 120
+ [Desktop2381]::keybd_event(0x56,0,2,[UIntPtr]::Zero)
+ Start-Sleep -Milliseconds 120
+ [Desktop2381]::keybd_event(0x11,0,2,[UIntPtr]::Zero)
+
  Start-Sleep -Milliseconds 600
 }
 function Word([string]$word,[string]$snap) {
@@ -66,9 +75,14 @@ function PrimaryButton([string]$snap) {
  Click (($minX+$maxX)/2) (($minY+$maxY)/2)
 }
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
-$nic = Get-NetIPInterface -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -match "Loopback"} | Select-Object -First 1
-foreach ($ip in @("10.0.20.2","100.95.193.205")) {
- New-NetIPAddress -InterfaceIndex $nic.InterfaceIndex -IPAddress $ip -PrefixLength 16 -SkipAsSource $true -PolicyStore ActiveStore | Out-Null
+if (-not (Get-Command New-VMSwitch -ErrorAction SilentlyContinue)) {
+ Install-WindowsFeature Hyper-V-PowerShell | Out-String | Write-Host
+}
+foreach ($network in @(@{name="bug2381-home";ip="10.0.20.2"},@{name="bug2381-netbird";ip="100.95.193.205"})) {
+ New-VMSwitch -Name $network.name -SwitchType Internal | Out-Null
+ $nic = Get-NetAdapter -Name "vEthernet ($($network.name))"
+ Set-NetIPInterface -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -Dhcp Disabled
+ New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress $network.ip -PrefixLength 16 -SkipAsSource $true -PolicyStore ActiveStore | Out-Null
 }
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
 Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status | ConvertTo-Json | Set-Content "$EvidenceDirectory/adapters.json"
