@@ -7,6 +7,10 @@ import {waitForNativeControl} from './native-readiness.mjs';
 
 export default async function({session,wd,senderHost,senderPort,transportStatus}) {
  const prefix=`/session/${session}`;
+ const fixtureName=process.env.ISSUE_2007_FIXTURE_NAME||'A.txt';
+ assert(/^[A-Za-z0-9_-]+\.txt$/.test(fixtureName),'Fixture name must be a safe owned text-file basename');
+ const numberedName=fixtureName.replace(/\.txt$/,'-2.txt');
+ const repeatResend=process.env.ISSUE_2007_REPEAT_RESEND==='1';
  const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
  const requestedDeletionAction=process.env.ISSUE_2007_DELETE_ACTION||'permanent';
  const purgeTrash=requestedDeletionAction==='trash-purge';
@@ -171,7 +175,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await new Promise(r=>setTimeout(r,2000));
  }
  assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
- if(persistentSaf)await chooseSafDocuments('settings');
+ if(persistentSaf&&process.env.ISSUE_2007_PRESERVE_DESTINATION!=='1')await chooseSafDocuments('settings');
  const fileManagerInventory=[];
  for(const appId of ['com.vivo.filemanager','com.android.filemanager','com.google.android.apps.nbu.files','com.sec.android.app.myfiles']){
   const installed=await wd('POST',prefix+'/appium/device/app_installed',{appId}).catch(error=>({error:String(error)}));
@@ -191,17 +195,17 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await probeInstalledProviders({wd,prefix});
   return;
  }
- const before=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A.txt'}).catch(error=>{
+ const before=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName}).catch(error=>{
   if(!String(error).includes('No such file or directory'))throw error;
   return null;
  });
- assert.equal(before,null,'Baseline A.txt already exists on the device; do not mistake an old file for this transfer');
- const beforeNumbered=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A-2.txt'}).catch(error=>{
+ assert.equal(before,null,`Baseline ${fixtureName} already exists on the device; do not mistake an old file for this transfer`);
+ const beforeNumbered=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+numberedName}).catch(error=>{
   if(!String(error).includes('No such file or directory'))throw error;
   return null;
  });
- assert.equal(beforeNumbered,null,'Baseline A-2.txt already exists; numbered-path observation would be ambiguous');
- writeFileSync('evidence/baseline-path-absence.json',JSON.stringify({path:deviceFolder+'/A.txt',absent:true,utc:new Date().toISOString()},null,2));
+ assert.equal(beforeNumbered,null,`Baseline ${numberedName} already exists; numbered-path observation would be ambiguous`);
+ writeFileSync('evidence/baseline-path-absence.json',JSON.stringify({path:deviceFolder+'/'+fixtureName,absent:true,utc:new Date().toISOString()},null,2));
  const desktop=windows?spawn('pwsh',['-NoProfile','-File','support/diagnostics/2007-windows-sender.ps1'],{env:{...process.env,TRANSPORT_SENDER_PORT:String(senderPort)}}):spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
  let proxy;
@@ -242,12 +246,12 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,3500));
    await snapshot('after-storage-permission');
   }
-  const expected=readFileSync(windows?'evidence/A.txt':'/tmp/issue-2007/A.txt');
-  const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A.txt'});
+  const expected=readFileSync(windows?'evidence/'+fixtureName:'/tmp/issue-2007/'+fixtureName);
+  const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName});
   const actual=Buffer.from(encoded,'base64');
-  writeFileSync('evidence/android-saved-A.txt',actual);
+  writeFileSync('evidence/android-saved-'+fixtureName,actual);
   assert.deepEqual(actual,expected,'Saved Android file differs from selected desktop file');
-  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
+  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
   if(deletionTiming!=='absence'){
@@ -295,7 +299,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await wd('POST',prefix+'/element/'+downloads['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    await new Promise(r=>setTimeout(r,2000));
    await snapshot('files-downloads');
-   const file=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="A.txt"]',label:'file-manager-saved-A'});
+   const file=await waitForNativeControl({wd,prefix,using:'xpath',value:`//*[@text="${fixtureName}"]`,label:'file-manager-saved-A'});
    const rect=await wd('GET',prefix+'/element/'+file['element-6066-11e4-a52e-4f735466cecf']+'/rect');
    await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
    await new Promise(r=>setTimeout(r,1000));
@@ -303,7 +307,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    let remove;
    if(samsungFiles){
     await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="1 selected"]',label:'samsung-one-owned-selection'});
-    await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@resource-id="com.sec.android.app.myfiles:id/file_detail_list_item" and ((starts-with(@content-desc,"Checked, A.txt") and .//*[@text="A.txt"]) or (.//*[@text="A.txt"] and .//*[@resource-id="com.sec.android.app.myfiles:id/checkbox" and @checked="true"]))]',label:'samsung-owned-A-checked-row'});
+    await waitForNativeControl({wd,prefix,using:'xpath',value:`//*[@resource-id="com.sec.android.app.myfiles:id/file_detail_list_item" and ((starts-with(@content-desc,"Checked, ${fixtureName}") and .//*[@text="${fixtureName}"]) or (.//*[@text="${fixtureName}"] and .//*[@resource-id="com.sec.android.app.myfiles:id/checkbox" and @checked="true"]))]`,label:'samsung-owned-file-checked-row'});
     remove=await waitForNativeControl({wd,prefix,using:'id',value:'com.sec.android.app.myfiles:id/menu_delete',label:'samsung-files-delete-action'});
    }else if(requestedDeletionAction==='trash'){
     const options=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'More options',label:'file-manager-more-options'});
@@ -335,7 +339,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    do {
     let pathObservedUtc;
     const [pathValue,sourceObservation]=await Promise.all([
-     wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A.txt'}).catch(error=>{
+     wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName}).catch(error=>{
       if(!String(error).includes('No such file or directory'))throw error;
       absenceError=String(error);
       return null;
@@ -361,7 +365,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(deletionTiming==='absence')assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
    if(deletionTiming==='acknowledged')assert(firstToastObservedUtc||firstEmptyListObservedUtc,'Native UI never acknowledged deletion');
    const pathAbsenceUtc=absent===null?absenceObservations.at(-1).pathObservedUtc:null;
-   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:fileManagerName,package:fileManagerPackage,deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:deviceFolder+'/A.txt',pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
+   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:fileManagerName,package:fileManagerPackage,deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:deviceFolder+'/'+fixtureName,pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    if(samsungFiles&&purgeTrash){
     assert.equal(deletionTiming,'absence','Permanent trash purge control requires observed path absence before opening Trash');
     async function nativeClick(using,value,label){
@@ -371,12 +375,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     await nativeClick('accessibility id','Go to My Files home','purge-my-files-home');
     await nativeClick('xpath','//*[starts-with(@content-desc,"More options")]','purge-my-files-menu');
     await nativeClick('xpath','//*[@text="Trash" or @text="Recycle bin"]','purge-trash-entry');
-    const trashFile=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="A.txt"]',label:'purge-trash-owned-A',stableRect:true});
+    const trashFile=await waitForNativeControl({wd,prefix,using:'xpath',value:`//*[@text="${fixtureName}"]`,label:'purge-trash-owned-A',stableRect:true});
     await snapshot('trash-retained-A');
     assert.equal(await wd('GET',prefix+'/appium/device/current_package'),fileManagerPackage,'Trash foreground provider differs');
     const trashRect=await wd('GET',prefix+'/element/'+trashFile['element-6066-11e4-a52e-4f735466cecf']+'/rect');
     await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(trashRect.x+trashRect.width/2),y:Math.round(trashRect.y+trashRect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
     await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="1 selected"]',label:'purge-single-owned-file-selection'});
+    await waitForNativeControl({wd,prefix,using:'xpath',value:`//*[@resource-id="com.sec.android.app.myfiles:id/file_detail_list_item" and ((starts-with(@content-desc,"Checked, ${fixtureName}") and .//*[@text="${fixtureName}"]) or (.//*[@text="${fixtureName}"] and .//*[@resource-id="com.sec.android.app.myfiles:id/checkbox" and @checked="true"]))]`,label:'purge-owned-file-checked-row'});
     await snapshot('trash-owned-A-selected');
     await nativeClick('id','com.sec.android.app.myfiles:id/menu_delete','purge-selected-trash-file');
     const purgeConfirm=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE")]',label:'purge-permanent-confirmation'});
@@ -387,7 +392,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     await wd('POST',prefix+'/element/'+purgeConfirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
     await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="No files or folders"]',label:'purge-empty-trash'});
     await snapshot('trash-after-owned-A-purge');
-    writeFileSync('evidence/actual-trash-purge.json',JSON.stringify({package:fileManagerPackage,ownedFile:'A.txt',retainedFileObserved:true,oneSelected:true,permanentConfirmation:true,purgeUtc,emptyTrashObserved:true,confirmation:'android-trash-permanent-delete-dialog.xml'},null,2));
+    writeFileSync('evidence/actual-trash-purge.json',JSON.stringify({package:fileManagerPackage,ownedFile:fixtureName,retainedFileObserved:true,oneSelected:true,permanentConfirmation:true,purgeUtc,emptyTrashObserved:true,confirmation:'android-trash-permanent-delete-dialog.xml'},null,2));
    }
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    if(deletionTiming==='absence'){
@@ -408,9 +413,14 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     writeFileSync('evidence/post-delete-intervention.json',JSON.stringify({waitSeconds,waitStartedUtc,completedUtc:new Date().toISOString(),restartReceiver,restartUtc,filesystemMutation:false},null,2));
     writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
    }
-   await waitFile('evidence/resend-requested',90000);
-   const resendInput=JSON.parse(readFileSync('evidence/resend-input.json','utf8'));
+   async function receiveResend(stage){
+   await waitFile(`evidence/${stage}-requested`,90000);
+   const resendInput=JSON.parse(readFileSync(`evidence/${stage}-input.json`,'utf8'));
    const resendExpected=readFileSync(resendInput.path);
+   if(repeatResend){
+    assert.equal(resendInput.name,fixtureName,'Each same-session resend must use this arm\'s owned filename');
+    assert.deepEqual(resendExpected,expected,'Each same-session resend must use the unchanged baseline bytes');
+   }
    const resendDestination=deviceFolder+'/'+resendInput.name;
    let secondAccept;
    for(let i=0;i<20;i++){
@@ -419,16 +429,18 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     await new Promise(r=>setTimeout(r,1000));
    }
    assert(secondAccept,'Actual resend did not render Android approval');
-   await chooseSafDocuments('resend');
-   if(safDocuments)secondAccept=await returnedApproval('resend');
+   await chooseSafDocuments(stage);
+   if(safDocuments)secondAccept=await returnedApproval(stage);
    const acceptUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+secondAccept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    let saved;
    let receiverSource='';
+   let observedResultUtc=null;
    for(let attempt=0;attempt<10;attempt++){
     await new Promise(r=>setTimeout(r,1000));
-    await snapshot('after-resend-accept-'+attempt);
-    receiverSource=readFileSync(`evidence/android-after-resend-accept-${attempt}.xml`,'utf8');
+    await snapshot(`after-${stage}-accept-`+attempt);
+    receiverSource=readFileSync(`evidence/android-after-${stage}-accept-${attempt}.xml`,'utf8');
+    if(!observedResultUtc&&(receiverSource.includes('Finished with error')||receiverSource.includes('100%, Finished')))observedResultUtc=new Date().toISOString();
     const value=await wd('POST',prefix+'/appium/device/pull_file',{path:resendDestination}).catch(error=>{
      if(!String(error).includes('No such file or directory'))throw error;
      return null;
@@ -437,36 +449,94 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
      saved=Buffer.from(value,'base64');
      if(saved.equals(resendExpected)&&receiverSource.includes('100%, Finished')&&receiverSource.includes('&#10;Done'))break;
     }
+    if(repeatResend&&receiverSource.includes('Finished with error'))break;
    }
    const byteExact=saved?.equals(resendExpected)??false;
    const receiverFileDone=receiverSource.includes('100%, Finished')&&receiverSource.includes('&#10;Done');
-   const numberedEncoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A-2.txt'}).catch(error=>{
+   const numberedEncoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+numberedName}).catch(error=>{
     if(!String(error).includes('No such file or directory'))throw error;
     return null;
    });
    const numbered=numberedEncoded===null?null:Buffer.from(numberedEncoded,'base64');
    const numberedByteExact=numbered?.equals(resendExpected)??false;
-   if(numbered)writeFileSync('evidence/android-numbered-A-2.txt',numbered);
-   const actualSavedPath=receiverFileDone?(numberedByteExact?deviceFolder+'/A-2.txt':byteExact?resendDestination:null):null;
-   const submission=JSON.parse(readFileSync('evidence/resend-submission.json','utf8'));
-   if(saved)writeFileSync('evidence/android-resaved-'+resendInput.name,saved);
-   writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name==='A.txt',fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
-   writeFileSync('evidence/resend-completed','Resend outcome observed; inspect byteExact and endpoint evidence\n');
+   if(numbered)writeFileSync(stage==='resend'?'evidence/android-numbered-'+numberedName:`evidence/android-${stage}-numbered-`+numberedName,numbered);
+   const actualSavedPath=receiverFileDone?(numberedByteExact?deviceFolder+'/'+numberedName:byteExact?resendDestination:null):null;
+   const submission=JSON.parse(readFileSync(`evidence/${stage}-submission.json`,'utf8'));
+   if(saved)writeFileSync(stage==='resend'?'evidence/android-resaved-'+resendInput.name:`evidence/android-${stage}-resaved-`+resendInput.name,saved);
+   const result={stage,observedResultUtc,receiverFailed:receiverSource.includes('Finished with error'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name===fixtureName,fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()};
+   writeFileSync(`evidence/actual-${stage}-result.json`,JSON.stringify(result,null,2));
+   writeFileSync(`evidence/${stage}-completed`,`${stage} outcome observed; inspect byteExact and endpoint evidence\n`);
    if(receiverSource.includes('Finished with error')){
-    const errorRow=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"A.txt") and contains(@content-desc,"Error") and @clickable="true"]',label:'receiver-file-error-details',optional:true});
+    const errorRow=await waitForNativeControl({wd,prefix,using:'xpath',value:`//*[contains(@content-desc,"${fixtureName}") and contains(@content-desc,"Error") and @clickable="true"]`,label:stage+'-receiver-file-error-details',optional:true});
     if(errorRow){
      await wd('POST',prefix+'/element/'+errorRow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-     await snapshot('resend-file-error-details');
+     await snapshot(stage+'-file-error-details');
+     if(repeatResend){
+      const postTapSource=readFileSync(`evidence/android-${stage}-file-error-details.xml`,'utf8');
+      const doneVisible=(postTapSource.match(/<[^>]+>/g)||[]).some(tag=>tag.includes('content-desc="Done"')&&tag.includes('clickable="true"'));
+      if(!doneVisible)await wd('POST',prefix+'/back',{});
+      writeFileSync(`evidence/${stage}-error-detail-return.json`,JSON.stringify({actualDoneVisibleAfterTap:doneVisible,backRequested:!doneVisible,source:`android-${stage}-file-error-details.xml`},null,2));
+     }
     }
+   }
+   if(saved&&!numberedByteExact)assert(byteExact,'Resaved file differs from selected original file');
+   return result;
+   }
+   const firstResult=await receiveResend('resend');
+   if(repeatResend){
+    assert(firstResult.receiverFailed&&!firstResult.resendSucceeded&&firstResult.observedResultUtc,'Matched intervention requires the immediate resend to fail in the receiver UI');
+    const intervention=process.env.ISSUE_2007_RETRY_INTERVENTION;
+    assert(['wait','restart'].includes(intervention),'Retry intervention must be wait or restart');
+    const failureMs=Date.parse(firstResult.observedResultUtc);
+    const targetMs=failureMs+45000;
+    const interventionRecord={intervention,matchedDelayMs:45000,firstFailureObservedUtc:firstResult.observedResultUtc,targetRetryUtc:new Date(targetMs).toISOString(),filesystemMutation:false};
+    async function probes(stage){
+     const observations=[];
+     for(const command of ['pidof org.localsend.localsend_app','pidof com.android.providers.media','pidof com.google.android.providers.media.module','pidof '+fileManagerPackage,`content query --uri content://media/external/file --projection _id:_display_name:relative_path:is_trashed:date_expires --where "_display_name='${fixtureName}'"`]){
+      const startedUtc=new Date().toISOString();
+      const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({unavailable:String(error)}));
+      observations.push({command,startedUtc,completedUtc:new Date().toISOString(),result});
+     }
+     writeFileSync(`evidence/${stage}-provider-store-probes.json`,JSON.stringify({session,fixtureName,readOnly:true,observations},null,2));
+    }
+    await probes('first-failure');
+    await closeReceiverFinished();
+    await snapshot('receiver-ready-before-retry-intervention');
+    if(intervention==='restart'){
+     interventionRecord.terminateRequestedUtc=new Date().toISOString();
+     await wd('POST',prefix+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});
+     interventionRecord.activateRequestedUtc=new Date().toISOString();
+     await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+     await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"Receive")]',label:'retry-restarted-receiver-ready'});
+     interventionRecord.restartReadyUtc=new Date().toISOString();
+     await snapshot('receiver-restarted-before-retry');
+    }
+    await probes('after-intervention');
+    await waitFile('evidence/retry-address-ready',90000);
+    interventionRecord.senderPreparedUtc=new Date().toISOString();
+    const remainingMs=Math.max(0,targetMs-Date.now());
+    if(remainingMs)await new Promise(r=>setTimeout(r,remainingMs));
+    interventionRecord.retryReleasedUtc=new Date().toISOString();
+    interventionRecord.actualFailureToReleaseMs=Date.parse(interventionRecord.retryReleasedUtc)-failureMs;
+    interventionRecord.deadlineOverrunMs=Math.max(0,Date.parse(interventionRecord.retryReleasedUtc)-targetMs);
+    writeFileSync('evidence/retry-intervention.json',JSON.stringify(interventionRecord,null,2));
+    writeFileSync('evidence/retry-ready','Matched interval from observed first failure completed; same owned file retry\n');
+    const retryResult=await receiveResend('retry');
+    interventionRecord.retrySubmissionUtc=retryResult.submissionUtc;
+    interventionRecord.actualFailureToSubmissionMs=Date.parse(retryResult.submissionUtc)-failureMs;
+    writeFileSync('evidence/retry-intervention.json',JSON.stringify(interventionRecord,null,2));
+    await probes('after-retry');
+    await closeReceiverFinished();
+    await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"Receive")]',label:'same-session-next-arm-ready'});
+    await snapshot('receiver-ready-for-next-arm');
    }
    if(desktop.exitCode===null)await new Promise(r=>desktop.once('exit',r));
    assert.equal(desktop.exitCode,0,'Desktop resend observation did not complete');
-   if(saved&&!numberedByteExact)assert(byteExact,'Resaved file differs from selected original file');
   }
  } finally {
   if(desktop.exitCode===null)desktop.kill('SIGTERM');
   for(const socket of ownedProxySockets)socket.destroy();
-  proxy?.close();
+  if(proxy?.listening)await new Promise((resolve,reject)=>proxy.close(error=>error?reject(error):resolve()));
   await snapshot('final').catch(()=>{});
  }
 }

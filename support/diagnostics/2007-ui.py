@@ -80,7 +80,7 @@ click(*text('Send', 'send-button'))
 screen('send-visible')
 click(*text('File', 'file-button'))
 screen('file-picker-visible')
-fixture = Path('/tmp/issue-2007/A.txt')
+fixture = Path('/tmp/issue-2007') / os.environ.get('ISSUE_2007_FIXTURE_NAME', 'A.txt')
 fixture.parent.mkdir(exist_ok=True)
 fixture.write_text('LocalSend issue 2007 original app control v1\nRun: ' + (os.environ.get('ISSUE_2007_FIXTURE_SEED') or os.environ['GITHUB_RUN_ID']) + '\n')
 run('xdotool', 'key', 'ctrl+l')
@@ -144,60 +144,69 @@ if os.environ.get('ISSUE_2007_RESEND'):
         renamed = fixture.with_name('B.txt')
         renamed.write_bytes(fixture.read_bytes())
         fixture = renamed
-    (out / 'resend-input.json').write_text(json.dumps({'variant': variant, 'path': str(fixture), 'name': fixture.name}, indent=2))
-    # Observed original Finished screen places the session Done action here.
-    click(938, 680)
-    screen('resend-send-page')
-    click(*text('File', 'resend-file-button'))
-    screen('resend-file-picker-visible')
-    run('xdotool', 'key', 'ctrl+l', 'ctrl+a')
-    time.sleep(0.3)
-    run('xdotool', 'key', 'ctrl+a')
-    run('xdotool', 'type', '--clearmodifiers', '--delay', '50', str(fixture))
-    run('xdotool', 'key', 'Return')
-    time.sleep(2)
-    resolved = screen('resend-file-location-resolved')
-    if not any(w['text'].strip().startswith('Files:') for w in resolved):
-        click(*text('Open', 'resend-file-picker-open'))
+    def perform_resend(stage):
+        if stage == 'retry':
+            # Close the observed sender error-details dialog before session Done.
+            run('xdotool', 'key', 'Escape')
+            time.sleep(0.3)
+        (out / f'{stage}-input.json').write_text(json.dumps({'variant': variant, 'path': str(fixture), 'name': fixture.name}, indent=2))
+        # Observed original Finished screen places the session Done action here.
+        click(938, 680)
+        screen(f'{stage}-send-page')
+        click(*text('File', f'{stage}-file-button'))
+        screen(f'{stage}-file-picker-visible')
+        run('xdotool', 'key', 'ctrl+l', 'ctrl+a')
+        time.sleep(0.3)
+        run('xdotool', 'key', 'ctrl+a')
+        run('xdotool', 'type', '--clearmodifiers', '--delay', '50', str(fixture))
+        run('xdotool', 'key', 'Return')
         time.sleep(2)
-    words = screen('resend-file-selected')
-    if not any(w['text'].strip().startswith('Files:') for w in words):
-        raise RuntimeError('Resend actual file picker did not select A.txt')
-    nearby = [w for w in words if w['text'].strip() in ['Nearby', 'devices']]
-    if len(nearby) < 2:
-        raise RuntimeError('Resend Nearby devices row missing')
-    row_end = max(int(w['left']) + int(w['width']) for w in nearby)
-    row_y = int(nearby[0]['top']) + int(nearby[0]['height']) // 2
-    click(row_end + 70, row_y)
-    address_title = text('Enter', 'resend-manual-address-dialog')
-    if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0', 'current-c1ce']:
-        click(address_title[0] + 100, address_title[1] + 48)
-        screen('resend-manual-ip-mode-selected')
-    run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
-    screen('resend-address-prepared')
-    (out / 'resend-address-ready').touch()
-    deadline = time.monotonic() + 180
-    while not (out / 'resend-ready').exists():
-        if time.monotonic() > deadline:
-            screen('sender-delete-control-timeout')
-            raise RuntimeError('Real receiver deletion did not complete')
-        time.sleep(0.05)
-    submitted_utc = datetime.now(timezone.utc).isoformat()
-    run('xdotool', 'key', 'Return')
-    (out / 'resend-submission.json').write_text(json.dumps({'utc': submitted_utc, 'action': 'Return in prepared real address dialog'}, indent=2))
-    (out / 'resend-requested').touch()
-    time.sleep(2)
-    screen('resend-transfer-requested')
-    deadline = time.monotonic() + 120
-    while not (out / 'resend-completed').exists():
-        if time.monotonic() > deadline:
-            screen('sender-resend-timeout')
-            raise RuntimeError('Receiver resend observation did not complete')
-        time.sleep(0.5)
-    resend_words = screen('sender-resend-completed')
-    resend_errors = [w for w in resend_words if w['text'].strip() == 'Error']
-    if resend_errors:
-        # The observed file row info icon is immediately after its Error label.
-        error = resend_errors[0]
-        click(int(error['left']) + int(error['width']) + 20, int(error['top']) + int(error['height']) // 2)
-        screen('sender-resend-error-details')
+        resolved = screen(f'{stage}-file-location-resolved')
+        if not any(w['text'].strip().startswith('Files:') for w in resolved):
+            click(*text('Open', f'{stage}-file-picker-open'))
+            time.sleep(2)
+        words = screen(f'{stage}-file-selected')
+        if not any(w['text'].strip().startswith('Files:') for w in words):
+            raise RuntimeError('Resend actual file picker did not select A.txt')
+        nearby = [w for w in words if w['text'].strip() in ['Nearby', 'devices']]
+        if len(nearby) < 2:
+            raise RuntimeError('Resend Nearby devices row missing')
+        row_end = max(int(w['left']) + int(w['width']) for w in nearby)
+        row_y = int(nearby[0]['top']) + int(nearby[0]['height']) // 2
+        click(row_end + 70, row_y)
+        address_title = text('Enter', f'{stage}-manual-address-dialog')
+        if os.environ.get('ISSUE_2007_RELEASE') in ['1.16.1', '1.17.0', 'current-c1ce']:
+            click(address_title[0] + 100, address_title[1] + 48)
+            screen(f'{stage}-manual-ip-mode-selected')
+        run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
+        screen(f'{stage}-address-prepared')
+        (out / f'{stage}-address-ready').touch()
+        deadline = time.monotonic() + 180
+        while not (out / f'{stage}-ready').exists():
+            if time.monotonic() > deadline:
+                screen('sender-delete-control-timeout')
+                raise RuntimeError('Real receiver deletion did not complete')
+            time.sleep(0.05)
+        submitted_utc = datetime.now(timezone.utc).isoformat()
+        run('xdotool', 'key', 'Return')
+        (out / f'{stage}-submission.json').write_text(json.dumps({'utc': submitted_utc, 'action': 'Return in prepared real address dialog'}, indent=2))
+        (out / f'{stage}-requested').touch()
+        time.sleep(2)
+        screen(f'{stage}-transfer-requested')
+        deadline = time.monotonic() + 120
+        while not (out / f'{stage}-completed').exists():
+            if time.monotonic() > deadline:
+                screen(f'sender-{stage}-timeout')
+                raise RuntimeError(f'Receiver {stage} observation did not complete')
+            time.sleep(0.5)
+        resend_words = screen(f'sender-{stage}-completed')
+        resend_errors = [w for w in resend_words if w['text'].strip() == 'Error']
+        if resend_errors:
+            # The observed file row info icon is immediately after its Error label.
+            error = resend_errors[0]
+            click(int(error['left']) + int(error['width']) + 20, int(error['top']) + int(error['height']) // 2)
+            screen(f'sender-{stage}-error-details')
+
+    perform_resend('resend')
+    if os.environ.get('ISSUE_2007_REPEAT_RESEND') == '1':
+        perform_resend('retry')
