@@ -1,6 +1,6 @@
 import {writeFileSync} from 'node:fs';
 export default async function({session,wd}) {
- async function capture(label){const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/settings-${label}.xml`,xml);const image=await wd('GET',`/session/${session}/screenshot`);writeFileSync(`evidence/settings-${label}.png`,Buffer.from(image,'base64'));return xml;}
+ async function capture(label){await new Promise(resolve=>setTimeout(resolve,700));const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/settings-${label}.xml`,xml);const image=await wd('GET',`/session/${session}/screenshot`);writeFileSync(`evidence/settings-${label}.png`,Buffer.from(image,'base64'));return xml;}
  async function intent(action,uri){await wd('POST',`/session/${session}/execute/sync`,{script:'mobile: startActivity',args:[{action,uri,wait:true,stop:false}]});}
  const observations=[];
  try{
