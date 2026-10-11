@@ -5,9 +5,23 @@ const out = 'evidence-cloud';
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8', timeout: 30000 });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const log = data => fs.appendFileSync(`${out}/input-timings.jsonl`, JSON.stringify({ time: Date.now(), ...data }) + '\n');
+const response = await fetch('http://127.0.0.1:4723/session', {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ capabilities: { alwaysMatch: {
+    platformName: 'Android', 'appium:automationName': 'UiAutomator2',
+    'appium:deviceName': 'emulator-5554', 'appium:appPackage': 'org.localsend.localsend_app',
+    'appium:appActivity': '.MainActivity', 'appium:noReset': true,
+    'appium:settings[waitForIdleTimeout]': 0,
+  } } }),
+});
+const sessionData = await response.json();
+fs.writeFileSync(`${out}/appium-session.json`, JSON.stringify(sessionData, null, 2));
+const session = sessionData.value?.sessionId;
+if (!session) throw new Error('Appium did not create a UI snapshot session');
 async function snapshot(name) {
-  adb('shell', 'uiautomator', 'dump', '/sdcard/ui.xml');
-  adb('pull', '/sdcard/ui.xml', `${out}/${name}.xml`);
+  const source = await (await fetch(`http://127.0.0.1:4723/session/${session}/source`)).json();
+  if (typeof source.value !== 'string') throw new Error(`No XML snapshot for ${name}`);
+  fs.writeFileSync(`${out}/${name}.xml`, source.value);
   fs.writeFileSync(`${out}/${name}.png`, execFileSync('adb', ['exec-out', 'screencap', '-p']));
   fs.writeFileSync(`${out}/${name}-window.txt`, adb('shell', 'dumpsys', 'window', 'windows'));
   return fs.readFileSync(`${out}/${name}.xml`, 'utf8');
@@ -17,7 +31,7 @@ function nodes(xml) {
 }
 async function mouseNode(label, name) {
   const xml = await snapshot(`${name}-before`);
-  const node = nodes(xml).find(n => (n.text === label || n['content-desc'] === label));
+  const node = nodes(xml).find(n => (n.text === label || n['content-desc'] === label || n['content-desc']?.startsWith(`${label}&#10;`)));
   if (!node) throw new Error(`Missing visible semantic label ${label}; inspect ${name}-before.png`);
   const bounds = [...node.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
   const x = Math.round((bounds[0] + bounds[2]) / 2), y = Math.round((bounds[1] + bounds[3]) / 2);
@@ -56,3 +70,4 @@ await snapshot('media-initial');
 // Inspect this screenshot before choosing a photo's actual mouse target.
 // The D-pad experiment follows only after successful mouse selection control.
 fs.writeFileSync(`${out}/pending-control.txt`, 'Review media-initial.png; mouse photo selection control is still pending.\n');
+await fetch(`http://127.0.0.1:4723/session/${session}`, { method: 'DELETE' });
