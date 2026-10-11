@@ -56,11 +56,11 @@ def screen(stage, roi=None, psm=11):
     return rows
 
 
-def locate(label, stage, seconds=20, roi=None):
+def locate(label, stage, seconds=20, roi=None, psm=11):
     end = time.monotonic() + seconds
     index = 0
     while True:
-        rows = screen(stage + "-" + str(index), roi)
+        rows = screen(stage + "-" + str(index), roi, psm)
         index += 1
         matches = [row for row in rows if row["text"].strip().lower() == label.lower()]
         if matches:
@@ -265,10 +265,11 @@ try:
         # A fresh valid profile opens the ordinary release-notes page. Finish
         # it through its rendered Done control before checking the home alias.
         startup = screen(role + "-startup")
-        done = [row for row in startup if row["text"].lower() == "done"]
-        if done:
-            row = done[0]
-            click((row["left"] + row["width"] // 2, row["top"] + row["height"] // 2))
+        if any(row["text"].lower() == "new" for row in startup):
+            # The bounded button region is visible in retained normalized
+            # startup pixels. Single-block OCR can read its contrasting label.
+            click(locate("Done", role + "-onboarding-done", 10,
+                         roi=(685, 245, 115, 70), psm=6))
         locate(role, role + "-ready", 30)
         normalize(wid, role + "-ready-normalized")
         (OUT / (role + "-process.json")).write_text(json.dumps({"pid": pid, "exe": os.readlink(f"/proc/{pid}/exe"), "settings": settings}))
