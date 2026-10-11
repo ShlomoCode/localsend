@@ -44,7 +44,7 @@ for($attempt=0;$attempt -lt 8;$attempt++) {
  $setupBmp=New-Object System.Drawing.Bitmap(1920,1080);$setupG=[System.Drawing.Graphics]::FromImage($setupBmp);$setupG.CopyFromScreen(0,0,0,0,$setupBmp.Size);$setupBmp.Save("$EvidenceDirectory/setup-$attempt.png",[System.Drawing.Imaging.ImageFormat]::Png);$setupG.Dispose();$setupBmp.Dispose()
  $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
  $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-uia-$attempt.json"
- $privacy=$elements|Where-Object{$_.Current.Name -eq 'Microsoft account' -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window}|Select-Object -First 1
+ $privacy=$elements|Where-Object{$_.Current.Name -eq 'Microsoft account' -and !$_.Current.IsOffscreen -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window}|Select-Object -First 1
  if($privacy){
   # The retained 1920x1080 setup-7 screenshot shows the privacy wizard's Next/Accept button at these bounds.
   $setupInputs+=@{action='Privacy visible Next/Accept';x=1435;y=849;utc=[DateTime]::UtcNow.ToString('o')}
@@ -57,7 +57,7 @@ for($attempt=0;$attempt -lt 8;$attempt++) {
   if($properties){[Desktop2861]::SetForegroundWindow([IntPtr]$properties.Current.NativeWindowHandle)|Out-Null;Start-Sleep -Milliseconds 500}
   $bounds=$ok.Current.BoundingRectangle;[Desktop2861]::SetCursorPos([int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))|Out-Null;[Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);Start-Sleep -Seconds 1;continue
  }
- $next=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -in @('Next','Accept')}|Select-Object -First 1
+ $next=$elements|Where-Object{!$_.Current.IsOffscreen -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -in @('Next','Accept')}|Select-Object -First 1
  if(!$next){break}
  try{([System.Windows.Automation.InvokePattern]$next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()}catch{break}
  Start-Sleep -Seconds 1

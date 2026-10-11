@@ -5,14 +5,18 @@ Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,
 Get-CimInstance Win32_VideoController|Select-Object Name,DriverVersion,VideoModeDescription|ConvertTo-Json|Set-Content "$EvidenceDirectory/gpu.json"
 @{image=$env:ImageOS;imageVersion=$env:ImageVersion;architecture=$env:PROCESSOR_ARCHITECTURE;screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.ToString()}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
 function Snapshot($name,$process) {
+ $process.Refresh();$r=New-Object Desktop2861+Rect;$handle=[IntPtr]::Zero
+ if(!$process.HasExited -and $process.MainWindowHandle){$handle=$process.MainWindowHandle}
+ [Desktop2861]::GetClientRect($handle,[ref]$r)|Out-Null
+ @{utc=[DateTime]::UtcNow.ToString('o');pid=$process.Id;hasExited=$process.HasExited;window=$handle.ToInt64();foreground=[Desktop2861]::GetForegroundWindow().ToInt64();client=@{width=$r.right;height=$r.bottom};dpi=[Desktop2861]::GetDpiForWindow($handle)}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-state.json"
  $bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
  $bmp=New-Object System.Drawing.Bitmap($bounds.Width,$bounds.Height);$g=[System.Drawing.Graphics]::FromImage($bmp)
  $g.CopyFromScreen($bounds.X,$bounds.Y,0,0,$bmp.Size);$bmp.Save("$EvidenceDirectory/$name.png",[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
- $elements=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $scope=[System.Windows.Automation.TreeScope]::Children
+ $root=[System.Windows.Automation.AutomationElement]::RootElement
+ if($handle -ne [IntPtr]::Zero){$root=[System.Windows.Automation.AutomationElement]::FromHandle($handle);$scope=[System.Windows.Automation.TreeScope]::Descendants}
+ $elements=$root.FindAll($scope,[System.Windows.Automation.Condition]::TrueCondition)
  $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString();pid=$_.Current.ProcessId;offscreen=$_.Current.IsOffscreen}}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-uia.json"
- $process.Refresh();$r=New-Object Desktop2861+Rect
- [Desktop2861]::GetClientRect($process.MainWindowHandle,[ref]$r)|Out-Null
- @{utc=[DateTime]::UtcNow.ToString('o');pid=$process.Id;window=$process.MainWindowHandle.ToInt64();foreground=[Desktop2861]::GetForegroundWindow().ToInt64();client=@{width=$r.right;height=$r.bottom};dpi=[Desktop2861]::GetDpiForWindow($process.MainWindowHandle)}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-state.json"
 }
 Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
 $exe=Get-ChildItem $ReleaseRoot -Filter localsend_app.exe -Recurse|Select-Object -First 1
