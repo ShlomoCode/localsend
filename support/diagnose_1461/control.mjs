@@ -155,14 +155,26 @@ async function selectCompatibleDevice(){
  const response=await fetch('https://api-cloud.browserstack.com/app-automate/devices.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
  assert(response.ok,'Fresh supported-device inventory unavailable');const inventory=await response.json();assert(Array.isArray(inventory),'Invalid device inventory');
  const candidates=['Samsung Galaxy S20','Samsung Galaxy S21','Google Pixel 5','Google Pixel 4a'];
- const matches=inventory.filter(d=>d.os?.toLowerCase()==='android'&&d.os_version==='13.0'&&d.realMobile===true&&candidates.includes(d.device));
- save('airplane-device-inventory.json',{utc:new Date().toISOString(),source:'Authenticated /app-automate/devices.json',compatibilitySource:'https://www.browserstack.com/app-automate/capabilities',compatibilityChecked:'2026-10-11',candidates,matches,
+ const supportedModelInventory=inventory.filter(d=>d.os?.toLowerCase()==='android'&&candidates.includes(d.device));
+ const apkMinimumSdk=Number(process.env.BASELINE_APK_MIN_SDK);assert(Number.isInteger(apkMinimumSdk)&&apkMinimumSdk>0,'Official APK minimum SDK evidence missing');
+ assert(process.env.BASELINE_APK_COMPATIBILITY_PATH,'Official APK manifest evidence path missing');
+ const apkCompatibility=JSON.parse(fs.readFileSync(process.env.BASELINE_APK_COMPATIBILITY_PATH,'utf8').replace(/^\uFEFF/,''));
+ const apkDownload=JSON.parse(fs.readFileSync(path.join(out,'original-android-apk.json'),'utf8').replace(/^\uFEFF/,''));
+ assert.equal(apkCompatibility.minSdk,apkMinimumSdk);assert.equal(apkCompatibility.sha256,apkDownload.sha256,'Manifest evidence is not the downloaded official APK');
+ assert.equal(apkCompatibility.package,'org.localsend.localsend_app');assert.equal(apkCompatibility.versionName,'1.14.0');
+ assert(apkCompatibility.nativeCodeAbis?.includes('arm64-v8a'),'Original APK does not support the ARM64 supported-model candidates');
+ const apiByOs={'13.0':33,'12.0':31,'11.0':30,'10.0':29};
+ const matches=supportedModelInventory.filter(d=>d.realMobile===true&&apiByOs[d.os_version]>=Math.max(26,apkMinimumSdk))
+  .sort((a,b)=>apiByOs[b.os_version]-apiByOs[a.os_version]||candidates.indexOf(a.device)-candidates.indexOf(b.device));
+ save('airplane-device-inventory.json',{utc:new Date().toISOString(),source:'Authenticated /app-automate/devices.json',compatibilitySource:'https://www.browserstack.com/app-automate/capabilities',compatibilityChecked:'2026-10-11',candidates,supportedModelInventory,matches,
+  apkMinimumSdk,helperMinimumSdk:26,selectionPolicy:'Prefer Android13 then12/11/10 among actual supported-model inventory compatible with unmodified official APK and helper; broader OS explicitly diagnostic only',
   excludedOriginalDevice:'Samsung Galaxy S23 is explicitly excluded from airplane-mode support',scope:'Distinct airplane-mode diagnostic; not original Wi-Fi-off reproduction'});
- const selected=candidates.map(name=>matches.find(d=>d.device===name)).find(Boolean);
- assert(selected,'No inventoried Android 13 device among documented airplane-compatible candidates; stop before session creation');
+ const selected=matches[0];
+ assert(selected,'No inventoried documented airplane-compatible candidate with authorized OS and official APK compatibility; stop before session creation');
  report.device=selected.device;report.android=selected.os_version;
  report.boundaries[1]=selected.device+' Android '+selected.os_version+' differs from Redmi K40 HyperOS Android 13';
  report.boundaries.push('Provider actual airplane-mode is a different trigger from the original Wi-Fi Settings experiment');
+ report.apkCompatibility={apkMinimumSdk,selectedApi:apiByOs[selected.os_version],helperMinimumSdk:26,nativeCodeAbis:apkCompatibility.nativeCodeAbis,apkSha256:apkCompatibility.sha256,source:'Unmodified official1.14APK aapt manifest evidence; supported candidate models are ARM64; Android OS/API mapping'};
 }
 function successfulFileControl(value,phase){
  const result=value.result;assert.equal(result?.phase,phase,'Wrong file-control phase');

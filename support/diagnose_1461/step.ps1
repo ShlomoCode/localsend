@@ -41,7 +41,55 @@ function Upload-App {
  $script:secretValues+=[string]$response.app_url
  return [string]$response.app_url
 }
+function Read-OfficialApkCompatibility {
+ param([string]$ApkPath)
+ $sdk=$env:ANDROID_HOME
+ if(-not $sdk) { $sdk=$env:ANDROID_SDK_ROOT }
+ if(-not $sdk) { throw 'Android SDK path is required for official APK manifest compatibility evidence.' }
+ $aapt=Join-Path $sdk 'build-tools/35.0.0/aapt.exe'
+ if(-not (Test-Path -LiteralPath $aapt -PathType Leaf)) { throw 'Installed Android build-tools 35.0.0 aapt is required for APK compatibility evidence.' }
+ $rawPath=Join-Path $EvidenceDirectory 'original-android-apk-badging.txt'
+ $stderrPath=Join-Path $EvidenceDirectory 'original-android-apk-badging.stderr.txt'
+ & $aapt dump badging $ApkPath 1> $rawPath 2> $stderrPath
+ if($LASTEXITCODE -ne 0) { throw 'aapt could not read the official APK; compatibility is unknown.' }
+ $raw=Get-Content -LiteralPath $rawPath -Raw
+ $packageLines=[regex]::Matches($raw,"(?m)^package: name='([^']+)' versionCode='([0-9]+)' versionName='([^']+)'[^\r\n]*\r?$")
+ $minLines=[regex]::Matches($raw,"(?m)^sdkVersion:'([0-9]+)'\r?$")
+ $targetLines=[regex]::Matches($raw,"(?m)^targetSdkVersion:'([0-9]+)'\r?$")
+ $abiLines=[regex]::Matches($raw,"(?m)^native-code:([^\r\n]+)\r?$")
+ foreach($field in @('package','sdkVersion','targetSdkVersion','native-code')) {
+  if([regex]::Matches($raw,('(?m)^'+[regex]::Escape($field)+':')).Count -ne 1) { throw "Official APK $field evidence is missing or ambiguous." }
+ }
+ if($packageLines.Count -ne 1 -or $minLines.Count -ne 1 -or $targetLines.Count -ne 1 -or $abiLines.Count -ne 1) {
+  throw 'Official APK package, version, SDK or ABI evidence is missing or ambiguous; device selection is blocked.'
+ }
+ $package=$packageLines[0].Groups[1].Value; $versionName=$packageLines[0].Groups[3].Value
+ if($package -ne 'org.localsend.localsend_app' -or $versionName -ne '1.14.0') { throw 'Downloaded APK identity does not match the official LocalSend 1.14.0 baseline.' }
+ $minSdk=0; $targetSdk=0
+ if(-not [int]::TryParse($minLines[0].Groups[1].Value,[ref]$minSdk) -or $minSdk -lt 1 -or
+    -not [int]::TryParse($targetLines[0].Groups[1].Value,[ref]$targetSdk) -or $targetSdk -lt $minSdk) { throw 'Official APK numeric SDK requirements are invalid.' }
+ $abiText=$abiLines[0].Groups[1].Value
+ $abiMatches=[regex]::Matches($abiText,"'([a-zA-Z0-9_-]+)'")
+ $abiRemainder=[regex]::Replace($abiText,"'([a-zA-Z0-9_-]+)'",'').Trim()
+ $abis=@($abiMatches | ForEach-Object { $_.Groups[1].Value })
+ if($abis.Count -eq 0 -or $abiRemainder -or @($abis | Select-Object -Unique).Count -ne $abis.Count) { throw 'Official APK native-code ABI evidence is missing or ambiguous.' }
+ $compatibilityPath=Join-Path $EvidenceDirectory 'original-android-apk-compatibility.json'
+ $compatibility=@{
+  source=$BaselineUrl; sha256=(Get-FileHash $ApkPath -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=(Get-Item $ApkPath).Length
+  tool='aapt dump badging'; buildToolsVersion='35.0.0'; package=$package; versionCode=$packageLines[0].Groups[2].Value; versionName=$versionName
+  minSdk=$minSdk; targetSdk=$targetSdk; nativeCodeAbis=$abis; observedUtc=[DateTime]::UtcNow.ToString('o')
+  rawEvidence=[IO.Path]::GetFileName($rawPath); stderrEvidence=[IO.Path]::GetFileName($stderrPath)
+ }
+ [IO.File]::WriteAllText($compatibilityPath,(ConvertTo-Json -Depth 5 $compatibility),[Text.UTF8Encoding]::new($false))
+ $env:BASELINE_APK_MIN_SDK=[string]$minSdk
+ $env:BASELINE_APK_TARGET_SDK=[string]$targetSdk
+ $env:BASELINE_APK_COMPATIBILITY_PATH=$compatibilityPath
+}
 try {
+ $baselinePath=Join-Path $private 'original-1.14.0.apk'
+ Invoke-WebRequest $BaselineUrl -OutFile $baselinePath -TimeoutSec 120
+ [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'original-android-apk.json'),(ConvertTo-Json @{ release='1.14.0'; sha256=(Get-FileHash $baselinePath -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=(Get-Item $baselinePath).Length; source=$BaselineUrl }))
+ Read-OfficialApkCompatibility -ApkPath $baselinePath
  $localLog=Join-Path $private 'local.log'
  $stdoutPath=Join-Path $private 'local.stdout.txt'; $stderrPath=Join-Path $private 'local.stderr.txt'
  $start=[Diagnostics.ProcessStartInfo]::new()
@@ -78,9 +126,6 @@ try {
   method='Foreground owned native process readiness message; same step lifetime'
  }),[Text.UTF8Encoding]::new($false))
  $env:RELAY_APP=Upload-App -ApkPath $env:CLOUD_TRANSPORT_APK -Label 'relay'
- $baselinePath=Join-Path $private 'original-1.14.0.apk'
- Invoke-WebRequest $BaselineUrl -OutFile $baselinePath -TimeoutSec 120
- [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'original-android-apk.json'),(ConvertTo-Json @{ release='1.14.0'; sha256=(Get-FileHash $baselinePath -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=(Get-Item $baselinePath).Length; source=$BaselineUrl }))
  $env:BASELINE_APP=Upload-App -ApkPath $baselinePath -Label 'baseline'
  $env:TRANSFER_EVIDENCE_DIRECTORY=$EvidenceDirectory
  & node (Join-Path $PSScriptRoot 'control.mjs')
@@ -104,7 +149,7 @@ try {
    [IO.File]::WriteAllText((Join-Path $EvidenceDirectory $name),(Redact ([IO.File]::ReadAllText($source))),[Text.UTF8Encoding]::new($false))
   }
  }
- foreach($name in @('HELPER_APP','RELAY_APP','BASELINE_APP')) { [Environment]::SetEnvironmentVariable($name,$null,'Process') }
+ foreach($name in @('HELPER_APP','RELAY_APP','BASELINE_APP','BASELINE_APK_MIN_SDK','BASELINE_APK_TARGET_SDK','BASELINE_APK_COMPATIBILITY_PATH')) { [Environment]::SetEnvironmentVariable($name,$null,'Process') }
  if(Test-Path -LiteralPath $private) { Remove-Item -LiteralPath $private -Recurse -Force }
  # Remove this single-run capability APK after its private upload and session use.
  if(Test-Path -LiteralPath $env:CLOUD_TRANSPORT_APK) { Remove-Item -LiteralPath $env:CLOUD_TRANSPORT_APK -Force }

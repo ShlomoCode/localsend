@@ -44,7 +44,7 @@ jobs:
           $env:RELAY_TOKEN=Get-Content (Join-Path $env:RUNNER_TEMP 'relay-token') -Raw
           Remove-Item (Join-Path $env:RUNNER_TEMP 'relay-token')
           ./support/diagnose_1461/build-helper.ps1
-      - name: Original release apps and normal Android Wi-Fi interruption
+      - name: Original release apps and observed OS network interruption
         shell: pwsh
         run: |
           if(-not(Get-Command ffmpeg -ErrorAction SilentlyContinue)){
