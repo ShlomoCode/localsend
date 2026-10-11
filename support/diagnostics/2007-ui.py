@@ -26,7 +26,8 @@ def screen(name, sidebar=False):
     source.resize((source.width * 3, source.height * 3), Image.Resampling.LANCZOS).save(ocr_path)
     tsv = run('tesseract', str(ocr_path), 'stdout', '--psm', '11', 'tsv')
     (out / (name + '.tsv')).write_text(tsv)
-    words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t'))
+    # Tesseract TSV does not CSV-quote text; a leading UI quote is literal.
+    words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t', quoting=csv.QUOTE_NONE))
     for word in words:
         for key in ['left', 'top', 'width', 'height']:
             word[key] = str(int(word[key]) // 3)

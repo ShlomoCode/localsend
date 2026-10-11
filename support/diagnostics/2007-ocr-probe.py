@@ -14,7 +14,7 @@ for region, crop in [('full', (0, 0, source.width, source.height)), ('sidebar', 
     for mode in ['6', '11', '12']:
         tsv = subprocess.check_output(['tesseract', str(path), 'stdout', '--psm', mode, 'tsv'], text=True)
         Path('evidence', region + '-' + mode + '.tsv').write_text(tsv)
-        words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t'))
+        words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t', quoting=csv.QUOTE_NONE))
         names = [w['text'] for w in words if w['text']]
         result = {'region': region, 'mode': mode, 'recognized': names, 'settings_found': 'Settings' in names}
         results.append(result)
@@ -24,7 +24,7 @@ assert any(r['region'] == 'sidebar' and r['settings_found'] for r in results), '
 server_source = Image.open(next(Path('/tmp/ocr-reference').rglob('server-row-11.png')))
 server_source.resize((server_source.width * 3, server_source.height * 3), Image.Resampling.LANCZOS).save('evidence/server.png')
 tsv = subprocess.check_output(['tesseract', 'evidence/server.png', 'stdout', '--psm', '11', 'tsv'], text=True)
-words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t'))
+words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t', quoting=csv.QUOTE_NONE))
 for word in words:
     for key in ['left', 'top', 'width', 'height']:
         word[key] = str(int(word[key]) // 3)
