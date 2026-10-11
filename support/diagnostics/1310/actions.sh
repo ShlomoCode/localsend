@@ -159,7 +159,7 @@ for version in 1.14.0 1.18.2; do
     xdotool mousemove --sync $point
     sleep 2
     snapshot "$version-transfer-manual-tooltip"
-    awk -F '\t' '$12=="Manual"{found=1}END{exit !found}' "evidence/$version-transfer-manual-tooltip.tsv"
+    awk -F '\t' '$12=="Manual"{manual=1} $12=="Enter"{enter=1} $12=="address"{address=1} END{exit !(manual || (enter && address))}' "evidence/$version-transfer-manual-tooltip.tsv"
     xdotool click 1
     sleep 2
     click_label "$version-transfer-ip-mode" IP
