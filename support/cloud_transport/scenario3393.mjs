@@ -67,7 +67,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   const permission=await source('calibration-folder-permission');
   if(permission.includes('text="Allow"')){await nativeText('Allow');}
   const destination=await source('calibration-selected-destination');
-  if(!destination.includes('/storage/emulated/0/Documents'))throw new Error('Options did not show the selected Documents destination');
+  if(!destination.includes('content://com.android.externalstorage.documents/tree/primary%3ADocuments'))throw new Error('Options did not show the selected Documents SAF destination');
   const selectedShot=await wd('GET',`/session/${session}/screenshot`);writeFileSync('evidence/calibration-selected-destination.png',Buffer.from(selectedShot,'base64'));
   await lifecycle('calibration-after-folder-selection');
   await wd('POST',`/session/${session}/back`,{});
