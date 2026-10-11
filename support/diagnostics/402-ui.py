@@ -36,7 +36,7 @@ def snapshot(name):
 
 
 def click(label, name, optional=False):
-    if label in ('Accept', 'Done', 'Confirm') or label.endswith('.txt'):
+    if label in ('Accept', 'Done', 'Confirm', 'Open', 'OK') or label.endswith('.txt'):
         matches = []
         def visit(node, depth=0):
             if depth > 18:
@@ -64,7 +64,7 @@ def click(label, name, optional=False):
             time.sleep(2)
             return True
     rows = snapshot(name)
-    hits = [r for r in rows if r['text'].strip().strip('.,:').lower() == label.lower()]
+    hits = [r for r in rows if r['text'].strip().strip('.,:\"\u0027’“”').lower() == label.lower()]
     if not hits and label in ('Accept', 'Done') and app_bounds:
         left, top, width, height = app_bounds
         crop_top = top + int(height * .7)
@@ -87,7 +87,7 @@ def click(label, name, optional=False):
         if optional:
             return False
         raise RuntimeError('UI label absent: ' + label)
-    hit = max(hits, key=lambda row: int(row['top'])) if label in ('Accept', 'Done') else hits[0]
+    hit = max(hits, key=lambda row: int(row['top'])) if label in ('Accept', 'Done', 'Open', 'OK') else hits[0]
     x = int(hit['left']) + int(hit['width']) // 2
     y = int(hit['top']) + int(hit['height']) // 2
     log('click', label=label, x=x, y=y)
