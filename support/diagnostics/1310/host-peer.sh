@@ -3,7 +3,9 @@
 set -euo pipefail
 mkdir -p evidence/host-peer /home/runner/issue1310-peer/bundle /home/runner/Downloads
 peerroot=/home/runner/issue1310-peer
-sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgl1-mesa-dri
+sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgl1-mesa-dri network-manager at-spi2-core
+sudo systemctl start NetworkManager
+{ systemctl status NetworkManager --no-pager; busctl --system list; } > evidence/host-peer/desktop-services.txt
 curl -fL --retry 3 -o "$peerroot/release.tar.gz" https://github.com/localsend/localsend/releases/download/v1.14.0/LocalSend-1.14.0-linux-x86-64.tar.gz
 sha256sum "$peerroot/release.tar.gz" > evidence/host-peer/release-sha256.txt
 tar xf "$peerroot/release.tar.gz" -C "$peerroot/bundle"
