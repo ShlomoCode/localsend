@@ -193,7 +193,13 @@ dpkg-deb -I "$deb" > "$OUT/localsend-deb-control.txt"
 deb_package=$(dpkg-deb -f "$deb" Package)
 sudo apt-get install -y "$deb"
 dpkg-query -L "$deb_package" > "$OUT/localsend-deb-files.txt" 2>&1 || true
-deb_exe=$(awk '/\/localsend_app$/ {print; exit}' "$OUT/localsend-deb-files.txt")
+deb_exe=""
+while IFS= read -r candidate; do
+  if [[ "$candidate" == */localsend_app && -f "$candidate" && -x "$candidate" ]]; then
+    deb_exe="$candidate"
+    break
+  fi
+done < "$OUT/localsend-deb-files.txt"
 if [[ -z "$deb_exe" || ! -x "$deb_exe" ]]; then
   echo 'Could not find installed LocalSend executable from dpkg -L.' | tee -a "$OUT/infrastructure-failures.txt"
   exit 2
