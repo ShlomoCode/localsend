@@ -154,11 +154,17 @@ function PrimaryButton([string]$snap) {
  $bmp = [System.Drawing.Bitmap]::FromFile("$EvidenceDirectory/$snap.png")
  $minX=992; $maxX=0; $minY=720; $maxY=0; $count=0
  for ($y=180;$y -lt 710;$y++) {
-  for ($x=510;$x -lt 640;$x++) {
+  $runStart=-1
+  for ($x=450;$x -lt 800;$x++) {
    $pixel=$bmp.GetPixel($x,$y)
    if ($pixel.R -lt 30 -and $pixel.G -gt 80 -and $pixel.G -lt 145 -and $pixel.B -gt 60 -and $pixel.B -lt 140) {
-    $minX=[Math]::Min($minX,$x);$maxX=[Math]::Max($maxX,$x)
-    $minY=[Math]::Min($minY,$y);$maxY=[Math]::Max($maxY,$y);$count++
+    if($runStart -lt 0) {$runStart=$x}
+   } else {
+    if($runStart -ge 0 -and $x-$runStart -ge 60) {
+     $minX=[Math]::Min($minX,$runStart);$maxX=[Math]::Max($maxX,$x-1)
+     $minY=[Math]::Min($minY,$y);$maxY=[Math]::Max($maxY,$y);$count+=$x-$runStart
+    }
+    $runStart=-1
    }
   }
  }
@@ -243,6 +249,11 @@ function Pencil([string]$snapshot,[string]$name) {
 function RequireText([string]$snapshot,[string]$word) {
  if(!(Import-Csv "$EvidenceDirectory/$snapshot.tsv" -Delimiter "`t" | Where-Object {$_.text -eq $word})) {throw "Input verification failed: $word not visible in $snapshot"}
 }
+function OpenFavorites([string]$snapshot) {
+ $row=Import-Csv "$EvidenceDirectory/$snapshot.tsv" -Delimiter "`t" | Where-Object {$_.text -eq 'devices'} | Select-Object -First 1
+ if(!$row) {throw "Nearby devices heading unavailable in $snapshot"}
+ Click (([int]$row.left+[int]$row.width)/2+110) (([int]$row.top+[int]$row.height/2)/2)
+}
 try {
  Chapter 'Actual Windows app and real LocalSend peer - empty favorites'
  Snap 'home'
@@ -310,6 +321,7 @@ try {
  if(!$err) {throw 'Addition error missing'}
  Click (([int]$err.left+[int]$err.width)/2+24) (([int]$err.top+[int]$err.height/2)/2)
  Snap 'failed-add-details'
+ RequireText 'failed-add-details' 'Close'
  Esc
  Chapter 'Recover from failed addition by correcting the peer port'
  Snap 'add-recovery'
@@ -355,12 +367,14 @@ try {
  if(!$err) {throw 'Long-list connection error unreachable'}
  Click (([int]$err.left+[int]$err.width)/2+24) (([int]$err.top+[int]$err.height/2)/2)
  Snap 'connection-error-details'
+ RequireText 'connection-error-details' 'Close'
  Esc
  Chapter 'Recover from failed favorite by selecting the real peer'
  Snap 'long-recovery'
  Word 'receiver' 'long-recovery'
  Start-Sleep -Seconds 2
  Snap 'long-connected'
+ RequireText 'long-connected' 'selection'
  Esc
  Chapter 'Shorter native window: scroll and fixed Cancel / Add actions'
  Click 576 212
@@ -386,11 +400,26 @@ try {
  Word 'Send' 'large-text-home'
  Snap 'large-text-send'
  # Favorites icon lies next to Nearby devices, at the end of the heading.
- Click 576 212
+ OpenFavorites 'large-text-send'
  [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,883,610,$true) | Out-Null
  Snap 'large-text-top'
+ RequireText 'large-text-top' 'Favorites'
+ $normal=Import-Csv "$EvidenceDirectory/long-top.tsv" -Delimiter "`t" | Where-Object {$_.text -eq 'Favorites'} | Select-Object -First 1
+ $large=Import-Csv "$EvidenceDirectory/large-text-top.tsv" -Delimiter "`t" | Where-Object {$_.text -eq 'Favorites'} | Select-Object -First 1
+ @{normalTitleHeight=$normal.height;enlargedTitleHeight=$large.height;requestedWindowsTextScale=150} | ConvertTo-Json | Set-Content "$EvidenceDirectory/text-scale-observation.json"
+ if([int]$large.height -lt [int]$normal.height*1.2) {throw 'Requested text scale did not visibly enlarge Favorites title'}
+ Chapter 'Short window and enlarged text: failed favorite, scroll Error and open details'
+ Word 'Offline' 'large-text-top'
+ Start-Sleep -Seconds 2
  Scroll $true 24
  Snap 'large-text-bottom'
+ RequireText 'large-text-bottom' 'Favorites'
+ $err=Import-Csv "$EvidenceDirectory/large-text-bottom.tsv" -Delimiter "`t" | Where-Object {$_.text -eq 'Error'} | Select-Object -First 1
+ if(!$err) {throw 'Enlarged-text error is unreachable'}
+ Click (([int]$err.left+[int]$err.width)/2+24) (([int]$err.top+[int]$err.height/2)/2)
+ Snap 'large-text-error-details'
+ RequireText 'large-text-error-details' 'Close'
+ Esc
  Chapter 'Recording complete - actual app UI, real HTTP peer, seeded long list'
  @{sourceCommit='ac81c35d3c623df398ded2704f06b7a5401dec86';recordingBranchCommit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;network='Two actual LocalSend Windows apps, plaintext loopback HTTP, ports 53317 and 53318; closed port 1 for failure';diagnosticSetup='11 persisted offline favorites plus one UI-created real peer; native window resize; Windows Accessibility TextScaleFactor=150';mocks=$false;completed=$true} | ConvertTo-Json | Set-Content "$EvidenceDirectory/coverage.json"
 } finally {
