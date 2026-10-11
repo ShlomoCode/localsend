@@ -8,14 +8,25 @@ sha256sum --check <<'HASHES'
 ef4f2a528f76edc7cb37b70d0143a51fa5e049ae93198c4426befd2c250c3b03  /home/probe/evidence/atspi254/source.tar.gz
 d4348bcd7197e837b03004f7e80ca6dc69b4bee8cd81ea35dba94dd37424f01d  /home/probe/evidence/A-local-dispatch.patch
 HASHES
+if test -d "$task_build_root/A"; then
+  mv "$task_build_root/A" "$task_build_root/A-attempt-$(date -u +%Y%m%dT%H%M%S)"
+fi
 mkdir -p "$task_build_root/A"
 tar -xzf "$task_build_root/source.tar.gz" -C "$task_build_root/A" --strip-components=1
 flatpak info org.freedesktop.Sdk//25.08
 flatpak run --filesystem=/home/probe/evidence --command=sh org.freedesktop.Sdk//25.08 -c '
   set -eu
   cd /home/probe/evidence/atspi254/A
-  git apply --check /home/probe/evidence/A-local-dispatch.patch
-  git apply /home/probe/evidence/A-local-dispatch.patch
+  # The independent cloud gate runs all eleven native tests. This pinned SDK
+  # lacks dbus-run-session; apply only the identical production adaptor here.
+  # Keep the full verified patch as evidence, and do not alter production code.
+  git apply --check --exclude="tests/*" /home/probe/evidence/A-local-dispatch.patch
+  git apply --exclude="tests/*" /home/probe/evidence/A-local-dispatch.patch
+  sha256sum --check <<"PRODUCTION"
+8b763df2b23c3d4e0f65084b3d96d4156831689c85fec76e6554b4b4a716b48c  atk-adaptor/adaptors/socket-adaptor.c
+PRODUCTION
+  diff -u /home/probe/evidence/atspi254/stock/atk-adaptor/adaptors/socket-adaptor.c atk-adaptor/adaptors/socket-adaptor.c > /home/probe/evidence/A-production-source.diff || test "$?" -eq 1
+  sha256sum /home/probe/evidence/A-production-source.diff
   pkg-config --modversion glib-2.0 gobject-2.0 dbus-1 gtk+-3.0
   meson setup build --buildtype=debugoptimized -Ddocs=false -Dintrospection=disabled -Dgtk2_atk_adaptor=false -Duse_systemd=false
   meson compile -C build
