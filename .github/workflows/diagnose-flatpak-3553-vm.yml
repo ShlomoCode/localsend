@@ -13,6 +13,11 @@ on:
         default: released
         type: choice
         options: ['released', 'previous-25.08']
+      graphics:
+        description: Virtual graphics path (virgl is not Intel i915)
+        default: virtio
+        type: choice
+        options: ['virtio', 'virgl']
 
 jobs:
   full-session:
@@ -22,10 +27,11 @@ jobs:
       - name: Install VM tools and prepare the Ubuntu guest
         env:
           START_VERSION: ${{ inputs.start_version || '24.04' }}
+          GRAPHICS: ${{ inputs.graphics || 'virtio' }}
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick openssh-client
+          sudo apt-get install -y qemu-system-x86 qemu-system-gui qemu-utils cloud-image-utils socat imagemagick openssh-client xvfb mesa-utils
           mkdir -p evidence/vm /tmp/localsend-vm /home/runner/localsend-vm
           df -Th /home/runner /tmp | tee evidence/vm/host-filesystems.txt
           disk_type=$(findmnt -no FSTYPE -T /home/runner)
@@ -68,18 +74,25 @@ jobs:
           EOF
           printf 'instance-id: localsend-3553\nlocal-hostname: localsend-3553\n' > /tmp/localsend-vm/meta-data
           cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
-          sudo qemu-system-x86_64 \
+          gpu_args=(-device virtio-vga -display none -vnc 127.0.0.1:1)
+          if [ "$GRAPHICS" = virgl ]; then
+            Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX > evidence/vm/host-xvfb.log 2>&1 &
+            export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEODRIVER=x11
+            for i in $(seq 1 20); do if xdpyinfo >/dev/null 2>&1; then break; fi; sleep 1; done
+            glxinfo -B > evidence/vm/host-glx.txt
+            gpu_args=(-device virtio-vga-gl -display sdl,gl=on)
+          fi
+          sudo --preserve-env=DISPLAY,LIBGL_ALWAYS_SOFTWARE,SDL_VIDEODRIVER qemu-system-x86_64 \
             -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 6144 \
             -drive file=/home/runner/localsend-vm/ubuntu.img,if=virtio,format=qcow2 \
             -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
-            -device virtio-vga -usb -device usb-tablet \
+            "${gpu_args[@]}" -usb -device usb-tablet \
             -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
             -device virtio-net-pci,netdev=net0 \
-            -display none -vnc 127.0.0.1:1 \
             -monitor unix:/tmp/localsend-vm/monitor,server,nowait \
             -serial file:evidence/vm/serial.log \
             -daemonize 2> evidence/vm/qemu-start.log
-          printf 'Image: Ubuntu %s server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: virtio-vga\n' "$START_VERSION" > evidence/vm/host-setup.txt
+          printf 'Image: Ubuntu %s server cloud image + ubuntu-desktop-minimal\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: %s\n' "$START_VERSION" "$GRAPHICS" > evidence/vm/host-setup.txt
           uname -a >> evidence/vm/host-setup.txt
           lscpu > evidence/vm/host-cpu.txt
           free -m >> evidence/vm/host-setup.txt
@@ -202,6 +215,8 @@ jobs:
           export WAYLAND_DISPLAY=$(basename "$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' | head -n 1)")
           export XDG_SESSION_TYPE=wayland
           export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+          gsettings set org.gnome.desktop.session idle-delay 0
+          gsettings set org.gnome.desktop.screensaver lock-enabled false
           if [ "$kind" = deb ]; then
             deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
             nohup "$deb_binary" > "/tmp/localsend-$kind.log" 2>&1 < /dev/null &
@@ -343,6 +358,8 @@ jobs:
           export WAYLAND_DISPLAY=wayland-0
           export XDG_SESSION_TYPE=wayland
           export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+          gsettings set org.gnome.desktop.session idle-delay 0
+          gsettings set org.gnome.desktop.screensaver lock-enabled false
           if [ "$kind" = deb ]; then
             deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
             nohup "$deb_binary" > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
@@ -402,11 +419,17 @@ jobs:
           export WAYLAND_DISPLAY=wayland-0
           export XDG_SESSION_TYPE=wayland
           export XDG_CURRENT_DESKTOP=ubuntu:GNOME
-          shell_pid=$(pgrep -n -u "$(id -u)" -x gnome-shell)
-          display=$(tr '\0' '\n' < "/proc/$shell_pid/environ" | sed -n 's/^DISPLAY=//p' | head -n 1)
-          xauthority=$(tr '\0' '\n' < "/proc/$shell_pid/environ" | sed -n 's/^XAUTHORITY=//p' | head -n 1)
+          gsettings set org.gnome.desktop.session idle-delay 0
+          gsettings set org.gnome.desktop.screensaver lock-enabled false
+          user_environment=$(systemctl --user show-environment)
+          display=$(printf '%s\n' "$user_environment" | sed -n 's/^DISPLAY=//p' | head -n 1)
+          xauthority=$(printf '%s\n' "$user_environment" | sed -n 's/^XAUTHORITY=//p' | head -n 1)
           export DISPLAY="$display" XAUTHORITY="$xauthority"
-          args=()
+          if [ "$mode" = x11 ]; then
+            test -n "$DISPLAY"
+            test -f "$XAUTHORITY"
+          fi
+          args=(--env=EGL_LOG_LEVEL=debug)
           case "$mode" in
             fresh) mv "$HOME/.var/app/org.localsend.localsend_app" "$HOME/localsend-profile-before-fresh" ;;
             software) args+=(--env=LIBGL_ALWAYS_SOFTWARE=1) ;;
@@ -435,10 +458,12 @@ jobs:
           app_pid=$(pgrep -n -x localsend || true)
           if [ -n "$app_pid" ]; then
             ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm
-            cat "/proc/$app_pid/stat"
+            cat "/proc/$app_pid/maps"
+            sudo nsenter -t "$app_pid" -n ss -lntup | grep 53317 || true
+            cat "/proc/$app_pid/task/$app_pid/stat"
             sleep 5
-            cat "/proc/$app_pid/stat"
-            if ! ss -lntup | grep -q 'tcp.*LISTEN.*53317'; then
+            cat "/proc/$app_pid/task/$app_pid/stat"
+            if ! sudo nsenter -t "$app_pid" -n ss -lntup | grep -q 'tcp.*LISTEN.*53317'; then
               timeout 12 sudo gdb -q -batch -p "$app_pid" -ex 'info proc mappings' -ex 'thread apply all bt 16' || true
             fi
           fi
