@@ -206,6 +206,7 @@ environment() {
     date -u --iso-8601=seconds
     uname -a
     locale
+    printf 'GUI_MODE=%s DISPLAY=%s XDG_CURRENT_DESKTOP=%s XDG_SESSION_TYPE=%s\n' "${GUI_MODE:-virtual}" "${DISPLAY:-}" "${XDG_CURRENT_DESKTOP:-}" "${XDG_SESSION_TYPE:-}"
     cat /etc/os-release
     dpkg-query -W -f='${Package} ${Version}\n' flatpak fontconfig xvfb openbox dbus-x11 imagemagick xdotool gdb strace 2>/dev/null || true
     fc-cache --version 2>&1 || true
@@ -265,12 +266,27 @@ if [[ "$actual_app_commit" != "${EXPECTED_APP_COMMIT:-a7a6bc3f9debbbfd90c2e8874a
   exit 5
 fi
 
-export DISPLAY=:99
-Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp > "$OUT/xvfb.log" 2>&1 & XVFB_PID=$!
-sleep 2
-openbox > "$OUT/openbox.log" 2>&1 & OPENBOX_PID=$!
-sleep 2
-dbus-update-activation-environment DISPLAY
+case "${GUI_MODE:-virtual}" in
+  virtual)
+    export DISPLAY=:99
+    Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp > "$OUT/xvfb.log" 2>&1 & XVFB_PID=$!
+    sleep 2
+    openbox > "$OUT/openbox.log" 2>&1 & OPENBOX_PID=$!
+    sleep 2
+    dbus-update-activation-environment DISPLAY
+    ;;
+  native)
+    # Use the existing Cinnamon display and session bus supplied by the guest.
+    if [[ -z "${DISPLAY:-}" || -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || ! xdpyinfo > "$OUT/native-display.txt" 2>&1; then
+      echo 'Native GUI requires a working display and desktop session bus.' | tee -a "$OUT/infrastructure-failures.txt"
+      exit 8
+    fi
+    ;;
+  *)
+    echo "Unknown GUI_MODE: $GUI_MODE" | tee -a "$OUT/infrastructure-failures.txt"
+    exit 8
+    ;;
+esac
 
 flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "XDG_CACHE_HOME=%s FONTCONFIG_FILE=%s\n" "$XDG_CACHE_HOME" "$FONTCONFIG_FILE"; cat /etc/fonts/conf.d/50-flatpak.conf; ls -l /run/host/user-fonts-cache' > "$OUT/flatpak-fontconfig-host-cache.txt" 2>&1
 flatpak run --user --command=sh org.localsend.localsend_app -c 'find /run/host/user-fonts /run/host/fonts -type f 2>/dev/null | sort' > "$OUT/flatpak-host-font-inventory.txt" 2>&1 || true
