@@ -417,7 +417,7 @@ jobs:
           /home/probe/flatpak-identities
           flatpak run --command=sh org.localsend.localsend_app -c 'command -v localsend; ls -l /app/bin /app/localsend_app; env | sort'
           GUEST
-          for mode in baseline fresh software zink x11 isolated-network software-engine; do
+          for mode in baseline fresh software zink x11 isolated-network software-engine adwaita adwaita-dark; do
             label="matrix-$mode"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode $label" <<'GUEST'
           set -eu
@@ -445,6 +445,8 @@ jobs:
             zink) args+=(--env=MESA_LOADER_DRIVER_OVERRIDE=zink --env=LIBGL_ALWAYS_SOFTWARE=1) ;;
             x11) args+=(--nosocket=wayland --socket=x11 --env=GDK_BACKEND=x11) ;;
             isolated-network) args+=(--unshare=network) ;;
+            adwaita) args+=(--env=GTK_THEME=Adwaita) ;;
+            adwaita-dark) args+=(--env=GTK_THEME=Adwaita:dark) ;;
           esac
           if [ "$mode" = software-engine ]; then
             nohup flatpak run org.localsend.localsend_app --enable-software-rendering > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
