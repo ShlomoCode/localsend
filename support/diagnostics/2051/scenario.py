@@ -123,8 +123,9 @@ def transfer(content, phase):
     for path in files:
         path = path.strip()
         if path.endswith(".txt"):
-            data = adb(R, "exec-out", "cat", shlex.quote(path), binary=True)
-            (ROOT / (phase + "-saved-" + pathlib.Path(path).name)).write_bytes(data)
+            pulled = ROOT / (phase + "-saved-" + pathlib.Path(path).name)
+            adb(R, "pull", path, str(pulled))
+            data = pulled.read_bytes()
             saved.append({"path": path, "sha256": hashlib.sha256(data).hexdigest(), "content": data.decode()})
     (ROOT / (phase + "-saved.json")).write_text(json.dumps(saved, indent=2))
     print("SAVED", phase, saved, flush=True)
