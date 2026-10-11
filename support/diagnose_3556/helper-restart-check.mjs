@@ -76,6 +76,8 @@ async function check(factory, port, candidate) {
     await until(() => r.status().peers === 1);
     assert.throws(() => r.retireStoppedHelper('Invalid live helper reset'), /empty owned peers/);
     socket.destroy();
+    // The diagnostic sockets are half-open; client FIN alone does not retire the relay's write half.
+    r.closePeers('Component live-peer guard finished');
     await until(() => r.status().peers === 0);
     r.retireStoppedHelper('Component cleanup');
     assert.equal(r.status().queued, 0);
@@ -87,6 +89,9 @@ try {
   await check(old.relay, 18086, false);
   await check(relay, 18088, true);
   evidence.success = true;
+} catch (error) {
+  evidence.error = error.message;
+  throw error;
 } finally {
   clearTimeout(watchdog);
   for (const req of requests) req.destroy();
