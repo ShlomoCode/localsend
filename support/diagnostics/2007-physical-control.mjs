@@ -119,11 +119,20 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const deleteUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+confirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    let absenceError;
-   const absent=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
-    if(!String(error).includes('No such file or directory'))throw error;
-    absenceError=String(error);
-    return null;
-   });
+   let absent;
+   const absenceObservations=[];
+   const deletionDeadline=Date.now()+10000;
+   do {
+    absent=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
+     if(!String(error).includes('No such file or directory'))throw error;
+     absenceError=String(error);
+     return null;
+    });
+    absenceObservations.push({utc:new Date().toISOString(),pathExists:absent!==null});
+    writeFileSync('evidence/deletion-path-observations.json',JSON.stringify({deleteUtc,observations:absenceObservations,absenceError},null,2));
+    if(absent===null)break;
+    await new Promise(r=>setTimeout(r,100));
+   } while(Date.now()<deletionDeadline);
    assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
    writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,pathAbsenceUtc:new Date().toISOString(),absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
