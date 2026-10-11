@@ -107,7 +107,24 @@ def guest_frame(name):
     remote = guest('capture', name)
     local = OUT/Path(remote['path']).name
     run(SCP+['probe@127.0.0.1:'+remote['path'], str(local)], 45)
-    return ocr(local), remote
+    words = ocr(local)
+    tokens = {word['text'].strip() for word in words}
+    if 'Receiver2414' in tokens:
+        # Full-frame PSM 11 omits these small sidebar labels on the Debian
+        # retained frame. Require actual label OCR in their observed bounds.
+        for label, top in (('Receive', 125), ('Send', 170)):
+            if label in tokens:
+                continue
+            crop = local.with_name(local.stem+'-sidebar-'+label.lower()+'.png')
+            run(['convert',str(local),'-crop',f'110x35+70+{top}','+repage','-resize','400%',str(crop)])
+            tsv = run(['tesseract',str(crop),'stdout','--psm','7','tsv'])
+            crop.with_suffix('.tsv').write_text(tsv)
+            for word in csv.DictReader(io.StringIO(tsv),delimiter='\t',quoting=csv.QUOTE_NONE):
+                if (word.get('text') or '').strip() == label:
+                    observed = {'text':label,'left':int(word['left'])//4+70,'top':int(word['top'])//4+top,
+                                'width':int(word['width'])//4,'height':int(word['height'])//4}
+                    words.append(observed)
+    return words, remote
 
 
 def check_guest(name, required, deadline=45):
