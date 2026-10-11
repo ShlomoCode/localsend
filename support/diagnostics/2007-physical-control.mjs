@@ -41,9 +41,9 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   if(persistentSaf){
    await click('xpath','//*[contains(@content-desc,"Settings") and @clickable="true"]');
    await snapshot('settings-before-scroll');
-   await waitForNativeControl({wd,prefix,using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description("Save to folder"))',label:'settings-save-folder-scroll'});
+   await waitForNativeControl({wd,prefix,using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description("(Downloads)"))',label:'settings-save-folder-scroll'});
    await snapshot('settings-destination-ready');
-   await click('xpath','//android.widget.Button[@content-desc="Downloads"]');
+   await click('xpath','//android.widget.Button[@content-desc="(Downloads)"]');
   }else{
    await click('accessibility id','Options');
    await snapshot(stage+'-options');
