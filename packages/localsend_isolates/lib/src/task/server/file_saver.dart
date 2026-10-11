@@ -131,7 +131,9 @@ Future<(bool, String?)> saveCachedFileToGallery({
   required Set<String> createdDirectories,
 }) async {
   try {
-    isImage ? await Gal.putImage(cachedPath) : await Gal.putVideo(cachedPath);
+    isImage
+        ? await Gal.putImage(cachedPath, preserveFileModifiedTime: Platform.isAndroid)
+        : await Gal.putVideo(cachedPath, preserveFileModifiedTime: Platform.isAndroid);
   } on GalException catch (e) {
     _logger.warning('Could not save to gallery (${e.type.name}), moving to destination directory', e);
 
