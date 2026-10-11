@@ -18,7 +18,7 @@ on:
       apk:
         description: Original release or exact existing c1ce current artifact; no build
         type: choice
-        options: [original, current-c1ce, source-pair]
+        options: [original, current-c1ce, source-pair, source-reuse]
         default: original
 permissions:
   contents: read
@@ -69,6 +69,18 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+      - name: Reuse exact retained normal source pair
+        if: inputs.apk == 'source-reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p evidence-cloud
+          gh run download 38164923680 --repo ShlomoCode/localsend --name issue1864-tv29-initial --dir /tmp/issue1864-source-reuse
+          cp /tmp/issue1864-source-reuse/source-*.apk evidence-cloud/
+          cp /tmp/issue1864-source-reuse/source-pair* evidence-cloud/
+          echo 'e633bffbdd2b4de18f80eaa1f365b2e7c273266f83d25a9bb37195df0c0c234b  evidence-cloud/source-baseline.apk' | sha256sum -c -
+          echo 'f6925e4846f3c3ee177d8b490e1f0e53aea634f391f43418d7bd4ce21816deb1  evidence-cloud/source-focus.apk' | sha256sum -c -
+          echo 'Exact pair reused from run38164923680, headf927f8dd; no app rebuild or APK changes in this test-only job.' > evidence-cloud/source-pair-reuse.txt
       - name: Prepare genuine TV 10 image and avdslim
         shell: bash
         run: |
@@ -114,7 +126,7 @@ jobs:
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/current-c1ce.apk
             echo '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea  evidence-cloud/current-c1ce.apk' | sha256sum -c -
             echo 'Existing build run38107226429, artifact11691000051, workflow head6dd3184ef65cb473a717fd52dd37b9b88ae4edc4; app source c1ce322fb3acf08e44f329b8b7208b8b0d91e244; Flutter3.41.9, Dart3.11.5, Rust1.97.1; legitimate runtime ARM64 ABI/native bridge only; no new build.' > evidence-cloud/current-build-provenance.txt
-          elif [ '${{ inputs.apk }}' = source-pair ]; then
+          elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ]; then
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/source-baseline.apk
           else
             curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
@@ -164,7 +176,7 @@ jobs:
           ISSUE_APPIUM_PID=$!
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
           curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
-          if [ '${{ inputs.apk }}' = source-pair ]; then
+          if [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ]; then
             ISSUE1864_APK=source-baseline node support/tests/issue1864-tv.mjs
             kill "$ISSUE_APPIUM_PID"
             wait "$ISSUE_APPIUM_PID" || true
@@ -188,9 +200,16 @@ jobs:
       - name: Validate recordings and render logged input review aids
         if: always()
         run: |
+          mkdir -p evidence-cloud
+          free -h > evidence-cloud/host-memory.txt
+          df -h > evidence-cloud/host-disk.txt
+          ps -eo pid,ppid,rss,comm > evidence-cloud/host-processes.txt
+          sudo dmesg --ctime > evidence-cloud/host-kernel.txt 2> evidence-cloud/host-kernel-stderr.txt || echo "Optional kernel collection exited $?" > evidence-cloud/host-kernel-status.txt
+          adb devices -l > evidence-cloud/adb-final-devices.txt 2> evidence-cloud/adb-final-stderr.txt || echo "Optional adb devices collection exited $?" > evidence-cloud/adb-final-status.txt
+          for logfile in /tmp/avdslim-emulator-*.log; do if [ -f "$logfile" ]; then cp "$logfile" evidence-cloud/; fi; done
           adb logcat -d > evidence-cloud/final-logcat.txt 2> evidence-cloud/final-logcat-stderr.txt || echo "Final optional logcat dump exited $?" > evidence-cloud/final-logcat-status.txt
           node support/tests/issue1864-video.mjs
-          if [ '${{ inputs.apk }}' = source-pair ]; then
+          if [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ]; then
             ISSUE1864_VIDEO_DIR=evidence-cloud/source-baseline node support/tests/issue1864-video.mjs
             ISSUE1864_VIDEO_DIR=evidence-cloud/source-focus node support/tests/issue1864-video.mjs
           fi
