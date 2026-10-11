@@ -8,6 +8,8 @@ const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
  const policyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
+ const samsungDiscovery=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-policy-discovery';
+ if(samsungDiscovery&&process.env.BS_DEVICE!=='Samsung Galaxy S25')throw new Error('Samsung policy discovery requires Samsung Galaxy S25');
  if(policyOn&&(process.env.BS_DEVICE!=='OnePlus 13R'||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires OnePlus 13R and scheduled 20 s');
  let policyAttempted=false,policyModule;
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
@@ -82,6 +84,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await clickElement(controlDone,'control-done');
   await source('control-notification-handled');
   const {default:observeSettings}=await import('./settings3393.mjs');await observeSettings({session,wd});
+  if(samsungDiscovery)return;
   if(policyOn){
    const {default:timedPicker}=await import('./picker3393-timed.mjs');
    await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true});
@@ -128,6 +131,6 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results});
  } finally {
   try{if(policyAttempted)await policyModule.setOnePlusBackground({session,wd,enabled:false,label:'policy-restore'});}
-  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,transport:transportStatus()},null,2));}
+  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyDiscovery:samsungDiscovery,transport:transportStatus()},null,2));}
  }
 }
