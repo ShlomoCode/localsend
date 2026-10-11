@@ -21,6 +21,24 @@ $window=@($shellApp.Windows()|Where-Object {$_.LocationURL -like '*evidence*'}|S
 if($window.Count -ne 1){throw 'Explorer fixture window was not found'}
 $shell.AppActivate([int](Get-Process explorer|Select-Object -Last 1).Id)|Out-Null
 $root=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window[0].HWND)
+Add-Type @'
+using System;using System.Runtime.InteropServices;
+public static class Explorer2311 {
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n);
+ [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
+ [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
+}
+'@
+$hwnd=[IntPtr]$window[0].HWND
+$current=[Explorer2311]::GetCurrentThreadId();$unused=0u
+$threads=@([Explorer2311]::GetWindowThreadProcessId([Explorer2311]::GetForegroundWindow(),[ref]$unused),[Explorer2311]::GetWindowThreadProcessId($hwnd,[ref]$unused))|Select-Object -Unique
+$attached=@()
+foreach($thread in $threads){if($thread -and $thread -ne $current -and [Explorer2311]::AttachThreadInput($current,$thread,$true)){$attached+=$thread}}
+try{[void][Explorer2311]::ShowWindow($hwnd,9);[void][Explorer2311]::SetForegroundWindow($hwnd)}finally{foreach($thread in $attached){[void][Explorer2311]::AttachThreadInput($current,$thread,$false)}}
+if([Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Explorer foreground could not be established; no context-menu keys were sent'}
 $filename=[IO.Path]::GetFileNameWithoutExtension($fixture)
 $items=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
 $item=@($items|Where-Object {$_.Current.Name -eq $filename -or $_.Current.Name -eq [IO.Path]::GetFileName($fixture)}|Select-Object -Last 1)

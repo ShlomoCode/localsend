@@ -113,6 +113,7 @@ jobs:
           Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
           Expand-Archive C:/tmp/bs-local.zip C:/tmp/bs-local-bin -Force
           Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
+          New-NetFirewallRule -Name Issue2311BrowserStackLocal -DisplayName Issue2311BrowserStackLocal -Direction Inbound -Program C:/tmp/bs-local-bin/BrowserStackLocal.exe -Action Allow -Profile Any | Out-Null
           Start-Process node -ArgumentList support/cloud_transport/local.mjs -RedirectStandardOutput "$PWD/evidence/local.stdout.txt" -RedirectStandardError "$PWD/evidence/local.stderr.txt"
           $deadline=(Get-Date).AddSeconds(240)
           while(-not (Test-Path C:/tmp/helper/local-ready) -and (Get-Date) -lt $deadline){Start-Sleep 2}
