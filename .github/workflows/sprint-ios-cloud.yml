@@ -70,7 +70,9 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.41.9'
-          cache: true
+          # The observation mutates resolved plugin sources; never restore/save them.
+          cache: false
+          pub-cache: false
 
       - name: Resolve the pinned build tools and dependencies
         working-directory: source
