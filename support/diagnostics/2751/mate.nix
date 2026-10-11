@@ -84,9 +84,11 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
             user_command("sh -c 'mate-display-properties > /tmp/evidence/display-ui.log 2>&1 &' ")
             machine.wait_for_window("Monitor Preferences", 60)
             machine.screenshot("100-gui-before")
+            display_gi = machine.succeed("tr '\\0' '\\n' < /proc/$(pgrep -u alice -f '[m]ate-display-properties' | head -1)/environ | sed -n 's/^GI_TYPELIB_PATH=//p'").strip()
+            assert display_gi, "The real display dialog GI typelib environment was not recovered"
         if label.endswith("gui"):
             try:
-                user_command("GI_TYPELIB_PATH=${pkgs.at-spi2-core}/lib/girepository-1.0:${pkgs.glib}/lib/girepository-1.0 mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1 || { cat /tmp/evidence/display-ui-actions.log; exit 1; }")
+                user_command("GI_TYPELIB_PATH=" + shlex.quote(display_gi) + " mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1 || { cat /tmp/evidence/display-ui-actions.log; exit 1; }")
             finally:
                 machine.copy_from_vm("/tmp/evidence", "guest-gui-attempt-" + label)
             machine.sleep(3)
