@@ -33,9 +33,9 @@ def click(serial, label, name):
         values = [n.get("text", ""), n.get("content-desc", "")]
         if any(v == label or v.startswith(label + "\n") for v in values):
             target = n
-            while target.get("clickable") != "true" and target in parents:
+            while target.get("clickable") != "true" and target.get("is-collection-item") != "true" and target in parents:
                 target = parents[target]
-            if target.get("clickable") != "true":
+            if target.get("clickable") != "true" and target.get("is-collection-item") != "true":
                 target = n
             a,b,c,d = map(int, re.findall(r"\d+", target.get("bounds")))
             adb(serial, "shell", "input", "tap", str((a+c)//2), str((b+d)//2))
