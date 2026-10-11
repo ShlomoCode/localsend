@@ -92,4 +92,4 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
         machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';
-})
+}) {}
