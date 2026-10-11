@@ -5,6 +5,7 @@ import subprocess
 import time
 import os
 import shlex
+import shutil
 from pathlib import Path
 import pyatspi
 import dbus
@@ -91,7 +92,7 @@ def panel_item():
     return None
 
 
-def prepare_hide(stage):
+def prepare_visibility(stage, hidden=True):
     subprocess.run(["xdotool", "search", "--name", "^LocalSend$", "windowminimize"], check=True)
     click(find("Show hidden icons", "button"))
     click(find("Configure System Tray...", "button"))
@@ -109,15 +110,112 @@ def prepare_hide(stage):
             continue
     assert len(candidates) == 1, f"Expected one LocalSend visibility selector, got {len(candidates)}"
     click(candidates[0])
-    subprocess.run(["xdotool", "key", "End", "Return"], check=True)
+    keys = ["End", "Return"] if hidden else ["Home", "Down", "Return"]
+    subprocess.run(["xdotool", "key", *keys], check=True)
     time.sleep(.5)
-    snapshot(stage + "-selected-hidden")
+    snapshot(stage + ("-selected-hidden" if hidden else "-selected-shown"))
     click(find("Apply", "button"))
     click(find("OK", "button"))
     subprocess.run(["xdotool", "key", "Escape"], check=True)
     time.sleep(2)
-    snapshot(stage + "-hidden-panel")
-    assert panel_item() is None, "Hide did not remove LocalSend from rendered panel"
+    snapshot(stage + ("-hidden-panel" if hidden else "-shown-panel"))
+    assert (panel_item() is None) == hidden, "Visibility selection did not update the rendered panel"
+
+
+def prepare_hide(stage):
+    prepare_visibility(stage)
+
+
+def visible_windows(pid):
+    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(pid), "--name", "^LocalSend$"], capture_output=True, text=True)
+    return result.stdout.split()
+
+
+def open_via_menu(pid, stage):
+    item = registered_item(pid)
+    service, path = item["address"].split("/", 1)
+    bus = dbus.SessionBus()
+    props = dbus.Interface(bus.get_object(service, "/" + path), "org.freedesktop.DBus.Properties")
+    menu_path = str(props.Get("org.kde.StatusNotifierItem", "Menu"))
+    menu = dbus.Interface(bus.get_object(service, menu_path), "com.canonical.dbusmenu")
+    _, layout = menu.GetLayout(0, -1, dbus.Array([], signature="s"))
+    leaves = []
+    def collect(entry):
+        entry_id, properties, children = entry
+        if str(properties.get("label", "")) == "Open" and not children:
+            leaves.append(int(entry_id))
+        for child in children:
+            collect(child)
+    collect(layout)
+    assert len(leaves) == 1, f"Expected one original Open leaf, got {leaves}"
+    subprocess.run(["xdotool", "search", "--name", "^LocalSend$", "windowminimize"], check=True)
+    time.sleep(1)
+    assert not visible_windows(pid), "Target window remained visible before Open"
+    menu.Event(dbus.Int32(leaves[0]), "clicked", dbus.Int32(0, variant_level=1), dbus.UInt32(0))
+    time.sleep(2)
+    windows = visible_windows(pid)
+    Path(f"evidence/{stage}-open-api.json").write_text(json.dumps({"item": item, "menu_path": menu_path, "leaf": leaves[0], "visible_windows_after": windows}, indent=2))
+    snapshot(stage + "-opened-window")
+    assert windows, "Original Open callback did not reveal its application window"
+
+
+def regression_controls(pid):
+    app = Path(os.environ["APP_EXE"])
+    before = registered_item(pid)
+    prepare_visibility("control-always-shown", hidden=False)
+    quit_via_menu(pid, "control-always-shown")
+    with Path("evidence/control-always-shown-restart.log").open("w") as logfile:
+        process = subprocess.Popen([str(app)], cwd=app.parent, stdout=logfile, stderr=subprocess.STDOUT)
+    pid = process.pid
+    after = registered_item(pid)
+    time.sleep(3)
+    snapshot("control-always-shown-restarted")
+    assert panel_item() is not None, "Always shown was lost on restart"
+    assert before["id"] == after["id"], "Always shown restart changed identity"
+    click(find("Show hidden icons", "button"))
+    click(find("Configure System Tray...", "button"))
+    click(find("Entries"))
+    snapshot("control-always-shown-restarted-entries")
+    click(find("Cancel", "button"))
+    subprocess.run(["xdotool", "key", "Escape"], check=True)
+    open_via_menu(pid, "control-single")
+    with Path("evidence/control-handoff.log").open("w") as logfile:
+        second = subprocess.Popen([str(app)], cwd=app.parent, stdout=logfile, stderr=subprocess.STDOUT)
+    exit_code = second.wait(timeout=20)
+    assert exit_code == 0, f"Same-profile handoff exited {exit_code}"
+    assert registered_item(pid)["address"] == after["address"], "Handoff replaced original tray"
+    Path("evidence/control-handoff.json").write_text(json.dumps({"original": after, "second_pid": second.pid, "second_exit_code": exit_code}, indent=2))
+    quit_via_menu(pid, "control-single")
+    processes = []
+    items = []
+    for index in range(2):
+        directory = Path(f"profile-{index + 1}")
+        shutil.copytree(app.parent, directory)
+        settings = {"flutter.ls_port": 53318 + index, "flutter.ls_alias": f"Tray control {index + 1}", "flutter.ls_locale": "en"}
+        (directory / "settings.json").write_text(json.dumps(settings))
+        executable = (directory / app.name).resolve()
+        with Path(f"evidence/control-profile-{index + 1}.log").open("w") as logfile:
+            process = subprocess.Popen([str(executable)], cwd=directory.resolve(), stdout=logfile, stderr=subprocess.STDOUT)
+        processes.append(process)
+        items.append(registered_item(process.pid))
+        time.sleep(3)
+        try:
+            click(find("Skip", "button"))
+        except RuntimeError:
+            pass
+    Path("evidence/control-two-profiles.json").write_text(json.dumps(items, indent=2))
+    snapshot("control-two-profiles")
+    assert items[0]["address"] != items[1]["address"], "Two processes shared a D-Bus tray registration"
+    assert all(item["id"] == "org.localsend.localsend_app" for item in items), "Application identity changed across profiles"
+    for index, process in enumerate(processes):
+        open_via_menu(process.pid, f"control-profile-{index + 1}")
+        other = processes[1 - index]
+        assert not visible_windows(other.pid), "Open targeted the other profile's window"
+    quit_via_menu(processes[0].pid, "control-profile-1")
+    assert registered_item(processes[1].pid)["address"] == items[1]["address"], "Quitting first profile removed the second tray"
+    open_via_menu(processes[1].pid, "control-surviving-profile")
+    quit_via_menu(processes[1].pid, "control-profile-2")
+    Path("evidence/control-result.json").write_text(json.dumps({"always_shown_retained": True, "same_profile_handoff": True, "two_independent_trays": True, "open_targets_owner": True, "quit_preserves_other": True}, indent=2))
 
 
 def quit_via_menu(pid, stage):
@@ -233,6 +331,8 @@ try:
         Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
         assert all(case["preference_lost"] == expected_lost for case in outcomes), "Unexpected preference outcome"
         assert all((case["before"]["id"] != case["after"]["id"]) == expected_lost for case in outcomes), "Unexpected identity outcome"
+        if os.environ.get("REGRESSION_CONTROLS") == "1":
+            regression_controls(pid)
 except Exception:
     snapshot("ui-error")
     raise

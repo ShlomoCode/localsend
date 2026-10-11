@@ -14,9 +14,17 @@ on:
         description: Expect stable identity and retained tray preference
         type: boolean
         default: false
+      source_run_id:
+        description: Reuse source-build artifact from a completed diagnostic run
+        type: string
+        default: ''
+      regression_controls:
+        description: Exercise Always shown, Open, same-profile handoff and two profiles
+        type: boolean
+        default: false
 jobs:
   build:
-    if: inputs.source_ref != ''
+    if: inputs.source_ref != '' && inputs.source_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -78,8 +86,10 @@ jobs:
       - uses: actions/download-artifact@v6
         if: inputs.source_ref != ''
         with:
-          name: source-build-${{ github.run_id }}
+          name: source-build-${{ inputs.source_run_id || github.run_id }}
           path: build-evidence
+          run-id: ${{ inputs.source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Install requested application artifact
         env:
           SOURCE_REF: ${{ inputs.source_ref }}
@@ -96,6 +106,7 @@ jobs:
         env:
           STABLE_ID: ${{ inputs.stable_id && '1' || '0' }}
           EXPECT_RETAINED: ${{ (inputs.expect_retained || inputs.stable_id) && '1' || '0' }}
+          REGRESSION_CONTROLS: ${{ inputs.regression_controls && '1' || '0' }}
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash support/diagnostics/3546/probe.sh
       - uses: actions/upload-artifact@v6
