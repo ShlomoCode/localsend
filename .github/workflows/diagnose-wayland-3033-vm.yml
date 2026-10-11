@@ -1,0 +1,723 @@
+name: Diagnose Wayland Scale 3033
+on:
+  workflow_dispatch:
+jobs:
+  wayland-scale:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 360
+    steps:
+      - name: Install VM tools and prepare Debian 13 guest
+        env:
+          START_VERSION: trixie
+          GRAPHICS: virgl
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-system-gui qemu-utils cloud-image-utils socat imagemagick openssh-client xvfb mesa-utils xdotool x11-apps ffmpeg tesseract-ocr
+          mkdir -p evidence/vm /tmp/localsend-vm /home/runner/localsend-vm
+          df -Th /home/runner /tmp | tee evidence/vm/host-filesystems.txt
+          disk_type=$(findmnt -no FSTYPE -T /home/runner)
+          disk_free_kb=$(df -Pk /home/runner | awk 'NR == 2 {print $4}')
+          test "$disk_type" != tmpfs
+          test "$disk_free_kb" -ge 10485760
+          curl --fail --location --retry 3 \
+            --output /home/runner/localsend-vm/debian.img \
+            "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2"
+          sha256sum /home/runner/localsend-vm/debian.img > evidence/vm/debian-image-sha256.txt
+          qemu-img resize /home/runner/localsend-vm/debian.img 36G
+          ssh-keygen -q -t ed25519 -N '' -f /tmp/localsend-vm/id_ed25519
+          probe_key=$(cat /tmp/localsend-vm/id_ed25519.pub)
+          cat > /tmp/localsend-vm/user-data <<EOF
+          #cloud-config
+          users:
+            - default
+            - name: probe
+              groups: [adm, sudo, audio, video, render]
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              shell: /bin/bash
+              ssh_authorized_keys:
+                - $probe_key
+          package_update: true
+          packages:
+            - task-gnome-desktop
+            - flatpak
+            - gdb
+            - curl
+            - openssh-server
+            - libayatana-appindicator3-1
+            - python3-pyatspi
+          runcmd:
+            - [sh, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm3/daemon.conf"]
+            - [systemctl, set-default, graphical.target]
+            - [systemctl, enable, gdm3]
+          power_state:
+            mode: reboot
+            timeout: 30
+            condition: true
+          EOF
+          printf 'instance-id: localsend-3033\nlocal-hostname: localsend-3033\n' > /tmp/localsend-vm/meta-data
+          cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
+          gpu_args=(-device virtio-vga -display none -vnc 127.0.0.1:1)
+          if [ "$GRAPHICS" = virgl ]; then
+            touch /tmp/localsend-vm/virgl
+            Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX > evidence/vm/host-xvfb.log 2>&1 &
+            export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEODRIVER=x11
+            for i in $(seq 1 20); do if xdpyinfo >/dev/null 2>&1; then break; fi; sleep 1; done
+            glxinfo -B > evidence/vm/host-glx.txt
+            gpu_args=(-device virtio-vga-gl -display sdl,gl=on)
+          fi
+          cat > /tmp/localsend-vm/capture <<'CAPTURE'
+          #!/bin/bash
+          set -euo pipefail
+          target=$1
+          if [ -f /tmp/localsend-vm/virgl ]; then
+            DISPLAY=:99 xwd -root -silent | convert xwd:- "$target"
+          else
+            ppm="${target%.png}.ppm"
+            printf 'screendump %s\n' "$ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor
+            sudo chown "$(id -u):$(id -g)" "$ppm"
+            convert "$ppm" "$target"
+          fi
+          CAPTURE
+          chmod +x /tmp/localsend-vm/capture
+          sudo --preserve-env=DISPLAY,LIBGL_ALWAYS_SOFTWARE,SDL_VIDEODRIVER qemu-system-x86_64 \
+            -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 6144 \
+            -drive file=/home/runner/localsend-vm/debian.img,if=virtio,format=qcow2 \
+            -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
+            "${gpu_args[@]}" -usb -device usb-tablet \
+            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -monitor unix:/tmp/localsend-vm/monitor,server,nowait \
+            -serial file:evidence/vm/serial.log \
+            -daemonize 2> evidence/vm/qemu-start.log
+          printf 'Image: Debian 13 %s generic cloud image + task-gnome-desktop\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: %s\n' "$START_VERSION" "$GRAPHICS" > evidence/vm/host-setup.txt
+          uname -a >> evidence/vm/host-setup.txt
+          lscpu > evidence/vm/host-cpu.txt
+          free -m >> evidence/vm/host-setup.txt
+          df -Th /home/runner /tmp >> evidence/vm/host-setup.txt
+
+      - name: Wait for a complete GDM login session
+        run: |
+          set -u
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          ready=0
+          for i in $(seq 1 90); do
+            if timeout 12 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cloud-init status --wait >/dev/null 2>&1 && systemctl is-active --quiet gdm3 && loginctl list-sessions --no-legend | grep -q probe && find /run/user/$(id -u) -maxdepth 1 -type s -name "wayland-*" | grep -q .' >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            if [ $((i % 5)) = 0 ]; then
+              timeout 15 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cloud-init status; ps -eo pid,stat,pcpu,comm | grep -E "apt|dpkg|gnome|gdm"; df -h /' >> evidence/vm/provision-progress.txt 2>&1 || true
+              /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/provision-$i.png" || true
+            fi
+            sleep 20
+          done
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'uname -a; cloud-init status; systemctl status gdm3 --no-pager; loginctl list-sessions; ls -la /run/user/$(id -u)/wayland-* 2>&1' > evidence/vm/guest-session.txt 2>&1 || true
+          printf 'GDM_SESSION_READY=%s\n' "$ready" | tee -a evidence/vm/guest-session.txt
+          if [ "$ready" != 1 ]; then
+            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/setup.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            exit 1
+          fi
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'lscpu' > evidence/vm/guest-cpu.txt
+          grep -q 'GenuineIntel' evidence/vm/guest-cpu.txt
+          grep -q 'Skylake' evidence/vm/guest-cpu.txt
+
+      - name: Install legitimate 1.17 Flatpak and record identities
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 1200 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/install.log 2>&1 <<'GUEST'
+          set -euo pipefail
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.localsend.localsend_app
+          flatpak remote-info --log flathub org.localsend.localsend_app > /tmp/flatpak-history.txt
+          cat /tmp/flatpak-history.txt
+          old_commit=df68d5e6649a894643f4bff68711e52ad86c2f26c93470139f2ff1e2b38e4418
+          sudo flatpak update -y --commit="$old_commit" org.localsend.localsend_app
+          # Deploy the runtime declared by the historical app, without altering its contents.
+          runtime=$(flatpak info --show-runtime org.localsend.localsend_app)
+          sudo flatpak install -y flathub "$runtime"
+          flatpak info org.localsend.localsend_app
+          flatpak info org.localsend.localsend_app | grep -Eq "Version: +1.17.0"
+          flatpak info --show-metadata org.localsend.localsend_app
+          flatpak info --show-commit org.localsend.localsend_app
+          for ref in $(flatpak list --runtime --columns=ref); do flatpak info "$ref"; done
+          sha256sum "$(flatpak info -l org.localsend.localsend_app)/files/localsend_app"
+          cat /etc/os-release
+          gnome-shell --version
+          flatpak --version
+          lspci -nn
+          loginctl list-sessions
+          GUEST
+
+      - name: Prepare live VM controls
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' <<'GUEST'
+          cat > /home/probe/session-env <<'ENV'
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          export WAYLAND_DISPLAY=$(basename "$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' | head -1)")
+          export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME
+          user_environment=$(systemctl --user show-environment)
+          export DISPLAY=$(printf '%s\n' "$user_environment" | sed -n 's/^DISPLAY=//p' | head -1)
+          export XAUTHORITY=$(printf '%s\n' "$user_environment" | sed -n 's/^XAUTHORITY=//p' | head -1)
+          ENV
+          mkdir -p /home/probe/evidence
+          . /home/probe/session-env
+          gsettings set org.gnome.desktop.session idle-delay 0
+          gsettings set org.gnome.desktop.screensaver lock-enabled false
+          gsettings get org.gnome.desktop.interface toolkit-accessibility
+          gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled
+          GUEST
+          cat > /tmp/localsend-vm/round <<'CONTROL'
+          #!/bin/bash
+          set -euo pipefail
+          round=$1
+          mkdir -p "evidence/vm/round-$round"
+          target="$GITHUB_WORKSPACE/evidence/vm/round-$round"
+          for attempt in $(seq 1 1080); do
+            if ! gh api "repos/ShlomoCode/localsend/contents/.diagnostics/3033/command.json?ref=codex/bug-3033-wayland-scale-diagnostics" --jq .content | base64 -d > /tmp/localsend-vm/command.json; then sleep 10; continue; fi
+            if [ "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round" ]; then break; fi
+            sleep 10
+          done
+          test "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round"
+          cp /tmp/localsend-vm/command.json "$target/command.json"
+          ssh_opts=(-n -i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          export DISPLAY=:99
+          qemu_window=$(xdotool search --onlyvisible --name QEMU | head -1)
+          xdotool windowfocus "$qemu_window"
+          action_index=0
+          jq -c '.actions[]' /tmp/localsend-vm/command.json | while IFS= read -r action; do
+            date -u +%FT%T.%N >> "$target/timing.txt"
+            printf '%s\n' "$action" >> "$target/timing.txt"
+            kind=$(jq -r .kind <<< "$action")
+            case "$kind" in
+              capture) : ;;
+              click) xdotool mousemove "$(jq -r .x <<< "$action")" "$(jq -r .y <<< "$action")" click 1 ;;
+              move) xdotool mousemove "$(jq -r .x <<< "$action")" "$(jq -r .y <<< "$action")" ;;
+              key) xdotool key "$(jq -r .value <<< "$action")" ;;
+              text) xdotool type --clearmodifiers "$(jq -r .value <<< "$action")" ;;
+              scroll) xdotool click --repeat "$(jq -r '.count // 1' <<< "$action")" "$(jq -r '.button // 5' <<< "$action")" ;;
+              wait) sleep "$(jq -r .seconds <<< "$action")" ;;
+              flatpak) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup flatpak run --env=WAYLAND_DEBUG=1 org.localsend.localsend_app > /home/probe/evidence/localsend.log 2>&1 < /dev/null &' ;;
+              settings) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-control-center display > /home/probe/evidence/settings.log 2>&1 < /dev/null &' ;;
+              calculator) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' ;;
+              stop-app) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pkill -x localsend || true; pkill -x localsend_app || true' ;;
+              sample) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u +%FT%T.%N; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then getconf CLK_TCK; cat "/proc/$pid/task/$pid/stat"; sleep 5; date -u +%FT%T.%N; cat "/proc/$pid/task/$pid/stat"; ps -T -p "$pid" -o pid,tid,stat,pcpu,wchan:32,comm; fi' > "$target/sample-$(date +%s).txt" ;;
+              stack) timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); date -u +%FT%T.%N; if [ -n "$pid" ]; then cat "/proc/$pid/stat"; sudo timeout 30 gdb -q -batch -ex "set sysroot /proc/$pid/root" -ex "file /proc/$pid/root$(sudo readlink /proc/$pid/exe)" -p "$pid" -ex "thread apply all bt 40"; fi; date -u +%FT%T.%N' > "$target/backtrace.txt" 2>&1 || true ;;
+              probe) timeout 90 ssh "${ssh_opts[@]}" probe@127.0.0.1 "$(jq -r .value <<< "$action")" > "$target/probe-$action_index.txt" 2>&1 || true ;;
+              finish) touch evidence/vm/finished ;;
+              *) echo "Unsupported action=$kind"; exit 1 ;;
+            esac
+            sleep 2
+            action_index=$((action_index + 1))
+            /tmp/localsend-vm/capture "$target/action-$action_index.png"
+          done
+          /tmp/localsend-vm/capture "$target/screen.png"
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; gsettings list-recursively org.gnome.desktop.a11y.magnifier; ps -eLo pid,tid,stat,pcpu,wchan:30,comm | grep -E "localsend|gnome-shell|calculator|control-center"; cat /home/probe/evidence/localsend.log 2>/dev/null || true' > "$target/state.txt"
+          CONTROL
+          chmod +x /tmp/localsend-vm/round
+          DISPLAY=:99 ffmpeg -y -f x11grab -video_size 1280x800 -framerate 10 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p evidence/vm/live-ui.mp4 > evidence/vm/video.log 2>&1 &
+          echo $! > /tmp/localsend-vm/video.pid
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/ready.png"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wayland-scale-3033-ready
+          path: evidence/vm/ready.png
+      - name: Live UI round 1
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 1
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-1
+          path: evidence/vm/round-1/
+      - name: Live UI round 2
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 2
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-2
+          path: evidence/vm/round-2/
+      - name: Live UI round 3
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 3
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-3
+          path: evidence/vm/round-3/
+      - name: Live UI round 4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 4
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-4
+          path: evidence/vm/round-4/
+      - name: Live UI round 5
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 5
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-5
+          path: evidence/vm/round-5/
+      - name: Live UI round 6
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 6
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-6
+          path: evidence/vm/round-6/
+      - name: Live UI round 7
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 7
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-7
+          path: evidence/vm/round-7/
+      - name: Live UI round 8
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 8
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-8
+          path: evidence/vm/round-8/
+      - name: Live UI round 9
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 9
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-9
+          path: evidence/vm/round-9/
+      - name: Live UI round 10
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 10
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-10
+          path: evidence/vm/round-10/
+      - name: Live UI round 11
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 11
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-11
+          path: evidence/vm/round-11/
+      - name: Live UI round 12
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 12
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-12
+          path: evidence/vm/round-12/
+      - name: Live UI round 13
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 13
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-13
+          path: evidence/vm/round-13/
+      - name: Live UI round 14
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 14
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-14
+          path: evidence/vm/round-14/
+      - name: Live UI round 15
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 15
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-15
+          path: evidence/vm/round-15/
+      - name: Live UI round 16
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 16
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-16
+          path: evidence/vm/round-16/
+      - name: Live UI round 17
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 17
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-17
+          path: evidence/vm/round-17/
+      - name: Live UI round 18
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 18
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-18
+          path: evidence/vm/round-18/
+      - name: Live UI round 19
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 19
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-19
+          path: evidence/vm/round-19/
+      - name: Live UI round 20
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 20
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-20
+          path: evidence/vm/round-20/
+      - name: Live UI round 21
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 21
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-21
+          path: evidence/vm/round-21/
+      - name: Live UI round 22
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 22
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-22
+          path: evidence/vm/round-22/
+      - name: Live UI round 23
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 23
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-23
+          path: evidence/vm/round-23/
+      - name: Live UI round 24
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 24
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-24
+          path: evidence/vm/round-24/
+      - name: Live UI round 25
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 25
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-25
+          path: evidence/vm/round-25/
+      - name: Live UI round 26
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 26
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-26
+          path: evidence/vm/round-26/
+      - name: Live UI round 27
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 27
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-27
+          path: evidence/vm/round-27/
+      - name: Live UI round 28
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 28
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-28
+          path: evidence/vm/round-28/
+      - name: Live UI round 29
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 29
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-29
+          path: evidence/vm/round-29/
+      - name: Live UI round 30
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 30
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-30
+          path: evidence/vm/round-30/
+      - name: Live UI round 31
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 31
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-31
+          path: evidence/vm/round-31/
+      - name: Live UI round 32
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 32
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-32
+          path: evidence/vm/round-32/
+      - name: Live UI round 33
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 33
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-33
+          path: evidence/vm/round-33/
+      - name: Live UI round 34
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 34
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-34
+          path: evidence/vm/round-34/
+      - name: Live UI round 35
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 35
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-35
+          path: evidence/vm/round-35/
+      - name: Live UI round 36
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 36
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-36
+          path: evidence/vm/round-36/
+      - name: Live UI round 37
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 37
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-37
+          path: evidence/vm/round-37/
+      - name: Live UI round 38
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 38
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-38
+          path: evidence/vm/round-38/
+      - name: Live UI round 39
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 39
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-39
+          path: evidence/vm/round-39/
+      - name: Live UI round 40
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 40
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-40
+          path: evidence/vm/round-40/
+      - name: Live UI round 41
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 41
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-41
+          path: evidence/vm/round-41/
+      - name: Live UI round 42
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 42
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-42
+          path: evidence/vm/round-42/
+      - name: Live UI round 43
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 43
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-43
+          path: evidence/vm/round-43/
+      - name: Live UI round 44
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 44
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-44
+          path: evidence/vm/round-44/
+      - name: Live UI round 45
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 45
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-45
+          path: evidence/vm/round-45/
+      - name: Live UI round 46
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 46
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-46
+          path: evidence/vm/round-46/
+      - name: Live UI round 47
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 47
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-47
+          path: evidence/vm/round-47/
+      - name: Live UI round 48
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 48
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: wayland-scale-3033-round-48
+          path: evidence/vm/round-48/
+      - name: Collect session diagnostics and identities
+        if: always()
+        run: |
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          if [ -f /tmp/localsend-vm/video.pid ]; then kill -INT "$(cat /tmp/localsend-vm/video.pid)" || true; sleep 3; fi
+          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'journalctl --user -b --no-pager; sudo journalctl -b -p warning --no-pager' > evidence/vm/session-journal.txt 2>&1 || true
+          timeout 30 scp "${ssh_opts[@]/-p/-P}" -r probe@127.0.0.1:/home/probe/evidence evidence/vm/guest-files || true
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/final.png" || true
+          sudo chown -R "$(id -u):$(id -g)" evidence/vm
+          chmod -R a+rX evidence/vm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wayland-scale-3033-evidence
+          path: evidence/vm/
