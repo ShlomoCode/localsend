@@ -203,7 +203,7 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
             time.sleep(3)
             confirmed = snap('edit-'+str(index)+'-confirmed')
             saved = favorites()
-            still_open = any(r['text'].lower()=='delete' for r in confirmed)
+            still_open = any(r['text'].lower() in ('delete', 'edit', 'port') for r in confirmed)
             record('edit-outcome', stage=stage, index=index, alias=new_alias, still_open=still_open, saved_alias=saved[0]['alias'])
             (out/('edit-'+str(index)+'-saved.json')).write_text(json.dumps(saved, indent=2))
             if saved[0]['alias'] != new_alias:
@@ -211,6 +211,18 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
             if still_open:
                 click_word(confirmed, 'Cancel')
             rows = snap('edit-'+str(index)+'-reopened-list')
+        heading = word(rows, 'Favorites')
+        click(int(heading['left'])+203, int(heading['top'])+72)
+        cancelled = snap('edit-cancel-control-open')
+        name_row = word(cancelled, 'name')
+        fill(field_x, int(name_row['top'])+45, 'Cancelled1840')
+        cancelled = snap('edit-cancel-control-filled')
+        click_word(cancelled, 'Cancel')
+        snap('edit-cancel-control-closed')
+        cancelled_saved = favorites()
+        if cancelled_saved[0]['alias'] != saved[0]['alias']:
+            raise RuntimeError('Edit Cancel unexpectedly changed saved alias')
+        record('edit-cancel-control', stage=stage, saved_alias=cancelled_saved[0]['alias'])
         record('stage-complete', stage=stage)
     finally:
         recorder.send_signal(signal.SIGINT)
