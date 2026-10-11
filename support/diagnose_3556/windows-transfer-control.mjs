@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdirSync,readFileSync,writeFileSync,appendFileSync,existsSync,createWriteStream,unlinkSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,appendFileSync,existsSync,createWriteStream,unlinkSync,renameSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
@@ -31,6 +31,11 @@ function redact(value){let s=String(value);for(const secret of [...secrets,auth]
 let artifactPrefix='';
 const artifactName=name=>artifactPrefix&&!['results.json','relay-trace.json','relay-final-status.json','reverse-physical-controls.json','reverse-physical-trace.json'].includes(name)?artifactPrefix+name:name;
 const save=(name,value)=>writeFileSync(path.join(output,artifactName(name)),typeof value==='string'?redact(value):redact(JSON.stringify(value,null,2)));
+function publishCoordination(name,value){
+ const destination=path.join(windowsOutput,name),temporary=destination+'.tmp';
+ // Same-directory rename exposes a complete receipt to the independent receiver.
+ writeFileSync(temporary,JSON.stringify(value));renameSync(temporary,destination);
+}
 const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
  requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
@@ -494,7 +499,7 @@ try{
  const favoriteRect=await wd('GET',base()+'/element/'+elementId(favorite)+'/rect');
  admit();report.sendUtc=new Date().toISOString();const sendStart=Date.now();
  report.sendAdmissionAgeMs=sessionAge();
- if(largePass)writeFileSync(path.join(windowsOutput,'send-started.json'),JSON.stringify({started:true,utc:report.sendUtc,evidence:'large-selected-one-file.xml'}));
+ if(largePass)publishCoordination('send-started.json',{started:true,utc:report.sendUtc,evidence:'large-selected-one-file.xml'});
  await touch(favoriteRect,'Select registered issue3556-cloud-receiver favorite');
  if(largePass)phaseDeadline=Math.min(sendStart+90*minute,sessionStart+100*minute);
  await snap('send-first-frame');
@@ -513,7 +518,7 @@ try{
   if(finished&&!existsSync(path.join(windowsOutput,'sender-completed.json'))){
    assert(now<=end,'Android Finished was first observed after transfer deadline');
    await snap('android-finished',xml);
-   writeFileSync(path.join(windowsOutput,'sender-completed.json'),JSON.stringify({completed:true,utc:new Date(now).toISOString(),evidence:artifactName('android-finished.xml'),bytes,name,uri}));
+   publishCoordination('sender-completed.json',{completed:true,utc:new Date(now).toISOString(),evidence:artifactName('android-finished.xml'),bytes,name,uri});
   }
   const completionPath=path.join(windowsOutput,'receiver-completed.json');let windowsCompletion=null;
   if(existsSync(completionPath)){try{windowsCompletion=JSON.parse(readFileSync(completionPath,'utf8'));}catch{throw Error('Malformed Windows completion receipt');}}
@@ -525,14 +530,14 @@ try{
    if(largePass){phaseDeadline=sessionStart+105*minute;end=phaseDeadline;}
    report.verificationDeadlineUtc=new Date(Math.min(end,phaseDeadline)).toISOString();
    report.verificationStarted={started:true,utc:new Date(gateNow).toISOString(),deadlineUtc:report.verificationDeadlineUtc,bytes,name,uri};
-   writeFileSync(path.join(windowsOutput,'verification-started.json'),JSON.stringify(report.verificationStarted));
+   publishCoordination('verification-started.json',report.verificationStarted);
    if(largePass){
     await activate('org.localsend.fixture3556');await click('Hash owned fixture after completion');
     const hashed=await waitFor(s=>{const t=labels(s).join('\n');if(t.includes('HASH_FAILED'))throw Error('Late fixture hash failed');return t.includes('HASH_READY uri=');},15*minute,'Late Android hash did not finish before verification deadline',true);
     const detail=labels(hashed).find(t=>t.includes('HASH_READY uri='));
     const hash=detail.match(/sha256=([a-f0-9]{64})/)?.[1],hashBytes=Number(detail.match(/bytes=(\d+)/)?.[1]);assert(hash&&hashBytes===bytes&&detail.match(/HASH_READY uri=([^\n]+)/)?.[1]===uri,'Late hash fixture identity mismatch');
     sha256=hash;report.fixture.sha256=hash;report.lateHash={utc:new Date().toISOString(),bytes:hashBytes,sha256:hash};
-    writeFileSync(path.join(windowsOutput,'expected-sha256.json'),JSON.stringify({sha256:hash,bytes:hashBytes,name,uri}));
+    publishCoordination('expected-sha256.json',{sha256:hash,bytes:hashBytes,name,uri});
     await snap('hash-ready',hashed);await activate('org.localsend.localsend_app');
    }
   }
