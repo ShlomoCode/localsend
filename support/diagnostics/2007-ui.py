@@ -152,22 +152,27 @@ if os.environ.get('ISSUE_2007_RESEND'):
         (out / f'{stage}-input.json').write_text(json.dumps({'variant': variant, 'path': str(fixture), 'name': fixture.name}, indent=2))
         # Observed original Finished screen places the session Done action here.
         click(938, 680)
-        screen(f'{stage}-send-page')
-        click(*text('File', f'{stage}-file-button'))
-        screen(f'{stage}-file-picker-visible')
-        run('xdotool', 'key', 'ctrl+l', 'ctrl+a')
-        time.sleep(0.3)
-        run('xdotool', 'key', 'ctrl+a')
-        run('xdotool', 'type', '--clearmodifiers', '--delay', '50', str(fixture))
-        run('xdotool', 'key', 'Return')
-        time.sleep(2)
-        resolved = screen(f'{stage}-file-location-resolved')
-        if not any(w['text'].strip().startswith('Files:') for w in resolved):
-            click(*text('Open', f'{stage}-file-picker-open'))
+        words = screen(f'{stage}-send-page')
+        reuse_selection = stage == 'retry' and any(w['text'].strip().startswith('Files:') for w in words)
+        if reuse_selection:
+            # Failed sessions retain the actual file-picker selection after Done.
+            (out / 'retry-selection-reused.json').write_text(json.dumps({'path': str(fixture), 'name': fixture.name, 'source': 'resend-file-selected.png', 'actualSelectionRetained': True}, indent=2))
+        else:
+            click(*text('File', f'{stage}-file-button'))
+            screen(f'{stage}-file-picker-visible')
+            run('xdotool', 'key', 'ctrl+l', 'ctrl+a')
+            time.sleep(0.3)
+            run('xdotool', 'key', 'ctrl+a')
+            run('xdotool', 'type', '--clearmodifiers', '--delay', '50', str(fixture))
+            run('xdotool', 'key', 'Return')
             time.sleep(2)
-        words = screen(f'{stage}-file-selected')
-        if not any(w['text'].strip().startswith('Files:') for w in words):
-            raise RuntimeError('Resend actual file picker did not select A.txt')
+            resolved = screen(f'{stage}-file-location-resolved')
+            if not any(w['text'].strip().startswith('Files:') for w in resolved):
+                click(*text('Open', f'{stage}-file-picker-open'))
+                time.sleep(2)
+            words = screen(f'{stage}-file-selected')
+            if not any(w['text'].strip().startswith('Files:') for w in words):
+                raise RuntimeError('Resend actual file picker did not select A.txt')
         nearby = [w for w in words if w['text'].strip() in ['Nearby', 'devices']]
         if len(nearby) < 2:
             raise RuntimeError('Resend Nearby devices row missing')

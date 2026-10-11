@@ -492,7 +492,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     const interventionRecord={intervention,matchedDelayMs:45000,firstFailureObservedUtc:firstResult.observedResultUtc,targetRetryUtc:new Date(targetMs).toISOString(),filesystemMutation:false};
     async function probes(stage){
      const observations=[];
-     for(const command of ['pidof org.localsend.localsend_app','pidof com.android.providers.media','pidof com.google.android.providers.media.module','pidof '+fileManagerPackage,`content query --uri content://media/external/file --projection _id:_display_name:relative_path:is_trashed:date_expires --where "_display_name='${fixtureName}'"`]){
+     for(const command of ['dumpsys meminfo org.localsend.localsend_app','dumpsys meminfo com.android.providers.media','dumpsys meminfo com.google.android.providers.media.module','dumpsys meminfo '+fileManagerPackage,'pidof org.localsend.localsend_app','pidof com.android.providers.media','pidof com.google.android.providers.media.module','pidof '+fileManagerPackage,`content query --uri content://media/external/file --projection _id:_display_name:relative_path:is_trashed:date_expires --where "_display_name='${fixtureName}'"`]){
       const startedUtc=new Date().toISOString();
       const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({unavailable:String(error)}));
       observations.push({command,startedUtc,completedUtc:new Date().toISOString(),result});

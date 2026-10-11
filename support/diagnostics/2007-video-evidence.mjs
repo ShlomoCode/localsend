@@ -139,12 +139,25 @@ async function processEvidenceDir(evidenceDir) {
   if (!sessionId) throw new Error(`No session ID in ${sessionFile}`);
   let shared = sessionCache.get(sessionId);
   if (!shared) {
-    const api = await getSessionMetadata(sessionId);
     const sharedDir = path.join(root, 'browserstack-sessions', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_'));
     await mkdir(sharedDir, { recursive: true });
     const video = path.join(sharedDir, 'browserstack-video.mp4');
-    await downloadVideo(api.videoUrl, video);
-    const media = await probe(video);
+    let api;
+    let media;
+    // Immediately after DELETE session, the asset can exist before its MP4
+    // index is finalized. Re-download and validate the actual recording.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        api = await getSessionMetadata(sessionId);
+        await downloadVideo(api.videoUrl, video);
+        media = await probe(video);
+        break;
+      } catch (error) {
+        if (attempt === 7) throw error;
+        console.log(`Recording not finalized for session ${sessionId}; retrying preservation.`);
+        await new Promise(resolve => setTimeout(resolve, 15000));
+      }
+    }
     await writeFile(path.join(sharedDir, 'browserstack-session-metadata.redacted.json'), `${JSON.stringify(redact(api.body), null, 2)}\n`);
     shared = { video, media, sharedDir, body: api.body };
     sessionCache.set(sessionId, shared);
