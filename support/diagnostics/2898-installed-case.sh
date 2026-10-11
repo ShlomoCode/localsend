@@ -21,6 +21,7 @@ cat > /tmp/issue2898-case/launch.sh <<'DESKTOP'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 export LIBGL_ALWAYS_SOFTWARE=1
+trap 'import -window root /tmp/issue2898-case/failure-desktop.png || true; xwininfo -root -tree > /tmp/issue2898-case/failure-window-tree.txt; ps aux > /tmp/issue2898-case/failure-processes.txt' ERR
 openbox > /tmp/issue2898-case/openbox.log 2>&1 &
 zenity --info --text="GTK launch control" --title="GTK control" > /tmp/issue2898-case/gtk.log 2>&1 &
 control=$!
@@ -28,9 +29,14 @@ for attempt in $(seq 1 75); do
   if xdotool search --onlyvisible --name "GTK control" > /tmp/issue2898-case/gtk-window.txt; then break; fi
   sleep 0.2
 done
-xdotool search --onlyvisible --name "GTK control" > /tmp/issue2898-case/gtk-window.txt
+if ! xdotool search --onlyvisible --name "GTK control" > /tmp/issue2898-case/gtk-window.txt; then
+  import -window root /tmp/issue2898-case/gtk-control-unlocated.png
+  xwininfo -root -tree > /tmp/issue2898-case/gtk-control-window-tree.txt
+  ps aux > /tmp/issue2898-case/gtk-control-processes.txt
+  echo GTK_control_unlocated > /tmp/issue2898-case/gtk-control-status.txt
+fi
 import -window root /tmp/issue2898-case/gtk-control.png
-kill "$control"
+kill "$control" || true
 if [[ "$PROBE_CASE" == *baseline ]]; then
   for n in 1 2 3; do
     set +e
