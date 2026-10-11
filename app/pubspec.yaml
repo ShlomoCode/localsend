@@ -87,12 +87,6 @@ dev_dependencies:
   test: ^1.30.0
 
 dependency_overrides:
-  tray_manager:
-    # Keep the tray identity stable so desktop visibility preferences survive restarts.
-    git:
-      url: https://github.com/ShlomoCode/tray_manager.git
-      ref: 59985e2aeee26676b3ab64cb042fb92baf3dd98c
-      path: packages/tray_manager
   device_apps:
     # Migrate to another maintained package to fetch installed apps on Android
     git:
@@ -110,6 +104,12 @@ dependency_overrides:
     git:
       url: https://github.com/localsend/permission_handler_windows_noop.git
       ref: 2dadd8afbf81e0e3e4791d7144e689555e58f649
+  tray_manager:
+    # Keep the tray identity stable so desktop visibility preferences survive restarts.
+    git:
+      url: https://github.com/ShlomoCode/tray_manager.git
+      ref: 59985e2aeee26676b3ab64cb042fb92baf3dd98c
+      path: packages/tray_manager
 
 flutter:
   uses-material-design: true
