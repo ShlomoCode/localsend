@@ -21,6 +21,9 @@ for n in $(seq 1 120); do
   if test -f /home/runner/Downloads/control.txt; then
     sha256sum /home/runner/Downloads/control.txt > evidence/host-peer/saved-sha256.txt
     cp /home/runner/Downloads/control.txt evidence/host-peer/saved-control.txt
+    printf 'Issue 1310 real file selection control\n' > evidence/host-peer/expected-control.txt
+    cmp evidence/host-peer/expected-control.txt evidence/host-peer/saved-control.txt
+    sha256sum evidence/host-peer/expected-control.txt evidence/host-peer/saved-control.txt > evidence/host-peer/content-comparison.txt
     scrot evidence/host-peer/completed.png
     printf 'real receiver saved file\n' > evidence/host-peer/result.txt
     exit 0
