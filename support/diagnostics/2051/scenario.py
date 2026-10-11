@@ -22,12 +22,12 @@ def snapshot(serial, name):
     xml = request("GET", "/session/" + sessions[serial] + "/source")
     (ROOT / (name + ".xml")).write_text(xml)
     (ROOT / (name + ".png")).write_bytes(adb(serial, "exec-out", "screencap", "-p", binary=True))
-    print(name, [(n.get("text"), n.get("content-desc"), n.get("bounds")) for n in ET.fromstring(xml).iter("node") if n.get("text") or n.get("content-desc")], flush=True)
+    print(name, [(n.get("text"), n.get("content-desc"), n.get("bounds")) for n in ET.fromstring(xml).iter() if n.get("text") or n.get("content-desc")], flush=True)
     return xml
 
 def click(serial, label, name):
     xml = snapshot(serial, name)
-    for n in ET.fromstring(xml).iter("node"):
+    for n in ET.fromstring(xml).iter():
         values = [n.get("text", ""), n.get("content-desc", "")]
         if any(v == label or v.startswith(label + "\n") for v in values):
             a,b,c,d = map(int, re.findall(r"\d+", n.get("bounds")))
@@ -54,7 +54,7 @@ try:
     click(S, "a.txt", "picker-before-file")
     click(S, "Manual sending", "sender-before-manual")
     xml = snapshot(S, "address-dialog")
-    edits = [n for n in ET.fromstring(xml).iter("node") if n.get("class") == "android.widget.EditText"]
+    edits = [n for n in ET.fromstring(xml).iter() if n.get("class") == "android.widget.EditText"]
     if not edits:
         raise RuntimeError("No address field")
     a,b,c,d = map(int, re.findall(r"\d+", edits[0].get("bounds")))
