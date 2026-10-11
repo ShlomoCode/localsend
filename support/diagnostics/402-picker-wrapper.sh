@@ -3,6 +3,7 @@
 set -u
 backend=$(basename "$0")
 capture=$(mktemp /evidence/sender/picker-XXXXXX)
+chmod 644 "$capture"
 "/usr/bin/$backend" "$@" > "$capture.stdout"
 status=$?
 printf '%s\n' "$status" > "$capture.status"

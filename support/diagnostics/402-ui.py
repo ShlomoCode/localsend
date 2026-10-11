@@ -178,6 +178,8 @@ else:
             command('xdotool', 'key', 'Return')
             time.sleep(2)
             if mode == 'row':
+                click('OK', case + '-enter-directory', optional=True)
+                time.sleep(2)
                 click(filename, case + '-picker-row')
             click('OK', case + '-confirm-picker', optional=True)
             time.sleep(5)

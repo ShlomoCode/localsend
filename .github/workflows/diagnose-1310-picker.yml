@@ -40,9 +40,15 @@ jobs:
           for name in issue402-sender issue402-receiver; do
             status=$(timeout 600 docker wait "$name") || status=124
             docker logs "$name" > "evidence/cloud/$name.log" 2>&1
+            tail -n 60 "evidence/cloud/$name.log"
             test "$status" = 0 || result=1
           done
           exit "$result"
+      - name: Preserve readable diagnostic evidence on every outcome
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" evidence/cloud
+          chmod -R a+rX evidence/cloud
       - uses: actions/upload-artifact@v4
         if: always()
         with:
