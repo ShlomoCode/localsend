@@ -30,6 +30,32 @@ function FocusLocalSend($process) {
  Snapshot "focus-$($process.Id)-after" $process
  if([Desktop2861]::GetForegroundWindow() -ne $process.MainWindowHandle){throw 'Real title-bar focus did not reach LocalSend; before/after pixels and geometry retained'}
 }
+function CloseSeedNormally($name,$process) {
+ $requested=[DateTime]::UtcNow.ToString('o')
+ if(!$process.CloseMainWindow()){throw 'Normal seed close request failed'}
+ if(!$process.WaitForExit(20000)){throw 'Seed did not exit normally; saved profile is invalid'}
+ @{requestedUtc=$requested;exitedUtc=[DateTime]::UtcNow.ToString('o');pid=$process.Id;normalExit=$true}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-close.json"
+}
+function AssertSavedGeometry($name,$stateName) {
+ $saved=Get-Content $profileFile -Raw|ConvertFrom-Json
+ $state=Get-Content "$EvidenceDirectory/$stateName-state.json" -Raw|ConvertFrom-Json
+ if(!$state.validWindow -or $state.dpi -ne 96){throw 'Saved geometry comparison requires valid seed window at DPI 96'}
+ $expected=@{ls_window_offset_x=$state.frame.left;ls_window_offset_y=$state.frame.top;ls_window_width=($state.frame.right-$state.frame.left);ls_window_height=($state.frame.bottom-$state.frame.top)}
+ foreach($key in $expected.Keys){
+  $property=$saved.PSObject.Properties["flutter.$key"]
+  if(!$property -or $null -eq $property.Value -or [double]::IsNaN([double]$property.Value) -or [double]::IsInfinity([double]$property.Value) -or [Math]::Abs([double]$property.Value-[double]$expected[$key]) -gt 2){throw "Saved $name geometry does not match measured seed: $key"}
+ }
+ @{savedGeometryMatchesNative=$true;expected=$expected;dpi=$state.dpi}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-geometry-validity.json"
+}
+function FinishOwnedRecorder($name,$process,$startedUtc) {
+ if(!$process){return}
+ $forced=$false
+ if(!$process.HasExited){
+  $remaining=[Math]::Max(0,45000-([DateTime]::UtcNow-[DateTime]::Parse($startedUtc)).TotalMilliseconds)
+  if(!$process.WaitForExit([int]$remaining)){$forced=$true;$process.Kill();$process.WaitForExit()}
+ }
+ @{forcedRecorderTermination=$forced;utc=[DateTime]::UtcNow.ToString('o');exitCode=$process.ExitCode;elapsedFromStart=([DateTime]::UtcNow-[DateTime]::Parse($startedUtc)).TotalSeconds;lastProgress=$(if(Test-Path "$EvidenceDirectory/$name-progress.txt"){[string](Get-Content "$EvidenceDirectory/$name-progress.txt" -Raw)}else{''})}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-cleanup.json"
+}
 $app=$null;$recording=$null;$launchClock=$null
 try {
 Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
@@ -44,14 +70,16 @@ Snapshot 'control-no-powertoys' $app
 $profilePaths=@((Join-Path $exe.DirectoryName 'settings.json'),"$env:APPDATA/LocalSend/settings.json","$env:APPDATA/org.localsend/localsend_app/shared_preferences.json")
 $profileFile=$profilePaths|Where-Object{Test-Path $_}|Select-Object -First 1
 if(!$profileFile){throw 'Cannot freeze actual LocalSend settings store'}
-$wideProfile=[System.IO.File]::ReadAllBytes($profileFile)
 function SaveProfile($name) {
  $profile=Get-Content $profileFile -Raw|ConvertFrom-Json
  foreach($property in $profile.PSObject.Properties){if($property.Name -match 'security_context|show_token|pin'){$property.Value='<REDACTED>'}}
  @{path=$profileFile;hash=(Get-FileHash $profileFile).Hash;settings=$profile}|ConvertTo-Json -Depth 20|Set-Content "$EvidenceDirectory/$name-settings.json"
 }
+SaveProfile 'wide-before-close'
+CloseSeedNormally 'wide' $app
+AssertSavedGeometry 'wide' 'control-no-powertoys'
+$wideProfile=[System.IO.File]::ReadAllBytes($profileFile)
 SaveProfile 'wide-frozen'
-Stop-Process -Id $app.Id -Force
 $roots=@("$env:LOCALAPPDATA/PowerToys","$env:ProgramFiles/PowerToys","${env:ProgramFiles(x86)}/PowerToys")
 @{localAppData=$env:LOCALAPPDATA;programFiles=$env:ProgramFiles;roots=$roots}|ConvertTo-Json|Set-Content "$EvidenceDirectory/paths.json"
 Get-ChildItem $roots -Recurse -ErrorAction SilentlyContinue|Select-Object FullName,Length|ConvertTo-Json|Set-Content "$EvidenceDirectory/installed-files.json"
@@ -122,14 +150,19 @@ if(!($historyData.'app-zone-history'|Where-Object{$_.'app-path' -ieq $exe.FullNa
 Get-ChildItem "$ptSettings/FancyZones" -File -Filter '*layouts.json'|Copy-Item -Destination $EvidenceDirectory
 # Freeze both actual state files before diagnostic resizes alter either application.
 $genuineHistoryBytes=[System.IO.File]::ReadAllBytes($history)
-$narrowProfile=[System.IO.File]::ReadAllBytes($profileFile)
-SaveProfile 'narrow-frozen'
+SaveProfile 'narrow-before-close'
 $layout=Get-Content "$ptSettings/FancyZones/applied-layouts.json" -Raw|ConvertFrom-Json
 $entry=$historyData.'app-zone-history'|Where-Object{$_.'app-path' -ieq $exe.FullName}|Select-Object -First 1
 $zone=$entry.history|Where-Object{($_.'zone-index-set' -join ',') -eq '0'}|Select-Object -First 1
 if(!$zone){throw 'Exact executable lacks genuine zone zero history'}
 if(!($layout.'applied-layouts'|Where-Object{$_.device.monitor -eq $zone.device.monitor -and $_.device.'monitor-instance' -eq $zone.device.'monitor-instance' -and $_.'applied-layout'.uuid -eq $zone.'zoneset-uuid'})){throw 'Genuine history does not match applied monitor/layout'}
-Stop-Process -Id $app.Id -Force;$app.WaitForExit()
+CloseSeedNormally 'narrow' $app
+AssertSavedGeometry 'narrow' 'actual-shift-drag-zone'
+$narrowProfile=[System.IO.File]::ReadAllBytes($profileFile)
+SaveProfile 'narrow-frozen'
+$wideSaved=[System.Text.Encoding]::UTF8.GetString($wideProfile)|ConvertFrom-Json
+$narrowSaved=[System.Text.Encoding]::UTF8.GetString($narrowProfile)|ConvertFrom-Json
+if($wideSaved.'flutter.ls_window_width' -eq $narrowSaved.'flutter.ls_window_width' -and $wideSaved.'flutter.ls_window_height' -eq $narrowSaved.'flutter.ls_window_height'){throw 'Frozen wide and narrow saved dimensions are identical'}
 $baseFzConfig=Get-Content $fzFile -Raw
 $cases=@(
  @{name='wide-enabled';profile=$wideProfile;restore=$true;excluded=''},
@@ -140,7 +173,7 @@ $cases=@(
  @{name='wide-enabled-again';profile=$wideProfile;restore=$true;excluded=''}
 )
  foreach($case in $cases){foreach($iteration in 1..3){
-  $name="$($case.name)-$iteration";$recording=$null;$app=$null;$launchClock=$null
+  $name="$($case.name)-$iteration";$recording=$null;$app=$null;$launchClock=$null;$recorderStartUtc=$null
   try {
    Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
    $exitDeadline=[DateTime]::UtcNow.AddSeconds(30)
@@ -161,22 +194,25 @@ $cases=@(
    Copy-Item $fzFile "$EvidenceDirectory/$name-config-loaded.json"
    $recorderStartUtc=[DateTime]::UtcNow.ToString('o')
    $progress="$EvidenceDirectory/$name-progress.txt"
+   if(Test-Path $progress){Remove-Item $progress}
    $recording=Start-Process $env:FFMPEG2380 -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','30','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-stats_period','0.25','-progress',$progress,"$EvidenceDirectory/$name.mp4") -RedirectStandardOutput "$EvidenceDirectory/$name-record.log" -RedirectStandardError "$EvidenceDirectory/$name-record-error.log" -PassThru
    $readyDeadline=[DateTime]::UtcNow.AddSeconds(15)
    do {
     if($recording.HasExited){throw 'Recorder exited before application launch'}
-    $progressBlocks=if(Test-Path $progress){[regex]::Matches((Get-Content $progress -Raw),'(?s)frame=(\d+).*?out_time_us=(\d+).*?progress=(continue|end)')}else{@()}
+    $progressBlocks=if(Test-Path $progress){[regex]::Matches([string](Get-Content $progress -Raw),'(?s)frame=(\d+).*?out_time_us=(\d+).*?progress=(continue|end)')}else{@()}
     if($progressBlocks.Count){
      $readyBlock=$progressBlocks[$progressBlocks.Count-1]
+     if($readyBlock.Groups[3].Value -eq 'end'){throw 'Recorder ended before application launch'}
      if([int]$readyBlock.Groups[1].Value -gt 0 -and [long]$readyBlock.Groups[2].Value -ge 0){break}
     }
     if([DateTime]::UtcNow -gt $readyDeadline){throw 'No first captured frame before application launch'}
     Start-Sleep -Milliseconds 100
    }while($true)
    if([long]$readyBlock.Groups[2].Value -gt 2000000){throw 'Recording lacks twenty-eight seconds of remaining coverage at launch'}
+   if($recording.HasExited){throw 'Recorder exited immediately before application launch'}
    $recordReadyUtc=[DateTime]::UtcNow.ToString('o');$launchUtc=[DateTime]::UtcNow.ToString('o')
    $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;$launchClock=[System.Diagnostics.Stopwatch]::StartNew()
-   @{case=$case.name;iteration=$iteration;pid=$app.Id;launchUtc=$launchUtc;recordStartUtc=$recorderStartUtc;firstCaptureObservedUtc=$recordReadyUtc;recordingPid=$recording.Id}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-timing.json"
+   @{case=$case.name;iteration=$iteration;pid=$app.Id;launchUtc=$launchUtc;recordStartUtc=$recorderStartUtc;firstCaptureObservedUtc=$recordReadyUtc;firstCaptureProgress=$readyBlock.Value;recordingPid=$recording.Id}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-timing.json"
    foreach($seconds in @(0.5,1,3,10)){
     while($launchClock.Elapsed.TotalSeconds -lt $seconds){Start-Sleep -Milliseconds 50}
     if($recording.HasExited){throw 'Recorder exited before startup observation completed'}
@@ -205,10 +241,12 @@ $cases=@(
    $resizeResult=Get-Content "$EvidenceDirectory/$name-resize-result.json" -Raw|ConvertFrom-Json
    @{interventionValid=($resizeResult.samePid -and $resizeResult.sameWindow -and $resizeResult.dimensionsChanged)}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-resize-validity.json"
    $lastObservedUtc=[DateTime]::UtcNow.ToString('o')
+   $lastObservedProgress=[string](Get-Content $progress -Raw)
    SaveProfile "$name-resize-after"
    Copy-Item $history "$EvidenceDirectory/$name-history-after.json"
    if(!$recording.WaitForExit(30000)){throw 'Recorder did not finish normal duration'}
    if($recording.ExitCode -ne 0){throw 'Recording ended abnormally'}
+   $recordingExitedUtc=[DateTime]::UtcNow.ToString('o')
    $ffprobe=Join-Path (Split-Path $env:FFMPEG2380) 'ffprobe.exe'
    & $ffprobe -v error -show_format -show_streams -of json "$EvidenceDirectory/$name.mp4" | Set-Content "$EvidenceDirectory/$name-recording.json"
    if($LASTEXITCODE -ne 0){throw 'Recording metadata cannot decode'}
@@ -216,10 +254,10 @@ $cases=@(
    if([double]$video.format.duration -lt 29 -or [int]$video.streams[0].nb_frames -lt 280){throw 'Recording duration/frame count is insufficient'}
    & $env:FFMPEG2380 -v error -i "$EvidenceDirectory/$name.mp4" -f null NUL 2> "$EvidenceDirectory/$name-decode.log"
    if($LASTEXITCODE -ne 0){throw 'Full recording decode failed'}
-   @{lastObservedUtc=$lastObservedUtc;recordingDuration=[double]$video.format.duration;fullDecode=$true}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-coverage.json"
+   @{lastObservedUtc=$lastObservedUtc;lastObservedProgress=$lastObservedProgress;recordingExitedUtc=$recordingExitedUtc;recordingDuration=[double]$video.format.duration;finalProgress=[string](Get-Content $progress -Raw);fullDecode=$true}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-coverage.json"
   } finally {
    [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)
-   if($recording -and !$recording.HasExited){if(!$recording.WaitForExit(30000)){$recording.Kill();@{forcedRecorderTermination=$true;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-cleanup.json"}}
+   FinishOwnedRecorder $name $recording $recorderStartUtc
    if($app -and !$app.HasExited){Stop-Process -Id $app.Id -Force;$app.WaitForExit()}
    Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
   }
@@ -227,7 +265,7 @@ $cases=@(
 } finally {
  [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  if('Input2380' -as [type]){[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)}
- if($recording -and !$recording.HasExited){if(!$recording.WaitForExit(30000)){$recording.Kill()}}
+ if($recording -and !$recording.HasExited){FinishOwnedRecorder $name $recording $recorderStartUtc}
  if($app -and !$app.HasExited){Stop-Process -Id $app.Id -Force;$app.WaitForExit()}
  Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
  Stop-Transcript
