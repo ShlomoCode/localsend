@@ -1,15 +1,16 @@
 {
   "version": "0.0.15",
   "sourceCommit": "c1ce322fb3acf08e44f329b8b7208b8b0d91e244",
+  "signatureReaderSha256": "18da86403f7fd0cf36f1415fd74da0291226e94f6ea7305c1bf20aa4f635e760",
   "files": {
     "ios/Models/Classes/ShareHandlerIosViewController.swift": {
       "originalSha256": "db8767a0e2dac514967467c8c67b2820cd625ac3c70f10afaf42946a0d3379b8",
-      "diagnosticSha256": "fd50100cd40951c75fa85b1cf98729bc78854161a7a9125378034aed5d2a2725"
+      "diagnosticSha256": "936c7038b552c47795184c3d95a67fa361400619df89c78bda2a153dd6633d6c"
     },
     "ios/Classes/SwiftShareHandlerIosPlatform.swift": {
       "originalSha256": "3568747c254ed50b709a8604bdf28075c030851cbb449d44496dc80bac8675fb",
-      "diagnosticSha256": "47c9b8473add0efab2267117c241acbda67633356e11a49a65e329fd530ad777"
+      "diagnosticSha256": "b1788eac9fa54421b585427648cadd415867e5f947e7dd578a1816cad9026abf"
     }
   },
-  "patchSha256": "04477ce3656a97af68636b4b0bd666239f4ae5df55defa39ce744d6df2e30a84"
+  "patchSha256": "688efccaaf578b6c8a56a3e901b118cdef1905d9f14aada2a5f8a8f0175fff67"
 }

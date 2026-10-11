@@ -11,6 +11,9 @@ const manifest = JSON.parse(fs.readFileSync(path.join(here, 'manifest.json'), 'u
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const patch = fs.readFileSync(path.join(here, 'share-handler-observation.patch'));
 if (hash(patch) !== manifest.patchSha256) throw new Error('Diagnostic patch hash mismatch.');
+if (manifest.signatureReaderSha256 && hash(fs.readFileSync(path.join(here, 'installed-signature-reader.swift.inc'))) !== manifest.signatureReaderSha256) {
+  throw new Error('Installed signature reader source hash mismatch.');
+}
 for (const [relative, hashes] of Object.entries(manifest.files)) {
   if (hash(fs.readFileSync(path.join(packageDirectory, relative))) !== hashes.originalSha256) {
     throw new Error(`Pinned source mismatch: ${relative}`);
