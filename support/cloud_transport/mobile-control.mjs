@@ -32,7 +32,12 @@ try {
   assert.equal(reply.count,size);assert.equal(reply.sha256,expected);results.push({bytes:size,byteExact:true,replyAfterHalfClose:true});console.log('Physical control passed '+size+' bytes');
  }
  writeFileSync('mobile-control-results.json',JSON.stringify({device:caps['appium:deviceName'],os:caps['appium:platformVersion'],results,metrics:r.status()},null,2));
- await clickText('Stop helper');await clickText('Relay to LocalSend');
+ await clickText('Stop helper');
+ // The prior service can still hold one 15-second long pull. Let that
+ // request finish before the replacement service starts another pull.
+ console.log('Waiting for prior helper long-pull lifecycle to finish');
+ await new Promise(ok=>setTimeout(ok,16000));
+ await clickText('Relay to LocalSend');
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});
  await new Promise(ok=>setTimeout(ok,4000));
  const source=await wd('GET',`/session/${session}/source`);writeFileSync('localsend-source.xml',source);
@@ -45,6 +50,10 @@ try {
  if(session){writeFileSync('helper-failure-source.xml',await wd('GET',`/session/${session}/source`).catch(()=>''));const screenshot=await wd('GET',`/session/${session}/screenshot`).catch(()=>'');if(screenshot)writeFileSync('helper-failure.png',Buffer.from(screenshot,'base64'));}
  throw error;
 } finally {
+ if(session){
+  const logcat=await wd('POST',`/session/${session}/log`,{type:'logcat'}).catch(error=>({unavailable:String(error)}));
+  writeFileSync('evidence/android-logcat.json',JSON.stringify(logcat,null,2));
+ }
  writeFileSync('mobile-control-final-status.json',JSON.stringify({results,metrics:r.status()},null,2));
  if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});
  await r.stop();
