@@ -1,6 +1,6 @@
 # Issue 3033 status
 
-No reported failure reproduced yet. No production patch is justified. Investigation remains active.
+Investigation ended after root review of 13 substantive conditions. The reported failure was not reproduced; no production patch is justified. See FINAL.md for retained evidence and requirements to resume. No additional workload is authorized until new reproduction evidence arrives.
 
 ## Evidence
 
