@@ -105,7 +105,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   }
   const documentsSelected=(nativeSource.match(/<[^>]+>/g)||[]).some(tag=>tag.includes('text="Documents"')&&tag.includes('resource-id="com.google.android.documentsui:id/breadcrumb_text"'));
   if(!documentsSelected){
-   await click('xpath','//*[@text="Documents" and @resource-id!="com.google.android.documentsui:id/breadcrumb_text"]');
+   const row=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Documents" and @resource-id="android:id/title"]',label:stage+'-native-documents-row',stableRect:true});
+   const rect=await wd('GET',prefix+'/element/'+row['element-6066-11e4-a52e-4f735466cecf']+'/rect');
+   const point={x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)};
+   writeFileSync('evidence/'+stage+'-native-documents-input.json',JSON.stringify({method:'Actual W3C touch tap at freshly observed native Documents row label',utc:new Date().toISOString(),rect,point},null,2));
+   await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'folder-finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,...point},{type:'pointerDown',button:0},{type:'pointerUp',button:0}]}]});
   }
   await snapshot(stage+'-native-documents');
   await click('xpath','//*[@text="Use this folder" or @text="USE THIS FOLDER"]');
