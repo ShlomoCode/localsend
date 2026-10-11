@@ -14,9 +14,6 @@ function Snapshot($name,$process) {
  [Desktop2861]::GetClientRect($process.MainWindowHandle,[ref]$r)|Out-Null
  @{utc=[DateTime]::UtcNow.ToString('o');pid=$process.Id;window=$process.MainWindowHandle.ToInt64();foreground=[Desktop2861]::GetForegroundWindow().ToInt64();client=@{width=$r.right;height=$r.bottom};dpi=[Desktop2861]::GetDpiForWindow($process.MainWindowHandle)}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-state.json"
 }
-$pt=Get-ChildItem "$env:LOCALAPPDATA/PowerToys","$env:ProgramFiles/PowerToys" -Filter PowerToys.exe -Recurse -ErrorAction SilentlyContinue|Select-Object -First 1
-if(!$pt){throw 'Official PowerToys executable missing'}
-Get-FileHash $pt.FullName|ConvertTo-Json|Set-Content "$EvidenceDirectory/powertoys-exe.json"
 Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
 $exe=Get-ChildItem $ReleaseRoot -Filter localsend_app.exe -Recurse|Select-Object -First 1
 Get-FileHash $exe.FullName|ConvertTo-Json|Set-Content "$EvidenceDirectory/localsend-exe.json"
@@ -25,6 +22,13 @@ $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
 Start-Sleep -Seconds 15
 Snapshot 'control-no-powertoys' $app
 Stop-Process -Id $app.Id -Force
+$roots=@("$env:LOCALAPPDATA/PowerToys","$env:ProgramFiles/PowerToys","${env:ProgramFiles(x86)}/PowerToys")
+@{localAppData=$env:LOCALAPPDATA;programFiles=$env:ProgramFiles;roots=$roots}|ConvertTo-Json|Set-Content "$EvidenceDirectory/paths.json"
+Get-ChildItem $roots -Recurse -ErrorAction SilentlyContinue|Select-Object FullName,Length|ConvertTo-Json|Set-Content "$EvidenceDirectory/installed-files.json"
+Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*','HKLM:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*'|Where-Object{$_.DisplayName -like '*PowerToys*'}|Select-Object DisplayName,DisplayVersion,InstallLocation,DisplayIcon|ConvertTo-Json|Set-Content "$EvidenceDirectory/installation-registry.json"
+$pt=Get-ChildItem $roots -Filter '*PowerToys*.exe' -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name -eq 'PowerToys.exe'}|Select-Object -First 1
+if(!$pt){throw 'Official PowerToys executable missing; inspect installed-files and installation-registry'}
+Get-FileHash $pt.FullName|ConvertTo-Json|Set-Content "$EvidenceDirectory/powertoys-exe.json"
 $power=Start-Process $pt.FullName -PassThru
 Start-Sleep -Seconds 12
 Snapshot 'powertoys-started' $power

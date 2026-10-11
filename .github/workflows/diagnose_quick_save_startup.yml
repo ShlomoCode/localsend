@@ -14,6 +14,7 @@ jobs:
           $install = Start-Process "$env:RUNNER_TEMP/PowerToys.exe" -ArgumentList '/install','/quiet','/norestart',"/log $env:RUNNER_TEMP/powertoys-install.log" -Wait -PassThru
           "Installer exit $($install.ExitCode)"
           if ($install.ExitCode -notin @(0,3010)) { throw 'PowerToys installation failed' }
+          Start-Sleep -Seconds 150
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
           Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
       - name: Observe genuine desktop and applications
@@ -25,4 +26,4 @@ jobs:
           name: evidence2380
           path: |
             ${{ runner.temp }}/evidence2380
-            ${{ runner.temp }}/powertoys-install.log
+            ${{ runner.temp }}/powertoys-install*.log
