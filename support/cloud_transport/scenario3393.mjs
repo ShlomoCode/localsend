@@ -7,6 +7,9 @@ import {exactNativeButton} from './native-labels.mjs';
 const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
+ const policyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
+ if(policyOn&&(process.env.BS_DEVICE!=='OnePlus 13R'||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires OnePlus 13R and scheduled 20 s');
+ let policyAttempted=false,policyModule;
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
  async function source(label) { const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
@@ -50,6 +53,10 @@ export default async function({session,wd,senderPort,transportStatus}) {
  }
 
  try {
+  if(policyOn){
+   policyModule=await import('./oneplus-policy3393.mjs');
+   await policyModule.setOnePlusBackground({session,wd,enabled:true,requireInitial:false,label:'policy-enable',onMutationAttempt:()=>{policyAttempted=true;}});
+  }
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2026-10-11T00:00:00Z','-FixtureFileName',controlFile,'-DiagnosticPeerPort',String(senderPort)]);
   await source('control-before');await lifecycle('control-before');
   await ui('click',246,266,'windows-favorites');
@@ -71,6 +78,11 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await clickElement(controlDone,'control-done');
   await source('control-notification-handled');
   const {default:observeSettings}=await import('./settings3393.mjs');await observeSettings({session,wd});
+  if(policyOn){
+   const {default:timedPicker}=await import('./picker3393-timed.mjs');
+   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true});
+   return;
+  }
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case','picker-calibration']);
   await approvalReady('calibration-pending');
   await click('Options');await source('calibration-options');
@@ -110,5 +122,8 @@ export default async function({session,wd,senderPort,transportStatus}) {
   results.push({case:'picker-calibration',dwellTest:false,nativeUiObserved:true,fileName:repeatFile,destination:'/sdcard/Documents',savedContentVerified:true,savedSha256:savedHash});
   const {default:timedPicker}=await import('./picker3393-timed.mjs');
   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results});
- } finally { writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2)); }
+ } finally {
+  try{if(policyAttempted)await policyModule.setOnePlusBackground({session,wd,enabled:false,label:'policy-restore'});}
+  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,transport:transportStatus()},null,2));}
+ }
 }

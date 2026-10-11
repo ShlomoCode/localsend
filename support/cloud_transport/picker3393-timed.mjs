@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const exec=promisify(execFile);
 
-export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results}) {
+export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false}) {
  const prefix=`/session/${session}`;
  function phase(caseName,name){const event={phase:name,utc:new Date().toISOString()};writeFileSync(`evidence/${caseName}-phase.json`,JSON.stringify(event,null,2));appendFileSync(`evidence/${caseName}-phases.jsonl`,JSON.stringify(event)+'\n');}
  async function returnToOptions(caseName){
@@ -22,9 +22,11 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
  }
  const longDwellMs=Number(process.env.PICKER_LONG_DWELL_MS||10000);
  if(![10000,20000,30000].includes(longDwellMs))throw new Error('Unsupported diagnostic long dwell');
- for(const dwellMs of [2000,longDwellMs]) {
+ let firstCase=true;
+ for(const dwellMs of onlyLong?[longDwellMs]:[2000,longDwellMs]) {
   const caseName=`picker-${dwellMs/1000}s`,fileName=`issue3393-${process.env.GITHUB_RUN_ID}-${caseName}.txt`;
-  await clickElement(await completedReady(`${caseName}-previous-completion`),`${caseName}-previous-done`);
+  if(!firstCase||!skipInitialCompletion)await clickElement(await completedReady(`${caseName}-previous-completion`),`${caseName}-previous-done`);
+  firstCase=false;
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case',caseName]);
   await approvalReady(`${caseName}-pending`);
   await click('Options',caseName);

@@ -14,6 +14,10 @@ on:
         type: choice
         options: ['10000', '20000', '30000']
         default: '10000'
+      background_policy:
+        type: choice
+        options: [observe, oneplus-enable-and-restore]
+        default: observe
 permissions:
   contents: read
 jobs:
@@ -91,6 +95,7 @@ jobs:
       BASELINE_APP: bs://3dfcafa474a5db80bb8dde70a68c0087b21b27d3
       BS_DEVICE: ${{ inputs.bs_device || 'Google Pixel 9' }}
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
+      BACKGROUND_POLICY_EXPERIMENT: ${{ inputs.background_policy || 'observe' }}
       BS_OS: '15.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario3393.mjs
     steps:
