@@ -3,3 +3,4 @@ E00	metadata	read full issue and release dates	version and OS unknown; v1.17 pla
 E01	cloud-host harness	5-file real release control	apps start with portable profiles; OCR misses visible Send; no bug assertion reached	run-38103697333/	no
 E02	OCR scale	5-file cloud release control	visible Send still omitted from OCR; no selection reached	run-38103844295/	no
 E03	peer namespaces	5-file real-app control	Send navigation succeeds and genuine TCP discovery finds Receiver2414; OCR misses Folder; no picker reached	run-38104034501/	no
+E04	actual Folder control	5-file real picker	picker opened and path typed; GTK chooser remained open; no send reached	run-38104220074/	no
