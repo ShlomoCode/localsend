@@ -1,0 +1,25 @@
+name: Diagnose Flatpak revoked Downloads 733
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-733-flatpak-diagnostics]
+jobs:
+  mint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble unchanged historical Flathub package
+        run: bash support/diagnostics/733/package.sh
+      - name: Prepare reported Mint desktop and actual two apps
+        run: bash support/diagnostics/733/mint.sh
+      - name: Retain every outcome
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" evidence && chmod -R a+rX evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue733-${{ github.run_id }}
+          path: evidence/
