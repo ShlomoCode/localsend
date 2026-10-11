@@ -95,7 +95,7 @@ jobs:
             if($errors.Count -gt 0){throw ($errors | Out-String)}
           }
           $receiverSource=Get-Content support/diagnose_3556/windows_receiver.ps1 -Raw
-          $nativeOcr=[regex]::Match($receiverSource,"(?s)param\(\[string\]\`$Image,\[string\]\`$Result\).*?(?=\r?\n'@)").Value
+          $nativeOcr=[regex]::Match($receiverSource,"(?s)param\(\[string\]\`$Image,\[string\]\`$Result,\[string\]\`$DeadlineUtc\).*?(?=\r?\n'@)").Value
           if(-not $nativeOcr){throw 'Native OCR source not found'}
           $tokens=$null; $errors=$null
           [void][System.Management.Automation.Language.Parser]::ParseInput($nativeOcr,[ref]$tokens,[ref]$errors)
