@@ -1,0 +1,56 @@
+name: Build controlled 2890 comparison
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preserve exact existing fix
+        shell: pwsh
+        run: Copy-Item support/test/windows/pr3192-current-adapted.diff $env:RUNNER_TEMP/scroll.diff
+      - uses: actions/checkout@v6
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.9
+          channel: stable
+      - name: Prepare required MSIX helper
+        shell: pwsh
+        run: |
+          $makepri = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin/10.*/x64/makepri.exe" | Select-Object -Last 1
+          & $makepri.FullName new /pr support/build/msix/content /cf support/build/msix/priconfig.xml /mn support/build/msix/content/AppxManifest.xml /of support/build/msix/content/resources.pri /o
+          & "C:/Program Files (x86)/Windows Kits/10/App Certification Kit/makeappx.exe" pack /o /d support/build/msix/content /nv /p app/windows/localsend_msix_helper.msix
+      - name: Build unchanged production base
+        working-directory: app
+        shell: pwsh
+        run: |
+          flutter pub get
+          flutter build windows
+          if ($LASTEXITCODE -ne 0) {throw "Baseline build failed"}
+          Copy-Item build/windows/x64/runner/Release $env:RUNNER_TEMP/baseline2890 -Recurse
+          git rev-parse HEAD | Set-Content $env:RUNNER_TEMP/baseline2890/source-commit.txt
+      - name: Apply only existing scrolling correction
+        shell: pwsh
+        run: |
+          git apply $env:RUNNER_TEMP/scroll.diff
+          if ($LASTEXITCODE -ne 0) {throw "Existing fix did not apply"}
+          git diff | Set-Content $env:RUNNER_TEMP/candidate-diff.txt
+      - name: Build matched existing-fix candidate
+        working-directory: app
+        shell: pwsh
+        run: |
+          flutter build windows
+          if ($LASTEXITCODE -ne 0) {throw "Candidate build failed"}
+          Copy-Item build/windows/x64/runner/Release $env:RUNNER_TEMP/candidate2890 -Recurse
+          Copy-Item $env:RUNNER_TEMP/candidate-diff.txt $env:RUNNER_TEMP/candidate2890/
+      - uses: actions/upload-artifact@v6
+        with:
+          name: baseline2890-c1ce
+          path: ${{ runner.temp }}/baseline2890
+      - uses: actions/upload-artifact@v6
+        with:
+          name: candidate2890-pr3192
+          path: ${{ runner.temp }}/candidate2890
