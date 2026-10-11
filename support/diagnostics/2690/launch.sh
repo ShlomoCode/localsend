@@ -11,7 +11,10 @@ trap 'kill "$wm_pid" 2>/dev/null || true' EXIT
 xterm -title issue2690-known-working-X11 > /evidence/launch/xterm-$phase.log 2>&1 &
 term_pid=$!
 sleep 3
-xdotool search --name issue2690-known-working-X11 > /evidence/launch/x11-control-$phase.txt
+if ! xdotool search --name issue2690-known-working-X11 > /evidence/launch/x11-control-$phase.txt; then
+  cat /evidence/launch/xterm-$phase.log /evidence/launch/dwm-$phase.log /evidence/xvfb.log
+  exit 1
+fi
 kill "$term_pid"
 for iteration in 1 2 3; do
   set +e

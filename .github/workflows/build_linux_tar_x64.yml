@@ -13,4 +13,9 @@ jobs:
         if: always()
         with:
           name: issue2690-evidence-${{ github.run_id }}
-          path: evidence/cloud
+          path: |
+            evidence/cloud/*.txt
+            evidence/cloud/*.log
+            evidence/cloud/*.sha256
+            evidence/cloud/*.json
+            evidence/cloud/launch/**

@@ -10,7 +10,7 @@ printf '%s\n' 'x11-libs/gtk+ -wayland X' 'x11-libs/libxkbcommon -wayland X' 'med
 printf '%s\n' 'x11-base/xorg-server xvfb' >> /etc/portage/package.use/issue2690
 printf '%s\n' 'MAKEOPTS="-j4"' >> /etc/portage/make.conf
 emerge --info > /evidence/gentoo-info.txt
-packages=(x11-libs/gtk+ x11-wm/dwm x11-base/xorg-server x11-misc/xdotool x11-terms/xterm x11-apps/xwd media-fonts/dejavu sys-apps/dbus sys-fs/fuse:0)
+packages=(x11-libs/gtk+ x11-wm/dwm x11-base/xorg-server x11-misc/xdotool x11-terms/xterm x11-apps/xwd media-fonts/dejavu media-fonts/font-misc-misc sys-apps/dbus sys-fs/fuse:0)
 emerge --pretend --verbose --getbinpkg "${packages[@]}" > /evidence/gentoo-plan.txt
 cat /evidence/gentoo-plan.txt
 emerge --verbose --getbinpkg --jobs=2 "${packages[@]}"
