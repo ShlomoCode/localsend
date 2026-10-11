@@ -6,27 +6,96 @@ on:
         description: Diagnostic identity-only intervention on original release
         type: boolean
         default: false
+      source_ref:
+        description: Immutable source revision to build; empty uses official release
+        type: string
+        default: ''
+      expect_retained:
+        description: Expect stable identity and retained tray preference
+        type: boolean
+        default: false
 jobs:
+  build:
+    if: inputs.source_ref != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CXXFLAGS: -Wno-error=deprecated-declarations
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev
+      - name: Read pinned Flutter version
+        id: flutter
+        run: echo "version=$(jq -r .flutter .fvmrc)" >> "$GITHUB_OUTPUT"
+      - uses: flutter-actions/setup-flutter@v4
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+      - name: Resolve workspace and generate code
+        run: |
+          flutter pub get
+          (cd packages/localsend_isolates/rust_builder/cargokit/build_tool && flutter pub get)
+          (cd app && dart run build_runner build -d)
+      - name: Check candidate API and build release
+        run: |
+          dart format --output=none --set-exit-if-changed app/lib/util/native/tray_helper.dart
+          (cd app && flutter analyze lib/util/native/tray_helper.dart)
+          (cd app && flutter build linux --release)
+          mkdir -p build-evidence
+          git rev-parse HEAD > build-evidence/source-revision.txt
+          git diff -- pubspec.lock > build-evidence/lock-resolution.diff
+          cp pubspec.lock build-evidence/pubspec.lock
+          flutter --version > build-evidence/toolchain.txt
+          cp app/lib/util/native/tray_helper.dart build-evidence/tray_helper.dart
+          cp app/pubspec.yaml build-evidence/app-pubspec.yaml
+          tar -czf build-evidence/release.tar.gz -C app/build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: source-build-${{ github.run_id }}
+          path: build-evidence/
   plasma:
+    needs: build
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
     container: debian:trixie
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
-      - name: Install Plasma 6 and official release
+      - name: Install Plasma 6
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y ca-certificates curl git gcc plasma-desktop plasma-workspace kwin-x11 systemsettings xvfb xauth dbus-x11 xdotool imagemagick qdbus-qt6 libgtk-3-0 libayatana-appindicator3-1 libcanberra-gtk3-module libgl1-mesa-dri libegl-mesa0 python3-pyatspi python3-dbus
           mkdir -p evidence release
-          curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o release.tar.gz
-          echo '287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16  release.tar.gz' | sha256sum -c -
-          tar -xzf release.tar.gz -C release
           dpkg-query -W plasma-workspace plasma-desktop > evidence/environment.txt
           echo "$GITHUB_SHA" >> evidence/environment.txt
+      - uses: actions/download-artifact@v6
+        if: inputs.source_ref != ''
+        with:
+          name: source-build-${{ github.run_id }}
+          path: build-evidence
+      - name: Install requested application artifact
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          if [ -n "$SOURCE_REF" ]; then
+            cp build-evidence/* evidence/
+            tar -xzf build-evidence/release.tar.gz -C release
+          else
+            curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o release.tar.gz
+            echo '287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16  release.tar.gz' | sha256sum -c -
+            tar -xzf release.tar.gz -C release
+          fi
       - name: Observe actual application and Plasma settings
         env:
           STABLE_ID: ${{ inputs.stable_id && '1' || '0' }}
+          EXPECT_RETAINED: ${{ (inputs.expect_retained || inputs.stable_id) && '1' || '0' }}
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash support/diagnostics/3546/probe.sh
       - uses: actions/upload-artifact@v6

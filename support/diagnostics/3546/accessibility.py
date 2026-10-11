@@ -197,7 +197,7 @@ try:
         click(find("Cancel", "button"))
         subprocess.run(["xdotool", "key", "Escape"], check=True)
         pid = int(os.environ["APP_PID"])
-        expected_lost = os.environ.get("STABLE_ID") != "1"
+        expected_lost = os.environ.get("EXPECT_RETAINED") != "1"
         outcomes = []
         for cycle in range(1, 3):
             stage = f"{'baseline' if expected_lost else 'stable-id'}-cycle{cycle}"
