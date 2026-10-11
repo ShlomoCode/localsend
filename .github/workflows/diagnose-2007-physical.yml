@@ -31,6 +31,15 @@ on:
         options: [permanent, trash, trash-purge]
         default: permanent
         description: Require native permanent deletion, trash retention, or trash then permanent purge
+      post_delete_wait_seconds:
+        type: choice
+        options: ['0', '45']
+        default: '0'
+        description: Fixed delay after verified deletion before actual same-name resend
+      restart_receiver:
+        type: boolean
+        default: false
+        description: Restart only the receiver after deletion without changing its filesystem
       destination:
         type: choice
         options: [downloads, saf-documents, saf-documents-persistent]
@@ -54,6 +63,8 @@ jobs:
       ISSUE_2007_VARIANT: ${{ inputs.scenario || 'unchanged' }}
       ISSUE_2007_DELETE_TIMING: ${{ inputs.deletion_timing || 'absence' }}
       ISSUE_2007_DELETE_ACTION: ${{ inputs.deletion_action || 'permanent' }}
+      ISSUE_2007_POST_DELETE_WAIT: ${{ inputs.post_delete_wait_seconds || '0' }}
+      ISSUE_2007_RESTART_RECEIVER: ${{ inputs.restart_receiver && '1' || '0' }}
       ISSUE_2007_DESTINATION: ${{ inputs.destination || 'downloads' }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-physical-control.mjs
     steps:

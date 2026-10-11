@@ -392,6 +392,20 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    if(deletionTiming==='absence'){
     await closeReceiverFinished();
+    const waitSeconds=Number(process.env.ISSUE_2007_POST_DELETE_WAIT||0);
+    assert([0,45].includes(waitSeconds),'Only configured fixed post-delete delays are supported');
+    const waitStartedUtc=new Date().toISOString();
+    if(waitSeconds)await new Promise(r=>setTimeout(r,waitSeconds*1000));
+    const restartReceiver=process.env.ISSUE_2007_RESTART_RECEIVER==='1';
+    let restartUtc=null;
+    if(restartReceiver){
+     restartUtc=new Date().toISOString();
+     await wd('POST',prefix+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});
+     await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+     await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"Receive")]',label:'restarted-receiver-ready'});
+     await snapshot('receiver-restarted-after-deletion');
+    }
+    writeFileSync('evidence/post-delete-intervention.json',JSON.stringify({waitSeconds,waitStartedUtc,completedUtc:new Date().toISOString(),restartReceiver,restartUtc,filesystemMutation:false},null,2));
     writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
    }
    await waitFile('evidence/resend-requested',90000);
