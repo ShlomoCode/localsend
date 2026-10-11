@@ -3,6 +3,11 @@ on:
   push:
     branches: [codex/diagnose-2381-favorite-alias]
   workflow_dispatch:
+    inputs:
+      current_baseline:
+        description: Use the untouched current baseline artifact
+        type: boolean
+        default: false
 jobs:
   release:
     runs-on: windows-latest
@@ -10,10 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Download reported release
+        if: ${{ !inputs.current_baseline }}
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile $env:RUNNER_TEMP/app.zip
           Expand-Archive $env:RUNNER_TEMP/app.zip $env:RUNNER_TEMP/release
+      - name: Download untouched current baseline
+        if: ${{ inputs.current_baseline }}
+        uses: actions/download-artifact@v6
+        with:
+          name: baseline2381-current
+          run-id: 38102878653
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release
       - name: Install screenshot OCR
         run: choco install tesseract --no-progress -y
       - name: Run actual Windows apps

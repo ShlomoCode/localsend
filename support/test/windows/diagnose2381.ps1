@@ -114,6 +114,7 @@ function FavoritePencil([string]$snap,[int]$rowY) {
  Click ($rightmost-8) $rowY
 }
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
+Get-FileHash $Executable -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/executable-hash.json"
 if (-not (Get-Command New-VMSwitch -ErrorAction SilentlyContinue)) {
  Install-WindowsFeature Hyper-V-PowerShell | Out-String | Write-Host
 }
@@ -293,6 +294,8 @@ if (-not $found) {throw "Whitelist UI was not reached"}
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces-after-ui.json"
 
 # The transfer stage uses a real native file picker, after all alias evidence.
+Click 36 59
+Screenshot "settings-returned"
 Click 103 199
 Screenshot "sender-transfer-selection"
 $fixture="$EvidenceDirectory/fixture-home.txt"
