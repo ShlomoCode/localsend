@@ -26,6 +26,10 @@ on:
         description: Capture desktop daemon PATH and wrappers without starting LocalSend
         type: boolean
         default: false
+      killall_package:
+        description: Ordinary system package providing killall (psmisc or busybox)
+        type: string
+        default: 'psmisc'
 jobs:
   mate-4k:
     runs-on: ubuntu-24.04
@@ -51,6 +55,7 @@ jobs:
           NIXPKGS_REVISION: ${{ inputs.nixpkgs_revision }}
           APP_ROUTE: ${{ inputs.app_route }}
           RUNTIME_ONLY: ${{ inputs.runtime_only }}
+          KILLALL_PACKAGE: ${{ inputs.killall_package }}
         run: |
           set -euo pipefail
           [[ "$PANEL_SIZE" =~ ^(20|24)$ ]]
@@ -58,6 +63,7 @@ jobs:
           [[ "$NIXPKGS_REVISION" =~ ^(6132ff3ee5a9509d0aeb66a01a7d662c6384289b|11cb3517b3af6af300dd6c055aeda73c9bf52c48)$ ]]
           [[ "$APP_ROUTE" =~ ^(nix|official)$ ]]
           [[ "$RUNTIME_ONLY" =~ ^(true|false)$ ]]
+          [[ "$KILLALL_PACKAGE" =~ ^(psmisc|busybox)$ ]]
           for variant in baseline; do
             mkdir -p "evidence/$variant"
             printf '%s\n' "$NIXPKGS_REVISION" > "evidence/$variant/nixpkgs-revision.txt"
@@ -71,7 +77,7 @@ jobs:
             fi
             fixed=false
             if [ "$variant" = panel-fix ]; then fixed=true; fi
-            nix-build support/diagnostics/2751/mate.nix -A driver --arg panelFix "$fixed" --arg panelSize "$PANEL_SIZE" --arg minIconSize "$MIN_ICON_SIZE" --argstr revision "$NIXPKGS_REVISION" --argstr appRoute "$APP_ROUTE" --arg runtimeOnly "$RUNTIME_ONLY" --no-out-link | tee "evidence/$variant/driver-path.txt"
+            nix-build support/diagnostics/2751/mate.nix -A driver --arg panelFix "$fixed" --arg panelSize "$PANEL_SIZE" --arg minIconSize "$MIN_ICON_SIZE" --argstr revision "$NIXPKGS_REVISION" --argstr appRoute "$APP_ROUTE" --arg runtimeOnly "$RUNTIME_ONLY" --argstr killallPackage "$KILLALL_PACKAGE" --no-out-link | tee "evidence/$variant/driver-path.txt"
             driver=$(tail -1 "evidence/$variant/driver-path.txt")
             "$driver/bin/nixos-test-driver" --no-interactive --global-timeout 900 -o "$PWD/evidence/$variant" 2>&1 | tee "evidence/$variant/test-driver.log"
           done

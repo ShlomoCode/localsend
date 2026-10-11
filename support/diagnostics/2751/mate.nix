@@ -1,4 +1,4 @@
-{ panelFix ? false, panelSize ? 24, minIconSize ? 24, appRoute ? "nix", runtimeOnly ? false, revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
+{ panelFix ? false, panelSize ? 24, minIconSize ? 24, appRoute ? "nix", killallPackage ? "psmisc", runtimeOnly ? false, revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
 let
   nixpkgs = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${revision}.tar.gz";
 in
@@ -33,7 +33,8 @@ in {
     networking.networkmanager.enable = true;
     programs.nm-applet.enable = true;
     programs.localsend.enable = appRoute == "nix";
-    environment.systemPackages = (with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc ])
+    environment.systemPackages = (with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick ])
+      ++ [ (if killallPackage == "busybox" then pkgs.lib.lowPrio pkgs.busybox else pkgs.psmisc) ]
       ++ pkgs.lib.optional (appRoute == "official") officialLauncher;
     virtualisation.memorySize = 4096;
     virtualisation.cores = 2;
@@ -94,7 +95,9 @@ in {
     machine.succeed("cat ${pkgs.mate.mate-settings-daemon}/libexec/mate-settings-daemon > /tmp/evidence/daemon-wrapper.txt")
     daemon_path = machine.succeed("tr '\\0' '\\n' < /proc/" + daemon_pid + "/environ | sed -n 's/^PATH=//p'").strip()
     assert daemon_path, "The actual daemon PATH was not recovered"
-    user_command("env PATH=" + shlex.quote(daemon_path) + " sh -c 'command -v killall > /tmp/evidence/daemon-resolved-killall.txt; readlink -f $(command -v killall) >> /tmp/evidence/daemon-resolved-killall.txt; killall --version >> /tmp/evidence/daemon-resolved-killall.txt 2>&1'")
+    user_command("env PATH=" + shlex.quote(daemon_path) + " sh -c 'command -v killall > /tmp/evidence/daemon-resolved-killall.txt; readlink -f $(command -v killall) >> /tmp/evidence/daemon-resolved-killall.txt; killall --help >> /tmp/evidence/daemon-resolved-killall.txt 2>&1 || true'")
+    resolved_killall = user_command("env PATH=" + shlex.quote(daemon_path) + " sh -c 'readlink -f $(command -v killall)'").strip()
+    assert resolved_killall.startswith("${if killallPackage == "busybox" then pkgs.busybox else pkgs.psmisc}/"), resolved_killall
     machine.copy_from_vm("/tmp/evidence", "guest-runtime-evidence")
     if not ${if runtimeOnly then "True" else "False"}:
         user_command("sh -c 'localsend_app > /tmp/evidence/localsend.log 2>&1 &' ")
@@ -165,7 +168,7 @@ in {
                 user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
             machine.screenshot(label)
             machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
-            machine.succeed("for pid in $(pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; done > /tmp/evidence/" + label + "-executables.txt")
+            machine.succeed("for pid in $(pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; tr '\\0' '\\n' < /proc/$pid/cmdline || true; done > /tmp/evidence/" + label + "-executables.txt")
             machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';
