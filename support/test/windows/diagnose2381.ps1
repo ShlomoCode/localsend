@@ -99,6 +99,20 @@ function PrimaryButton([string]$snap) {
  Write-Host "Primary button in ${snap}: $minX,$minY to $maxX,$maxY"
  Click (($minX+$maxX)/2) (($minY+$maxY)/2)
 }
+function FavoritePencil([string]$snap,[int]$rowY) {
+ $bmp=[System.Drawing.Bitmap]::FromFile("$EvidenceDirectory/$snap.png")
+ $rightmost=0
+ for($y=$rowY-10;$y -le $rowY+10;$y++) {
+  for($x=540;$x -lt 700;$x++) {
+   $pixel=$bmp.GetPixel($x,$y)
+   if($pixel.R -lt 70 -and $pixel.G -lt 85 -and $pixel.B -lt 85) {$rightmost=[Math]::Max($rightmost,$x)}
+  }
+ }
+ $bmp.Dispose()
+ if($rightmost -eq 0) {throw "No favorite pencil in $snap row $rowY"}
+ Write-Host "Favorite pencil right edge in ${snap}: $rightmost"
+ Click ($rightmost-8) $rowY
+}
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
 if (-not (Get-Command New-VMSwitch -ErrorAction SilentlyContinue)) {
  Install-WindowsFeature Hyper-V-PowerShell | Out-String | Write-Host
@@ -229,6 +243,12 @@ foreach ($edit in @(@{alias="My Desktop (Home Lan)";y=358;ip="10.0.20.2"},@{alia
   Paste "$($edit.alias) temp"
   Screenshot "edit-intermediate-$($edit.ip)"
   PrimaryButton "edit-intermediate-$($edit.ip)"
+  # Reopen so the Edit widget receives the newly saved favorite. Reusing the
+  # old widget can restore customAlias=false with the original alias.
+  Word "Cancel" "edit-confirmed-$($edit.ip)"
+  Screenshot "favorites-intermediate-$($edit.ip)"
+  FavoritePencil "favorites-intermediate-$($edit.ip)" $edit.y
+  Screenshot "edit-reopened-$($edit.ip)"
   Click 500 280
   [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 100}")
   Paste $edit.alias
