@@ -5,6 +5,10 @@ on:
       physical:
         type: boolean
         default: false
+      clipboard_case:
+        type: choice
+        options: [short, ascii105000, multiline105000, ascii105kib]
+        default: short
 permissions:
   contents: read
 jobs:
@@ -42,7 +46,7 @@ jobs:
       BS_DEVICE: Samsung Galaxy S23
       BS_OS: '13.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2830.mjs
-      CLIPBOARD_CASES: short
+      CLIPBOARD_CASES: ${{ inputs.clipboard_case }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

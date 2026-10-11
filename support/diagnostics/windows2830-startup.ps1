@@ -752,5 +752,7 @@ namespace LocalSendReleaseUiProbe {
   $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
   [System.IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $report -Depth 10), [System.Text.UTF8Encoding]::new($false))
   Write-Host "Release UI report: $reportPath"
+  if ($StartupOnly -and $report.errors.Count -eq 0 -and $report.sendTab.imageChanged -and
+      $report.status -in @('captured-foreground-app','captured-app-window','captured-app-ui-tree')) { exit 0 }
   if ($report.status -notin @('selection-dialog-observed', 'sendto-launch-observed')) { exit 1 }
 }

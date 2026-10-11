@@ -8,6 +8,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
  async function ui(action,x,y,label){await exec("pwsh",["-NoProfile","-File","support/diagnostics/windows2830-ui.ps1","-Action",action,"-X",String(x),"-Y",String(y),"-Label",label]);event("windows-ui",{action,x,y,label});}
  async function snapshot(label){
   const start=Date.now();
+  event("receiver-source-start",{label});
   const xml=await wd("GET",`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);event("receiver-source",{label,ms:Date.now()-start,chars:xml.length,copy:xml.includes("Copy"),close:xml.includes("Close")});
   const png=await wd("GET",`/session/${session}/screenshot`);writeFileSync(`evidence/${label}.png`,Buffer.from(png,"base64"));return xml;
  }
