@@ -17,6 +17,7 @@ find release -maxdepth 3 -type f > evidence/release-files.txt
 app=$(find "$PWD/release" -name localsend_app -type f | head -1)
 cd "$(dirname "$app")"
 "$app" > "$GITHUB_WORKSPACE/evidence/app.log" 2>&1 &
+export APP_PID=$! APP_EXE="$app" FULL_SCENARIO=1
 cd "$GITHUB_WORKSPACE"
 sleep 15
 import -window root evidence/desktop.png
@@ -31,7 +32,6 @@ cp "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" evidence/plasma-confi
 xdotool key Escape
 xdotool search --name '^Welcome Center$' windowminimize || true
 xdotool search --name '^LocalSend$' windowminimize || true
-"$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels();for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){if(ws[j].type=="org.kde.plasma.systemtray") ws[j].showConfigurationInterface();}}'
-sleep 3
+sleep 1
 import -window root evidence/tray-settings.png
 python3 support/diagnostics/3546/accessibility.py
