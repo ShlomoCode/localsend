@@ -36,6 +36,10 @@ export function storageObserver({wd,prefix,session}) {
   if(enabled!=='true')await wd('POST',`${prefix}/element/${toggle['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
   writeFileSync('evidence/observer-permission-after.xml',await wd('GET',prefix+'/source'));
   writeFileSync('evidence/observer-permission-after.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
+  // Samsung keeps the externally launched Settings activity above the helper
+  // in its task. Close that observed activity before activating the helper.
+  await wd('POST',prefix+'/back',{});
+  await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Observe owned storage',label:'observer-returned-from-settings'});
   await activate('org.localsend.localsend_app');
   return observe('before-baseline');
  }
