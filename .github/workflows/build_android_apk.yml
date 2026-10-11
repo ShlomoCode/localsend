@@ -41,8 +41,10 @@ jobs:
         with:
           flutter-version: '3.24.5'
 
-      - name: Install historical Rust SDK
-        run: rustup toolchain install 1.84.1 --profile minimal
+      - name: Install historical Rust SDK and Android ARM64 target
+        run: |
+          rustup toolchain install 1.84.1 --profile minimal
+          rustup target add --toolchain 1.84.1 aarch64-linux-android
 
       - name: Build control and tagged ARM64 release APKs
         shell: bash

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cloud-only diagnostic source build. Both APKs keep the historical app behavior.
+# Cloud-only diagnostic source build with recorded build compatibility settings.
 set -euo pipefail
 
 source_dir="$(realpath "${1:?historical checkout required}")"
@@ -15,7 +15,7 @@ cd "$source_dir"
 [[ "$(flutter --version --machine | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).frameworkVersion))')" == 3.24.5 ]]
 
 cat > "$evidence_dir/identity.txt" <<EOF
-purpose=diagnostic source-build control and tagged cache/gallery boundary APKs
+purpose=uninstrumented control and tagged cache/gallery source APKs sharing build compatibility settings
 historical_tag=v1.17.0
 historical_source=$expected_commit
 diagnostic_infrastructure_commit=${GITHUB_SHA:?}
@@ -24,6 +24,8 @@ workflow_attempt=${GITHUB_RUN_ATTEMPT:?}
 target=android-arm64
 mode=release
 original_release_baseline=separate original v1.17.0 APK; these source builds do not replace it
+build_compatibility=Rust Android target installed explicitly for historical toolchain 1.84.1
+control_scope=historical tracked application source without probes; compatibility environment is not the original release build environment
 EOF
 git rev-parse HEAD^{tree} > "$evidence_dir/source-tree.txt"
 cp .fvmrc "$evidence_dir/historical.fvmrc"
@@ -35,7 +37,24 @@ flutter --version --machine > "$evidence_dir/flutter-version.json"
 dart --version > "$evidence_dir/dart-version.txt" 2>&1
 java -version > "$evidence_dir/java-version.txt" 2>&1
 rustc --version --verbose > "$evidence_dir/rust-version.txt"
+rustup target list --toolchain 1.84.1 --installed > "$evidence_dir/rust-installed-targets.txt"
+grep -Fxq aarch64-linux-android "$evidence_dir/rust-installed-targets.txt"
 flutter doctor -v > "$evidence_dir/flutter-doctor.txt" 2>&1
+
+cp app/android/settings.gradle "$evidence_dir/historical-android-settings.gradle"
+cp app/android/gradle/wrapper/gradle-wrapper.properties "$evidence_dir/historical-gradle-wrapper.properties"
+cat > "$evidence_dir/build-compatibility.txt" <<'EOF'
+Previous failed build: https://github.com/ShlomoCode/localsend/actions/runs/38165020550
+Observed Kotlin errors: dependency metadata 1.8.0; compiler expected 1.6.0.
+Historical app settings.gradle already declares org.jetbrains.kotlin.android 1.8.21.
+Final failing task was :rhttp:cargokitCargoBuildRhttpRelease, not a Kotlin task.
+Kotlin messages alone do not establish an independently fatal compile failure.
+Kotlin configuration is unchanged for this minimal Rust-target-only retry.
+Observed Rust error: target aarch64-linux-android missing for cargo invoked via 1.84.1.
+Adjustment: install that target explicitly on toolchain 1.84.1 before either build.
+The uninstrumented control isolates diagnostic probes within this compatibility
+environment. It does not establish equivalence to the original release APK.
+EOF
 
 # Use supported release-signing inputs; create a disposable identity if absent.
 # Never upload the keystore, signing properties, or passwords.
