@@ -1,6 +1,8 @@
 package org.localsend.cloudtransport;
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.content.Intent;
 import android.widget.*;
 import java.io.ByteArrayOutputStream;
@@ -17,7 +19,59 @@ import org.json.JSONObject;
 public final class MainActivity extends Activity {
   private boolean reverseControlBusy;
   private boolean transportControlBusy;
+  private final Handler serviceObserver=new Handler(Looper.getMainLooper());
+  private int serviceObservationGeneration;
+  private boolean serviceObservationPending;
+  private Button[] serviceModeButtons;
   private static void showStatus(TextView text,String value) {text.setText(value);text.setContentDescription(value);}
+  private void observeService(TextView text,boolean starting,Integer expectedPort,String expectedTransport,String readyText) {
+    final int generation=++serviceObservationGeneration;
+    final long started=android.os.SystemClock.elapsedRealtime();
+    serviceObservationPending=true;
+    for(Button button:serviceModeButtons)button.setEnabled(false);
+    Runnable poll=new Runnable() {
+      public void run() {
+        if(generation!=serviceObservationGeneration||isFinishing()||isDestroyed())return;
+        JSONObject status;
+        try {status=RelayService.transportStatus();}
+        catch(Exception error) {status=new JSONObject();try{status.put("statusReadErrorType",error.getClass().getSimpleName());}catch(Exception ignored){}}
+        long elapsed=android.os.SystemClock.elapsedRealtime()-started;
+        boolean observed=status.opt("servicePresent") instanceof Boolean&&status.opt("running") instanceof Boolean&&status.opt("ready") instanceof Boolean;
+        boolean complete=observed&&(starting
+          ?status.optBoolean("ready")&&status.optBoolean("running")&&status.optBoolean("servicePresent")&&status.optBoolean("firstPullSucceeded")
+            &&(expectedPort==null||status.optInt("listenerPort",-1)==expectedPort&&"127.0.0.1".equals(status.optString("listenerHost")))
+            &&(expectedTransport==null||expectedTransport.equals(status.optString("transport")))
+          :!status.optBoolean("servicePresent")&&!status.optBoolean("running")&&!status.optBoolean("ready"));
+        boolean timeout=!complete&&elapsed>=30000;
+        try {
+          status.put("observation",starting?"start":"stop").put("observationElapsedMs",elapsed)
+            .put("observationStatus",complete?(starting?"ready":"stopped"):(timeout?"timed-out":"pending"));
+          if(expectedPort!=null)status.put("expectedListenerPort",expectedPort);
+          if(expectedTransport!=null)status.put("expectedTransport",expectedTransport);
+        }catch(Exception ignored){}
+        String json="HELPER_SERVICE_STATUS\n"+status.toString();
+        text.setText((complete?readyText:(timeout?"Helper service observation timed out":"Observing helper service "+(starting?"start":"stop")))+"\n"+json);
+        text.setContentDescription(json);
+        if(complete||timeout) {
+          serviceObservationPending=false;
+          for(Button button:serviceModeButtons)button.setEnabled(true);
+        } else serviceObserver.postDelayed(this,250);
+      }
+    };
+    poll.run();
+  }
+  private void startObservedService(TextView text,Intent intent,Integer expectedPort,String expectedTransport,String readyText) {
+    try {startForegroundService(intent);observeService(text,true,expectedPort,expectedTransport,readyText);}
+    catch(Exception error) {showServiceActionFailure(text,"start",error);}
+  }
+  private void showServiceActionFailure(TextView text,String action,Exception error) {
+    ++serviceObservationGeneration;serviceObservationPending=false;
+    for(Button button:serviceModeButtons)button.setEnabled(true);
+    JSONObject status;
+    try{status=RelayService.transportStatus();}catch(Exception ignored){status=new JSONObject();}
+    try{status.put("observation",action).put("observationStatus","failed").put("actionErrorType",error.getClass().getSimpleName());}catch(Exception ignored){}
+    showStatus(text,"HELPER_SERVICE_STATUS\n"+status.toString());
+  }
   private static final class CaseSocket implements AutoCloseable {
     final Socket socket=new Socket();
     final Thread watchdog;
@@ -107,7 +161,7 @@ public final class MainActivity extends Activity {
     }
   }
   private void runTransportControls(TextView text,Button button) {
-    if(transportControlBusy||reverseControlBusy)return;
+    if(transportControlBusy||reverseControlBusy||serviceObservationPending)return;
     transportControlBusy=true;button.setEnabled(false);
     new Thread(()->{
       long started=android.os.SystemClock.elapsedRealtime();JSONArray cases=new JSONArray();
@@ -142,7 +196,7 @@ public final class MainActivity extends Activity {
     return value.toString();
   }
   private void runReverseControl(TextView text,Button button) {
-    if(reverseControlBusy||transportControlBusy)return;
+    if(reverseControlBusy||transportControlBusy||serviceObservationPending)return;
     reverseControlBusy=true;button.setEnabled(false);
     showStatus(text,"REVERSE_CONTROL_RUNNING counts=0,1,65537\nTransport proof only; LocalSend is unchanged.");
     new Thread(()->{
@@ -207,15 +261,19 @@ public final class MainActivity extends Activity {
     Button transportControl=new Button(this);transportControl.setText("Run transport controls");transportControl.setContentDescription("Run transport controls");transportControl.setAllCaps(false);layout.addView(transportControl);
     Button stop=new Button(this);stop.setText("Stop helper");stop.setContentDescription("Stop helper");stop.setAllCaps(false);layout.addView(stop);
     Button metrics=new Button(this);metrics.setText("Show transport status");metrics.setContentDescription("Show transport status");metrics.setAllCaps(false);layout.addView(metrics);
-    control.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("control",true));showStatus(text,"Socket control running");});
-    actual.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("control",false));showStatus(text,"Relaying to LocalSend localhost:53317");});
-    reverse.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("reverse",true));showStatus(text,"Receiving LocalSend connections at localhost:53318");});
-    coalesced.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("reverse",true).putExtra("transport","coalesced"));showStatus(text,"Receiving LocalSend connections (coalesced) at localhost:53318");});
+    serviceModeButtons=new Button[]{control,actual,reverse,coalesced};
+    control.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("control",true),53319,null,"Socket control running"));
+    actual.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("control",false),null,null,"Relaying to LocalSend localhost:53317"));
+    reverse.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("reverse",true),53318,null,"Receiving LocalSend connections at localhost:53318"));
+    coalesced.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("reverse",true).putExtra("transport","coalesced"),53318,"coalesced","Receiving LocalSend connections (coalesced) at localhost:53318"));
     reverseControl.setOnClickListener(v->runReverseControl(text,reverseControl));
     transportControl.setOnClickListener(v->runTransportControls(text,transportControl));
-    stop.setOnClickListener(v->{stopService(new Intent(this,RelayService.class));showStatus(text,"Stopped");});
-    metrics.setOnClickListener(v->{try{showStatus(text,"HELPER_TRANSPORT_STATUS\n"+RelayService.transportStatus().toString());}catch(Exception error){showStatus(text,"HELPER_TRANSPORT_STATUS_FAILED "+error.getClass().getSimpleName());}});
+    stop.setOnClickListener(v->{try{stopService(new Intent(this,RelayService.class));observeService(text,false,null,null,"Stopped");}catch(Exception error){showServiceActionFailure(text,"stop",error);}});
+    metrics.setOnClickListener(v->{if(serviceObservationPending)return;try{showStatus(text,"HELPER_TRANSPORT_STATUS\n"+RelayService.transportStatus().toString());}catch(Exception error){showStatus(text,"HELPER_TRANSPORT_STATUS_FAILED "+error.getClass().getSimpleName());}});
     setContentView(layout);
     layout.requestApplyInsets();
+  }
+  public void onDestroy() {
+    ++serviceObservationGeneration;serviceObserver.removeCallbacksAndMessages(null);super.onDestroy();
   }
 }

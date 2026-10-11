@@ -64,6 +64,24 @@ async function wd(method,url,body,attempt=0){
 }
 const base=()=>'/session/'+session;
 async function source(){return wd('GET',base()+'/source');}
+async function waitHelperState({ready,mode,previousInstance,name}){
+ const marker='HELPER_SERVICE_STATUS\n';let observed;
+ const xml=await waitFor(value=>{
+  const text=labels(value).find(label=>label.includes(marker));if(!text)return false;
+  observed=JSON.parse(text.slice(text.indexOf(marker)+marker.length));
+  report.helperLifecycle??=[];
+  if(report.helperLifecycle.length<120)report.helperLifecycle.push({utc:new Date().toISOString(),stage:name,
+   servicePresent:observed.servicePresent,running:observed.running,ready:observed.ready,instance:observed.instance,
+   transport:observed.transport,lifecycle:observed.lifecycle,listenerHost:observed.listenerHost,listenerPort:observed.listenerPort,
+   firstPullSucceeded:observed.firstPullSucceeded,lastFailure:observed.lastFailure});
+  if(!ready)return observed.servicePresent===false&&observed.running===false&&observed.ready===false;
+  if(observed.lastFailure&&!observed.running)throw Error('Owned helper readiness failed: '+observed.lastFailure);
+  return observed.servicePresent===true&&observed.running===true&&observed.ready===true&&observed.firstPullSucceeded===true
+   &&observed.transport===mode&&observed.listenerHost==='127.0.0.1'&&observed.listenerPort===53318
+   &&typeof observed.instance==='string'&&(!previousInstance||observed.instance!==previousInstance);
+ },45000,'Owned helper did not reach observed '+name+' state before deadline');
+ save('helper-lifecycle-'+name+'.json',observed);await snap('helper-lifecycle-'+name,xml);return observed;
+}
 async function recoverOwnedStartupSession(){
  // A timed-out POST can still allocate a device. Resolve only this unique Actions build.
  const get=async url=>{
@@ -171,6 +189,8 @@ async function stopPhysicalServer(){
 async function runPhysicalReverseControl(){
  physicalCases.length=0;
  const expected=[0,1,65537].map(expectedControl),metricsBefore=r.status();
+ const attemptedTransport=r.status().transport;
+ try{
  physicalServer=net.createServer({allowHalfOpen:true},socket=>{
   physicalSockets.add(socket);const index=physicalCases.length;
   const entry={index,openedUtc:new Date().toISOString(),expected:expected[index]||null,count:0,sha256:null,readHalfClosed:false,replyFlushed:false};
@@ -216,9 +236,13 @@ async function runPhysicalReverseControl(){
   assert.equal(physicalCases[i].count,expected[i].count);assert.equal(physicalCases[i].sha256,expected[i].sha256);
   assert(physicalCases[i].readHalfClosed&&physicalCases[i].replyFlushed&&!physicalCases[i].error,'Windows half-close response was not verified');
  }
- report.physicalReverseControl={status:'passed',scope:'Transport proof only; temporary TCP server and native helper, not LocalSend app reproduction',
-  expected,android:native,windows:physicalCases,metricsBefore,metricsAfter:r.status()};
+ report.physicalReverseControl={status:'passed',transport:attemptedTransport,scope:'Transport proof only; temporary TCP server and native helper, not LocalSend app reproduction',
+  expected,android:native,windows:structuredClone(physicalCases),metricsBefore,metricsAfter:r.status()};
  save('reverse-physical-controls.json',report.physicalReverseControl);save('reverse-physical-controls-'+r.status().transport+'.json',report.physicalReverseControl);save('reverse-physical-trace.json',physicalTrace);
+ }finally{
+  save('reverse-physical-attempt-'+attemptedTransport+'.json',{transport:attemptedTransport,
+   status:report.physicalReverseControl?.transport===attemptedTransport?'passed':'incomplete',windows:structuredClone(physicalCases),metricsAfter:r.status()});
+ }
 }
 async function gateImprovedTransport(){
  if(transportMode==='legacy')return;
@@ -235,13 +259,14 @@ async function gateImprovedTransport(){
   report.streamRouteFailure={phase:error.failedPhase,errorType:error.nativeErrorType,prefixCount:partial.count,prefixSha256:partial.sha256,
    reason:'Exact native prefix sent, then bounded challenge read timed out while source output remained open'};
   save('stream-route-fallback.json',report.streamRouteFailure);
-  await click('Stop helper');await waitFor(s=>labels(s).includes('Stopped'),30000,'Streaming helper did not stop');
+  const previousInstance=report.initialHelperState.instance;
+  await click('Stop helper');await waitHelperState({ready:false,name:'stream-stopped'});
   r.closePeers('Owned streaming route discriminator ended');
   const deadline=Date.now()+10000;
   while(r.status().peers||r.status().activeUploads){assert(Date.now()<deadline,'Owned stream peers failed bounded cleanup');await sleep(100);}
-  await sleep(1000);r.setTransport('coalesced');
+  r.setTransport('coalesced');
   await click('Relay from LocalSend (coalesced)');
-  await waitFor(s=>labels(s).some(v=>v.includes('Receiving LocalSend connections (coalesced) at localhost:53318')),30000,'Coalesced helper did not start');
+  report.fallbackHelperState=await waitHelperState({ready:true,mode:'coalesced',previousInstance,name:'coalesced-ready'});
   await runPhysicalReverseControl();
   report.transportControls.push(await runTransportControls({r,snap,click,waitFor,labels,save,sleep,output}));
  }
@@ -370,7 +395,7 @@ try{
  assert(decodedFrame&&Number(decodedFrame[1])>0&&Number(decodedFrame[2])>0,'Fixture helper did not decode a video frame');
  report.fixture={name,bytes,sha256,availableBytes,totalBytes,mediaDurationMs,decodedFrame:{width:Number(decodedFrame[1]),height:Number(decodedFrame[2])},details};save('fixture.json',report.fixture);
  await activate('org.localsend.cloudtransport');await snap('relay-before');await click('Relay from LocalSend');
- await waitFor(s=>labels(s).some(v=>v.includes('Receiving LocalSend connections at localhost:53318')),30000,'Relay UI did not confirm reverse mode');
+ report.initialHelperState=await waitHelperState({ready:true,mode:transportMode,name:transportMode+'-ready'});
  await snap('relay-running');
  await runPhysicalReverseControl();
  await gateImprovedTransport();
