@@ -1,6 +1,6 @@
 snapshot() {
   scrot "evidence/$1.png"
-  tesseract "evidence/$1.png" "evidence/$1" tsv >/dev/null 2>&1
+  tesseract "evidence/$1.png" "evidence/$1" --psm 11 tsv >/dev/null 2>&1
   xwininfo -root -tree > "evidence/$1-windows.txt"
 }
 click_label() {
