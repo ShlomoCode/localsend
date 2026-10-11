@@ -38,7 +38,7 @@ Ten substantive conditions now pass without original failure. The stop-gate pack
 
 Validated E11: [38147444960](https://github.com/ShlomoCode/localsend/actions/runs/38147444960), official v1.7.0 with kdialog typed-path selection. Native stdout preserves another.txt. Direct control and both repeats save exact names, 1,280 bytes and independently verified archived target hashes. Full raw workflow log and application evidence preserved in run21.
 
-Eleven substantive conditions now pass without original failure; 33 actual saved files are archived. No workload is active. Per parent instruction, no additional workload will be started while its quality gate independently reviews E6/E9/E10 against the original report. Parent owns the stop decision.
+Eleven substantive conditions now pass without original failure; 33 actual saved files are archived. The independent quality review rehashed all 30 saved files from E1–E10 and examined E6/E9/E10 against the original report; E11 was verified separately by the owning agent. The parent approved stopping the original Ubuntu 20 file-picker investigation as a documented reproduction blocker. Resume only with the release, package, picker backend, target filesystem and link fixture from a failing installation. The unversioned December 2024 macOS claim and October 2025 directory-symlink omission remain separate gaps; the whole issue thread is not resolved. All owned resources are closed and no workload is active. No further workload will start without a new lead.
 
 The current validated desktop session is XFCE under Xvfb; the report does not identify a desktop environment, and a container is different from a physical Ubuntu installation. Raw picker stdout and status are passed back to the unchanged app without alteration. Artifact preservation is enforced before upload.
 
@@ -46,7 +46,7 @@ The official AppImage SHA-256 is `49eb71c34bab7c90a21c8f8cb3e220ae88b508b0a00741
 
 Run 38137246675 selected the valid relative symlink twice as 1.3 KB. Its transfer result is invalid as a control: XDG Downloads was missing, and the receiver failed before approval for the direct file and symlink. A green run without saved-file assertions was rejected. Infrastructure repairs are recorded separately and do not count as substantive reproduction conditions.
 
-Next discriminators, once the end-to-end control works: select the same file by clicking its picker row rather than typing its full path; compare zenity with the supported kdialog backend. Source history identifies desktop migration commit `6b4ff0b7c80be6622f2558a6468078514523f6dd` as a possible historical comparison, without proving it corrected this report.
+File-row selection and the supported kdialog backend were covered in the completed matrix. Source history identifies desktop migration commit `6b4ff0b7c80be6622f2558a6468078514523f6dd` as a possible historical comparison, without proving it corrected this report.
 
 No application workload has run locally. No production patch exists.
 
