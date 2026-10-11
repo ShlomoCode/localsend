@@ -64,6 +64,7 @@ export default async function(context){
     arm.install.priorPackage=await context.wd('GET',prefix+'/appium/device/current_package');
     arm.install.priorPid=await shell('pidof org.localsend.localsend_app');
     arm.install.requestedUtc=new Date().toISOString();save();
+    arm.install.terminateResult=await context.wd('POST',prefix+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});
     await context.wd('POST',prefix+'/execute/sync',{script:'mobile:installApp',args:[{appPath:arm.appUrl}]});
     arm.install.returnedUtc=new Date().toISOString();save();
    }
