@@ -10,7 +10,7 @@ rm -f "$out/ready.tsv" "$out/session.env"
 exec > >(tee -a "$out/startup.log") 2>&1
 date -u --iso-8601=ns
 [[ $(id -un) == tester && $(id -u) != 0 ]] || { echo 'Must run as normal user tester'; exit 1; }
-[[ -x "$exe" ]] || { echo "Missing installed executable: $exe"; exit 1; }
+[[ -f "$exe" && -x "$exe" ]] || { echo "Missing installed executable file: $exe"; exit 1; }
 for tool in Xvfb dbus-launch openbox xdotool tesseract ffmpeg ss timeout; do command -v "$tool"; done
 cat /etc/os-release | tee "$out/os-release.txt"
 uname -a | tee "$out/kernel.txt"

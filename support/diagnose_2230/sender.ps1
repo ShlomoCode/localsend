@@ -5,6 +5,8 @@ Add-Type -Path "$PSScriptRoot/native.cs"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $app=$null
+$receiver=$null
+$currentCase=$null
 $sequence=0
 function Snapshot([string]$Label) {
   $script:sequence++
@@ -88,6 +90,7 @@ try {
   if($ip -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'No valid WSL receiver IPv4 address.' }
   $manifest=Get-Content C:/2230/manifest.json -Raw | ConvertFrom-Json
   foreach($case in $manifest) {
+    $currentCase=$case.id
     # Preserve prior verified files, then restore the same empty Books destination.
     & wsl -d Ubuntu-24.04 -u tester -- bash -lc "mkdir -p /home/tester/2230-verified/$($case.id); find /home/tester/*/Books -maxdepth 1 -type f -exec mv -t /home/tester/2230-verified/$($case.id) -- {} +"
     if($LASTEXITCODE -ne 0) { throw 'Could not preserve preceding received files.' }
@@ -107,6 +110,13 @@ try {
   $_.Exception.ToString() | Set-Content (Join-Path $evidence 'sender-error.txt')
   throw
 } finally {
+  if($receiver -and -not $receiver.HasExited -and $currentCase) {
+    & wsl -d Ubuntu-24.04 -u tester -- timeout 40 bash "$linuxRoot/support/diagnose_2230/cleanup_controller.sh" "$linuxRoot/evidence/2230" $currentCase
+    if(-not $receiver.WaitForExit(10000)) {
+      'WSL controller process did not finish after bounded Linux cleanup; inspect recording-closed.tsv.' | Set-Content (Join-Path $evidence 'cleanup-error.txt')
+      $receiver.Kill()
+    }
+  }
   if($app -and -not $app.HasExited) { Stop-Process -Id $app.Id }
   Stop-Transcript
 }

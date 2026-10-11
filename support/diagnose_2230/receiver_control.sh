@@ -12,6 +12,12 @@ mkdir -p "$out"
 exec > >(tee -a "$out/control.log") 2>&1
 exec 9>/tmp/localsend-2230-controller.lock
 flock -n 9 || { echo 'Another case controller is active'; exit 1; }
+rm -f "$out/armed.tsv" "$out/accepted.tsv" "$out/complete.tsv" "$out/result.env" "$out/recording-closed.tsv"
+[[ "$$" =~ ^[1-9][0-9]*$ && -r "/proc/$$/cmdline" ]]
+# Parent validates the PID's /proc command line against this script and case
+# before signaling it. The start tick distinguishes a later reused PID.
+printf '%s\n' "$$" > "$out/controller.pid"
+awk '{print $22}' "/proc/$$/stat" > "$out/controller.start-tick"
 [[ -s "$evidence/receiver/ready.tsv" ]]
 kill -0 "$APP_PID"
 [[ -z $(find "$DEST" -mindepth 1 -maxdepth 1 -print -quit) ]] || {
@@ -53,14 +59,51 @@ confirm_cancel() {
   timeout 3 xdotool mousemove --sync "$x" "$y" click 1
 }
 video_pid=''
+recorder_alive() {
+  [[ -r "/proc/$video_pid/stat" ]] || return 1
+  # A zombie has exited and can be reaped immediately by wait.
+  [[ $(awk '{print $3}' "/proc/$video_pid/stat" 2>/dev/null) != Z ]]
+}
+wait_recorder() {
+  local until_ms=$(( $(mono)+$1*1000 ))
+  while recorder_alive; do
+    (( $(mono) < until_ms )) || return 1
+    sleep 0.1
+  done
+}
 stop_video() {
   if [[ -n "$video_pid" ]]; then
-    kill -INT "$video_pid" 2>/dev/null || true
-    wait "$video_pid" || true
+    local method=already_exited recorder_status=0
+    if recorder_alive; then
+      method=INT
+      kill -INT "$video_pid" 2>/dev/null || true
+      if ! wait_recorder 10; then
+        method=TERM
+        kill -TERM "$video_pid" 2>/dev/null || true
+        if ! wait_recorder 5; then
+          method=KILL
+          kill -KILL "$video_pid" 2>/dev/null || true
+          if ! wait_recorder 2; then
+            method=KILL_not_reaped
+          fi
+        fi
+      fi
+    fi
+    if ! recorder_alive; then
+      wait "$video_pid" || recorder_status=$?
+    else
+      # Never block indefinitely on an uninterruptible process.
+      recorder_status=124
+    fi
+    event recording_closed "method=$method exit=$recorder_status pid=$video_pid"
+    printf 'utc\tshutdown_method\texit_code\trecorder_pid\n%s\t%s\t%s\t%s\n' \
+      "$(stamp)" "$method" "$recorder_status" "$video_pid" > "$out/recording-closed.tsv"
     video_pid=''
   fi
 }
 trap stop_video EXIT
+trap 'event controller_signal TERM; exit 143' TERM
+trap 'event controller_signal INT; exit 130' INT
 ffmpeg -nostdin -y -loglevel warning -f x11grab -framerate 15 -video_size 1280x900 -i "$DISPLAY" \
   -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p "$out/continuous.mp4" > "$out/recording.log" 2>&1 & video_pid=$!
 event recording_start "pid=$video_pid"
