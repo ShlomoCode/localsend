@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -130,6 +131,177 @@ def sample_sender(pid, stop, path):
             output.flush()
 
 
+def filename_rows(words):
+    """Read observed numeric suffixes; Tesseract splits the path before 'e-'."""
+    rows = {}
+    for word in words:
+        match = re.search(r"(\d{5})\.txt\b", word["text"])
+        if match:
+            rows["file-" + match.group(1) + ".txt"] = {
+                "left": word["left"], "top": word["top"],
+                "center_y": word["top"] + word["height"] // 2,
+            }
+    return rows
+
+
+def same_file_rows(observed, expected, tolerance=3):
+    return observed.keys() == expected.keys() and all(
+        abs(observed[name]["center_y"] - expected[name]["center_y"]) <= tolerance
+        for name in expected)
+
+
+def visibly_scrolled(observed, expected):
+    if not observed:
+        return False
+    if len(observed.keys() - expected.keys()) >= 2:
+        return True
+    return any(abs(observed[name]["center_y"] - expected[name]["center_y"]) >= 12
+               for name in observed.keys() & expected.keys())
+
+
+def observe_probe(predicate, stage, deadline=45):
+    started = time.monotonic()
+    end = started + deadline
+    previous = None
+    index = 0
+    while time.monotonic() < end:
+        words, timing = screen("guest", stage + "-" + str(index))
+        index += 1
+        if predicate(words):
+            return words, {"first_matching_capture": timing, "last_nonmatching_capture": previous,
+                           "assertion_seconds_including_ocr": time.monotonic() - started}
+        previous = timing
+        time.sleep(.5)
+    raise RuntimeError("Probe observation deadline; inspect frames, not proof of hang: " + stage)
+
+
+def reaction_timing(input_timing, observation, host_started):
+    capture = observation["first_matching_capture"]
+    return {"input_guest_monotonic": input_timing,
+            "first_matching_capture_guest_monotonic": capture,
+            "last_nonmatching_capture_guest_monotonic": observation["last_nonmatching_capture"],
+            "capture_start_since_input_started_seconds": capture["started"] - input_timing["started"],
+            "capture_end_since_input_started_seconds": capture["completed"] - input_timing["started"],
+            "total_seconds_including_ssh_and_ocr": time.monotonic() - host_started,
+            "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."}
+
+
+def options_interaction_probes(count, case, window):
+    probes = {"count": count, "classification": "in-progress", "deadline_note":
+              "A 45-second observation deadline is an automation/discovery result, not evidence of hang or OOM."}
+    path = OUT / (case + "-options-interactions.json")
+
+    def retain():
+        path.write_text(json.dumps(probes, indent=2))
+        print(json.dumps({"phase": "options-interactions", **probes}), flush=True)
+
+    try:
+        geometry = desktop("guest", "xdotool", "getwindowgeometry", "--shell", window)["output"]
+        probes["geometry"] = geometry
+        bounds = dict(line.split("=", 1) for line in geometry.splitlines() if "=" in line)
+        if (int(bounds["WIDTH"]), int(bounds["HEIGHT"])) != (1000, 700):
+            raise RuntimeError("Probe requires observed 1000x700 geometry")
+        words, before_capture = screen("guest", case + "-wheel-before")
+        before = filename_rows(words)
+        if not before:
+            raise RuntimeError("No OCR filename rows before wheel")
+        probes["before_wheel"] = {"rows": before, "capture": before_capture}
+        first = min(before.values(), key=lambda row: row["top"])
+        # Wheel input targets a visible file row inside the actual list.
+        wheel_point = (first["left"] + 20, first["center_y"])
+        host_started = time.monotonic()
+        wheel = desktop("guest", "xdotool", "mousemove", *map(str, wheel_point),
+                        "click", "--repeat", "6", "--delay", "120", "5")
+        desktop("guest", "xdotool", "mousemove", "1190", "790")
+        if count == 5000:
+            changed, observed = observe_probe(
+                lambda frame: visibly_scrolled(filename_rows(frame), before),
+                case + "-wheel-down", 45)
+            after = filename_rows(changed)
+            probes["wheel_down"] = {"classification": "visible-file-rows-changed", "rows": after,
+                                    **reaction_timing(wheel, observed, host_started)}
+        else:
+            # Five ordinary rows fit this viewport. Still retain real wheel input
+            # and the resulting frame; a stationary fitting list is expected.
+            time.sleep(1)
+            changed, capture = screen("guest", case + "-wheel-down-control")
+            after = filename_rows(changed)
+            if len(before) != count or len(after) != count:
+                raise RuntimeError("Five-row fit cannot be established from OCR")
+            probes["wheel_down"] = {"classification": "all-five-rows-fit-viewport",
+                                    "rows": after, "positions_unchanged_within_3px": same_file_rows(after, before),
+                                    **reaction_timing(wheel, {"first_matching_capture": capture,
+                                       "last_nonmatching_capture": None}, host_started)}
+        retain()
+        host_started = time.monotonic()
+        wheel_up = desktop("guest", "xdotool", "mousemove", *map(str, wheel_point),
+                           "click", "--repeat", "6", "--delay", "120", "4")
+        desktop("guest", "xdotool", "mousemove", "1190", "790")
+        restored_words, restored = observe_probe(
+            lambda frame: same_file_rows(filename_rows(frame), before), case + "-wheel-restored", 45)
+        probes["wheel_up"] = {"classification": "original-rows-and-positions-restored",
+                              **reaction_timing(wheel_up, restored, host_started)}
+        rows = filename_rows(restored_words)
+        original = min(rows, key=lambda name: rows[name]["top"])
+        row = rows[original]
+        # Screenshot 38111506442 shows the pencil 9 pixels below the filename
+        # center, at client x739. Derive y from this run's visible row, not OCR of
+        # an icon; reject geometry drift before using the observed icon column.
+        pencil = (int(bounds["X"]) + 739, row["center_y"] + 9)
+        probes["editor_original_filename"] = original
+        probes["editor_original_ocr_tokens"] = [word["text"] for word in restored_words
+                                               if abs(word["top"] - row["top"]) <= 3 and word["text"].strip()]
+        probes["dialog_source_expectation"] = {
+            "release": "v1.17.0", "path": "app/lib/widget/dialogs/file_name_input_dialog.dart",
+            "title": "Enter file name", "original_label": "Original:", "autofocus": True,
+            "cancel_label": "Cancel", "note": "Runtime OCR must establish these observations; source alone is not a passed probe."}
+        probes["editor_target"] = {"absolute_xy": pencil, "observed_row": row,
+                                   "reference": "38111506442/files-5000-options-visible.png"}
+        host_started = time.monotonic()
+        opened = click("guest", pencil)
+        dialog_words, dialog = observe_probe(
+            lambda frame: {"Enter", "file", "name", "Cancel", "Original:"}.issubset(
+                {word["text"].strip() for word in frame}) and original in filename_rows(frame),
+            case + "-editor-open", 45)
+        probes["editor_open"] = {"classification": "file-name-dialog-observed",
+                                 **reaction_timing(opened, dialog, host_started)}
+        screen("guest", case + "-editor-textfield-before")
+        # v1.17 FileNameInputDialog has autofocus:true. Confirm focus through
+        # observed draft text rather than assuming that autofocus took effect.
+        host_started = time.monotonic()
+        draft_input = desktop("guest", "xdotool", "key", "--clearmodifiers", "ctrl+a")
+        typed = desktop("guest", "xdotool", "type", "--clearmodifiers", "--delay", "40", "Probe2414.txt")
+        draft_words, draft = observe_probe(
+            lambda frame: any(word["text"].strip() == "Probe2414.txt" for word in frame)
+            and any(word["text"].strip() == "Cancel" for word in frame),
+            case + "-editor-draft", 45)
+        probes["draft_input"] = {"classification": "draft-visible-in-dialog", "select_all": draft_input,
+                                 **reaction_timing(typed, draft, host_started)}
+        cancel = next(word for word in draft_words if word["text"].strip() == "Cancel")
+        host_started = time.monotonic()
+        cancelled = click("guest", (cancel["left"] + cancel["width"] // 2,
+                                     cancel["top"] + cancel["height"] // 2))
+        returned_words, returned = observe_probe(
+            lambda frame: same_file_rows(filename_rows(frame), before)
+            and any(word["text"].strip() == "Options" for word in frame)
+            and not any(word["text"].strip() in ("Cancel", "Probe2414.txt") for word in frame),
+            case + "-editor-cancel-return", 45)
+        probes["editor_cancel"] = {"classification": "original-filenames-restored-without-draft",
+                                   "rows": filename_rows(returned_words),
+                                   **reaction_timing(cancelled, returned, host_started)}
+        probes["classification"] = "wheel-and-editor-cancel-observed"
+        retain()
+        return probes
+    except Exception as error:
+        probes.update({"classification": "automation-or-discovery-failure", "failure": str(error)})
+        try:
+            screen("guest", case + "-interaction-discovery-failure")
+        except Exception as capture_error:
+            probes["capture_error"] = str(capture_error)
+        retain()
+        raise
+
+
 results = []
 for count in (5, 5000):
     case = "files-" + str(count)
@@ -193,6 +365,8 @@ for count in (5, 5000):
         result["timing_note"] = "First matching screenshot capture completion, including SSH input/capture overhead; not isolated paint latency."
         print(json.dumps({"phase": "options-observed", **result}), flush=True)
         screen("guest", case + "-options-visible")
+        stage = "options-interaction-probes"
+        result["options_interactions"] = options_interaction_probes(count, case, rwin)
         stage = "return-and-accept"
         focus("guest", rwin)
         desktop("guest", "xdotool", "getwindowgeometry", "--shell", rwin)
