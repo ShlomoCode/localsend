@@ -13,6 +13,9 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const safDocuments=persistentSaf||process.env.ISSUE_2007_DESTINATION==='saf-documents';
  const deviceFolder=safDocuments?'/sdcard/Documents':'/sdcard/Download';
  const windows=process.platform==='win32';
+ const samsungFiles=(process.env.BS_DEVICE||'').startsWith('Samsung ');
+ const fileManagerPackage=samsungFiles?'com.sec.android.app.myfiles':'com.google.android.apps.nbu.files';
+ const fileManagerName=samsungFiles?'Samsung My Files':'Google Files';
  await wd('POST',prefix+'/appium/settings',{settings:{waitForIdleTimeout:0}});
  async function snapshot(stage){
   writeFileSync(`evidence/android-${stage}.xml`,await wd('GET',prefix+'/source'));
@@ -158,7 +161,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   assert(done,'Original receiver Finished screen did not render its actual Done button');
   await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
  }
- writeFileSync('evidence/browserstack-session.json',JSON.stringify({session,device:'Vivo Y21',os:'Android 11'},null,2));
+ writeFileSync('evidence/browserstack-session.json',JSON.stringify({session,device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0')},null,2));
  let receiverReady=false;
  for(let attempt=0;attempt<20;attempt++){
   await snapshot('initial-'+attempt);
@@ -169,7 +172,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
  if(persistentSaf)await chooseSafDocuments('settings');
  const fileManagerInventory=[];
- for(const appId of ['com.vivo.filemanager','com.android.filemanager','com.google.android.apps.nbu.files']){
+ for(const appId of ['com.vivo.filemanager','com.android.filemanager','com.google.android.apps.nbu.files','com.sec.android.app.myfiles']){
   const installed=await wd('POST',prefix+'/appium/device/app_installed',{appId}).catch(error=>({error:String(error)}));
   fileManagerInventory.push({appId,installed});
  }
@@ -237,7 +240,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   const actual=Buffer.from(encoded,'base64');
   writeFileSync('evidence/android-saved-A.txt',actual);
   assert.deepEqual(actual,expected,'Saved Android file differs from selected desktop file');
-  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:'Vivo Y21',os:'Android 11',release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
+  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
   if(deletionTiming!=='absence'){
@@ -250,14 +253,14 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await wd('POST',prefix+'/appium/device/press_keycode',{keycode:3});
   await new Promise(r=>setTimeout(r,1500));
   await snapshot('file-manager-home');
-  const manager=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="File Manager" or @content-desc="File Manager" or @text="Files" or @content-desc="Files"]',label:'home-file-manager-entry',optional:true});
+  const manager=samsungFiles?null:await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="File Manager" or @content-desc="File Manager" or @text="Files" or @content-desc="Files"]',label:'home-file-manager-entry',optional:true});
   if(manager){
    await wd('POST',prefix+'/element/'+manager['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    writeFileSync('evidence/file-manager-launch.json',JSON.stringify({method:'Observed native Files launcher control',package:'com.google.android.apps.nbu.files'},null,2));
   }else{
-   assert(fileManagerInventory.some(app=>app.appId==='com.google.android.apps.nbu.files'&&app.installed===true),'No observed Files control or confirmed installed Google Files app');
-   await wd('POST',prefix+'/appium/device/activate_app',{appId:'com.google.android.apps.nbu.files'});
-   writeFileSync('evidence/file-manager-launch.json',JSON.stringify({method:'Normal Appium activateApp for confirmed installed Google Files; launcher accessibility control unavailable',package:'com.google.android.apps.nbu.files'},null,2));
+   assert(fileManagerInventory.some(app=>app.appId===fileManagerPackage&&app.installed===true),'No confirmed installed '+fileManagerName);
+   await wd('POST',prefix+'/appium/device/activate_app',{appId:fileManagerPackage});
+   writeFileSync('evidence/file-manager-launch.json',JSON.stringify({method:'Normal Appium activateApp for confirmed installed provider',package:fileManagerPackage},null,2));
   }
   {
    const onboardingDeadline=Date.now()+10000;
@@ -276,6 +279,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     }
     await new Promise(r=>setTimeout(r,200));
    }while(Date.now()<onboardingDeadline);
+   const actualManagerPackage=await wd('GET',prefix+'/appium/device/current_package');
+   const actualManagerSource=await wd('GET',prefix+'/source');
+   assert.equal(actualManagerPackage,fileManagerPackage,'File manager foreground package differs from confirmed provider');
+   assert(actualManagerSource.includes('package="'+fileManagerPackage+'"'),'File manager source does not match provider package');
+   writeFileSync('evidence/file-manager-provenance.json',JSON.stringify({actualManagerPackage,sourcePackageMatched:true},null,2));
    const downloads=await waitForNativeControl({wd,prefix,using:'xpath',value:safDocuments?'//*[@text="Documents & other"]':'//*[@text="Downloads"]',label:'file-manager-category'});
    await wd('POST',prefix+'/element/'+downloads['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    await new Promise(r=>setTimeout(r,2000));
@@ -286,7 +294,9 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,1000));
    await snapshot('files-A-selected');
    let remove;
-   if(requestedDeletionAction==='trash'){
+   if(samsungFiles){
+    remove=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Delete" or @content-desc="Delete"]',label:'samsung-files-delete-action'});
+   }else if(requestedDeletionAction==='trash'){
     const options=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'More options',label:'file-manager-more-options'});
     await wd('POST',prefix+'/element/'+options['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
     await snapshot('files-delete-options');
@@ -323,13 +333,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
      }).then(value=>{pathObservedUtc=new Date().toISOString();return value;}),
      wd('GET',prefix+'/source').then(source=>{
       const utc=new Date().toISOString();
-      if(deletionTiming==='acknowledged'&&(source.includes('1 file deleted')||source.includes("There's nothing here.")))writeFileSync('evidence/resend-ready','Actual deletion toast or empty list observed; path existence does not gate resend\n');
+      if(deletionTiming==='acknowledged'&&(source.includes('1 file deleted')||source.includes("There's nothing here.")||(samsungFiles&&source.includes('No files'))))writeFileSync('evidence/resend-ready','Actual deletion toast or empty list observed; path existence does not gate resend\n');
       return {source,utc};
      }),
     ]);
     absent=pathValue;
     const toastVisible=sourceObservation.source.includes('1 file deleted');
-    const emptyListVisible=sourceObservation.source.includes("There's nothing here.");
+    const emptyListVisible=sourceObservation.source.includes("There's nothing here.")||(samsungFiles&&sourceObservation.source.includes('No files'));
     if(toastVisible&&!firstToastObservedUtc)firstToastObservedUtc=sourceObservation.utc;
     if(emptyListVisible&&!firstEmptyListObservedUtc)firstEmptyListObservedUtc=sourceObservation.utc;
     const sourceFile=`evidence/android-delete-observation-${absenceObservations.length}.xml`;
@@ -342,7 +352,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(deletionTiming==='absence')assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
    if(deletionTiming==='acknowledged')assert(firstToastObservedUtc||firstEmptyListObservedUtc,'Native UI never acknowledged deletion');
    const pathAbsenceUtc=absent===null?absenceObservations.at(-1).pathObservedUtc:null;
-   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:deviceFolder+'/A.txt',pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
+   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:fileManagerName,package:fileManagerPackage,deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:deviceFolder+'/A.txt',pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    if(deletionTiming==='absence'){
     await closeReceiverFinished();
