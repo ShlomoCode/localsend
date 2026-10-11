@@ -41,7 +41,7 @@ cat > "$settings" <<'JSON'
   "flutter.ls_alias": "Ubuntu2230",
   "flutter.ls_locale": "en",
   "flutter.ls_theme": "light",
-  "flutter.ls_port": 53317,
+  "flutter.ls_port": 41631,
   "flutter.ls_https": false,
   "flutter.ls_destination": "/home/tester/文档/Books",
   "flutter.ls_quick_save": false,
@@ -83,7 +83,7 @@ for attempt in $(seq 1 60); do
     timeout 8 tesseract "$out/readiness.png" "$out/readiness" --psm 11 tsv txt >/dev/null 2>&1
     ss -ltnp > "$out/listeners.txt"
     if grep -q 'Ubuntu2230' "$out/readiness.txt" && grep -q 'Receive' "$out/readiness.txt" &&
-       grep -E ':53317[[:space:]].*pid='"$app_pid"',' "$out/listeners.txt" >/dev/null; then
+       grep -E ':41631[[:space:]].*pid='"$app_pid"',' "$out/listeners.txt" >/dev/null; then
       printf 'WINDOW=%q\n' "$window" >> "$out/session.env"
       printf 'ready\t%s\t%s\n' "$(date -u --iso-8601=ns)" "$app_pid" > "$out/ready.tsv"
       break
