@@ -38,9 +38,10 @@ integrate)
   chmod +x /home/probe/LocalSend-1.17.0-linux-x86-64.AppImage
   flatpak run it.mijorus.gearlever --integrate /home/probe/LocalSend-1.17.0-linux-x86-64.AppImage --yes > evidence/gearlever-integration.txt 2>&1
   find ~/.local/share/applications -name '*.desktop' -print -exec cat {} \; > evidence/integrated-desktop.txt
-  find ~/.local/share/icons -type f -exec sha256sum {} \; > evidence/integrated-icons.sha256
+  find ~/.local/share -type f \( -name '*.png' -o -name '*.svg' \) -exec sha256sum {} \; > evidence/integrated-icons.sha256
   cp -a ~/.local/share/applications evidence/desktop-files
-  cp -a ~/.local/share/icons evidence/icons
+  mkdir -p evidence/icons
+  while IFS= read -r icon; do test -f "$icon"; cp "$icon" evidence/icons/; done < <(sed -n 's/^Icon=//p' evidence/integrated-desktop.txt)
   for i in $(seq 1 30); do if probe Inspect > evidence/probe-ready.txt 2>&1; then break; fi; sleep 2; done
   probe Inspect >> evidence/probe-ready.txt
   ;;
