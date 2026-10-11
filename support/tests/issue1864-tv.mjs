@@ -44,7 +44,7 @@ async function mouseNode(label, name) {
   if (node) bounds = [...node.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
   else {
     const words = ocr(`${name}-before`).trim().split('\n').slice(1).map(line => line.split('\t'));
-    const hits = words.filter(w => w[11] === label && Number(w[10]) > 65);
+    const hits = words.filter(w => w[11] === label && Number(w[10]) > 40);
     if (hits.length !== 1) throw new Error(`Missing or ambiguous visible OCR label ${label}; inspect ${name}-before.png`);
     const word = hits[0];
     bounds = [Number(word[6]), Number(word[7]), Number(word[6]) + Number(word[8]), Number(word[7]) + Number(word[9])];
