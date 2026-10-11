@@ -110,6 +110,25 @@ foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="send
  Screenshot "$($item.name)-initial"
  $apps[$item.name]=$p
 }
+# Establish network controls before submitting either real UI favorite.
+Get-NetIPAddress | Select-Object InterfaceAlias,InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json | Set-Content "$EvidenceDirectory/source-addresses-before-ui.json"
+Get-NetRoute -AddressFamily IPv4 | Select-Object InterfaceAlias,InterfaceIndex,DestinationPrefix,NextHop,RouteMetric | ConvertTo-Json | Set-Content "$EvidenceDirectory/routes-before-ui.json"
+$selectedRoutes=@()
+foreach ($ip in @("10.0.20.2","100.95.193.205")) {
+ try {$selectedRoutes+=@{remote=$ip;selection=@(Find-NetRoute -RemoteIPAddress $ip | Select-Object InterfaceAlias,InterfaceIndex,IPAddress,DestinationPrefix,NextHop,AddressState,SkipAsSource);error=$null}}
+ catch {$selectedRoutes+=@{remote=$ip;selection=@();error=$_.Exception.Message}}
+}
+$selectedRoutes | ConvertTo-Json -Depth 6 | Set-Content "$EvidenceDirectory/selected-routes-before-ui.json"
+Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -in @(53317,53318)} | Select-Object LocalAddress,LocalPort,RemoteAddress,State,OwningProcess | ConvertTo-Json | Set-Content "$EvidenceDirectory/listeners-before-ui.json"
+$preControls=@()
+foreach($ip in @("127.0.0.1","10.0.20.2","100.95.193.205")) {
+ $tcp=New-Object System.Net.Sockets.TcpClient
+ try {$task=$tcp.ConnectAsync($ip,53317);$ready=$task.Wait(5000);$preControls+=@{ip=$ip;connected=($ready -and $tcp.Connected);localEndpoint=[string]$tcp.Client.LocalEndPoint;error=$null}}
+ catch {$preControls+=@{ip=$ip;connected=$false;localEndpoint=$null;error=$_.Exception.ToString()}}
+ finally {$tcp.Dispose()}
+}
+$preControls | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/tcp-controls-before-ui.json"
+if (@($preControls | Where-Object {-not $_.connected}).Count -gt 0) {throw "Pre-UI TCP controls failed; source/route diagnostics retained"}
 $sender = $apps.sender
 [Desktop2381]::SetForegroundWindow($sender.MainWindowHandle) | Out-Null
 Word "Send" "sender-initial"
