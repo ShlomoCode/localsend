@@ -4,7 +4,7 @@ export DEBIAN_FRONTEND=noninteractive
 E=/work/evidence/cloud/cases/$PROBE_CASE
 mkdir -p "$E"
 exec > >(tee "$E/transcript.log") 2>&1
-trap 'cp -a /var/log/apt "$E/apt-logs"; dpkg-query -W > "$E/final-inventory.tsv"' EXIT
+trap 'cp -a /var/log/apt "$E/apt-logs"; dpkg-query -W > "$E/final-inventory.tsv"; cp -a /tmp/issue2898-case "$E/ui" 2>/dev/null || true' EXIT
 dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n' > "$E/pre-inventory.tsv"
 [ "$(dpkg-query -W -f='${Version}' libappindicator3-1)" = 0.4.92-7 ]
 apt-get install -y "/work/evidence/cloud/packages/$PROBE_CASE.deb" 2>&1 | tee "$E/install.log"
@@ -24,7 +24,10 @@ export LIBGL_ALWAYS_SOFTWARE=1
 openbox > /tmp/issue2898-case/openbox.log 2>&1 &
 zenity --info --text="GTK launch control" --title="GTK control" > /tmp/issue2898-case/gtk.log 2>&1 &
 control=$!
-sleep 2
+for attempt in $(seq 1 75); do
+  if xdotool search --onlyvisible --name "GTK control" > /tmp/issue2898-case/gtk-window.txt; then break; fi
+  sleep 0.2
+done
 xdotool search --onlyvisible --name "GTK control" > /tmp/issue2898-case/gtk-window.txt
 import -window root /tmp/issue2898-case/gtk-control.png
 kill "$control"
@@ -49,6 +52,5 @@ else
   kill "$app"
 fi
 DESKTOP
-runuser -u probe -- env PROBE_CASE="$PROBE_CASE" dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" bash /tmp/issue2898-case/launch.sh
-cp -a /tmp/issue2898-case "$E/ui"
+runuser -u probe -- env PROBE_CASE="$PROBE_CASE" dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" bash -x /tmp/issue2898-case/launch.sh 2>&1 | tee "$E/desktop-driver.log"
 echo pass > "$E/result.txt"
