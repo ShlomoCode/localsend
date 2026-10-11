@@ -184,7 +184,7 @@ $apps=@{}
 foreach($item in @(@{name='receiver';port=53317},@{name='sender';port=53318})) {
  $folder="$EvidenceDirectory/$($item.name)-app"
  Copy-Item (Split-Path $Executable) $folder -Recurse
- @{ 'flutter.ls_port'=$item.port; 'flutter.ls_alias'=$item.name; 'flutter.ls_locale'='en'; 'flutter.ls_https'=$false; 'flutter.ls_save_window_placement'=$false } | ConvertTo-Json | Set-Content -Encoding UTF8 "$folder/settings.json"
+ @{ 'flutter.ls_port'=$item.port; 'flutter.ls_alias'=$item.name; 'flutter.ls_locale'='en'; 'flutter.ls_https'=$false; 'flutter.ls_save_window_placement'=$false; 'flutter.ls_whats_new'='1.18.2' } | ConvertTo-Json | Set-Content -Encoding UTF8 "$folder/settings.json"
  $p=Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
  Start-Sleep -Seconds 10
  $p.Refresh()
@@ -225,7 +225,7 @@ function Scroll([bool]$down,[int]$count=16) {
  Start-Sleep -Milliseconds 800
 }
 function Stored { Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json }
-function AssertCount([int]$count) {if(@((Stored).'flutter.ls_favorites').Count -ne $count) {throw "Expected $count persisted favorites"}}
+function AssertCount([int]$count) {if(@((Stored).'flutter.ls_favorites' | Where-Object {$_}).Count -ne $count) {throw "Expected $count persisted favorites"}}
 function Pencil([string]$snapshot,[string]$name) {
  $row=Import-Csv "$EvidenceDirectory/$snapshot.tsv" -Delimiter "`t" | Where-Object {$_.text -eq $name} | Select-Object -First 1
  if(!$row) {throw "Favorite $name missing in $snapshot"}
@@ -244,21 +244,20 @@ try {
  Snap 'add'
  Field 'Address' 'add' '127.0.0.1'
  Field 'Port' 'add' '53317'
- Field 'Device' 'add' 'Live peer'
  Snap 'add-filled'
  PrimaryButton 'add-filled'
  Start-Sleep -Seconds 2
  Snap 'added'
  AssertCount 1
  Chapter 'Edit then Cancel - persisted name is unchanged'
- Pencil 'added' 'Live'
+ Pencil 'added' 'receiver'
  Snap 'edit-cancel'
  Field 'Device' 'edit-cancel' 'Cancelled name'
  Esc
  Snap 'cancelled'
- if(((Stored).'flutter.ls_favorites'[0] | ConvertFrom-Json).alias -ne 'Live peer') {throw 'Cancelled edit changed persistence'}
+ if(((Stored).'flutter.ls_favorites'[0] | ConvertFrom-Json).alias -ne 'receiver') {throw 'Cancelled edit changed persistence'}
  Chapter 'Edit and Confirm - custom favorite name is saved'
- Pencil 'cancelled' 'Live'
+ Pencil 'cancelled' 'receiver'
  Snap 'edit-save'
  Field 'Device' 'edit-save' 'Saved peer'
  Snap 'edit-filled'
