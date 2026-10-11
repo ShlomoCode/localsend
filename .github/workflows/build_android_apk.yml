@@ -94,7 +94,9 @@ jobs:
           node support/tests/issue1864-tv.mjs
       - name: Validate recordings and render logged input review aids
         if: always()
-        run: node support/tests/issue1864-video.mjs
+        run: |
+          adb logcat -d > evidence-cloud/final-logcat.txt || true
+          node support/tests/issue1864-video.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

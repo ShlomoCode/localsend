@@ -60,17 +60,26 @@ function nodes(xml) {
   return [...xml.matchAll(/<[\w.$-]+\s+([^>]+)>?/g)].map(m => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a => [a[1], a[2]])));
 }
 async function mouseNode(label, name) {
-  const xml = await snapshot(`${name}-before`);
-  const node = nodes(xml).find(n => (n.text === label || n['content-desc'] === label || n['content-desc']?.startsWith(`${label}&#10;`)));
   let bounds;
-  if (node) bounds = [...node.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
-  else {
-    const words = ocr(`${name}-before`).trim().split('\n').slice(1).map(line => line.split('\t'));
-    const hits = words.filter(w => w[11] === label && Number(w[10]) > 40);
-    if (hits.length !== 1) throw new Error(`Missing or ambiguous visible OCR label ${label}; inspect ${name}-before.png`);
-    const word = hits[0];
-    bounds = [Number(word[6]), Number(word[7]), Number(word[6]) + Number(word[8]), Number(word[7]) + Number(word[9])];
+  for(let attempt=0;attempt<6;attempt++) {
+    const capture=attempt===0 ? `${name}-before` : `${name}-before-retry-${attempt}`;
+    const xml=await snapshot(capture);
+    const node=nodes(xml).find(n=>(n.text===label || n['content-desc']===label || n['content-desc']?.startsWith(`${label}&#10;`)));
+    if(node) bounds=[...node.bounds.matchAll(/\d+/g)].map(n=>Number(n[0]));
+    else {
+      const words=ocr(capture).trim().split('\n').slice(1).map(line=>line.split('\t'));
+      const hits=words.filter(w=>w[11]===label && Number(w[10])>40);
+      if(hits.length>1) throw new Error(`Ambiguous visible OCR label ${label}; inspect ${capture}.png`);
+      if(hits.length===1) {
+        const word=hits[0];
+        bounds=[Number(word[6]),Number(word[7]),Number(word[6])+Number(word[8]),Number(word[7])+Number(word[9])];
+      }
+    }
+    if(bounds) break;
+    log({type:'readiness',label,capture,attempt,observation:'label-not-yet-visible'});
+    await pause(1500);
   }
+  if(!bounds) throw new Error(`Visible label ${label} absent after bounded readiness snapshots`);
   const x = Math.round((bounds[0] + bounds[2]) / 2), y = Math.round((bounds[1] + bounds[3]) / 2);
   await mouseTap(x,y,label);
   await pause(1200);
