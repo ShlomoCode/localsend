@@ -353,7 +353,7 @@ Click 566 702
 Start-Sleep -Seconds 5
 Screenshot "receiver-transfer-completed"
 $originalHash=(Get-FileHash $fixture -Algorithm SHA256).Hash
-$saved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
+$saved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks;creationUtc=$_.CreationTimeUtc.ToString("o")}})
 $saved | ConvertTo-Json | Set-Content "$EvidenceDirectory/first-transfer-saved-files.json"
 if(@($saved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length}).Count -ne 1) {throw "Real UI receive did not save exactly one matching fixture"}
 $preserved="$EvidenceDirectory/first-transfer-preserved"
@@ -363,7 +363,6 @@ Copy-Item $saved[0].path "$preserved/$($saved[0].name)"
 Start-Sleep -Seconds 2
 Screenshot "sender-transfer-completed"
 if($currentView -and $CandidateExecutable) {
- $script:previousWriteTicks=$saved[0].lastWriteTicks
  function RunMatchedPhase([string]$phase,[string]$PhaseExecutable) {
  # Preserve the real receiver and complete private sender profile. Only replace
  # sender program files; settings and certificates are never re-created.
@@ -418,6 +417,9 @@ if($currentView -and $CandidateExecutable) {
  Click 464 473
  Start-Sleep -Seconds 3
  Screenshot "$phase-file-selected"
+ $phaseFilesBefore=@(Get-ChildItem $receiveDirectory -File | Select-Object FullName,CreationTimeUtc,LastWriteTimeUtc,Length)
+ $phaseFilesBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-saved-files-before.json"
+ $phasePathsBefore=@($phaseFilesBefore | ForEach-Object {$_.FullName})
  $candidateBefore=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
  $candidateBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-transfer-sockets-before.json"
  Word "My" "$phase-file-selected"
@@ -432,11 +434,13 @@ if($currentView -and $CandidateExecutable) {
  Click 566 702
  Start-Sleep -Seconds 5
  Screenshot "$phase-receiver-completed"
- $candidateSaved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
+ $candidateSaved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks;creationUtc=$_.CreationTimeUtc.ToString("o")}})
  $candidateSaved | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-transfer-saved-files.json"
- $matchingNew=@($candidateSaved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $_.lastWriteTicks -gt $script:previousWriteTicks})
+ # Current LocalSend preserves the source modification time and gives repeat
+ # receives a new filename. Verify the new path and bytes against the pre-send
+ # directory instead of assuming the saved modification time advances.
+ $matchingNew=@($candidateSaved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $phasePathsBefore -notcontains $_.path})
  if($matchingNew.Count -lt 1) {throw "Matched phase did not write a new matching fixture"}
- $script:previousWriteTicks=($matchingNew | Measure-Object -Property lastWriteTicks -Maximum).Maximum
  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
  Screenshot "$phase-sender-completed"
  ExportSettings "sender" "$phase-sender-after-transfer"
@@ -481,7 +485,7 @@ Screenshot "receiver-second-transfer-request"
 Click 566 702
 Start-Sleep -Seconds 5
 Screenshot "receiver-second-transfer-completed"
-$savedSecond=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
+$savedSecond=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks;creationUtc=$_.CreationTimeUtc.ToString("o")}})
 $savedSecond | ConvertTo-Json | Set-Content "$EvidenceDirectory/second-transfer-saved-files.json"
 if(@($savedSecond | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $_.lastWriteTicks -gt $saved[0].lastWriteTicks}).Count -lt 1) {throw "Second actual receive did not write a new matching fixture"}
 [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
