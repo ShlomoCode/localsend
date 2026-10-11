@@ -19,6 +19,10 @@ on:
         description: Insert NetBird favorite before Home Lan as an order control
         type: boolean
         default: false
+      fallback_control:
+        description: Candidate-only same-peer new-address fallback through actual favorite UI
+        type: boolean
+        default: false
 jobs:
   release:
     runs-on: windows-latest
@@ -54,7 +58,7 @@ jobs:
         run: |
           $exe = (Get-ChildItem $env:RUNNER_TEMP/release -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
           $candidate = if ('${{ inputs.candidate_run }}' -ne '') { (Get-ChildItem $env:RUNNER_TEMP/candidate -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName } else { '' }
-          & ./support/test/windows/diagnose2381.ps1 -Executable $exe -CandidateExecutable $candidate -ReverseFavorites ('${{ inputs.reverse_favorites }}' -eq 'true') -EvidenceDirectory $env:RUNNER_TEMP/evidence2381
+          & ./support/test/windows/diagnose2381.ps1 -Executable $exe -CandidateExecutable $candidate -ReverseFavorites ('${{ inputs.reverse_favorites }}' -eq 'true') -FallbackControl ('${{ inputs.fallback_control }}' -eq 'true') -EvidenceDirectory $env:RUNNER_TEMP/evidence2381
       - uses: actions/upload-artifact@v6
         if: always()
         with:

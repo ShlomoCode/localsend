@@ -1,5 +1,10 @@
-param([string]$Executable,[string]$CandidateExecutable,[bool]$ReverseFavorites=$false,[string]$EvidenceDirectory)
+param([string]$Executable,[string]$CandidateExecutable,[bool]$ReverseFavorites=$false,[bool]$FallbackControl=$false,[string]$EvidenceDirectory)
 $ErrorActionPreference = "Stop"
+if($FallbackControl) {
+ if(-not $CandidateExecutable) {throw "Fallback control requires the verified candidate build"}
+ $Executable=$CandidateExecutable
+ $CandidateExecutable=""
+}
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes, WindowsBase
 Add-Type @"
 using System;
@@ -113,7 +118,8 @@ function Word([string]$word,[string]$snap) {
  if (-not $row) {
   if ($word -eq "Cancel" -and $snap -like "*favorites*") {
    # Two-row Favorites Cancel verified at x474-524/y477-495, including the wider exact-name dialog.
-   Click 500 485
+   $favoriteCount=@((Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json).'flutter.ls_favorites').Count
+   Click 500 (485+28*[Math]::Max(0,$favoriteCount-2))
    return
   }
   if ($word -eq "Cancel" -and $snap -like "edit-confirmed*") {
@@ -173,6 +179,10 @@ foreach ($network in @(@{name="bug2381-home";ip="10.0.20.2"},@{name="bug2381-net
  Set-NetIPInterface -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -Dhcp Disabled
  New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress $network.ip -PrefixLength 16 -SkipAsSource $false -PolicyStore ActiveStore | Out-Null
 }
+if($FallbackControl) {
+ $homeNic=Get-NetAdapter -Name "vEthernet (bug2381-home)"
+ New-NetIPAddress -InterfaceIndex $homeNic.ifIndex -IPAddress "10.0.20.3" -PrefixLength 16 -SkipAsSource $false -PolicyStore ActiveStore | Out-Null
+}
 Start-Sleep -Seconds 3
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
 Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status | ConvertTo-Json | Set-Content "$EvidenceDirectory/adapters.json"
@@ -180,11 +190,14 @@ Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,
 $apps = @{}
 $receiveDirectory="$EvidenceDirectory/received"
 New-Item -ItemType Directory -Force $receiveDirectory | Out-Null
+if($FallbackControl) {New-Item -ItemType Directory -Force "$EvidenceDirectory/sender-received" | Out-Null}
 foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="sender";port=53318;alias="SourceBeta"})) {
  $folder = "$EvidenceDirectory/$($item.name)-app"
  Copy-Item (Split-Path $Executable) $folder -Recurse
  $settings = @{"flutter.ls_port"=$item.port;"flutter.ls_alias"=$item.alias;"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false;"flutter.ls_advanced_settings"=$true;"flutter.ls_network_whitelist"=@("10.0.20.2","100.95.193.205")}
+ if($FallbackControl) {$settings["flutter.ls_network_whitelist"]=@("10.0.20.2","10.0.20.3","100.95.193.205")}
  if ($item.name -eq "receiver") {$settings["flutter.ls_destination"]=$receiveDirectory}
+ if ($FallbackControl -and $item.name -eq "sender") {$settings["flutter.ls_destination"]="$EvidenceDirectory/sender-received"}
  $settings | ConvertTo-Json | Set-Content -Encoding UTF8 "$folder/settings.json"
  $p = Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
  Start-Sleep -Seconds 12
@@ -265,7 +278,8 @@ foreach ($favorite in $favoriteOrder) {
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 $favorites = @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
 $favorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-before-scan.json"
-if ($favorites.Count -ne 2 -or $favorites[0].alias -ne $favoriteOrder[0].alias -or $favorites[1].alias -ne $favoriteOrder[1].alias) {throw "UI input did not store the intended favorite names and insertion order"}
+if ($favorites.Count -ne $favoriteOrder.Count -or @($favorites | Where-Object {$favoriteOrder.ip -notcontains $_.ip}).Count -gt 0) {throw "UI input did not store the intended favorite addresses"}
+for($i=0;$i -lt $favoriteOrder.Count;$i++) {if($favorites[$i].alias -ne $favoriteOrder[$i].alias) {throw "UI input did not store the intended names and insertion order"}}
 if ($favorites[0].fingerprint -ne $favorites[1].fingerprint) {throw "Favorites do not refer to the same real peer identity"}
 Word "Cancel" "favorites-second"
 
@@ -319,7 +333,7 @@ foreach ($edit in @(@{alias="My Desktop (Home Lan)";y=$homeY;ip="10.0.20.2"},@{a
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 $customFavorites=@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
 $customFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-custom-before-scan.json"
-if (@($customFavorites | Where-Object {-not $_.customAlias}).Count -gt 0) {throw "Actual UI Edit did not set both custom aliases"}
+if (@($customFavorites | Where-Object {$_.ip -ne "10.0.20.3" -and -not $_.customAlias}).Count -gt 0) {throw "Actual UI Edit did not set both custom aliases"}
 Word "Cancel" "favorites-edited-100.95.193.205"
 Screenshot "nearby-after-edit"
 Click 497 212
@@ -409,6 +423,149 @@ Copy-Item $saved[0].path "$preserved/$($saved[0].name)"
 [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
 Start-Sleep -Seconds 2
 Screenshot "sender-transfer-completed"
+if($FallbackControl) {
+ function PublicFingerprint([string]$name) {
+  $profile=Get-Content "$EvidenceDirectory/$name-app/settings.json" -Raw | ConvertFrom-Json
+  $security=$profile.'flutter.ls_security_context' | ConvertFrom-Json
+  if(-not $security.certificateHash) {throw "Missing actual public certificate fingerprint for $name"}
+  return $security.certificateHash
+ }
+ function FinishControl([string]$from,[string]$to,[string]$prefix) {
+  [Desktop2381]::SetForegroundWindow($apps[$from].MainWindowHandle) | Out-Null
+  Click 930 714
+  Screenshot "$prefix-$from-done"
+  [Desktop2381]::SetForegroundWindow($apps[$to].MainWindowHandle) | Out-Null
+  Click 930 714
+  Screenshot "$prefix-$to-done"
+ }
+ function PickControlFixture([string]$name,[string]$prefix) {
+  [Desktop2381]::SetForegroundWindow($apps[$name].MainWindowHandle) | Out-Null
+  Click 103 199
+  Screenshot "$prefix-selection"
+  Word "File" "$prefix-selection"
+  Screenshot "$prefix-native-picker"
+  FillNativeFilename $fixture $prefix
+  Screenshot "$prefix-native-picker-filled"
+  Click 464 473
+  Start-Sleep -Seconds 3
+  Screenshot "$prefix-file-selected"
+ }
+ function ControlSockets([string]$name,[int]$port) {
+  return @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq $port -and $_.OwningProcess -eq $apps[$name].Id} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+ }
+ function AcceptControl([string]$to,[string]$prefix,[string]$destination,[object[]]$oldPaths) {
+  [Desktop2381]::SetForegroundWindow($apps[$to].MainWindowHandle) | Out-Null
+  Start-Sleep -Seconds 2
+  Screenshot "$prefix-request"
+  Click 566 702
+  Start-Sleep -Seconds 5
+  Screenshot "$prefix-completed"
+  $files=@(Get-ChildItem $destination -File | ForEach-Object {@{path=$_.FullName;name=$_.Name;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;creationUtc=$_.CreationTimeUtc.ToString("o");lastWriteUtc=$_.LastWriteTimeUtc.ToString("o")}})
+  $files | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-saved-files.json"
+  if(@($files | Where-Object {$oldPaths -notcontains $_.path -and $_.length -eq (Get-Item $fixture).Length -and $_.sha256 -eq $originalHash}).Count -lt 1) {throw "Actual control receive did not save a new matching fixture"}
+ }
+ function ReverseControl([string]$from,[string]$prefix) {
+  PickControlFixture $from $prefix
+  Click 576 212
+  Screenshot "$prefix-favorites-empty"
+  PrimaryButton "$prefix-favorites-empty"
+  Screenshot "$prefix-add-sender-favorite"
+  Click 500 400
+  Paste "10.0.20.3"
+  Click 500 490
+  [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 12}")
+  [System.Windows.Forms.SendKeys]::SendWait("53318")
+  Click 500 310
+  Paste "Sender route control"
+  Screenshot "$prefix-sender-favorite-filled"
+  PrimaryButton "$prefix-sender-favorite-filled"
+  Start-Sleep -Seconds 3
+  Screenshot "$prefix-sender-favorite-added"
+  $storedFrom=Get-Content "$EvidenceDirectory/$from-app/settings.json" -Raw | ConvertFrom-Json
+  $actualFavorites=@($storedFrom.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
+  $actualFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/$prefix-sender-favorite.json"
+  if($actualFavorites.Count -ne 1 -or $actualFavorites[0].ip -ne "10.0.20.3" -or $actualFavorites[0].port -ne 53318 -or $actualFavorites[0].fingerprint -ne (PublicFingerprint "sender")) {throw "Reverse control favorite is not the actual sender at the intended address"}
+  $before=@(ControlSockets $from 53318)
+  $before | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-sockets-before.json"
+  $oldPaths=@(Get-ChildItem "$EvidenceDirectory/sender-received" -File | ForEach-Object {$_.FullName})
+  # Actual one-row Favorites layout is the centered row at y386.
+  Click 445 386
+  Start-Sleep -Seconds 3
+  Screenshot "$prefix-send-requested"
+  $after=@(ControlSockets $from 53318)
+  $after | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-sockets-after.json"
+  $new=@($after | Where-Object {$before.LocalPort -notcontains $_.LocalPort})
+  $new | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-new-sockets.json"
+  if(@($new | Where-Object {$_.LocalAddress -eq "10.0.20.3" -and $_.RemoteAddress -eq "10.0.20.3"}).Count -lt 1) {throw "Actual reverse transfer did not use source address 10.0.20.3; no new-IP claim"}
+  AcceptControl "sender" $prefix "$EvidenceDirectory/sender-received" $oldPaths
+  [Desktop2381]::SetForegroundWindow($apps[$from].MainWindowHandle) | Out-Null
+  Screenshot "$prefix-sender-completed"
+  FinishControl $from "sender" $prefix
+ }
+ function ForwardControl([string]$to,[string]$prefix,[string]$word,[int]$port,[string]$destination) {
+  PickControlFixture "sender" $prefix
+  $before=@(ControlSockets "sender" $port)
+  $before | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-sockets-before.json"
+  $oldPaths=@(Get-ChildItem $destination -File | ForEach-Object {$_.FullName})
+  Word $word "$prefix-file-selected"
+  Start-Sleep -Seconds 3
+  Screenshot "$prefix-send-requested"
+  $after=@(ControlSockets "sender" $port)
+  $new=@($after | Where-Object {$before.LocalPort -notcontains $_.LocalPort})
+  $new | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-new-sockets.json"
+  if(@($new | Where-Object {$_.RemoteAddress -eq "10.0.20.3"}).Count -lt 1) {throw "Actual control transfer did not select the new address"}
+  AcceptControl $to $prefix $destination $oldPaths
+  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+  Screenshot "$prefix-sender-completed"
+  FinishControl "sender" $to $prefix
+ }
+ FinishControl "sender" "receiver" "control-warmup"
+ $alphaHash=PublicFingerprint "receiver"
+ $betaHash=PublicFingerprint "sender"
+ if($alphaHash -eq $betaHash) {throw "Actual source and receiver identities are not distinct"}
+ ReverseControl "receiver" "fallback-learn-new-ip"
+ [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+ Screenshot "fallback-nearby-no-exact-favorite"
+ Click 868 288
+ Screenshot "fallback-device-details"
+ Click 36 59
+ ExportSettings "sender" "fallback-sender-settings"
+ $fallbackStored=Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+ $fallbackFavorites=@($fallbackStored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
+ $fallbackFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/fallback-original-favorites.json"
+ if($fallbackFavorites.Count -ne 2 -or @($fallbackFavorites | Where-Object {$_.ip -eq "10.0.20.3" -or $_.fingerprint -ne $alphaHash}).Count -gt 0) {throw "New address has an exact favorite or a different identity"}
+ ForwardControl "receiver" "fallback-actual-transfer" "My" 53317 $receiveDirectory
+
+ # A third real app uses a fresh private profile/certificate at the SAME new IP.
+ $gammaFolder="$EvidenceDirectory/gamma-app"
+ $gammaDestination="$EvidenceDirectory/gamma-received"
+ New-Item -ItemType Directory -Force $gammaDestination | Out-Null
+ Copy-Item (Split-Path $Executable) $gammaFolder -Recurse
+ @{"flutter.ls_port"=53319;"flutter.ls_alias"="PeerGamma";"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false;"flutter.ls_advanced_settings"=$true;"flutter.ls_network_whitelist"=@("10.0.20.2","10.0.20.3","100.95.193.205");"flutter.ls_destination"=$gammaDestination} | ConvertTo-Json | Set-Content -Encoding UTF8 "$gammaFolder/settings.json"
+ $apps.gamma=Start-Process "$gammaFolder/localsend_app.exe" -WorkingDirectory $gammaFolder -PassThru
+ Start-Sleep -Seconds 12
+ $apps.gamma.Refresh()
+ if(!$apps.gamma.MainWindowHandle) {throw "Third real app did not open"}
+ [Desktop2381]::MoveWindow($apps.gamma.MainWindowHandle,0,0,1000,760,$true) | Out-Null
+ [Desktop2381]::SetForegroundWindow($apps.gamma.MainWindowHandle) | Out-Null
+ Screenshot "gamma-initial"
+ $gammaHash=PublicFingerprint "gamma"
+ @{receiverAlpha=$alphaHash;senderBeta=$betaHash;receiverGamma=$gammaHash;alphaPid=$apps.receiver.Id;betaPid=$apps.sender.Id;gammaPid=$apps.gamma.Id} | ConvertTo-Json | Set-Content "$EvidenceDirectory/control-public-fingerprints.json"
+ if($gammaHash -eq $alphaHash -or $gammaHash -eq $betaHash) {throw "Third app does not have a distinct actual identity"}
+ ReverseControl "gamma" "distinct-peer-learn-same-ip"
+ [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+ Screenshot "distinct-peer-nearby"
+ $gammaRow=Import-Csv "$EvidenceDirectory/distinct-peer-nearby.tsv" -Delimiter "`t" | Where-Object {$_.text -eq "PeerGamma"} | Select-Object -First 1
+ if(-not $gammaRow) {throw "Distinct peer is not displayed by its actual alias"}
+ Click 868 (([int]$gammaRow.top+[int]$gammaRow.height/2)/2+11)
+ Screenshot "distinct-peer-device-details"
+ Click 36 59
+ ExportSettings "sender" "distinct-peer-sender-settings"
+ ExportSettings "receiver" "control-receiver-settings"
+ ExportSettings "gamma" "control-gamma-settings"
+ ForwardControl "gamma" "distinct-peer-actual-transfer" "PeerGamma" 53319 $gammaDestination
+ throw "Candidate new-IP fallback and distinct-peer actual-app checkpoint: inspect cards, Details, fingerprints, sockets and saved bytes"
+}
 if($currentView -and $CandidateExecutable) {
  function RunMatchedPhase([string]$phase,[string]$PhaseExecutable) {
  # Preserve the real receiver and complete private sender profile. Only replace
