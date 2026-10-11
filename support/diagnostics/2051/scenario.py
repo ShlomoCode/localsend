@@ -183,6 +183,12 @@ try:
     result = {"saved_B_filename": numbered, "displayed_B_filename": displayed, "viewer_has_A": "ISSUE2051_CONTENT_A" in b_viewer, "viewer_has_B": "ISSUE2051_CONTENT_B" in b_viewer}
     (ROOT / "result.json").write_text(json.dumps(result, indent=2))
     print("RESULT", result, flush=True)
+    expected_viewer = os.environ.get("ISSUE2051_EXPECTED", "observe")
+    (ROOT / "expected-verdict.json").write_text(json.dumps({"expected_viewer": expected_viewer, "observed": result}, indent=2))
+    if expected_viewer == "B" and (not result["viewer_has_B"] or result["viewer_has_A"]):
+        raise RuntimeError("Expected corrected Open to display only B")
+    if expected_viewer == "A" and (not result["viewer_has_A"] or result["viewer_has_B"]):
+        raise RuntimeError("Expected diagnostic stale-A behavior to remain present")
     if not result["viewer_has_A"] and not result["viewer_has_B"]:
         raise RuntimeError("Viewer observation incomplete")
     if result["viewer_has_B"] and not SAF:
