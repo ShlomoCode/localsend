@@ -66,6 +66,7 @@ foreach($case in $cases) {
   [Desktop2277]::MoveWindow($script:process.MainWindowHandle,0,0,1000,760,$true)|Out-Null
   [Desktop2277]::SetForegroundWindow($script:process.MainWindowHandle)|Out-Null
   Start-Sleep -Seconds 2;Screenshot "$name-initial"
+  Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue|Select-Object LocalAddress,LocalPort,OwningProcess|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-listeners-initial.json"
   $stored=Get-Content "$folder/settings.json" -Raw|ConvertFrom-Json
   @{animations=$stored.'flutter.ls_enable_animations';port=$stored.'flutter.ls_port';locale=$stored.'flutter.ls_locale'}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-profile.json"
   if($stored.'flutter.ls_enable_animations' -ne $animations){throw 'Stored animations setting differs from the case'}
@@ -89,6 +90,7 @@ foreach($case in $cases) {
   Click 28 60 'Back-single'
   foreach($delay in @(100,500,1500,5000)) {Start-Sleep -Milliseconds $delay;Screenshot "$name-after-back-$delay"}
   $final=Get-Content "$EvidenceDirectory/$name-after-back-5000-state.json" -Raw|ConvertFrom-Json
+  Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue|Select-Object LocalAddress,LocalPort,OwningProcess|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-listeners-final.json"
   $outcome=if($final.blackFraction -gt 0.95){'black-window'}elseif($final.words -contains 'Selection'){'returned-send'}else{'other-state'}
   $results+=@{case=$name;status='scenario-reached';outcome=$outcome;backCount=(@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count-$backBefore);pid=$final.pid;hwnd=$final.hwnd;exited=$final.exited;error=$null}
  } catch {$results+=@{case=$name;status='harness-or-app-blocker';error=$_.Exception.ToString()}}
