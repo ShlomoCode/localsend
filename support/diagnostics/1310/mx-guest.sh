@@ -2,7 +2,7 @@
 set -euo pipefail
 cd /home/demo
 mkdir -p evidence releases
-{ cat /etc/os-release; uname -a; dpkg-query -W '*portal*' '*xfce*'; } > evidence/initial-environment.txt
+{ cat /etc/os-release; uname -a; dpkg-query -W '*portal*' '*xfce*' || true; } > evidence/initial-environment.txt
 # Add remote observation tools without removing dependencies or changing
 # desktop defaults. First retain the pristine desktop/portal package list.
 sudo apt-get update
@@ -12,7 +12,7 @@ test -n "$session"
 while IFS= read -r -d '' value; do
   case "$value" in DISPLAY=*|DBUS_SESSION_BUS_ADDRESS=*|XDG_RUNTIME_DIR=*|XDG_CURRENT_DESKTOP=*|XDG_SESSION_DESKTOP=*|XDG_SESSION_TYPE=*|GTK_USE_PORTAL=*|XAUTHORITY=*) export "$value";; esac
 done < "/proc/$session/environ"
-{ printenv; ps -ef; dpkg-query -W '*portal*'; } > evidence/desktop-environment.txt
+{ printenv; ps -ef; dpkg-query -W '*portal*' || true; } > evidence/desktop-environment.txt
 xdotool getdisplaygeometry
 scrot evidence/desktop.png
 # Reuse the exact actual-app action sequence of the Ubuntu control, retaining
