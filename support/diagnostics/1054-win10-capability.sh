@@ -159,7 +159,18 @@ fi
 stage "storage-pass free_kb=$FREE_KB; download official ISO"
 ISO="$OUT/19045.2006.220908-0225.22h2_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
 URL='https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66750/19045.2006.220908-0225.22h2_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso'
-curl --fail --location --retry 2 --max-time 900 --dump-header "$OUT/iso-headers.txt" "$URL" --output "$ISO"
+command -v curl > "$OUT/curl-command-path.txt"
+curl --version > "$OUT/curl-version.txt"
+curl --help all > "$OUT/curl-help-all.txt"
+if ! grep -q -- '--retry-all-errors' "$OUT/curl-help-all.txt"; then
+  stage 'blocked-curl-version retry-all-errors unsupported; no silent fallback or tool upgrade'
+  exit 1
+fi
+# A receive reset (curl 56) is not retried by --retry alone. This GET restarts
+# its output file on retry; final size/hash checks remain required. The retry
+# restart budget is 330s plus at most one already-started 300s attempt.
+curl --fail --location --retry-all-errors --retry 2 --retry-max-time 330 --max-time 300 \
+  --dump-header "$OUT/iso-headers.txt" "$URL" --output "$ISO"
 printf '%s  %s\n' 'ef7312733a9f5d7d51cfa04ac497671995674ca5e1058d5164d6028f0938d668' "$ISO" > "$OUT/iso.expected.sha256"
 shasum -a 256 -c "$OUT/iso.expected.sha256" | tee "$OUT/iso-verification.txt"
 stat -f '%z' "$ISO" > "$OUT/iso-size.txt"
