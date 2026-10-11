@@ -2,6 +2,16 @@
 set -Eeuo pipefail
 [[ ${GITHUB_ACTIONS:-} == true ]] || exit 8
 mkdir -p evidence/cloud /home/runner/issue1927-mint /tmp/issue1927-mint/seed
+collect() {
+  result=$?
+  set +e
+  if [ -f /tmp/issue1927-mint/id ]; then
+    timeout 60 scp -r -i /tmp/issue1927-mint/id -P 2277 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue1927-mint/known mint@127.0.0.1:/home/mint/evidence evidence/cloud/guest
+  fi
+  sudo chown -R "$(id -u):$(id -g)" evidence
+  printf 'harness_exit=%s\n' "$result" > evidence/cloud/result.txt
+}
+trap collect EXIT
 sudo apt-get update
 sudo apt-get install -y qemu-system-x86 qemu-utils genisoimage socat imagemagick openssh-client tesseract-ocr
 for mirror in https://mirror.csclub.uwaterloo.ca/linuxmint https://mirrors.edge.kernel.org/linuxmint; do
@@ -61,7 +71,7 @@ for n in $(seq 1 60); do
 done
 test "$ready" = 1
 timeout 1200 ssh "${opts[@]}" mint@127.0.0.1 'bash -s' > evidence/cloud/scenario.log 2>&1 <<'GUEST'
-set -Eeuo pipefail
+set -Eeuxo pipefail
 cd /home/mint
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
 tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt

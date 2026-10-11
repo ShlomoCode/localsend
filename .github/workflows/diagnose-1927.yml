@@ -11,6 +11,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Exercise normal Flatpak and Cinnamon login on Mint 22.2
         run: bash support/diagnostics/issue1927-mint.sh
+      - name: Preserve VM files after every outcome
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" evidence && chmod -R a+rX evidence
       - uses: actions/upload-artifact@v4
         if: always()
         with:
