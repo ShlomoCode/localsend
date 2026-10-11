@@ -43,13 +43,16 @@ jobs:
       - name: Check changed file formatting
         if: ${{ inputs.checks_only }}
         working-directory: app
-        run: dart format --output=none --set-exit-if-changed lib/pages/tabs/send_tab.dart
+        run: dart format --set-exit-if-changed lib/pages/tabs/send_tab.dart
+      - name: Report exact cloud formatting diff
+        if: ${{ always() && inputs.checks_only }}
+        run: git diff -- app/lib/pages/tabs/send_tab.dart
       - name: Analyze changed file
-        if: ${{ inputs.checks_only }}
+        if: ${{ always() && inputs.checks_only }}
         working-directory: app
         run: flutter analyze lib/pages/tabs/send_tab.dart
       - name: Check existing favorite behavior
-        if: ${{ inputs.checks_only }}
+        if: ${{ always() && inputs.checks_only }}
         working-directory: app
         run: flutter test test/unit/provider/favorites_provider_test.dart
       - uses: actions/upload-artifact@v6
