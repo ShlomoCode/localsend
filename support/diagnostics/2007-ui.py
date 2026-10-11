@@ -37,6 +37,7 @@ def text(name, stage, scroll=False):
     for attempt in range(12 if scroll else 1):
         words = screen(stage + '-' + str(attempt), sidebar=name in ['Settings', 'Send'])
         matches = [w for w in words if w['text'].strip() == name]
+        print('LOOKUP', repr(name), repr([w['text'] for w in words if w['text'].strip()]), flush=True)
         if matches:
             w = matches[0]
             return (int(w['left']) + int(w['width']) // 2,
@@ -54,10 +55,10 @@ click(*text('Settings', 'settings-button'))
 _, row_y = text('Server', 'server-row', scroll=True)
 # The observed SettingsEntry places two controls in a 150 px child at the
 # right edge. Retain the tooltip screenshot to verify which control is used.
-run('xdotool', 'mousemove', '925', str(row_y))
+run('xdotool', 'mousemove', '861', str(row_y))
 time.sleep(1)
 screen('server-stop-tooltip')
-click(925, row_y)
+click(861, row_y)
 screen('server-stopped')
 if os.environ.get('PHYSICAL_2007'):
     (out / 'desktop-stopped').touch()

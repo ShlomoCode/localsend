@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr python3-pil
-          gh run download 38103679659 --repo ShlomoCode/localsend --dir /tmp/ocr-reference
+          gh run download 38104296912 --repo ShlomoCode/localsend --dir /tmp/ocr-reference
           mkdir -p evidence
           /usr/bin/python3 support/diagnostics/2007-ocr-probe.py
       - uses: actions/upload-artifact@v6
