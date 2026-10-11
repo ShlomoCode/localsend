@@ -1,6 +1,11 @@
 name: Issue 1310 supported XFCE investigation
 on:
   workflow_dispatch:
+    inputs:
+      desktop:
+        type: choice
+        options: [ubuntu, mx]
+        default: ubuntu
 permissions:
   contents: read
 jobs:
@@ -10,7 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Normal XFCE release controls
-        run: bash support/diagnostics/1310/vm.sh
+        run: |
+          if [ '${{ inputs.desktop }}' = mx ]; then
+            bash support/diagnostics/1310/mx.sh
+          else
+            bash support/diagnostics/1310/vm.sh
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

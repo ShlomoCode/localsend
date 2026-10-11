@@ -41,5 +41,5 @@ for n in $(seq 1 180); do
   sleep 5
 done
 test "$ready" = 1
-scp "${copy[@]}" support/diagnostics/1310/guest.sh probe@127.0.0.1:/home/probe/
+scp "${copy[@]}" support/diagnostics/1310/guest.sh support/diagnostics/1310/actions.sh probe@127.0.0.1:/home/probe/
 timeout 1000 ssh "${opts[@]}" probe@127.0.0.1 'bash /home/probe/guest.sh' | tee evidence/scenario.log
