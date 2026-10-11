@@ -240,7 +240,7 @@ async function manualInputComparison(){
  save('manual-input-comparison.json',{scope:'Input comparison only, Cancel without registration; Manual uses settings.port and cannot override relay port',
   expected:'127.0.0.1',fields:nodes(observed).filter(n=>n.class==='android.widget.EditText'),before,after:r.status()});
  await click('Cancel');
- await snap('manual-input-canceled',await waitFor(s=>labels(s).some(v=>/Selection\nFiles: 1\nSize: 1\.0 MB/.test(v)),30000,'Selection did not return after canceling Manual input'));
+ await snap('manual-input-canceled',await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),30000,'Selection did not return with '+controlSizeLabel+' after canceling Manual input'));
 }
 async function addFavorite(){
  await click('Favorites');await snap('favorites-before-add');await click('Add');
