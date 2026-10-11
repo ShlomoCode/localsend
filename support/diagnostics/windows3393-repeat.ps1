@@ -18,7 +18,7 @@ if($SelectionMethod -eq 'SendTo'){
 $argsLine='-NoProfile -STA -File "{0}" -TargetProcessId {1} -Path "{2}" -Mode File -SelectionMethod PathEntry -DialogScreenshotPath "{3}" -TimeoutSeconds 15' -f "$PSScriptRoot/windows_dialog_select.ps1",$pidInfo.appPid,$fixture,(Join-Path $PWD "evidence/windows-$Case-dialog.png")
 $driver=Start-Process pwsh -ArgumentList $argsLine -PassThru -WindowStyle Hidden -RedirectStandardOutput "evidence/windows-$Case-dialog.stdout.txt" -RedirectStandardError "evidence/windows-$Case-dialog.stderr.txt"
 Start-Sleep -Milliseconds 500
-& "$PSScriptRoot/windows3393-ui.ps1" -Action click -X 80 -Y 85 -Label "windows-$Case-file-button" -RequireForeground
+& "$PSScriptRoot/windows3393-ui.ps1" -Action click -X 80 -Y 85 -Label "windows-$Case-file-button" -RequireForeground -UseControlSequence
 if(-not $driver.WaitForExit(22000)){ $driver.Kill();throw 'Repeat file selection timed out' }
 $selected=Get-Content "evidence/windows-$Case-dialog.stdout.txt" -Raw|ConvertFrom-Json
 if(-not $selected.Success){
