@@ -6,7 +6,7 @@ Start-Transcript -Path (Join-Path $evidence 'prepare.log')
 try {
   wsl --list --verbose
   if($LASTEXITCODE -ne 0) { throw 'WSL inventory failed.' }
-  $linuxRoot=(& wsl -d Ubuntu-24.04 -u root -- wslpath -a $root).Trim()
+  $linuxRoot=(& wsl -d Ubuntu-24.04 -u root -- wslpath -a $root.Replace('\','/')).Trim()
   if($LASTEXITCODE -ne 0) { throw 'WSL path mapping failed.' }
   & wsl -d Ubuntu-24.04 -u root -- bash "$linuxRoot/support/diagnose_2230/prepare.sh" "$linuxRoot/evidence/2230"
   if($LASTEXITCODE -ne 0) { throw 'Ubuntu original-release installation/readiness failed; no product case counted.' }

@@ -83,7 +83,7 @@ try {
   $app=Start-Process $exe -PassThru
   Start-Sleep -Seconds 5
   [void](Snapshot 'startup')
-  $linuxRoot=(& wsl -d Ubuntu-24.04 -u tester -- wslpath -a (Get-Location).Path).Trim()
+  $linuxRoot=(& wsl -d Ubuntu-24.04 -u tester -- wslpath -a (Get-Location).Path.Replace('\','/')).Trim()
   $ip=(& wsl -d Ubuntu-24.04 -u tester -- bash -lc "hostname -I | cut -d' ' -f1").Trim()
   if($ip -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'No valid WSL receiver IPv4 address.' }
   $manifest=Get-Content C:/2230/manifest.json -Raw | ConvertFrom-Json
