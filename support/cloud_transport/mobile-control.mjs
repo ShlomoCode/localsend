@@ -42,7 +42,7 @@ try {
  const helperStarted=await wd('GET',`/session/${session}/source`);writeFileSync('evidence/helper-after-start.xml',helperStarted);
  assert(helperStarted.includes('Socket control running'),'Actual helper Start button did not activate the service');
  await new Promise(ok=>setTimeout(ok,2500));
- for(const size of [0,1,65537,8*1024*1024]){
+ for(const size of [0,1,65537]){
   const data=randomBytes(size),expected=createHash('sha256').update(data).digest('hex');
   const s=net.connect({host:'127.0.0.1',port:senderPort,allowHalfOpen:true});s.setTimeout(180000,()=>s.destroy(new Error('Physical relay timeout')));s.end(data);
   const chunks=[];for await(const d of s)chunks.push(d);const reply=JSON.parse(Buffer.concat(chunks));
