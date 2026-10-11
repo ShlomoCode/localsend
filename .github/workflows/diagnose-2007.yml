@@ -1,6 +1,11 @@
 name: Diagnose Android deleted filename 2007
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/bug-2007-diagnostics]
+    paths:
+      - .github/workflows/diagnose-2007.yml
+      - support/diagnostics/2007-*
 jobs:
   actual-app-baseline:
     runs-on: ubuntu-24.04
