@@ -67,6 +67,20 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource))break;
    if(launch===1)throw new Error('Actual native directory-selection footer absent after one verified reopen');
    await wd('POST',prefix+'/back',{});
+   const backDeadline=Date.now()+10000;
+   let backAttempt=0;
+   do{
+    nativeSource=await wd('GET',prefix+'/source');
+    writeFileSync('evidence/'+stage+'-native-after-back-'+backAttempt+++'.xml',nativeSource);
+    if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource)||nativeSource.includes('content-desc="Save to folder"'))break;
+    await new Promise(r=>setTimeout(r,200));
+   }while(Date.now()<backDeadline);
+   // On the observed repeat picker, Back reaches its storage parent and
+   // restores the selection footer; it does not exit to LocalSend Options.
+   if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource)){
+    writeFileSync('evidence/'+stage+'-native-recovery.json',JSON.stringify({method:'Native Back to selector parent, then select Documents again',source:stage+'-native-after-back-'+(backAttempt-1)+'.xml'},null,2));
+    break;
+   }
    await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Save to folder',label:stage+'-options-after-native-back'});
    await click('xpath','//*[@content-desc="Save to folder"]/following-sibling::android.widget.Button[1]');
    await waitForNativeControl({wd,prefix,using:'id',value:'com.google.android.documentsui:id/toolbar',label:stage+'-reopened-native-picker'});
@@ -153,11 +167,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const desktop=windows?spawn('pwsh',['-NoProfile','-File','support/diagnostics/2007-windows-sender.ps1'],{env:{...process.env,TRANSPORT_SENDER_PORT:String(senderPort)}}):spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
  let proxy;
+ const ownedProxySockets=new Set();
  try {
   if(!windows){
   await waitFile('evidence/desktop-stopped',120000);
   proxy=net.createServer({allowHalfOpen:true},client=>{
    const remote=net.connect({host:senderHost,port:senderPort,allowHalfOpen:true});
+   for(const socket of [client,remote]){ownedProxySockets.add(socket);socket.once('close',()=>ownedProxySockets.delete(socket));}
    client.pipe(remote);remote.pipe(client);
    client.on('error',()=>remote.destroy());remote.on('error',()=>client.destroy());
   });
@@ -354,6 +370,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   }
  } finally {
   if(desktop.exitCode===null)desktop.kill('SIGTERM');
+  for(const socket of ownedProxySockets)socket.destroy();
   proxy?.close();
   await snapshot('final').catch(()=>{});
  }
