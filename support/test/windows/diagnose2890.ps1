@@ -252,21 +252,14 @@ foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";w
  }
  Start-Sleep -Seconds 1
  Screenshot "$($size.name)-after-wheel-to-end"
- # Drag at the visible right edge of the dialog. Images determine whether a scrollbar exists.
- Click 576 240
- [Desktop2381]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
- [Desktop2381]::SetCursorPos(576,480) | Out-Null
- [Desktop2381]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
- Start-Sleep -Seconds 1
- Screenshot "$($size.name)-after-edge-drag"
 }
-$lastRows=Import-Csv "$EvidenceDirectory/larger-after-edge-drag.tsv" -Delimiter "`t"
+$lastRows=Import-Csv "$EvidenceDirectory/larger-after-wheel-to-end.tsv" -Delimiter "`t"
 $lastPeer=$lastRows | Where-Object {$_.text -eq "Peer12"} | Select-Object -First 1
 $lastPeerIp=$lastRows | Where-Object {$_.text -like '*127.0.0.12*'} | Select-Object -First 1
-@{lastRowVisible=($null -ne $lastPeer -or $null -ne $lastPeerIp);lastRowOcr=$lastPeer;lastRowIpOcr=$lastPeerIp;input="six wheel notches, 24 more to end, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
+@{lastRowVisible=($null -ne $lastPeer -or $null -ne $lastPeerIp);lastRowOcr=$lastPeer;lastRowIpOcr=$lastPeerIp;input="six wheel notches, 24 more to end"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
 if($lastPeer -or $lastPeerIp) {
  $lastRowY=if($lastPeer){([int]$lastPeer.top + [int]$lastPeer.height/2)/2 + 10}else{([int]$lastPeerIp.top + [int]$lastPeerIp.height/2)/2 - 10}
- FavoritePencil "larger-after-edge-drag" $lastRowY
+ FavoritePencil "larger-after-wheel-to-end" $lastRowY
  Screenshot "last-row-edit"
  [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
  Start-Sleep -Seconds 1
