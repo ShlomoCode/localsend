@@ -16,3 +16,4 @@ E13	5000 count prepared	5-file prerequisite	Home tooltip covers fixture label; n
 E14	5000 ordinaryfiles	real selection→send→Options	Optionsvisible3.765s, RSSHWM1170088kB, noOSOOM; Acceptmiss causedzero saved	38107406174	yes-options-only
 E15	normalizedreceiverapproval	5000Options→realAccept→save	Options5.483s;507savedin180s;continuedprogressatteardown;saveintervalshort	38107835899	yes-partial-transfer
 E16	external sender; ordinary 2CPU/2GiB receiver guest	5-file control then 5000 Options/input/save	238 evidence files existed; upload failed EACCES on root-owned QEMU serial.log; raw lost; no product result	38108292337	no-retained-raw
+E17	same external sender and 2CPU/2GiB receiver	5-file control then 5000 Options/Back checkpoint beforeAccept	retained checkpoint: Options visible5.502s; Back visibly responds<=1.805s; RSS258.8to1100.3MiB; noOOM; fullsave active	38111506442	yes-options-input-only

@@ -1,0 +1,482 @@
+{
+  "scope": "Read-only analysis of original released 1.17 binary in Ubuntu24.04 x64 receiver VM; no screenshot interpretation performed.",
+  "artifactSha256": "6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81  baseline.tar.gz",
+  "memoryUnits": "KiB; divide by 1024 for MiB",
+  "samplingNote": "Samples about 0.5 s apart. status/stat/smaps/meminfo are sequential reads, not atomic snapshots. CPU is cumulative process utime+stime, fields 14 + 15 of /proc/PID/stat divided by clock_ticks_per_second=100. Percent of one CPU=100*cpuSeconds/wallSeconds; divide by 2 for fraction of two vCPU capacity.",
+  "cases": [
+    {
+      "count": 5,
+      "metricsCount": 81,
+      "metricSpan": {
+        "start": 55.843749732,
+        "end": 96.189324101
+      },
+      "click": 82.491395484,
+      "firstMatchingScreenshotCompleted": 83.494738914,
+      "backInput": 87.232586586,
+      "approvalObserved": 90.240490246,
+      "baseline": {
+        "t": 82.069820017,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1456,
+        "rssKiB": 263356,
+        "pssKiB": 228647,
+        "hwmKiB": 268192,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1494352,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "optionsWindowPeakRss": {
+        "t": 85.088912814,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1621,
+        "rssKiB": 275432,
+        "pssKiB": 240723,
+        "hwmKiB": 275432,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1489184,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "optionsWindowPeakPss": {
+        "t": 85.088912814,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1621,
+        "rssKiB": 275432,
+        "pssKiB": 240723,
+        "hwmKiB": 275432,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1489184,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "optionsWindowMinimumAvailable": {
+        "t": 82.572424538,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1487,
+        "rssKiB": 271112,
+        "pssKiB": 236243,
+        "hwmKiB": 271112,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1483756,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "fullMetricSpanPeakRss": {
+        "t": 95.181403358,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 2149,
+        "rssKiB": 277704,
+        "pssKiB": 242995,
+        "hwmKiB": 279128,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1491588,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "fullMetricSpanPeakPss": {
+        "t": 95.181403358,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 2149,
+        "rssKiB": 277704,
+        "pssKiB": 242995,
+        "hwmKiB": 279128,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1491588,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "fullMetricSpanMinimumAvailable": {
+        "t": 63.404297865,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 423,
+        "rssKiB": 262056,
+        "pssKiB": 227340,
+        "hwmKiB": 262056,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1454632,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "firstMatchingScreenshotNearestSample": {
+        "t": 83.578583534,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1552,
+        "rssKiB": 269044,
+        "pssKiB": 234331,
+        "hwmKiB": 275292,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1487192,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "backNearestSample": {
+        "t": 87.115700971,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1716,
+        "rssKiB": 270664,
+        "pssKiB": 235951,
+        "hwmKiB": 275292,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1493964,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "afterBackNearestSample": {
+        "t": 90.140632266,
+        "pid": 4458,
+        "hz": 100,
+        "cpuTicks": 1906,
+        "rssKiB": 276704,
+        "pssKiB": 241988,
+        "hwmKiB": 276704,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1487908,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "cpuToFirstMatchingScreenshot": {
+        "from": 82.069820017,
+        "to": 83.578583534,
+        "wallSeconds": 1.5087635170000055,
+        "cpuTicks": 96,
+        "cpuSeconds": 0.96,
+        "oneCpuPercent": 63.628261764232235,
+        "twoCpuCapacityPercent": 31.814130882116118
+      },
+      "cpuToBack": {
+        "from": 82.069820017,
+        "to": 87.115700971,
+        "wallSeconds": 5.045880953999998,
+        "cpuTicks": 260,
+        "cpuSeconds": 2.6,
+        "oneCpuPercent": 51.52717679434974,
+        "twoCpuCapacityPercent": 25.76358839717487
+      },
+      "optionsSampleCpuPeakInterval": {
+        "from": 82.572424538,
+        "to": 83.075911234,
+        "wallSeconds": 0.503486695999996,
+        "cpuTicks": 46,
+        "cpuSeconds": 0.46,
+        "oneCpuPercent": 91.36289074855787,
+        "twoCpuCapacityPercent": 45.68144537427894
+      },
+      "timings": {
+        "options-0": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 83.452333332,
+          "completed": 83.494738914
+        },
+        "options-visible": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 84.758835014,
+          "completed": 84.799298022
+        },
+        "returned": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 89.018115927,
+          "completed": 89.059205173
+        },
+        "accept-ready-0": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 90.196951424,
+          "completed": 90.240530634
+        }
+      },
+      "reportedOptionsObservationSeconds": 1.003343430000001,
+      "reportedOptionsAssertionWithOcrSeconds": 2.2526092059999883,
+      "reportedBackObservationSeconds": 3.0079036599999966,
+      "summaryMiB": {
+        "rssBefore": 257.18359375,
+        "rssOptionsPeak": 268.9765625,
+        "rssOptionsDelta": 11.79296875,
+        "pssBefore": 223.2880859375,
+        "pssOptionsPeak": 235.0810546875,
+        "pssOptionsDelta": 11.79296875,
+        "memTotal": 1967.64453125,
+        "availableBefore": 1459.328125,
+        "availableOptionsMinimum": 1448.98046875,
+        "availableWholeSpanMinimum": 1420.5390625,
+        "rssAfterBack": 270.21875
+      },
+      "observationOverhead": {
+        "firstMatchingCaptureDurationSeconds": 0.04240558200000066,
+        "extraAssertionSecondsOverFirstCapture": 1.2492657759999872,
+        "returnedCaptureAfterBackInputSeconds": 1.8266185869999987,
+        "approvalMatchingCaptureAfterBackInputSeconds": 3.007944047999999,
+        "backInputTimestampNote": "backInput is the input-log pre-execution timestamp; precise command started timestamp differs by tens of microseconds."
+      }
+    },
+    {
+      "count": 5000,
+      "metricsCount": 77,
+      "metricSpan": {
+        "start": 96.971486369,
+        "end": 135.663309142
+      },
+      "click": 122.143341434,
+      "firstMatchingScreenshotCompleted": 127.64510764,
+      "backInput": 131.853320198,
+      "approvalObserved": 134.82772413900003,
+      "baseline": {
+        "t": 121.726196679,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 1402,
+        "rssKiB": 264968,
+        "pssKiB": 230268,
+        "hwmKiB": 276936,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1491444,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "optionsWindowPeakRss": {
+        "t": 126.373669304,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2054,
+        "rssKiB": 1126684,
+        "pssKiB": 1091980,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 632920,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "optionsWindowPeakPss": {
+        "t": 126.373669304,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2054,
+        "rssKiB": 1126684,
+        "pssKiB": 1091980,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 632920,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "optionsWindowMinimumAvailable": {
+        "t": 125.847973634,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 1954,
+        "rssKiB": 1124692,
+        "pssKiB": 1089988,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 632920,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "fullMetricSpanPeakRss": {
+        "t": 133.618095045,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2590,
+        "rssKiB": 1137412,
+        "pssKiB": 1102461,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 615880,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "fullMetricSpanPeakPss": {
+        "t": 133.105205989,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2538,
+        "rssKiB": 1137344,
+        "pssKiB": 1102560,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 636256,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "fullMetricSpanMinimumAvailable": {
+        "t": 133.618095045,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2590,
+        "rssKiB": 1137412,
+        "pssKiB": 1102461,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 615880,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "firstMatchingScreenshotNearestSample": {
+        "t": 127.443759429,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2155,
+        "rssKiB": 1104940,
+        "pssKiB": 1070235,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 633520,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "backNearestSample": {
+        "t": 132.079662957,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2410,
+        "rssKiB": 1128668,
+        "pssKiB": 1093879,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 640028,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "afterBackNearestSample": {
+        "t": 134.6531598,
+        "pid": 6499,
+        "hz": 100,
+        "cpuTicks": 2686,
+        "rssKiB": 570948,
+        "pssKiB": 536159,
+        "hwmKiB": 1137712,
+        "memTotalKiB": 2014868,
+        "availableKiB": 1142380,
+        "swapTotalKiB": 0,
+        "swapFreeKiB": 0,
+        "processSwapKiB": 0
+      },
+      "cpuToFirstMatchingScreenshot": {
+        "from": 121.726196679,
+        "to": 127.443759429,
+        "wallSeconds": 5.717562749999999,
+        "cpuTicks": 753,
+        "cpuSeconds": 7.53,
+        "oneCpuPercent": 131.6994728217019,
+        "twoCpuCapacityPercent": 65.84973641085095
+      },
+      "cpuToBack": {
+        "from": 121.726196679,
+        "to": 132.079662957,
+        "wallSeconds": 10.353466278000013,
+        "cpuTicks": 1008,
+        "cpuSeconds": 10.08,
+        "oneCpuPercent": 97.35869832713804,
+        "twoCpuCapacityPercent": 48.67934916356902
+      },
+      "optionsSampleCpuPeakInterval": {
+        "from": 123.775189563,
+        "to": 124.294344722,
+        "wallSeconds": 0.5191551590000074,
+        "cpuTicks": 100,
+        "cpuSeconds": 1,
+        "oneCpuPercent": 192.62064195339832,
+        "twoCpuCapacityPercent": 96.31032097669916
+      },
+      "timings": {
+        "options-0": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 123.173770216,
+          "completed": 123.24103259
+        },
+        "options-1": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 127.583245849,
+          "completed": 127.64510764
+        },
+        "options-visible": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 129.20568625,
+          "completed": 129.253134153
+        },
+        "returned": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 133.610835386,
+          "completed": 133.658367582
+        },
+        "accept-ready-0": {
+          "clock": "guest monotonic",
+          "output": "",
+          "started": 134.77360053,
+          "completed": 134.827766391
+        }
+      },
+      "reportedOptionsObservationSeconds": 5.501766205999999,
+      "reportedOptionsAssertionWithOcrSeconds": 7.058291784000005,
+      "reportedBackObservationSeconds": 2.97440394100002,
+      "summaryMiB": {
+        "rssBefore": 258.7578125,
+        "rssOptionsPeak": 1100.27734375,
+        "rssOptionsDelta": 841.51953125,
+        "pssBefore": 224.87109375,
+        "pssOptionsPeak": 1066.38671875,
+        "pssOptionsDelta": 841.515625,
+        "memTotal": 1967.64453125,
+        "availableBefore": 1456.48828125,
+        "availableOptionsMinimum": 618.0859375,
+        "availableWholeSpanMinimum": 601.4453125,
+        "rssAfterBack": 557.56640625
+      },
+      "observationOverhead": {
+        "firstMatchingCaptureDurationSeconds": 0.061861791000012545,
+        "extraAssertionSecondsOverFirstCapture": 1.5565255780000058,
+        "returnedCaptureAfterBackInputSeconds": 1.8050473840000052,
+        "approvalMatchingCaptureAfterBackInputSeconds": 2.9744461930000057,
+        "backInputTimestampNote": "backInput is the input-log pre-execution timestamp; precise command started timestamp differs by tens of microseconds."
+      }
+    }
+  ],
+  "kernel": {
+    "lines": 584,
+    "oomMatches": [],
+    "checkpointGuestMonotonic": 135.8987196
+  },
+  "limits": [
+    "Options observation times include click/SSH/capture overhead and polling plus host OCR between attempts; they are not isolated paint latency.",
+    "First 5000 nonmatching screenshot completed 123.24103259; matching screenshot completed 127.64510764. A screenshot gap cannot establish an unresponsive interval without inspecting frames.",
+    "Back observation uses accept-ready screenshot, not earlier returned screenshot. Both have intervening SSH activation/input/capture operations.",
+    "The five-file control completed and content-verified five files. The 5000 checkpoint is before Accept/full save and has no final transfer result.",
+    "No kernel OOM matches at checkpoint does not rule out a future OOM or userspace stall."
+  ]
+}
