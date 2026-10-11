@@ -1,10 +1,16 @@
 name: Diagnose 3393 Windows Android networking
 on:
   workflow_dispatch:
+    inputs:
+      scenario:
+        type: choice
+        options: [software-emulator, windows11-sender-ui]
+        default: software-emulator
 permissions:
   contents: read
 jobs:
   windows-android:
+    if: inputs.scenario == 'software-emulator'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -64,5 +70,21 @@ jobs:
         if: always()
         with:
           name: issue3393-network-feasibility
+          path: evidence
+          retention-days: 14
+  windows11-sender-ui:
+    if: inputs.scenario == 'windows11-sender-ui'
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select a real file through the original Windows sender
+        shell: pwsh
+        run: |
+          ./support/diagnostics/windows_release_ui_probe.ps1 -OutputDirectory evidence -ReleaseVersion 1.17.0 -AssetArchitecture x86-64 -RunnerLabel windows-11-arm -FixtureTimestampUtc '2026-10-11T00:00:00Z' -FixtureFileName issue3393-payload.txt -SelectionMethod PathEntry
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue3393-windows11-sender-ui
           path: evidence
           retention-days: 14
