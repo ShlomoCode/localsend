@@ -186,13 +186,15 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
         rows = snap('add-confirmed')
         saved = favorites()
         (out/'ui-created-favorites.json').write_text(json.dumps(saved, indent=2))
-        if len(saved)!=1 or saved[0]['alias']!='Original1840' or not any(r['text']=='Original1840' for r in rows):
+        if len(saved)!=1 or saved[0]['alias']!='Original1840' or not any(r['text']=='Favorites' for r in rows):
             raise RuntimeError('Actual UI favorite creation control failed')
         for index, new_alias in enumerate(['Changed1840', 'ChangedAgain1840', 'ChangedAgain1840']):
-            alias_row = word(rows, saved[0]['alias'])
-            # Favorites content is a minimal centered row with the edit icon
-            # following the name/IP text. Retain before/after screenshot bounds.
-            click(xy(alias_row)[0]+185, xy(alias_row)[1]+10)
+            # Run6 add-confirmed.png verifies the single actual favorite row
+            # and pencil center x678/y405 relative to Favorites x475/y333.
+            # OCR reads Original1840 as Originall1840; storage verifies exact
+            # input independently, while the larger title anchors the icon.
+            heading = word(rows, 'Favorites')
+            click(int(heading['left'])+203, int(heading['top'])+72)
             edit = snap('edit-'+str(index)+'-open')
             name_row = word(edit, 'name')
             fill(field_x, int(name_row['top'])+45, new_alias)
