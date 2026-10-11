@@ -41,6 +41,11 @@ class Diagnostic2277Observer extends NavigatorObserver {
     super.didPop(route, previousRoute);
     _write('pop', route, previousRoute);
   }
+  @override
+  void didRemove(Route route, Route? previousRoute) {
+    super.didRemove(route, previousRoute);
+    _write('remove', route, previousRoute);
+  }
 }
 '@
 [IO.File]::WriteAllText($mainPath,$main)

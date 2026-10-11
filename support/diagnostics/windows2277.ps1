@@ -46,6 +46,7 @@ Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,
 @{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;commit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
 Get-FileHash $Executable -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/executable.json"
 Get-ChildItem (Split-Path $Executable) -Filter *.dll|Get-FileHash -Algorithm SHA256|Select-Object Path,Hash|ConvertTo-Json|Set-Content "$EvidenceDirectory/native-libraries.json"
+Get-ChildItem (Join-Path (Split-Path $Executable) 'data') -Recurse -Filter app.so|Get-FileHash -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/dart-aot.json"
 Set-Content "$EvidenceDirectory/payload2277.txt" 'LocalSend issue 2277 exact navigation payload'
 $results=@()
 $cases=@()

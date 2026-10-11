@@ -76,6 +76,8 @@ jobs:
         run: |
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v${{ inputs.version }}/LocalSend-${{ inputs.version }}-windows-x86-64.zip -OutFile $env:RUNNER_TEMP/app.zip
           Expand-Archive $env:RUNNER_TEMP/app.zip $env:RUNNER_TEMP/release
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/evidence2277" | Out-Null
+          Get-FileHash "$env:RUNNER_TEMP/app.zip" -Algorithm SHA256 | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/evidence2277/official-zip.json"
       - name: Download untouched current baseline
         if: ${{ inputs.current }}
         uses: actions/download-artifact@v6
