@@ -34,8 +34,28 @@ for(const size of [0,1,65537,16*1024*1024]){
  const chunks=[];for await(const d of s)chunks.push(d);const reply=JSON.parse(Buffer.concat(chunks));
  assert.equal(reply.count,size);assert.equal(reply.sha256,expected);results.push({bytes:size,byteExact:true,replyAfterHalfClose:true});
 }
+const pauses=[];
+for(const seconds of [2,10,30]){
+ const data=randomBytes(65537);const expected=createHash('sha256').update(data).digest('hex');
+ const s=net.connect({host:'127.0.0.1',port:53318,allowHalfOpen:true});
+ await new Promise((ok,no)=>{s.once('connect',ok);s.once('error',no);});
+ s.write(data.subarray(0,1));
+ const begin=process.hrtime.bigint();r.record('control-pause-start',undefined,{seconds});
+ await new Promise(ok=>setTimeout(ok,seconds*1000));
+ assert.equal(s.destroyed,false,'idle connection must stay open');
+ const elapsedMs=Number(process.hrtime.bigint()-begin)/1e6;r.record('control-pause-end',undefined,{seconds,elapsedMs});
+ s.end(data.subarray(1));
+ const chunks=[];for await(const d of s)chunks.push(d);const reply=JSON.parse(Buffer.concat(chunks));
+ assert.equal(reply.count,data.length);assert.equal(reply.sha256,expected);
+ pauses.push({requestedSeconds:seconds,elapsedMs,aliveAfterPause:true,byteExact:true});
+}
 assert(r.status().paused>0,'large body must exercise relay backpressure');
 assert(r.status().peak<2*1024*1024,'queued raw bytes must remain bounded');
-writeFileSync('control-results.json',JSON.stringify({results,metrics:r.status()},null,2));
-console.log(JSON.stringify({results,metrics:r.status()},null,2));
-running=false;await r.stop();await worker.catch(()=>{});await new Promise(ok=>receiver.close(ok));
+writeFileSync('control-results.json',JSON.stringify({results,pauses,metrics:r.status()},null,2));
+console.log(JSON.stringify({results,pauses,metrics:r.status()},null,2));
+assert.equal(r.trace.filter(e=>e.origin==='device-eof').length,results.length+pauses.length);
+const idle=net.connect({host:'127.0.0.1',port:53318,allowHalfOpen:true});
+await new Promise((ok,no)=>{idle.once('connect',ok);idle.once('error',no);});
+running=false;await r.stop();idle.destroy();for(const s of connections.values())s.destroy();await worker.catch(()=>{});await new Promise(ok=>receiver.close(ok));
+assert(r.trace.some(e=>e.origin==='relay-stop-close'),'explicit infrastructure stop must be identifiable');
+writeFileSync('relay-trace.json',JSON.stringify(r.trace,null,2));

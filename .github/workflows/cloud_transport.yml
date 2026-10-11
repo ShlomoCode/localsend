@@ -64,6 +64,7 @@ jobs:
           name: cloud-transport-control
           path: |
             control-results.json
+            relay-trace.json
             mobile-control-results.json
             mobile-control-final-status.json
             localsend-source.xml
