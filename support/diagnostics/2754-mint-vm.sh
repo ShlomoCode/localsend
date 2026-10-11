@@ -27,6 +27,11 @@ case "$probe_engine_variant" in
  *) echo "Unsupported engine variant: $probe_engine_variant" >&2; exit 2 ;;
 esac
 probe_capture_geometry=${PROBE_CAPTURE_GEOMETRY:-0}
+probe_capture_interactions=${PROBE_CAPTURE_INTERACTIONS:-0}
+case "$probe_capture_interactions" in 0|1) ;; *) exit 2 ;; esac
+if [[ $probe_capture_interactions == 1 ]]; then
+ [[ $probe_capture_geometry == 1 && $probe_engine_variant != official ]]
+fi
 case "$probe_capture_geometry" in
  0) ;;
  1) [[ "$probe_bridge_variant" == stock || "$probe_bridge_variant" == A || "$probe_engine_variant" != official ]] || { echo "Geometry capture requires a bridge or source-built engine run" >&2; exit 2; } ;;
@@ -236,7 +241,7 @@ elif [ "$probe_bridge_variant" != system ]; then
  scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known /tmp/issue2754-mint/diagnostic-bridge mint@127.0.0.1:/home/mint/diagnostic-bridge
 fi
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
@@ -251,7 +256,17 @@ if [ "$PROBE_ENGINE_VARIANT" != official ]; then
  engine_packages=(jq)
  test -f support/diagnostics/verify-loaded-engine.sh
 fi
-timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}" "${engine_packages[@]}"
+interaction_packages=()
+if [[ $PROBE_CAPTURE_INTERACTIONS == 1 ]]; then
+ interaction_packages=(orca python3-speechd speech-dispatcher speech-dispatcher-espeak-ng pulseaudio-utils)
+ test -f support/diagnostics/2754-accessibility/capture-interactions.sh
+ test -f support/diagnostics/2754-accessibility/interaction-client.c
+fi
+dpkg-query -W -f='${Package}\t${Version}\n' | sort > evidence/provision-packages-before.tsv
+timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}" "${engine_packages[@]}" "${interaction_packages[@]}"
+dpkg-query -W -f='${Package}\t${Version}\n' | sort > evidence/provision-packages-after.tsv
+diff -u evidence/provision-packages-before.tsv evidence/provision-packages-after.tsv > evidence/provision-package-diff.txt || test "$?" = 1
+printf 'capture_interactions=%s\n' "$PROBE_CAPTURE_INTERACTIONS" > evidence/interaction-capture-setting.txt
 printf 'capture_geometry=%s\n' "$PROBE_CAPTURE_GEOMETRY" > evidence/geometry-capture-setting.txt
 if [ "$PROBE_APP_SOURCE" = c1ce ]; then
  cd /home/mint/source-artifact
@@ -469,7 +484,9 @@ echo UI_PROVISION_READY
 GUEST
 status=$?
 if [ "$status" = 0 ]; then
-timeout 1500 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+scenario_deadline=1500
+if [[ $probe_capture_interactions == 1 ]]; then scenario_deadline=3000; fi
+timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -487,7 +504,7 @@ video_pid=$!
 set +e
 # Optional geometry validity is retained by the UI driver separately from causal timing.
 # A quick query or capture exit cannot establish valid geometry or correction success.
-PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" python3 support/diagnostics/2754-ui.py
+PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" python3 support/diagnostics/2754-ui.py
 status=$?
 if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ] || [ "$PROBE_ENGINE_VARIANT" != official ]; then
  grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1

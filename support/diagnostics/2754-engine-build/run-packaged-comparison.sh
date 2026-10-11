@@ -42,6 +42,7 @@ for label in control-system B-system AB-package; do
   if PROBE_ENVIRONMENT=mint PROBE_APP_SOURCE=c1ce PROBE_BUNDLE_TAR="$bundle/source-bundle.tar.gz" \
      PROBE_ENGINE_VARIANT="$variant" PROBE_BUNDLE_RUN_ID="$app_run" PROBE_BRIDGE_VARIANT="$bridge" \
      PROBE_BRIDGE_DELIVERY="$delivery" PROBE_BRIDGE_PACKAGE_DIR="$package" PROBE_CAPTURE_GEOMETRY=1 \
+     PROBE_CAPTURE_INTERACTIONS="${PROBE_CAPTURE_INTERACTIONS:-0}" \
      bash support/diagnostics/2754-mint-vm.sh; then
     status=0
   else
@@ -57,6 +58,6 @@ for label in control-system B-system AB-package; do
   fi
   mv evidence/cloud "evidence/comparison/$label"
 done
-printf 'scenario_processes_exit_status=%s\ngeometry_and_ui_verdicts_require_raw_evidence_review=true\n' "$suite_status" \
+printf 'scenario_processes_exit_status=%s\ngeometry_and_ui_verdicts_require_raw_evidence_review=true\ninteractions_speech_and_audio_require_raw_evidence_review=true\n' "$suite_status" \
   > evidence/comparison/result.txt
 exit "$suite_status"

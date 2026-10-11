@@ -25,6 +25,10 @@ on:
         type: string
         required: false
         default: ''
+      capture_interactions:
+        description: 'Separate real speech/edit/action/lifecycle phase after timing and geometry'
+        type: boolean
+        default: false
       engine_run_id:
         description: 'Completed engine source build supplying immutable control/B artifacts for app-only retry'
         type: string
@@ -92,6 +96,7 @@ jobs:
       - name: Run control system then B system then A plus B package in Mint
         env:
           APP_RUN_ID: ${{ inputs.bundle_run_id }}
+          PROBE_CAPTURE_INTERACTIONS: ${{ inputs.capture_interactions && '1' || '0' }}
         run: |
           bash support/diagnostics/2754-engine-build/run-packaged-comparison.sh \
             "$RUNNER_TEMP/issue2754-control-app" "$RUNNER_TEMP/issue2754-B-app" \

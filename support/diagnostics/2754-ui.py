@@ -91,12 +91,40 @@ def picker_control(word,label):
     while time.monotonic()<deadline:
         rows=snap(label+"-chooser-"+str(attempt))
         labels={r["text"].lower().strip() for r in rows}
+        # Whole-screen sparse OCR truncated the real GTK Cancel label to
+        # "Can" in run 38165470861. Inspect the actual active chooser's
+        # button strip, retaining exact labels rather than accepting fragments.
+        if "cancel" not in labels:
+            focused=run("xdotool","getwindowfocus").stdout.strip()
+            title=run("xdotool","getwindowname",focused).stdout.strip()
+            owner=run("xdotool","getwindowpid",focused).stdout.strip()
+            # A supported desktop portal may own the native chooser in a
+            # separate process; record its PID and require its actual title.
+            if owner.isdigit() and title.lower() in ("open file","select folder","select a folder","select directory"):
+                geometry=run("xdotool","getwindowgeometry","--shell",focused).stdout
+                (out/(label+"-chooser-"+str(attempt)+"-window.txt")).write_text(title+"\n"+geometry)
+                values=dict(line.split("=",1) for line in geometry.splitlines() if "=" in line)
+                left=int(values["X"])+max(0,int(values["WIDTH"])-360)
+                top=int(values["Y"])+max(0,int(values["HEIGHT"])-65)
+                crop=out/(label+"-chooser-"+str(attempt)+"-buttons.png")
+                run("scrot","--autoselect",f"{left},{top},360,65",str(crop))
+                result=run("tesseract",str(crop),"stdout","--psm","6","tsv")
+                (crop.with_suffix(".tsv")).write_text(result.stdout)
+                button_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+                for row in button_rows:
+                    row["left"]=str(left+int(row["left"])); row["top"]=str(top+int(row["top"]))
+                rows+=button_rows
+                labels={r["text"].lower().strip() for r in rows}
+                log("chooser-button-ocr",case=label,window_id=focused,window_title=title,owner_pid=owner,file=crop.name)
         if "cancel" in labels and ("open" in labels or "select" in labels):
             observed=True; break
         attempt+=1; time.sleep(1)
     log("picker-control",case=label,app_pid=app.pid,observed=observed,elapsed=time.monotonic()-start)
     if not observed: raise RuntimeError("Rendered chooser controls absent: "+label)
-    click_word("Cancel",label+"-cancel")
+    cancel=next(r for r in rows if r["text"].lower().strip()=="cancel")
+    x=int(cancel["left"])+int(cancel["width"])//2; y=int(cancel["top"])+int(cancel["height"])//2
+    log("click",label="Cancel",case=label,x=x,y=y)
+    run("xdotool","mousemove",str(x),str(y),"click","1")
     time.sleep(2)
     rows=snap(label+"-returned")
     if not any(r["text"].lower().strip()=="selection" for r in rows):
@@ -151,6 +179,54 @@ def capture_geometry_phase():
             except Exception as error:
                 log("geometry-phase-escape-failed",error=type(error).__name__+": "+str(error))
         log("geometry-phase-ended",status=status["status"])
+def capture_interaction_phase():
+    phase=out/"interactions-post-geometry"; phase.mkdir(exist_ok=True)
+    status=dict(phase="post-geometry",status="started",app_pid=app.pid,window_id=w[-1],speech_status="unknown")
+    try:
+        if (os.uname().sysname != "Linux" or out.resolve() != pathlib.Path("/home/mint/evidence")
+                or not (out/"bootstrap-complete").is_file()
+                or "ID=linuxmint" not in pathlib.Path("/etc/os-release").read_text().splitlines()):
+            raise RuntimeError("Interaction phase requires the staged cloud Mint session")
+        here=pathlib.Path(__file__).resolve().parent
+        fixture=here/"2754-accessibility"/"capture-interactions.sh"
+        launcher=here/"2754-bridge-app"
+        click_word("Text","interactions-fresh-text-before")
+        deadline=time.monotonic()+60
+        attempt=0
+        while True:
+            rows=snap("interactions-modal-wait-"+str(attempt))
+            labels={r["text"].lower().strip() for r in rows}
+            if {"type","message"}.issubset(labels): break
+            if time.monotonic() >= deadline: raise RuntimeError("Fresh Text dialog did not render before interaction phase")
+            attempt+=1; time.sleep(2)
+        log("interactions-phase-start",pid=app.pid,window_id=w[-1])
+        env=os.environ.copy(); env["PROBE_CLOUD_INTERACTIONS"]="1"
+        command=["timeout","--kill-after=60s","1200s","bash",str(fixture),str(app.pid),w[-1],str(phase),str(launcher)]
+        status["capture_command"]=command
+        with (phase/"capture.stdout").open("w") as stdout, (phase/"capture.stderr").open("w") as stderr:
+            result=subprocess.run(command,env=env,stdout=stdout,stderr=stderr,text=True,timeout=1275)
+        status.update(status="capture-finished",returncode=result.returncode,deadline_hit=result.returncode in (124,137))
+    except Exception as error:
+        status.update(status="capture-failed",error=type(error).__name__+": "+str(error),deadline_hit=isinstance(error,subprocess.TimeoutExpired))
+    finally:
+        (phase/"phase-status.json").write_text(json.dumps(status,indent=2))
+        snap("interactions-phase-final")
+        # The harness may restart the app. Preserve its lifecycle evidence and
+        # stop only the newly verified executable, even if a later gate failed.
+        pidfile=phase/"restarted-app-pid.txt"
+        startfile=phase/"restarted-app-starttime.txt"
+        cmdfile=phase/"restarted-app-cmdline.bin"
+        if pidfile.is_file() and startfile.is_file() and cmdfile.is_file():
+            restarted_pid=int(pidfile.read_text().strip())
+            expected=(out/"app-real-executable.txt").read_text().strip()
+            proc=pathlib.Path(f"/proc/{restarted_pid}")
+            if (proc.joinpath("exe").exists() and os.readlink(proc/"exe")==expected
+                    and proc.joinpath("stat").read_text().split()[21]==startfile.read_text().strip()
+                    and proc.joinpath("cmdline").read_bytes()==cmdfile.read_bytes()):
+                log("interactions-restarted-app-cleanup",pid=restarted_pid,executable=expected)
+                run("kill","-TERM",str(restarted_pid))
+        log("interactions-phase-ended",**status)
+    return status["status"]=="capture-finished" and status.get("returncode")==0
 log("start")
 executable=os.environ.get("APP_EXECUTABLE","localsend_app")
 app=subprocess.Popen([executable],stdin=subprocess.DEVNULL,stdout=open(out/"app.log","w"),stderr=subprocess.STDOUT)
@@ -222,5 +298,10 @@ run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-on-stack")
 if os.environ.get("PROBE_CAPTURE_GEOMETRY","0") == "1":
     capture_geometry_phase()
+interaction_completed=True
+if os.environ.get("PROBE_CAPTURE_INTERACTIONS","0") == "1":
+    interaction_completed=capture_interaction_phase()
 log("completed")
 settings.terminate(); app.terminate()
+if not interaction_completed:
+    raise RuntimeError("Requested interaction phase did not complete its process/API gates; inspect separate raw verdicts")
