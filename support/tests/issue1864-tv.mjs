@@ -5,6 +5,13 @@ const out = 'evidence-cloud';
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8', timeout: 30000 });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const log = data => fs.appendFileSync(`${out}/input-timings.jsonl`, JSON.stringify({ time: Date.now(), ...data }) + '\n');
+function optionalAdb(name,...args) {
+  try { fs.writeFileSync(`${out}/${name}.txt`,adb(...args)); }
+  catch(error) {
+    fs.writeFileSync(`${out}/${name}.txt`,error.stdout ?? '');
+    fs.writeFileSync(`${out}/${name}-error.json`,JSON.stringify({status:error.status,signal:error.signal,stderr:error.stderr,message:error.message},null,2));
+  }
+}
 const response = await fetch('http://127.0.0.1:4723/session', {
   method: 'POST', headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ capabilities: { alwaysMatch: {
@@ -52,8 +59,8 @@ async function mouseTap(x,y,label) {
     method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),
   });
   const body=await result.json();
-  fs.writeFileSync(`${out}/native-mouse-events.txt`,adb('logcat','-d','-v','threadtime','appium:I','*:S'));
   fs.appendFileSync(`${out}/native-mouse-actions.jsonl`,JSON.stringify({time:Date.now(),x,y,label,request,status:result.status,body})+'\n');
+  optionalAdb('native-mouse-events','logcat','-d','-v','threadtime','appium:I','*:S');
   if(!result.ok || body.value?.error) throw new Error('Native mouse executor rejected the action');
 }
 function nodes(xml) {
@@ -64,7 +71,8 @@ async function mouseNode(label, name) {
   for(let attempt=0;attempt<6;attempt++) {
     const capture=attempt===0 ? `${name}-before` : `${name}-before-retry-${attempt}`;
     const xml=await snapshot(capture);
-    const node=nodes(xml).find(n=>(n.text===label || n['content-desc']===label || n['content-desc']?.startsWith(`${label}&#10;`)));
+    const node=nodes(xml).find(n=>n.package==='org.localsend.localsend_app' && n.displayed!=='false'
+      && (n.text===label || n['content-desc']===label || n['content-desc']?.startsWith(`${label}&#10;`)));
     if(node) bounds=[...node.bounds.matchAll(/\d+/g)].map(n=>Number(n[0]));
     else {
       const words=ocr(capture).trim().split('\n').slice(1).map(line=>line.split('\t'));
@@ -85,17 +93,30 @@ async function mouseNode(label, name) {
   await pause(1200);
 }
 async function waitForAppWindow() {
+  const captureId=Date.now();
+  let stable=0;
+  let previousIdentity='';
   for (let attempt=0;attempt<30;attempt++) {
     const window=adb('shell','dumpsys','window','windows');
-    const blocks=window.split(/(?=  Window #\d+ Window\{)/);
-    const ready=blocks.some(block=>/^  Window #\d+ Window\{[^\n]*org\.localsend\.localsend_app[^\n]*\}:/.test(block)
-      && !block.split('\n')[0].includes('EXITING')
-      && block.includes('Surface: shown=true') && block.includes('mDrawState=HAS_DRAWN'));
-    fs.writeFileSync(`${out}/launch-readiness-${attempt}-window.txt`,window);
+    const input=adb('shell','dumpsys','input');
     let pid='';
-    try { pid=adb('shell','pidof','org.localsend.localsend_app').trim(); } catch {}
-    log({type:'readiness',action:'app-window',attempt,ready,pid});
-    if (ready) { await snapshot('launch-ready'); return; }
+    try { pid=adb('shell','pidof','org.localsend.localsend_app').trim(); }
+    catch(error) { log({type:'readiness',action:'pid',attempt,status:error.status,stderr:error.stderr}); }
+    const focus=input.split('  FocusedWindows:')[1]?.split('  FocusRequests:')[0] ?? '';
+    const blocks=window.split(/(?=  Window #\d+ Window\{)/);
+    const readyWindow=pid!=='' && blocks.find(block=>/^  Window #\d+ Window\{[^\n]*org\.localsend\.localsend_app[^\n]*\}:/.test(block)
+      && !block.split('\n')[0].includes('EXITING')
+      && block.includes(` ${pid}:u`) && block.includes('isVisible=true')
+      && focus.includes(`name='${block.match(/Window\{(\S+)/)?.[1]} org.localsend.localsend_app/`)
+      && block.includes('Surface: shown=true') && block.includes('mDrawState=HAS_DRAWN'));
+    const ready=!!readyWindow;
+    const identity=ready ? `${pid}:${readyWindow.match(/Window\{(\S+)/)?.[1]}` : '';
+    fs.writeFileSync(`${out}/launch-readiness-${captureId}-${attempt}-window.txt`,window);
+    fs.writeFileSync(`${out}/launch-readiness-${captureId}-${attempt}-input.txt`,input);
+    stable=ready ? (identity===previousIdentity ? stable+1 : 1) : 0;
+    previousIdentity=identity;
+    log({type:'readiness',action:'app-window',captureId,attempt,ready,stable,pid});
+    if (stable>=2) { await snapshot(`launch-ready-${captureId}`); return; }
     await pause(2000);
   }
   throw new Error('Current non-exiting app window did not finish drawing within 60 seconds');
@@ -112,12 +133,20 @@ async function record(name, action) {
   process.stderr.on('data', data => fs.appendFileSync(`${out}/${name}-screenrecord.log`, data));
   log({ type: 'recording', action: 'start', name });
   await pause(900);
-  await action();
-  await pause(1200);
-  adb('shell', 'pkill', '-INT', 'screenrecord');
-  await finished;
-  adb('pull', path, `${out}/${name}.mp4`);
-  log({ type: 'recording', action: 'end', name });
+  let actionError, captureError;
+  try { await action(); await pause(1200); }
+  catch(error) { actionError=error; }
+  finally {
+    try { adb('shell', 'pkill', '-INT', 'screenrecord'); }
+    catch(error) { log({type:'recording',action:'stop-error',name,status:error.status,message:error.message}); }
+    const exit=await finished;
+    log({type:'recording',action:'process-exit',name,...exit});
+    try { adb('pull', path, `${out}/${name}.mp4`); }
+    catch(error) { captureError=error; log({type:'recording',action:'pull-error',name,status:error.status,message:error.message}); }
+    log({type:'recording',action:'end',name,actionFailed:!!actionError,captureFailed:!!captureError});
+  }
+  if(actionError) throw actionError;
+  if(captureError) throw captureError;
 }
 adb('shell', 'settings', 'put', 'system', 'show_touches', '1');
 adb('shell','setprop','log.tag.appium','INFO');
@@ -184,9 +213,7 @@ const reset=await snapshot('media-reset-before-dpad');
 if (selectedCount(reset,'media-reset-before-dpad') !== 0) throw new Error('Mouse reset did not visibly return to zero');
 async function replay(name) {
   await record(name,async()=>{
-    for(const [index,key] of [20,20,22,23].entries()) {
-      await remote(key); await snapshot(`${name}-key-${index+1}-${key}`);
-    }
+    for(const key of [20,20,22,23]) await remote(key);
   });
 }
 await replay('media-dpad-original');
