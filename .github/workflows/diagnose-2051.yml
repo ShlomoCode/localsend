@@ -7,15 +7,24 @@ on:
         type: choice
         default: saf
         options: [saf, direct-history]
+      apk_run_id:
+        description: Optional immutable historical control build run
+        type: string
+        default: ''
   push:
     branches: [codex/diagnose-2051-open]
     paths: [.github/workflows/diagnose-2051.yml, support/diagnostics/2051/**]
 jobs:
   reproduce:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 30
     env:
       ISSUE2051_SCENARIO: ${{ inputs.scenario || 'saf' }}
+      ISSUE2051_APK_RUN: ${{ inputs.apk_run_id }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Check diagnostic syntax
@@ -41,7 +50,18 @@ jobs:
           export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
           mkdir -p evidence "$ANDROID_AVD_HOME"
           trap 'adb devices > evidence/adb-devices.txt; tail -n 100 evidence/*-emulator.log || true' EXIT
-          curl -fL https://github.com/localsend/localsend/releases/download/v1.16.1/LocalSend-1.16.1-android-x64.apk -o /tmp/localsend.apk
+          if [[ -n "$ISSUE2051_APK_RUN" ]]; then
+            [[ "$ISSUE2051_APK_RUN" =~ ^[0-9]+$ ]]
+            gh run download "$ISSUE2051_APK_RUN" --repo ShlomoCode/localsend --pattern "issue-2051-historical-control-$ISSUE2051_APK_RUN-*" --dir /tmp/issue2051-build
+            mapfile -t apk_paths < <(find /tmp/issue2051-build -name app-release.apk -type f)
+            [[ "${#apk_paths[@]}" == 1 ]]
+            cp "${apk_paths[0]}" /tmp/localsend.apk
+            printf '%s\n' "$ISSUE2051_APK_RUN" > evidence/apk-build-run.txt
+            cp -r /tmp/issue2051-build evidence/apk-build-artifact
+          else
+            curl -fL https://github.com/localsend/localsend/releases/download/v1.16.1/LocalSend-1.16.1-android-x64.apk -o /tmp/localsend.apk
+            printf '%s\n' official-release-v1.16.1 > evidence/apk-build-run.txt
+          fi
           curl -fL https://github.com/gsantner/markor/releases/download/v2.16.1/net.gsantner.markor-v163-2.16.1-flavorDefault-release.apk -o /tmp/markor.apk
           sha256sum /tmp/localsend.apk /tmp/markor.apk > evidence/artifact-sha256.txt
           sudo chmod 666 /dev/kvm
