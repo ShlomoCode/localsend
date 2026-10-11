@@ -1,5 +1,6 @@
 param([string]$ReleaseRoot,[string]$EvidenceDirectory)
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/capture_progress.ps1"
 . "$PSScriptRoot/desktop.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory $EvidenceDirectory
 Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,OSArchitecture|ConvertTo-Json|Set-Content "$EvidenceDirectory/os.json"
 Get-CimInstance Win32_VideoController|Select-Object Name,DriverVersion,VideoModeDescription|ConvertTo-Json|Set-Content "$EvidenceDirectory/gpu.json"
@@ -46,15 +47,6 @@ function AssertSavedGeometry($name,$stateName) {
   if(!$property -or $null -eq $property.Value -or [double]::IsNaN([double]$property.Value) -or [double]::IsInfinity([double]$property.Value) -or [Math]::Abs([double]$property.Value-[double]$expected[$key]) -gt 2){throw "Saved $name geometry does not match measured seed: $key"}
  }
  @{savedGeometryMatchesNative=$true;expected=$expected;dpi=$state.dpi}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-geometry-validity.json"
-}
-function FinishOwnedRecorder($name,$process,$startedUtc) {
- if(!$process){return}
- $forced=$false
- if(!$process.HasExited){
-  $remaining=[Math]::Max(0,45000-([DateTime]::UtcNow-[DateTime]::Parse($startedUtc)).TotalMilliseconds)
-  if(!$process.WaitForExit([int]$remaining)){$forced=$true;$process.Kill();$process.WaitForExit()}
- }
- @{forcedRecorderTermination=$forced;utc=[DateTime]::UtcNow.ToString('o');exitCode=$process.ExitCode;elapsedFromStart=([DateTime]::UtcNow-[DateTime]::Parse($startedUtc)).TotalSeconds;lastProgress=$(if(Test-Path "$EvidenceDirectory/$name-progress.txt"){[string](Get-Content "$EvidenceDirectory/$name-progress.txt" -Raw)}else{''})}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-cleanup.json"
 }
 $app=$null;$recording=$null;$launchClock=$null
 try {
@@ -173,7 +165,7 @@ $cases=@(
  @{name='wide-enabled-again';profile=$wideProfile;restore=$true;excluded=''}
 )
  foreach($case in $cases){foreach($iteration in 1..3){
-  $name="$($case.name)-$iteration";$recording=$null;$app=$null;$launchClock=$null;$recorderStartUtc=$null
+  $name="$($case.name)-$iteration";$recording=$null;$app=$null;$launchClock=$null;$recorderStartUtc=$null;$recorderClock=$null;$progress=$null
   try {
    Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
    $exitDeadline=[DateTime]::UtcNow.AddSeconds(30)
@@ -193,15 +185,14 @@ $cases=@(
    Copy-Item $history "$EvidenceDirectory/$name-history-loaded.json"
    Copy-Item $fzFile "$EvidenceDirectory/$name-config-loaded.json"
    $recorderStartUtc=[DateTime]::UtcNow.ToString('o')
-   $progress="$EvidenceDirectory/$name-progress.txt"
-   if(Test-Path $progress){Remove-Item $progress}
+   $progress=NewCaptureProgressPath $EvidenceDirectory $name
+   $recorderClock=[System.Diagnostics.Stopwatch]::StartNew()
    $recording=Start-Process $env:FFMPEG2380 -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','30','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-stats_period','0.25','-progress',$progress,"$EvidenceDirectory/$name.mp4") -RedirectStandardOutput "$EvidenceDirectory/$name-record.log" -RedirectStandardError "$EvidenceDirectory/$name-record-error.log" -PassThru
    $readyDeadline=[DateTime]::UtcNow.AddSeconds(15)
    do {
     if($recording.HasExited){throw 'Recorder exited before application launch'}
-    $progressBlocks=if(Test-Path $progress){[regex]::Matches([string](Get-Content $progress -Raw),'(?s)frame=(\d+).*?out_time_us=(\d+).*?progress=(continue|end)')}else{@()}
-    if($progressBlocks.Count){
-     $readyBlock=$progressBlocks[$progressBlocks.Count-1]
+    $readyBlock=ReadLiveCaptureProgress $progress $recording
+    if($readyBlock){
      if($readyBlock.Groups[3].Value -eq 'end'){throw 'Recorder ended before application launch'}
      if([int]$readyBlock.Groups[1].Value -gt 0 -and [long]$readyBlock.Groups[2].Value -ge 0){break}
     }
@@ -212,7 +203,7 @@ $cases=@(
    if($recording.HasExited){throw 'Recorder exited immediately before application launch'}
    $recordReadyUtc=[DateTime]::UtcNow.ToString('o');$launchUtc=[DateTime]::UtcNow.ToString('o')
    $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;$launchClock=[System.Diagnostics.Stopwatch]::StartNew()
-   @{case=$case.name;iteration=$iteration;pid=$app.Id;launchUtc=$launchUtc;recordStartUtc=$recorderStartUtc;firstCaptureObservedUtc=$recordReadyUtc;firstCaptureProgress=$readyBlock.Value;recordingPid=$recording.Id}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-timing.json"
+   @{case=$case.name;iteration=$iteration;pid=$app.Id;launchUtc=$launchUtc;recordStartUtc=$recorderStartUtc;firstCaptureObservedUtc=$recordReadyUtc;firstCaptureProgress=$readyBlock.Value;progressFile=$progress;recordingPid=$recording.Id}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-timing.json"
    foreach($seconds in @(0.5,1,3,10)){
     while($launchClock.Elapsed.TotalSeconds -lt $seconds){Start-Sleep -Milliseconds 50}
     if($recording.HasExited){throw 'Recorder exited before startup observation completed'}
@@ -257,7 +248,7 @@ $cases=@(
    @{lastObservedUtc=$lastObservedUtc;lastObservedProgress=$lastObservedProgress;recordingExitedUtc=$recordingExitedUtc;recordingDuration=[double]$video.format.duration;finalProgress=[string](Get-Content $progress -Raw);fullDecode=$true}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-coverage.json"
   } finally {
    [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)
-   FinishOwnedRecorder $name $recording $recorderStartUtc
+   FinishOwnedRecorder $name $recording $recorderClock $progress $EvidenceDirectory
    if($app -and !$app.HasExited){Stop-Process -Id $app.Id -Force;$app.WaitForExit()}
    Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
   }
@@ -265,7 +256,7 @@ $cases=@(
 } finally {
  [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  if('Input2380' -as [type]){[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)}
- if($recording -and !$recording.HasExited){FinishOwnedRecorder $name $recording $recorderStartUtc}
+ if($recording -and !$recording.HasExited){FinishOwnedRecorder $name $recording $recorderClock $progress $EvidenceDirectory}
  if($app -and !$app.HasExited){Stop-Process -Id $app.Id -Force;$app.WaitForExit()}
  Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
  Stop-Transcript

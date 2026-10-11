@@ -1,0 +1,110 @@
+name: Probe issue 2380 recorder readiness
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: windows-11-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Probe missing empty partial and completed progress files
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          . ./support/diagnostics/2380/capture_progress.ps1
+          $summary=@{stage='file-state';status='running'}
+          try {
+          $process=Get-Process -Id $PID
+          $stale="$env:RUNNER_TEMP/probe-progress.txt"
+          [System.IO.File]::WriteAllText($stale,"frame=999`nout_time_us=30000000`nprogress=end")
+          $file=NewCaptureProgressPath $env:RUNNER_TEMP 'probe'
+          $PSVersionTable | Format-List
+          if($file -eq $stale -or (ReadLiveCaptureProgress $file $process)){throw 'Stale previous generation must not be ready'}
+          'PASS missing current generation despite stale previous generation'
+          [System.IO.File]::WriteAllText($file,'')
+          if(ReadLiveCaptureProgress $file $process){throw 'Empty progress must not be ready'}
+          'PASS empty current generation'
+          [System.IO.File]::WriteAllText($file,"frame=1`nout_time_us=100000`nprogress=cont")
+          if(ReadLiveCaptureProgress $file $process){throw 'Partial progress must not be ready'}
+          'PASS incomplete progress block'
+          [System.IO.File]::WriteAllText($file,"frame=1`nout_time_us=100000`nprogress=continue`nframe=2`nout_time_us=")
+          $block=ReadLiveCaptureProgress $file $process
+          if(!$block -or $block.Groups[1].Value -ne '1' -or $block.Groups[2].Value -ne '100000' -or $block.Groups[3].Value -ne 'continue'){throw 'Completed block must survive partial following write'}
+          'PASS complete block followed by partial write'
+          [System.IO.File]::WriteAllText($file,"frame=1`nout_time_us=N/A`nprogress=continue`nframe=2`nout_time_us=200000`nprogress=continue")
+          $block=ReadLiveCaptureProgress $file $process
+          if(!$block -or $block.Groups[1].Value -ne '2'){throw 'Fields from different progress blocks were combined'}
+          'PASS malformed first block cannot borrow fields from next block'
+          [System.IO.File]::WriteAllText($file,"frame=1`nout_time_us=100000`nprogress=continue`nframe=2`nout_time_us=200000`nprogress=end")
+          $block=ReadCaptureProgress $file
+          if(!$block -or $block.Groups[1].Value -ne '2' -or $block.Groups[3].Value -ne 'end'){throw 'Latest complete end block must be recognized'}
+          'PASS latest ended block'
+          $ended=Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','exit 0' -PassThru
+          if(!$ended.WaitForExit(5000)){throw 'Owned probe child did not exit'}
+          if(ReadLiveCaptureProgress $file $ended){throw 'Ended owned process must not be ready'}
+          'PASS ended process cannot become ready from completed text'
+          $clock=[System.Diagnostics.Stopwatch]::StartNew()
+          $remaining=RemainingCaptureGrace $clock
+          if($remaining -lt 43000 -or $remaining -gt 45000){throw 'Monotonic cleanup grace is incorrect'}
+          "PASS initial monotonic grace: $remaining milliseconds"
+          $summary.status='passed';$summary.remainingGrace=$remaining;$summary.psVersion=$PSVersionTable.PSVersion.ToString()
+          } catch {$summary.status='failed';$summary.error=$_.Exception.Message;throw} finally {$summary|ConvertTo-Json|Set-Content "$env:RUNNER_TEMP/file-probe-summary.json"}
+      - name: Probe actual owned recorder startup and normal finalization
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          . ./support/diagnostics/2380/capture_progress.ps1
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile "$env:RUNNER_TEMP/ffmpeg.zip"
+          Expand-Archive "$env:RUNNER_TEMP/ffmpeg.zip" "$env:RUNNER_TEMP/ffmpeg"
+          $ffmpeg=(Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Filter ffmpeg.exe -Recurse|Select-Object -First 1).FullName
+          $progress=NewCaptureProgressPath $env:RUNNER_TEMP 'actual'
+          $video="$env:RUNNER_TEMP/actual-capture.mp4"
+          $clock=[System.Diagnostics.Stopwatch]::StartNew()
+          $recorder=Start-Process $ffmpeg -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','3','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-stats_period','0.25','-progress',$progress,$video) -RedirectStandardOutput "$env:RUNNER_TEMP/actual-record.log" -RedirectStandardError "$env:RUNNER_TEMP/actual-record-error.log" -PassThru
+          $summary=@{stage='actual-capture';status='running';pid=$recorder.Id;progressFile=$progress}
+          try {
+            do {
+              if($recorder.HasExited){throw 'Actual recorder exited before capture readiness'}
+              $block=ReadLiveCaptureProgress $progress $recorder
+              if($block -and $block.Groups[3].Value -eq 'end'){throw 'Actual recorder ended before readiness'}
+              if($block -and [int]$block.Groups[1].Value -gt 0){break}
+              if($clock.Elapsed.TotalSeconds -gt 15){throw 'Actual recorder never became ready'}
+              Start-Sleep -Milliseconds 100
+            }while($true)
+            if($recorder.HasExited -or [long]$block.Groups[2].Value -gt 2000000){throw 'Actual readiness not live/current/early enough'}
+            "PASS real recorder readiness: PID=$($recorder.Id), progress=$($block.Value), generation=$progress"
+            if(!$recorder.WaitForExit((RemainingCaptureGrace $clock))){throw 'Actual recorder did not finalize within monotonic grace'}
+            if($recorder.ExitCode -ne 0){throw 'Actual recorder exited abnormally'}
+            $last=ReadCaptureProgress $progress
+            if(!$last -or $last.Groups[3].Value -ne 'end' -or [int]$last.Groups[1].Value -lt 20){throw 'Actual final progress is incomplete'}
+            & $ffmpeg -v error -i $video -f null NUL
+            if($LASTEXITCODE -ne 0){throw 'Actual complete video decode failed'}
+            "PASS normal finalization and full decode: elapsed=$($clock.Elapsed.TotalSeconds), exit=$($recorder.ExitCode)"
+            $summary.status='passed';$summary.elapsed=$clock.Elapsed.TotalSeconds;$summary.exitCode=$recorder.ExitCode;$summary.readyProgress=$block.Value;$summary.finalProgress=$last.Value
+          } catch {$summary.status='failed';$summary.error=$_.Exception.Message;throw
+          } finally {
+            FinishOwnedRecorder 'actual' $recorder $clock $progress $env:RUNNER_TEMP
+            $summary|ConvertTo-Json|Set-Content "$env:RUNNER_TEMP/actual-probe-summary.json"
+          }
+          # Simulate failure immediately after recorder start: the same observer cleanup
+          # must allow normal capture finalization instead of killing at a timezone offset.
+          $progress=NewCaptureProgressPath $env:RUNNER_TEMP 'early'
+          $clock=[System.Diagnostics.Stopwatch]::StartNew()
+          $recorder=Start-Process $ffmpeg -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','3','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-progress',$progress,"$env:RUNNER_TEMP/early-capture.mp4") -RedirectStandardOutput "$env:RUNNER_TEMP/early-record.log" -RedirectStandardError "$env:RUNNER_TEMP/early-record-error.log" -PassThru
+          try {} finally {FinishOwnedRecorder 'early' $recorder $clock $progress $env:RUNNER_TEMP}
+          $cleanup=Get-Content "$env:RUNNER_TEMP/early-cleanup.json" -Raw|ConvertFrom-Json
+          if($cleanup.forcedRecorderTermination -or $cleanup.exitCode -ne 0 -or $cleanup.elapsedFromStart -gt 45){throw 'Early failure cleanup did not finalize normally within monotonic grace'}
+          & $ffmpeg -v error -i "$env:RUNNER_TEMP/early-capture.mp4" -f null NUL
+          if($LASTEXITCODE -ne 0){throw 'Early failure cleanup recording cannot fully decode'}
+          'PASS actual early-failure cleanup and complete video decode'
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue2380-capture-probe
+          path: |
+            ${{ runner.temp }}/*probe-summary.json
+            ${{ runner.temp }}/*capture.mp4
+            ${{ runner.temp }}/*record*.log
+            ${{ runner.temp }}/*progress*.txt
+            ${{ runner.temp }}/*cleanup.json
+          if-no-files-found: error
