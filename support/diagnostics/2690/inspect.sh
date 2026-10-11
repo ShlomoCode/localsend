@@ -7,7 +7,8 @@ sha256sum evidence/cloud/original.AppImage > evidence/cloud/artifact.sha256
 sudo apt-get update -qq
 sudo apt-get install -y squashfs-tools binutils
 # Extract without executing the application or changing its contents.
-offset=$(grep -abo hsqs evidence/cloud/original.AppImage | head -1 | cut -d: -f1)
+chmod u+x evidence/cloud/original.AppImage
+offset=$(evidence/cloud/original.AppImage --appimage-offset)
 unsquashfs -o "$offset" -d evidence/cloud/AppDir evidence/cloud/original.AppImage
 find evidence/cloud/AppDir -iname "*wayland*" -o -iname "*gtk*" > evidence/cloud/bundled-display-libraries.txt
 find evidence/cloud/AppDir -type f -print0 | while IFS= read -r -d "" f; do
