@@ -53,6 +53,15 @@ text_case("keyboard-off")
 # Paste is a real application action, with clipboard content set by xclip.
 subprocess.run(["xclip","-selection","clipboard"],input=b"Paste control issue2754",check=True)
 click_word("Paste","paste-before"); time.sleep(3); snap("paste-result")
+# Clear the selection through its rendered close control before the next original Text trigger.
+rows=snap("paste-clear-before")
+selection=next(r for r in rows if r["text"].lower()=="selection")
+clear_x=int(selection["left"])+510
+clear_y=int(selection["top"])+int(selection["height"])//2
+log("clear-paste-ui",x=clear_x,y=clear_y)
+run("xdotool","mousemove",str(clear_x),str(clear_y),"click","1"); time.sleep(2)
+cleared=snap("paste-cleared")
+if not any(r["text"].lower()=="text" for r in cleared): raise RuntimeError("Paste selection was not cleared through UI")
 # Keep the same application process and graphical login while changing a supported UI setting.
 settings=subprocess.Popen(["cinnamon-settings","accessibility"],stdout=open(out/"accessibility.log","w"),stderr=subprocess.STDOUT)
 time.sleep(6); snap("accessibility-start")
@@ -64,7 +73,7 @@ if not hits: raise RuntimeError("Supported virtual keyboard row not located; ins
 r=hits[0]; y=int(r["top"])+int(r["height"])//2
 wid=run("xdotool","getwindowfocus").stdout.strip(); geo=run("xdotool","getwindowgeometry","--shell",wid).stdout
 vals=dict(line.split("=",1) for line in geo.splitlines() if "=" in line)
-x=int(vals["X"])+int(vals["WIDTH"])-55
+x=int(vals["X"])+int(vals["WIDTH"])-150
 log("keyboard-toggle-ui",x=x,y=y); run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(4)
 snap("accessibility-after-toggle")
 (out/"keyboard-settings.txt").write_text(run("gsettings","list-recursively","org.cinnamon.desktop.a11y.applications").stdout)
