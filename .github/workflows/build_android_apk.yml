@@ -76,7 +76,7 @@ jobs:
           ISSUE1864_MOUSE: ${{ inputs.mouse }}
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y imagemagick tesseract-ocr
+          sudo apt-get install -y imagemagick tesseract-ocr ffmpeg
           mkdir -p /tmp/issue1864-photos
           for color in red green blue yellow purple orange; do convert -size 640x480 xc:$color /tmp/issue1864-photos/$color.jpg; done
           adb shell mkdir -p /sdcard/Pictures/issue1864
@@ -92,6 +92,9 @@ jobs:
           appium --port 4723 --log evidence-cloud/appium.log &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
           node support/tests/issue1864-tv.mjs
+      - name: Validate recordings and render logged input review aids
+        if: always()
+        run: node support/tests/issue1864-video.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
