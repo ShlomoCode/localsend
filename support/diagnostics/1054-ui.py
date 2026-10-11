@@ -158,7 +158,7 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
     focus(swin)
     normalize(swin, stage + "-sender-normalized")
     screen(stage + "-before-send-selection")
-    click(locate("Receiver1054", stage + "-target", 60))
+    click(locate("Receiver", stage + "-target", 60))
     focus(rwin)
     normalize(rwin, stage + "-receiver-normalized")
     locate("Options", stage + "-approval", 30)
@@ -228,7 +228,7 @@ apps = []
 try:
     dest = Path("/tmp/issue1054-received")
     dest.mkdir()
-    for role in ("Receiver1054", "Sender1054"):
+    for role in ("Receiver", "Sender"):
         bundle = Path("/tmp") / role
         shutil.copytree("released/base", bundle)
         # Exact c1ce storage schema3: quick_save is enum-name string, not the
@@ -242,7 +242,7 @@ try:
         (bundle / "settings.json").write_text(json.dumps(settings))
         executable = str(bundle / "localsend_app")
         command = [executable]
-        if role == "Receiver1054":
+        if role == "Receiver":
             command = ["sudo", "-E", "ip", "netns", "exec", "issue1054-receiver", "runuser", "-u",
                        pwd.getpwuid(os.getuid()).pw_name, "--preserve-environment", "--", "dbus-run-session", "--"] + command
         with (OUT / (role + ".log")).open("w") as log:
@@ -252,6 +252,14 @@ try:
         wid = window(pid)
         apps.append((process, wid, pid))
         focus(wid)
+        normalize(wid, role + "-startup-normalized")
+        # A fresh valid profile opens the ordinary release-notes page. Finish
+        # it through its rendered Done control before checking the home alias.
+        startup = screen(role + "-startup")
+        done = [row for row in startup if row["text"].lower() == "done"]
+        if done:
+            row = done[0]
+            click((row["left"] + row["width"] // 2, row["top"] + row["height"] // 2))
         locate(role, role + "-ready", 30)
         normalize(wid, role + "-ready-normalized")
         (OUT / (role + "-process.json")).write_text(json.dumps({"pid": pid, "exe": os.readlink(f"/proc/{pid}/exe"), "settings": settings}))
