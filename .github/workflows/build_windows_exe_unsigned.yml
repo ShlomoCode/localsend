@@ -18,8 +18,16 @@ on:
         type: choice
         options: [windows-11-arm, windows-2022]
         default: windows-11-arm
+      source_run_id:
+        type: string
+        default: ''
+      source_apk_kind:
+        type: choice
+        options: [original-release, control, tagged]
+        default: original-release
 permissions:
   contents: read
+  actions: read
 jobs:
   windows-android:
     if: inputs.scenario == 'software-emulator'
@@ -98,6 +106,7 @@ jobs:
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
       BS_OS: '15.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2311.mjs
+      SOURCE_APK_KIND: ${{ inputs.source_apk_kind || 'original-release' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -109,6 +118,31 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force C:/tmp/helper,evidence | Out-Null
           node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+      - name: Retrieve exact source-build APK lineage
+        if: inputs.source_apk_kind != 'original-release'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          pattern: issue2311-source-boundary-*
+          merge-multiple: true
+          path: source-artifact
+      - name: Upload selected source-build APK for real receiver workflow
+        if: inputs.source_apk_kind != 'original-release'
+        shell: pwsh
+        run: |
+          $apk="source-artifact/localsend-1.17.0-source-$env:SOURCE_APK_KIND-arm64.apk"
+          if(-not (Test-Path $apk)){throw 'Selected source APK missing'}
+          $identity=Get-Content source-artifact/identity.txt -Raw
+          if($identity -notmatch 'historical_source=7f21d1f9082a43803e05c37f021912e012145aa5'){throw 'Historical source identity differs'}
+          New-Item -ItemType Directory evidence/source-lineage -Force|Out-Null
+          Copy-Item source-artifact/*.txt,source-artifact/*.sha256,source-artifact/*.diff,source-artifact/file_saver*.dart evidence/source-lineage/
+          Get-FileHash $apk | ConvertTo-Json | Set-Content evidence/source-receiver-apk.json
+          curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/upload -F "file=@$apk" -o C:/tmp/helper/source-upload.json
+          if($LASTEXITCODE -ne 0){throw 'Source APK upload failed'}
+          $app=(Get-Content C:/tmp/helper/source-upload.json|ConvertFrom-Json).app_url
+          if(-not $app){throw 'No source app URL returned'}
+          "BASELINE_APP=$app" | Add-Content $env:GITHUB_ENV
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

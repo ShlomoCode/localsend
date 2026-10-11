@@ -72,6 +72,20 @@ try {
 } finally {
  writeFileSync('mobile-control-final-status.json',JSON.stringify({results,metrics:r.status()},null,2));
  if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});
+ if(session){
+  try{
+   const response=await fetch(`https://api-cloud.browserstack.com/app-automate/sessions/${session}.json`,{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+   if(!response.ok)throw new Error('Session details HTTP '+response.status);
+   const detail=(await response.json()).automation_session;
+   writeFileSync('evidence/browserstack-session.json',JSON.stringify({session,buildId:detail.build_hashed_id,browserUrl:detail.browser_url,device:detail.device,os:detail.os_version,app:detail.app_details},null,2));
+   const logResponse=await fetch(`https://api-cloud.browserstack.com/app-automate/builds/${detail.build_hashed_id}/sessions/${session}/devicelogs`,{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+   if(!logResponse.ok)throw new Error('Device logs HTTP '+logResponse.status);
+   let log=await logResponse.text();
+   for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token,auth])if(secret)log=log.replaceAll(secret,'[redacted]');
+   writeFileSync('evidence/device-logs.txt',log);
+   writeFileSync('evidence/cache-boundary-2311.txt',log.split('\n').filter(line=>line.includes('[DEBUG-2311]')).join('\n')+'\n');
+  }catch(error){writeFileSync('evidence/device-logs-error.txt',String(error));}
+ }
  await r.stop();
  writeFileSync('relay-trace.json',JSON.stringify(r.trace,null,2));
 }
