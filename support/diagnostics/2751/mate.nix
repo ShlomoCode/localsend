@@ -56,7 +56,10 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     machine.succeed("nixos-version > /tmp/evidence/environment.txt")
     machine.succeed("readlink -f $(command -v localsend_app) >> /tmp/evidence/environment.txt")
     machine.succeed("sha256sum $(readlink -f $(command -v localsend_app)) >> /tmp/evidence/environment.txt")
-    machine.succeed("printf '%s\\n' '${pkgs.localsend}' '${pkgs.mate.mate-panel}' '${pkgs.mate.mate-desktop}' '${pkgs.mate.mate-settings-daemon}' >> /tmp/evidence/environment.txt")
+    machine.succeed("find $(dirname $(dirname $(readlink -f $(command -v localsend_app)))) -type f -exec sha256sum {} \\; > /tmp/evidence/localsend-package-sha256.txt")
+    machine.succeed("printf '%s\\n' '${pkgs.localsend}' '${pkgs.mate.mate-desktop}' '${pkgs.mate.mate-settings-daemon}' >> /tmp/evidence/environment.txt")
+    machine.succeed("readlink -f $(command -v mate-panel) >> /tmp/evidence/environment.txt")
+    machine.succeed("sha256sum $(readlink -f $(command -v mate-panel)) >> /tmp/evidence/environment.txt")
     machine.screenshot("desktop-ready")
     user_command("xrandr --verbose > /tmp/evidence/xrandr.txt")
     assert "3840x2160" in user_command("xrandr | grep 'current 3840 x 2160\\|3840x2160.*\\*'"), "The display is not running at 4K"
@@ -68,9 +71,14 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
         ("100-live-first", 1, False), ("200-live", 2, False),
         ("100-live-return", 1, False), ("200-fresh", 2, True),
         ("100-fresh", 1, True), ("200-live-repeat", 2, False),
-        ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True)]:
+        ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True),
+        ("200-panel-replace", 2, False), ("100-panel-replace", 1, False)]:
         user_command("gsettings set org.mate.interface window-scaling-factor " + str(scale))
         machine.sleep(8)
+        if label.endswith("panel-replace"):
+            user_command("sh -c 'mate-panel --replace > /tmp/evidence/" + label + "-panel.log 2>&1 &' ")
+            machine.sleep(10)
+            machine.wait_until_succeeds("pgrep mate-panel")
         machine.wait_until_succeeds("pgrep mate-panel")
         if restart:
             machine.succeed("pkill -u alice -f '[l]ocalsend_app'")
@@ -89,6 +97,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
             user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
         machine.screenshot(label)
         machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
+        machine.succeed("for pid in $(pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; done > /tmp/evidence/" + label + "-executables.txt")
         machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';
