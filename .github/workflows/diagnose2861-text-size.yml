@@ -20,4 +20,6 @@ jobs:
         if: always()
         with:
           name: text-size-evidence
-          path: ${{ runner.temp }}/text-size-evidence
+          path: |
+            ${{ runner.temp }}/text-size-evidence
+            !${{ runner.temp }}/text-size-evidence/scale-*/*-app/**
