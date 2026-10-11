@@ -34,7 +34,10 @@ export default async function({session,wd,senderPort,transportStatus}) {
     if(source.includes("Copy")&&source.includes("Close")){event("preview-visible",{name,attempt,transport:transportStatus()});break;}
     await pause(1000);
    }
-   if(!source.includes("Copy")||!source.includes("Close"))throw new Error(`${name}: actual receiver text preview did not become observable; classify UI/transport readiness before attributing failure`);
+   if(!source.includes("Copy")||!source.includes("Close")){
+    await ui("click",136,259,`${name}-windows-error-details`);
+    throw new Error(`${name}: actual receiver text preview did not become observable; classify UI/transport readiness before attributing failure`);
+   }
    const expected=readFileSync(`evidence/${name}.txt`,"utf8");
    if(name==="short"&&!source.includes(expected))throw new Error("Short control preview differs from Windows clipboard");
    await diagnostic(`${name}-processes`,"dumpsys activity -p org.localsend.localsend_app processes");
