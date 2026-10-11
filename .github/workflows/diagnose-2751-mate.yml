@@ -1,0 +1,29 @@
+name: Diagnose 2751 MATE tray scaling
+on:
+  workflow_dispatch:
+jobs:
+  mate-4k:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Enable KVM for the NixOS test VM
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          df -h
+      - name: Run the unmodified NixOS 25.05 package on MATE
+        run: |
+          mkdir -p evidence
+          nix-build support/diagnostics/2751/mate.nix -A driver --no-out-link | tee evidence/driver-path.txt
+          driver=$(tail -1 evidence/driver-path.txt)
+          "$driver/bin/nixos-test-driver" --output-directory "$PWD/evidence" 2>&1 | tee evidence/test-driver.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-2751-mate-4k-${{ github.run_id }}
+          path: evidence/
