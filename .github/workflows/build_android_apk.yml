@@ -128,10 +128,12 @@ jobs:
           avdslim enable dpad issue1864-tv29
           cp "$ISSUE_AVD_DIR/config.ini" evidence-cloud/avd-dpad.ini
           sudo chmod 666 /dev/kvm
-          timeout 180 avdslim start issue1864-tv29 --headless --no-slim --no-lowram > evidence-cloud/emulator-launch.log 2>&1
-          timeout 180 adb wait-for-device
-          for i in $(seq 1 120); do [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break; sleep 2; done
-          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]
+          if timeout 180 avdslim start issue1864-tv29 --headless --no-slim --no-lowram > evidence-cloud/emulator-launch.log 2>&1; then
+            echo 0 > evidence-cloud/emulator-launch-status.txt
+          else
+            echo "$?" > evidence-cloud/emulator-launch-status.txt
+          fi
+          bash support/tests/issue1864-boot.sh
           adb shell getprop > evidence-cloud/getprop.txt
           adb shell settings list system > evidence-cloud/system-settings.txt
           adb shell settings list secure > evidence-cloud/secure-settings.txt
