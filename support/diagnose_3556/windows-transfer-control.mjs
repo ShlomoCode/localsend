@@ -217,6 +217,23 @@ function visibleFavoriteFields(xml){
 function favoriteEditorPresent(xml){
  const names=labels(xml);return names.includes('Add to favorites')&&names.includes('Confirm');
 }
+async function manualInputComparison(){
+ const before=r.status();await click('Manual sending');
+ const opened=await snap('manual-input-open',await waitFor(s=>labels(s).includes('Enter address'),30000,'Manual input dialog did not open'));
+ if(nodes(opened).some(n=>(n['content-desc']==='IP Address'||n.text==='IP Address')&&n.clickable==='true'&&n.displayed==='true'))await click('IP Address');
+ const xml=await waitFor(s=>nodes(s).filter(n=>n.class==='android.widget.EditText').length===1,30000,'Manual IP input must expose one field');
+ await snap('manual-input-ip-mode',xml);
+ const element=await wd('POST',base()+'/element',{using:'class name',value:'android.widget.EditText'}),id=elementId(element);
+ await touch(await wd('GET',base()+'/element/'+id+'/rect'),'Focus single Manual IP input');
+ assert.equal(await wd('GET',base()+'/element/'+id+'/attribute/focused'),'true','Manual input is not focused');
+ await wd('POST',base()+'/element/'+id+'/clear',{});
+ await wd('POST',base()+'/element/'+id+'/value',{text:'127.0.0.1',value:[...'127.0.0.1']});
+ const observed=await snap('manual-input-focused-value');
+ save('manual-input-comparison.json',{scope:'Input comparison only, Cancel without registration; Manual uses settings.port and cannot override relay port',
+  expected:'127.0.0.1',fields:nodes(observed).filter(n=>n.class==='android.widget.EditText'),before,after:r.status()});
+ await click('Cancel');
+ await snap('manual-input-canceled',await waitFor(s=>labels(s).some(v=>/Selection\nFiles: 1\nSize: 1\.0 MB/.test(v)),30000,'Selection did not return after canceling Manual input'));
+}
 async function addFavorite(){
  await click('Favorites');await snap('favorites-before-add');await click('Add');
  const editor=await waitFor(favoriteEditorPresent,30000,'Favorite Add did not expose Add to favorites and Confirm');
@@ -238,24 +255,39 @@ async function addFavorite(){
  fields.sort((a,b)=>a.rect.y-b.rect.y);
  assert(fields.every(f=>f.rect.width>0&&f.rect.height>0),'Favorite fields must be visible');
  const values=['issue3556-cloud-receiver','127.0.0.1','53318'];
- for(let i=0;i<fields.length;i++){
-  assert.equal(await wd('GET',base()+'/element/'+fields[i].id+'/displayed'),true,'Favorite field is no longer displayed before input');
-  await wd('POST',base()+'/element/'+fields[i].id+'/clear',{});
-  await wd('POST',base()+'/element/'+fields[i].id+'/value',{text:values[i],value:[...values[i]]});
-  fields[i].observedText=await wd('GET',base()+'/element/'+fields[i].id+'/text');
+ // Port first is the discriminator: focused input, then blur to Name and re-observe actual rendering.
+ for(const i of [2,0,1]){
+  const id=fields[i].id;
+  assert.equal(await wd('GET',base()+'/element/'+id+'/displayed'),true,'Favorite field is no longer displayed before input');
+  await snap('favorite-field-'+i+'-before-focus');
+  await touch(await wd('GET',base()+'/element/'+id+'/rect'),'Focus favorite field '+i);
+  assert.equal(await wd('GET',base()+'/element/'+id+'/attribute/focused'),'true','Favorite field did not gain actual focus');
+  await snap('favorite-field-'+i+'-focused-before-value');
+  await wd('POST',base()+'/element/'+id+'/clear',{});
+  await wd('POST',base()+'/element/'+id+'/value',{text:values[i],value:[...values[i]]});
+  fields[i].observedText=await wd('GET',base()+'/element/'+id+'/text');
   assert.equal(fields[i].observedText,values[i],'Favorite field did not retain the intended value');
   await snap('favorite-field-'+i+'-filled');
  }
- save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i],observedText:f.observedText})));
+ await touch(await wd('GET',base()+'/element/'+fields[0].id+'/rect'),'Blur Port and IP by focusing Name');
+ assert.equal(await wd('GET',base()+'/element/'+fields[0].id+'/attribute/focused'),'true','Name must be focused to establish Port blur');
+ const blurred=await snap('favorite-fields-after-blur');
+ for(let i=0;i<fields.length;i++){
+  fields[i].observedAfterBlur=await wd('GET',base()+'/element/'+fields[i].id+'/text');
+  assert.equal(fields[i].observedAfterBlur,values[i],'Favorite value changed after focus left the field');
+ }
+ save('favorite-fields-after-blur.json',nodes(blurred).filter(n=>n.class==='android.widget.EditText'));
+ save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i],observedText:f.observedText,observedAfterBlur:f.observedAfterBlur})));
  await snap('favorite-edit-filled');
  const confirmSource=await waitFor(s=>nodes(s).some(n=>(n['content-desc']==='Confirm'||n.text==='Confirm')&&
   n.enabled==='true'&&n.displayed==='true'&&/\[\d+,\d+\]\[\d+,\d+\]/.test(n.bounds||'')),30000,'Confirm did not remain visible after filling the fields');
  const confirm=await wd('POST',base()+'/element',{using:'accessibility id',value:'Confirm'});
  assert.equal(await wd('GET',base()+'/element/'+elementId(confirm)+'/displayed'),true,'Confirm is not displayed');
  await snap('favorite-confirm-without-keyboard-hide',confirmSource);
- await click('Confirm');
+ const registerBefore=r.status();await click('Confirm');
  const registered=await waitFor(s=>labels(s).some(v=>v.includes('issue3556-cloud-receiver')&&v.includes('127.0.0.1'))&&
-  nodes(s).filter(n=>n.class==='android.widget.EditText').length===0,60000,'Favorite registration did not complete through the genuine relay');
+  nodes(s).filter(n=>n.class==='android.widget.EditText').length===0&&r.status().opened>registerBefore.opened,60000,'Favorite registration did not complete through the genuine relay');
+ save('favorite-registration-transport.json',{before:registerBefore,after:r.status()});
  await snap('favorite-registered',registered);
 }
 try{
@@ -307,7 +339,7 @@ try{
  await ui('text("Recent").instance('+(recent.length-1)+')');
  await snap('file-picker-recent');await ui('textContains('+JSON.stringify(name)+')');
  const selected=await waitFor(s=>labels(s).some(v=>/Selection\nFiles: 1\nSize: 1\.0 MB/.test(v)),60000,'LocalSend did not show Selection, one file, and 1.0 MB');
- await snap('selected-one-file',selected);await addFavorite();
+ await snap('selected-one-file',selected);await manualInputComparison();await addFavorite();
  const metricsBefore=r.status();
  // Favorite selection registers again and then startSession sends the already selected file.
  const favorite=await wd('POST',base()+'/element',{using:'-android uiautomator',value:'new UiSelector().descriptionContains("issue3556-cloud-receiver")'});
