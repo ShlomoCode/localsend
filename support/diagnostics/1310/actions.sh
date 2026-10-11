@@ -163,8 +163,13 @@ for version in 1.14.0 1.18.2; do
     xdotool click 1
     sleep 2
     click_label "$version-transfer-ip-mode" IP
-    xdotool type --clearmodifiers --delay 50 10.0.2.2
-    click_label "$version-transfer-confirm-address" Confirm
+    xdotool type --clearmodifiers --delay 100 10.0.2.2
+    sleep 1
+    snapshot "$version-transfer-filled-address"
+    # The release's actual focused TextFormField submits on Enter, using the
+    # same discovery action as Confirm. Retain the fully rendered input first.
+    printf '%s IP address 10.0.2.2 Return\n' "$(date --iso-8601=ns)" >> evidence/input.log
+    xdotool key Return
     sleep 8
     snapshot "$version-transfer-progress"
     sleep 5
