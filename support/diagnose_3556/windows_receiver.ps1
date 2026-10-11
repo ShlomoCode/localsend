@@ -18,9 +18,9 @@ if (Test-Path $readyPath) { Remove-Item $readyPath }
 $report=[ordered]@{
  status='starting'; stage='setup'; startedUtc=[DateTime]::UtcNow.ToString('o')
  release='1.18.2'; artifactUrl='https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.zip'
- environmentMismatch='GitHub-hosted Windows Server 2022/2025 differs from the reported Windows 10 Pro.'
+ environmentMismatch='Peer device and OS are unspecified in issue 2426; this is a real Windows Server 2022 x64 peer.'
  transportBoundary='Android 127.0.0.1:53318 reverse relay to Windows 127.0.0.1:53317; differs from a shared LAN.'
- evidenceLevel='Prepared actual-release UI receiver; inspect cloud evidence before classifying.'
+ evidenceLevel='Actual original Windows LocalSend discovery UI with repeated original Android registration; no file transfer.'
  acceptCapability=@{status='unverified';scope='Window and listener readiness do not verify an observable Accept control.'}
  ocrCapability=@{status='not-probed';limitation=$null}
  runner=$env:RUNNER_NAME; runnerImage=$env:ImageOS; runnerImageVersion=$env:ImageVersion
@@ -203,7 +203,7 @@ try {
  } until(($windows.Count -gt 0 -and $listeners.Count -gt 0) -or [DateTime]::UtcNow -ge $deadline)
  if($windows.Count -eq 0 -or $listeners.Count -eq 0) { throw 'Readiness deadline expired before the release window and its TCP 53317 listener became available.' }
  $appHwnd=[IntPtr]::new($windows[0].Hwnd); [void][ReceiverNative]::Activate($appHwnd); Save-Snapshot 'ready'
- $report.stage='waiting-for-receive-request'; $report.status='ready'; Write-JsonFile $resultPath $report
+ $report.stage='observing-discovered-alias'; $report.status='ready'; Write-JsonFile $resultPath $report
  Write-JsonFile $readyPath @{ ready=$true; utc=[DateTime]::UtcNow.ToString('o'); processId=$app.Id; endpoint=$report.endpoint; destination=$destination; results=$resultPath }
 
  $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds);$lastId=''

@@ -26,7 +26,7 @@ const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
  requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
  release:process.env.ALIAS_BASELINE_APK?'current-c1ce322':'1.17.0',scenario:'Actual Android confirmed alias, Receive, Windows registration, server Stop/Start and relaunch',
- boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','Alias discovery observations only; no file transfer is performed'],
+ boundaries:['Issue 2426 does not specify peer OS; this experiment uses a real Windows Server 2022 x64 peer','Reverse cloud relay differs from reported shared LAN','Alias discovery observations only; no file transfer is performed'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
 let sessionCreationAttempted=false;
