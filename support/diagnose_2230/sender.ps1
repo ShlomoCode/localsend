@@ -89,7 +89,7 @@ try {
   $manifest=Get-Content C:/2230/manifest.json -Raw | ConvertFrom-Json
   foreach($case in $manifest) {
     # Preserve prior verified files, then restore the same empty Books destination.
-    & wsl -d Ubuntu-24.04 -u tester -- bash -lc "mkdir -p /home/tester/2230-verified/$($case.id); find /home/tester/文档/Books -maxdepth 1 -type f -exec mv -t /home/tester/2230-verified/$($case.id) -- {} +"
+    & wsl -d Ubuntu-24.04 -u tester -- bash -lc "mkdir -p /home/tester/2230-verified/$($case.id); find /home/tester/*/Books -maxdepth 1 -type f -exec mv -t /home/tester/2230-verified/$($case.id) -- {} +"
     if($LASTEXITCODE -ne 0) { throw 'Could not preserve preceding received files.' }
     # Arm the actual receiver UI before performing the real sender action.
     $guestArgs=@('-d','Ubuntu-24.04','-u','tester','--','bash',"$linuxRoot/support/diagnose_2230/receiver_control.sh","$linuxRoot/evidence/2230",$case.id,$case.bytes,$case.sha256)
