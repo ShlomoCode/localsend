@@ -1,4 +1,4 @@
-param([string]$Executable,[string]$EvidenceDirectory)
+param([string]$Executable,[string]$EvidenceDirectory,[int]$Repeat=1)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -47,11 +47,16 @@ Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,
 Get-FileHash $Executable -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/executable.json"
 Set-Content "$EvidenceDirectory/payload2277.txt" 'LocalSend issue 2277 exact navigation payload'
 $results=@()
-foreach($animations in @($false,$true)) {
+$cases=@()
+for($trial=1;$trial -le $Repeat;$trial++){foreach($animations in @($false,$true)){$cases+=@{animations=$animations;trial=$trial}}}
+foreach($case in $cases) {
+ $animations=$case.animations
  $name=if($animations){'animations-on'}else{'animations-off'}
+ if($Repeat -gt 1){$name+='-'+$case.trial}
  $folder="$EvidenceDirectory/$name-app"
  Copy-Item (Split-Path $Executable) $folder -Recurse
  @{'flutter.ls_port'=53317;'flutter.ls_alias'='Bug2277';'flutter.ls_locale'='en';'flutter.ls_enable_animations'=$animations;'flutter.ls_save_window_placement'=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 "$folder/settings.json"
+ $env:BUG2277_TRACE="$EvidenceDirectory/$name-route-trace.txt"
  $script:process=Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
  try {
   Start-Sleep -Seconds 12;$script:process.Refresh()

@@ -1,12 +1,56 @@
 name: Diagnose 2277 animations Back
 on:
   workflow_dispatch:
+    inputs:
+      causal:
+        description: Build matched 1.16.1 and four-line historical guard
+        type: boolean
+        default: false
+      repeats:
+        description: Number of independent off/on pairs
+        default: '1'
 jobs:
   release:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        if: ${{ inputs.causal }}
+        with:
+          ref: 216eb5e2ee0f3fc48b9d75ea5de9477c244dd520
+          path: source2277
+      - uses: subosito/flutter-action@v2
+        if: ${{ inputs.causal }}
+        with:
+          flutter-version: 3.24.4
+          channel: stable
+      - name: Build matched baseline and guard
+        if: ${{ inputs.causal }}
+        shell: pwsh
+        run: |
+          $evidence="$env:RUNNER_TEMP/evidence2277"
+          & ./support/diagnostics/prepare2277.ps1 -SourceDirectory source2277 -EvidenceDirectory $evidence
+          flutter --version --machine > "$evidence/flutter.json"
+          Push-Location source2277/app
+          flutter pub get
+          if ($LASTEXITCODE -ne 0) { throw 'Historical dependency resolution failed' }
+          Copy-Item pubspec.lock "$evidence/resolved-pubspec.lock"
+          flutter build windows --release
+          if ($LASTEXITCODE -ne 0) { throw 'Historical baseline build failed' }
+          Copy-Item build/windows/x64/runner/Release "$env:RUNNER_TEMP/baseline2277" -Recurse
+          $path=(Resolve-Path lib/pages/web_send_page.dart).Path
+          $source=[IO.File]::ReadAllText($path)
+          $marker="        _trace('callback didPop=' + didPop.toString());"
+          if (-not $source.Contains($marker)) { throw 'Trace marker missing' }
+          $source=$source.Replace($marker,$marker+"`n        if (_stateEnum != _ServerState.running) {`n          return;`n        }`n")
+          [IO.File]::WriteAllText($path,$source)
+          Copy-Item $path "$evidence/instrumented-guard.dart"
+          git diff -- lib/pages/web_send_page.dart > "$evidence/source-diagnostic.diff"
+          flutter build windows --release
+          if ($LASTEXITCODE -ne 0) { throw 'Historical guard build failed' }
+          Copy-Item build/windows/x64/runner/Release "$env:RUNNER_TEMP/guard2277" -Recurse
+          Pop-Location
       - name: Download official reported release
         shell: pwsh
         run: |
@@ -18,11 +62,16 @@ jobs:
         shell: powershell
         run: |
           $exe = (Get-ChildItem $env:RUNNER_TEMP/release -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
-          & ./support/diagnostics/windows2277.ps1 -Executable $exe -EvidenceDirectory $env:RUNNER_TEMP/evidence2277
+          if ('${{ inputs.causal }}' -eq 'true') {
+            & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/baseline2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/baseline" -Repeat ${{ inputs.repeats }}
+            & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/guard2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/guard" -Repeat ${{ inputs.repeats }}
+          } else {
+            & ./support/diagnostics/windows2277.ps1 -Executable $exe -EvidenceDirectory $env:RUNNER_TEMP/evidence2277 -Repeat ${{ inputs.repeats }}
+          }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: evidence2277
           path: |
             ${{ runner.temp }}/evidence2277
-            !${{ runner.temp }}/evidence2277/*-app/**
+            !${{ runner.temp }}/evidence2277/**/*-app/**
