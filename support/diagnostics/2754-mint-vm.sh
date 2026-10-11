@@ -18,13 +18,30 @@ cat > /tmp/issue2754-mint/seed/bootstrap.sh <<"BOOT"
 set -euxo pipefail
 exec > >(tee /tmp/issue2754-bootstrap.log /dev/ttyS0) 2>&1
 phase=files
-trap 'status=$?; echo "BOOTSTRAP_EXIT phase=$phase status=$status"' EXIT
+monitor_pid=
+trap 'status=$?; echo "BOOTSTRAP_EXIT phase=$phase status=$status"; if [ -n "$monitor_pid" ]; then kill "$monitor_pid" || true; fi' EXIT
 mkdir -p /home/mint/.ssh /home/mint/evidence /home/mint/support/diagnostics
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/ui.py /home/mint/support/diagnostics/2754-ui.py
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/support
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
+# Preserve evidence while package post-install scripts run, independently of SSH readiness.
+(
+  while true; do
+    date -u '+%FT%TZ'
+    ps --forest -eo pid,ppid,etimes,stat,pcpu,pmem,wchan:32,args
+    for process in $(pgrep -x 'apt-get|dpkg|ldconfig.*|mandb' || true); do
+      echo "PACKAGE_PROCESS $process"
+      cat "/proc/$process/status" "/proc/$process/io" "/proc/$process/stack" || true
+    done
+    free -m
+    df -h / /tmp
+    vmstat 1 2
+    sleep 10
+  done
+) > /home/mint/evidence/bootstrap-processes.txt 2>&1 &
+monitor_pid=$!
 phase=apt-sources
 # The live ISO enables an unregistered cdrom source; retain it and disable only that source.
 cp -a /etc/apt /home/mint/evidence/apt-before
@@ -85,7 +102,10 @@ for n in $(seq 1 50); do
 done
 printf "screendump %s/evidence/cloud/bootstrap.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor
 sudo chown -R "$(id -u):$(id -g)" evidence/cloud
-if [ "$ready" != 1 ]; then exit 1; fi
+if [ "$ready" != 1 ]; then
+ timeout 30 scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known mint@127.0.0.1:/home/mint/evidence evidence/cloud/guest || true
+ exit 1
+fi
 set +e
 timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
