@@ -24,7 +24,7 @@ import 'package:localsend_app/widget/dialogs/pin_dialog.dart';
 import 'package:localsend_app/widget/dialogs/quick_save_from_favorites_notice.dart';
 import 'package:localsend_app/widget/dialogs/quick_save_notice.dart';
 import 'package:localsend_app/widget/dialogs/text_field_tv.dart';
-import 'package:localsend_app/widget/dialogs/text_field_with_actions_dialog.dart';
+import 'package:localsend_app/widget/dialogs/text_field_with_actions.dart';
 import 'package:localsend_app/widget/labeled_checkbox.dart';
 import 'package:localsend_app/widget/local_send_logo.dart';
 import 'package:localsend_app/widget/responsive_list_view.dart';
@@ -363,47 +363,40 @@ class SettingsTab extends StatelessWidget {
                     ),
                   ),
                 ),
-                _ButtonEntry(
+                _SettingsEntry(
                   label: t.settingsTab.network.alias,
-                  buttonLabel: vm.aliasController.text,
-                  overflow: TextOverflow.ellipsis,
-                  onTap: () async {
-                    final alias = await showDialog<String>(
-                      context: context,
-                      builder: (_) => TextFieldWithActionsDialog(
-                        name: t.settingsTab.network.alias,
-                        initialValue: vm.aliasController.text,
-                        actionsBuilder: (setDraft) => [
-                          Tooltip(
-                            message: t.settingsTab.network.generateRandomAlias,
-                            child: IconButton(
-                              onPressed: () => setDraft(generateRandomAlias()),
-                              icon: const Icon(Icons.casino),
-                            ),
-                          ),
-                          Tooltip(
-                            message: t.settingsTab.network.useSystemName,
-                            child: IconButton(
-                              onPressed: () async {
-                                final newAlias = await getDeviceName();
-                                if (newAlias == null) {
-                                  return;
-                                }
-
-                                setDraft(newAlias);
-                              },
-                              icon: const Icon(Icons.desktop_windows_rounded),
-                            ),
-                          ),
-                        ],
+                  child: TextFieldWithActions(
+                    name: t.settingsTab.network.alias,
+                    controller: vm.aliasController,
+                    onChanged: (s) async {
+                      await ref.notifier(settingsProvider).setAlias(s);
+                    },
+                    actions: [
+                      Tooltip(
+                        message: t.settingsTab.network.generateRandomAlias,
+                        child: IconButton(
+                          onPressed: () => vm.aliasController.text = generateRandomAlias(),
+                          icon: const Icon(Icons.casino),
+                        ),
                       ),
-                    );
-                    if (alias == null || !context.mounted) {
-                      return;
-                    }
-                    vm.aliasController.text = alias;
-                    await ref.notifier(settingsProvider).setAlias(alias);
-                  },
+                      Builder(
+                        builder: (context) => Tooltip(
+                          message: t.settingsTab.network.useSystemName,
+                          child: IconButton(
+                            onPressed: () async {
+                              final newAlias = await getDeviceName();
+                              if (newAlias == null || !context.mounted || ModalRoute.of(context)?.isCurrent != true) {
+                                return;
+                              }
+
+                              vm.aliasController.text = newAlias;
+                            },
+                            icon: const Icon(Icons.desktop_windows_rounded),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 if (vm.advanced)
                   _SettingsEntry(
@@ -705,13 +698,11 @@ class _ButtonEntry extends StatelessWidget {
   final String label;
   final String buttonLabel;
   final void Function() onTap;
-  final TextOverflow? overflow;
 
   const _ButtonEntry({
     required this.label,
     required this.buttonLabel,
     required this.onTap,
-    this.overflow,
   });
 
   @override
@@ -729,7 +720,6 @@ class _ButtonEntry extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: Text(
             buttonLabel,
-            overflow: overflow,
             style: Theme.of(context).textTheme.titleMedium,
             textAlign: TextAlign.center,
           ),
