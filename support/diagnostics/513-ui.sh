@@ -120,3 +120,14 @@ key ret
 sleep 5
 capture 11-documents-chooser-result
 /home/runner/513-vm/ssh 'export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus; flatpak run --command=sh org.localsend.localsend_app -c '\''ls -l /home/probe/Documents/513-control.txt; find /run/user/$(id -u)/doc -maxdepth 3 -type f -name 513-control.txt -exec sha256sum {} \; '\''' > evidence/vm/chooser-access-control.txt 2>&1
+bash support/diagnostics/513-peer.sh
+capture 12-peer-app
+key alt-tab
+capture 13-sender-peer-list
+# Actual manual-address action; capture the dialog before completing discovery.
+move 540 438
+button true
+button false
+sleep 2
+capture 14-manual-address
+/home/runner/513-vm/ssh 'cat /home/probe/513-peer.log; flatpak documents; ls -la /home/probe/Downloads/513-received' > evidence/vm/peer-state.txt 2>&1
