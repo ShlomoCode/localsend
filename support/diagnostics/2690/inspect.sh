@@ -27,6 +27,34 @@ current_offset=$(evidence/cloud/current.AppImage --appimage-offset)
 unsquashfs -o "$current_offset" -d evidence/cloud/CurrentDir evidence/cloud/current.AppImage
 find evidence/cloud/CurrentDir -iname '*wayland*' > evidence/cloud/current-wayland-files.txt
 readelf -d evidence/cloud/CurrentDir/usr/lib/x86_64-linux-gnu/libgdk-3.so.0 > evidence/cloud/current-gdk-elf.txt
+if [[ ${USE_C1CE:-false} == true ]]; then
+  source_tar=evidence/main-source/source-bundle.tar.gz
+  echo '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  evidence/main-source/source-bundle.tar.gz' | sha256sum -c -
+  test "$(cat evidence/main-source/provenance/source-sha.txt)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+  test ! -s evidence/main-source/provenance/source-diff-after.patch
+  grep -Fxq 'exit_status=0' evidence/main-source/provenance/build-result.txt
+  cmp evidence/main-source/provenance/lock-hashes-before.txt evidence/main-source/provenance/lock-hashes-after.txt
+  git fetch --depth=1 origin c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+  git show c1ce322fb3acf08e44f329b8b7208b8b0d91e244:support/build/appimage/AppImageBuilder_x86_64.yml > evidence/cloud/main-source-recipe.txt
+  cmp evidence/cloud/main-source-recipe.txt support/build/appimage/AppImageBuilder_x86_64.yml
+  sha256sum "$source_tar" > evidence/cloud/main-source-tar.sha256
+  cp evidence/main-source/provenance/build-inputs.json evidence/cloud/main-source-build-inputs.json
+  cp evidence/main-source/provenance/bundle-file-sha256.txt evidence/cloud/main-source-files.txt
+  rm -rf evidence/cloud/CurrentDir
+  mkdir evidence/cloud/CurrentDir
+  tar -xf "$source_tar" -C evidence/cloud/CurrentDir
+  test -x evidence/cloud/CurrentDir/localsend_app
+  source_manifest=$(readlink -f evidence/cloud/main-source-files.txt)
+  (cd evidence/cloud/CurrentDir && sha256sum -c "$source_manifest") > evidence/cloud/main-source-verified.txt
+  for size in 32 128 256; do
+    icon_dir="evidence/cloud/CurrentDir/usr/share/icons/hicolor/${size}x${size}/apps"
+    mkdir -p "$icon_dir"
+    cp "evidence/cloud/CurrentDir/data/flutter_assets/assets/img/logo-$size.png" "$icon_dir/localsend.png"
+  done
+  printf '%s\n' 'Source-built c1ce artifact, not official-release repack' > evidence/cloud/package-source.txt
+else
+  printf '%s\n' 'Official1.18.2 release binary repack, not source-built current main' > evidence/cloud/package-source.txt
+fi
 bash support/diagnostics/2690/package.sh
 docker pull gentoo/stage3:latest
 docker image inspect gentoo/stage3:latest > evidence/cloud/gentoo-image.json

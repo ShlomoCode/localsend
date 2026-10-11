@@ -6,14 +6,27 @@ on:
         description: Existing run to compact without application workloads
         type: string
         default: ''
+      use_c1ce:
+        description: Package the existing source-built c1ce Linux artifact
+        type: boolean
+        default: false
 jobs:
   gentoo:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        if: inputs.evidence_run == '' && inputs.use_c1ce
+        with:
+          name: issue2754-c1ce-flutter3419-linux-x64
+          path: evidence/main-source
+          github-token: ${{ github.token }}
+          run-id: 38132747719
       - name: Inspect official artifact and prepare Gentoo
         if: inputs.evidence_run == ''
+        env:
+          USE_C1CE: ${{ inputs.use_c1ce }}
         run: bash support/diagnostics/2690/inspect.sh
       - uses: actions/download-artifact@v6
         if: inputs.evidence_run != ''
