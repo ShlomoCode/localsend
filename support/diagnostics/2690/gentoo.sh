@@ -37,3 +37,9 @@ find /usr/lib* /lib* -name 'libwayland*' > /evidence/wayland-after.txt
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-current /evidence/current.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-candidate /evidence/repacked-candidate.AppImage'
+printf '%s\n' 'x11-libs/gtk+ wayland X' 'x11-libs/libxkbcommon wayland X' 'media-libs/mesa wayland X' 'dev-libs/weston X desktop gles2 -drm -suid' > /etc/portage/package.use/issue2690
+emerge --pretend --verbose --getbinpkg x11-libs/gtk+ x11-libs/libxkbcommon media-libs/mesa dev-libs/weston > /evidence/wayland-plan.txt
+emerge --verbose --getbinpkg --jobs=2 x11-libs/gtk+ x11-libs/libxkbcommon media-libs/mesa dev-libs/weston
+emerge --info > /evidence/wayland-info.txt
+gcc /diagnostic/gtk-control.c -o /tmp/gtk-control $(pkg-config --cflags --libs gtk+-3.0)
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/wayland.sh'

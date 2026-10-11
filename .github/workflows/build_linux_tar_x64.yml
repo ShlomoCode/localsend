@@ -18,4 +18,5 @@ jobs:
             evidence/cloud/*.log
             evidence/cloud/*.sha256
             evidence/cloud/*.json
+            evidence/cloud/repacked-*.AppImage
             evidence/cloud/launch/**
