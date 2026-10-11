@@ -43,7 +43,7 @@ for(const seconds of [2,10,30]){
  const begin=process.hrtime.bigint();r.record('control-pause-start',undefined,{seconds});
  await new Promise(ok=>setTimeout(ok,seconds*1000));
  assert.equal(s.destroyed,false,'idle connection must stay open');
- const elapsedMs=Number(process.hrtime.bigint()-begin)/1e6;r.record('control-pause-end',undefined,{seconds,elapsedMs});
+ const elapsedMs=Number(process.hrtime.bigint()-begin)/1e6;r.record('control-pause-end',undefined,{seconds,durationMs:elapsedMs});
  s.end(data.subarray(1));
  const chunks=[];for await(const d of s)chunks.push(d);const reply=JSON.parse(Buffer.concat(chunks));
  assert.equal(reply.count,data.length);assert.equal(reply.sha256,expected);
