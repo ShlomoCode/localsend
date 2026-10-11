@@ -9,6 +9,7 @@ import java.io.*;
 import java.security.MessageDigest;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import android.media.MediaMetadataRetriever;
 
 /** Separate fixture app; uses public APIs and never changes LocalSend. */
@@ -19,8 +20,11 @@ public final class MainActivity extends Activity {
   private Uri last;
   public void onCreate(Bundle state){
     super.onCreate(state);
+    SharedPreferences saved=getPreferences(MODE_PRIVATE);
+    for(String value:saved.getStringSet("owned",new HashSet<String>()))owned.add(Uri.parse(value));
+    String lastValue=saved.getString("last",null);if(lastValue!=null)last=Uri.parse(lastValue);
     LinearLayout panel=new LinearLayout(this);panel.setOrientation(1);
-    status=new TextView(this);status.setText(capacity());panel.addView(status);
+    status=new TextView(this);status.setText(capacity()+saved.getString("readyDetails",""));panel.addView(status);
     add(panel,"Stage small data",()->stage(1024*1024,false));
     add(panel,"Stage small video",()->stage(1024*1024,true));
     add(panel,"Stage 1GB video",()->stage(1000000000L,true));
@@ -28,7 +32,7 @@ public final class MainActivity extends Activity {
     add(panel,"Stage 16GB video",()->stage(16000000000L,true));
     add(panel,"Share owned fixture",()->{if(last!=null){Intent i=new Intent(Intent.ACTION_SEND).setType(getContentResolver().getType(last)).putExtra(Intent.EXTRA_STREAM,last).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(i,"Share issue 3556 fixture"));}});
     add(panel,"Refresh capacity",()->status.setText(capacity()));
-    add(panel,"Delete owned fixtures",()->{if(!busy){for(Uri u:owned)getContentResolver().delete(u,null,null);owned.clear();last=null;status.setText(capacity()+"\nDeleted this session's fixture URIs only");}});
+    add(panel,"Delete owned fixtures",()->{if(!busy){for(Uri u:owned)getContentResolver().delete(u,null,null);owned.clear();last=null;getPreferences(MODE_PRIVATE).edit().clear().apply();status.setText(capacity()+"\nDeleted this session's fixture URIs only");}});
     ScrollView scroll=new ScrollView(this);scroll.addView(panel);setContentView(scroll);
   }
   private void add(LinearLayout panel,String title,Runnable action){Button b=new Button(this);b.setText(title);b.setContentDescription(title);b.setAllCaps(false);b.setOnClickListener(v->action.run());panel.addView(b);}
@@ -57,7 +61,10 @@ public final class MainActivity extends Activity {
       StringBuilder hex=new StringBuilder();for(byte b:hash.digest())hex.append(String.format("%02x",b&255));
       String media="";
       if(video){MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);String duration=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);android.graphics.Bitmap frame=retriever.getFrameAtTime(0);if(frame==null)throw new IOException("MP4 frame did not decode");media="\nmediaDurationMs="+duration+" decodedFrame="+frame.getWidth()+"x"+frame.getHeight();frame.recycle();}finally{retriever.release();}}
-      update(capacity()+"\nREADY name="+name+"\nuri="+uri+"\nbytes="+count+"\nsha256="+hex+media+"\nelapsedMs="+(SystemClock.elapsedRealtime()-start));
+      String details="\nREADY name="+name+"\nuri="+uri+"\nbytes="+count+"\nsha256="+hex+media+"\nelapsedMs="+(SystemClock.elapsedRealtime()-start);
+      HashSet<String> retained=new HashSet<>();for(Uri u:owned)retained.add(u.toString());
+      getPreferences(MODE_PRIVATE).edit().putStringSet("owned",retained).putString("last",uri.toString()).putString("readyDetails",details).commit();
+      update(capacity()+details);
     }catch(Exception e){if(uri!=null)getContentResolver().delete(uri,null,null);update(capacity()+"\nFAILED "+e.getClass().getSimpleName()+": "+e.getMessage());}finally{busy=false;}},"fixture-writer").start();
   }
 }

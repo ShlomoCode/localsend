@@ -8,7 +8,7 @@ jobs:
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
-      HOLD_SECONDS: '600'
+      HOLD_SECONDS: '0'
       SELECTION_MATRIX: 'true'
     steps:
       - uses: actions/checkout@v6

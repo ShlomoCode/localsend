@@ -3,3 +3,16 @@ I01	infrastructure	S20 baseline device is available	device catalog	Read saved Br
 I02	infrastructure	Capacity permits one session	live plan	Authenticated plan GET	0 running; maximum 5	STATUS.md	no
 S01	source	File selection copies all bytes	baseline source	Read File path in tag v1.18.2	SAF metadata/content URI; full copy not established	source/file_picker-1.18.2.dart	no
 S02	source	Media/share can differ from File	baseline source and PR3395	Read converter and PR body/comments	Distinct originFile/share paths; runtime evidence pending	source/converters-1.18.2.dart	no
+I03	infrastructure	S20 has capacity for16GB	physical StatFs	Run38103887707	109451628544 free bytes;1MiB fixtures staged and hashed	run-38103887707/	no
+I04	infrastructure	MP4 fixture is valid	Android public media API	Run38104317144	320x240 frame decoded;1000ms duration	run-38104317144/small-video-ready.xml	no
+I05	infrastructure	Source polling sustains device session	default session timeout	Hold run38104317144	TIMEOUT276s; no picker action occurred	run-38104317144/	no
+I06	infrastructure	Downloads data appears inRecent	picker navigation	Run38105027698	OriginalFile opens DocumentsUI; data absent inRecent, ownMP4 visible	run-38105027698/failure.xml	no
+I07	infrastructure	Reverse transport preserves bytes	cloud-only byte controls	Commonrun38104758667	0/1/65537/32MiB and2/10/30s controls pass; physical path unverified	/tmp/localsend-transport-reverse-audit.md	no
+I08	infrastructure	MediaStore data is available in DocumentsUI	owned Downloads directory	Run38105579581	Data absent in native owned directory; changed control to valid MP4	run-38105579581/	no
+C01	control	Small File selection works	1MiB valid MP4	Run38106039616 File picker	Selection Files1 Size1.0MB; no ANR approximately32s	run-38106039616/small-file-control-observations.json	no
+C02	control	Small Media selection works	1MiB valid MP4	Run38106039616 asset picker	Selection Files1 Size1.0MB; no ANR approximately32s	run-38106039616/small-media-control-observations.json	no
+I09	infrastructure	Exact16GB valid MP4 fits on S20	fixture size	Run38106039616	16000000000 bytes; SHA239b292668a102827fc3f75f0035bc2402f8ed8093a49ca2aec10abad47e9f6e; frame320x240; free93457510400	run-38106039616/large-video-ready.xml	no
+I10	infrastructure	Appium Flutter element click stays valid	Send-tab semantic click	Run38106039616	404 after actual tab switch; no large selection action completed; measured-bounds touch used next	run-38106039616/failure.xml	no
+E01	selection	16GB File selection causes ANR	16GB valid MP4 via File	Run38106817361	Selected16.0GB;0ANR/Wait over32.6s; screenshot confirmed	run-38106817361/large-video-file-observations.json	yes
+E02	selection	16GB Media selection causes ANR	Same16GB valid MP4 via Media	Run38106817361	Selected16.0GB with decoded thumbnail;0ANR/Wait over312.3s; screenshot confirmed	run-38106817361/large-video-media-observations.json	yes
+I11	infrastructure	Helper controls survive landscape/activity recreation	Refresh capacity after Media	Run38106817361	Offscreen control404; helper lastURI also lost on recreation; no share action	run-38106817361/failure.xml	no

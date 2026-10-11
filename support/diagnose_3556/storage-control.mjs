@@ -11,6 +11,7 @@ async function touch(rect){await wd('POST',`/session/${session}/actions`,{action
 async function locate(using,value){const e=await wd('POST',`/session/${session}/element`,{using,value});return wd('GET',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/rect`);}
 async function click(name){await touch(await locate('accessibility id',name));}
 async function ui(expression){await touch(await locate('-android uiautomator','new UiSelector().'+expression));}
+async function helperClick(name){await wd('POST',`/session/${session}/element`,{using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description('+JSON.stringify(name)+'))'});await click(name);}
 async function reset(){await wd('POST',`/session/${session}/appium/device/terminate_app`,{appId:'org.localsend.localsend_app'});await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await click('Send\nTab 2 of 3');}
 async function ready(suffix,deadlineMs){const end=Date.now()+deadlineMs;while(Date.now()<end){const s=await wd('GET',`/session/${session}/source`);if(s.includes('FAILED')||s.includes('INSUFFICIENT_STORAGE'))throw Error('Fixture generation failed');if(s.includes('READY')&&s.includes(suffix))return s;await new Promise(r=>setTimeout(r,3000));}throw Error('Fixture staging deadline');}
 function fixtureName(source){const m=source.match(/READY name=([^&<"]+)/);if(!m)throw Error('Fixture name absent');return m[1];}
@@ -24,6 +25,12 @@ async function filePick(file,name){
  await ui('textContains('+JSON.stringify(file)+')');await observe(name,30);
 }
 async function mediaPick(file,name){await reset();await click('Media');let source=await wd('GET',`/session/${session}/source`);if(source.includes('permissioncontroller'))await ui('textMatches("(?i)allow")');await snap(name+'-picker');await ui('descriptionContains('+JSON.stringify(file)+')');await snap(name+'-selected');await ui('descriptionStartsWith("Confirm")');await observe(name,name.startsWith('large')?300:30);}
+async function warmShare(name,seconds){
+ await reset();await snap(name+'-before');const sendBounds=await locate('accessibility id','Manual sending');
+ await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await helperClick('Share owned fixture');await snap(name+'-chooser');await ui('text("LocalSend")');await snap(name+'-first-frame');
+ // A normal next send action, using bounds observed on this app before sharing.
+ await touch(sendBounds);await observe(name,seconds);
+}
 try{
  const plan=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth}}).then(r=>r.json());writeFileSync('evidence/live-plan.json',JSON.stringify(plan));if(plan.parallel_sessions_running>=plan.parallel_sessions_max_allowed)throw Error('No live BrowserStack slot');
  const c=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'appium:newCommandTimeout':2400,'bstack:options':{idleTimeout:600,projectName:'LocalSend bug sprint',buildName:'issue3556-'+process.env.GITHUB_RUN_ID,sessionName:'issue3556-S20-selection-control',debug:true,video:true,networkLogs:false}},firstMatch:[{}]}});
@@ -38,15 +45,12 @@ try{
  if(process.env.SELECTION_MATRIX==='true'){
    await filePick(smallVideo,'small-file-control');
    await mediaPick(smallVideo,'small-media-control');
-   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Stage 16GB video');const largeVideo=fixtureName(await ready('16000000000.mp4',1800000));await snap('large-video-ready');await filePick(largeVideo,'large-video-file');await mediaPick(largeVideo,'large-video-media');
-   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Refresh capacity');await snap('capacity-after-media');
-   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await snap('warm-before-share');const sendBounds=await locate('accessibility id','Manual sending');
-   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Share owned fixture');await snap('large-share-chooser');await ui('text("LocalSend")');await snap('large-share-first-frame');
-   // A real user attempts the next send action while the shared file is added.
-   // The bounds were observed on the same app immediately before sharing.
-   await touch(sendBounds);await observe('large-video-share-warm',300);
+   await warmShare('small-share-control',30);
+   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await helperClick('Stage 16GB video');const largeVideo=fixtureName(await ready('16000000000.mp4',1800000));await snap('large-video-ready');await filePick(largeVideo,'large-video-file');await mediaPick(largeVideo,'large-video-media');
+   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await helperClick('Refresh capacity');await snap('capacity-after-media');
+   await warmShare('large-video-share-warm',300);
  }
- console.log('S20 storage and small fixture snapshots captured. No large file staged or transferred.');
+ console.log('Selection diagnostics captured; no file transfer performed.');
  if(process.env.HOLD_SECONDS){console.log('Owned issue3556 session='+session);const end=Date.now()+Number(process.env.HOLD_SECONDS)*1000;while(Date.now()<end){await new Promise(r=>setTimeout(r,20000));try{await wd('GET',`/session/${session}/source`);}catch(e){console.log('Owned session was ended externally; closing runner.');break;}}await snap('selection-final').catch(()=>{});}
 }catch(e){writeFileSync('evidence/storage-error.txt',String(e));if(session)await snap('failure').catch(()=>{});throw e;}
 finally{if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});}
