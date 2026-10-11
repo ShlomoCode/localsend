@@ -273,6 +273,22 @@ Screenshot "favorites-custom-after-scan"
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-custom-after-scan.json"
 Word "Cancel" "favorites-custom-after-scan"
+Click 497 212
+Start-Sleep -Seconds 8
+Screenshot "nearby-custom-repeat-scan"
+Click 576 212
+Screenshot "favorites-custom-reopened"
+$stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-custom-repeat.json"
+Word "Cancel" "favorites-custom-reopened"
+$currentView=@(Import-Csv "$EvidenceDirectory/nearby-custom-repeat-scan.tsv" -Delimiter "`t" | Where-Object {$_.text -eq "HTTP"}).Count -gt 0
+if($currentView) {
+ # Current merged row has an actual Info button at x868/y288 (run 38106131221).
+ Click 868 288
+ Screenshot "current-device-details"
+ Click 36 59
+ Screenshot "current-details-returned"
+}
 Click 103 245
 Screenshot "settings-top"
 $found=$false
@@ -303,7 +319,21 @@ $fixture="$EvidenceDirectory/fixture-home.txt"
 Get-FileHash $fixture -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/fixture-home-hash.json"
 Word "File" "sender-transfer-selection"
 Screenshot "native-file-picker"
-throw "Native file picker checkpoint: verify field before real transfer"
+# Native picker field and Open measured in actual run 38106065597.
+Click 400 442
+Paste (Resolve-Path $fixture).Path
+Screenshot "native-file-picker-filled"
+Click 464 473
+Start-Sleep -Seconds 3
+Screenshot "sender-file-selected"
+if($currentView) {Click 600 400} else {Word "#2" "sender-file-selected"}
+Start-Sleep -Seconds 3
+Screenshot "sender-transfer-requested"
+Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess | ConvertTo-Json | Set-Content "$EvidenceDirectory/home-transfer-sockets.json"
+[Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
+Start-Sleep -Seconds 2
+Screenshot "receiver-transfer-request"
+throw "Receiver Accept checkpoint: verify actual request before saving"
 
 
 foreach ($name in @("sender","receiver")) {
