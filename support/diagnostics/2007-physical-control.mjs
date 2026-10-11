@@ -268,7 +268,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     assert(['wait','scan'].includes(intervention),'Pre-Trash finalization intervention must be wait or scan');
     const startedMs=Date.now(),targetMs=startedMs+45000;
     const record={intervention,startedUtc:new Date(startedMs).toISOString(),targetUtc:new Date(targetMs).toISOString(),matchedDelayMs:45000};
-    if(intervention==='scan')record.scan=await storage.finalize(fixtureName);
+    if(intervention==='scan'){
+     record.scan=await storage.finalize(fixtureName);
+     const afterScan=Buffer.from(await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName}),'base64');
+     record.afterScanSha256=createHash('sha256').update(afterScan).digest('hex');
+     record.afterScanByteExact=afterScan.equals(expected);
+     assert(record.afterScanByteExact,'Media scan changed received file contents');
+    }
     else await storage.observe('wait-helper-switch-control');
     const remainingMs=Math.max(0,targetMs-Date.now());
     if(remainingMs)await new Promise(r=>setTimeout(r,remainingMs));
@@ -368,18 +374,18 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const deletionDeadline=Date.now()+10000;
    do {
     let pathObservedUtc;
-    const [pathValue,sourceObservation]=await Promise.all([
-     wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName}).catch(error=>{
+    // Keep WebDriver commands serial: the cloud route reported session404 for
+    // concurrent source/pull although underlying Appium remained responsive.
+    const pathValue=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName}).catch(error=>{
       if(!String(error).includes('No such file or directory'))throw error;
       absenceError=String(error);
       return null;
-     }).then(value=>{pathObservedUtc=new Date().toISOString();return value;}),
-     wd('GET',prefix+'/source').then(source=>{
+     }).then(value=>{pathObservedUtc=new Date().toISOString();return value;});
+    const sourceObservation=await wd('GET',prefix+'/source').then(source=>{
       const utc=new Date().toISOString();
       if(deletionTiming==='acknowledged'&&(source.includes('1 file deleted')||source.includes("There's nothing here.")||(samsungFiles&&source.includes('No files'))))writeFileSync('evidence/resend-ready','Actual deletion toast or empty list observed; path existence does not gate resend\n');
       return {source,utc};
-     }),
-    ]);
+     });
     absent=pathValue;
     const toastVisible=sourceObservation.source.includes('1 file deleted');
     const emptyListVisible=sourceObservation.source.includes("There's nothing here.")||(samsungFiles&&sourceObservation.source.includes('No files'));

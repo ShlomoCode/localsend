@@ -10,7 +10,7 @@ const senderPort=Number(process.env.TRANSPORT_SENDER_PORT||53318);
 const r=relay({token,tcpPort:senderPort});await r.start();let session;
 async function wd(method,path,body) {
  const res=await fetch('https://hub-cloud.browserstack.com/wd/hub'+path,{method,headers:{authorization:auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(path==='/session'?240000:120000)});
- const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'').slice(0,600);for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message);}return json.value;
+ const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'');for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');const missingPath=message.includes('No such file or directory');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message.slice(0,2000)+(missingPath?' [No such file or directory]':''));}return json.value;
 }
 async function clickText(text){
  const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:text});
