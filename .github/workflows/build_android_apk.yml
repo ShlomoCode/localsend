@@ -98,8 +98,8 @@ jobs:
           sleep 5
           adb exec-out screencap -p > evidence-cloud/initial.png
           adb shell dumpsys activity activities > evidence-cloud/activity.txt
-          adb logcat -d > evidence-cloud/logcat.txt
-          adb shell uiautomator dump /sdcard/ui.xml 2>&1 | tee evidence-cloud/uiautomator-dump.txt
+          adb logcat -d > evidence-cloud/logcat.txt || echo "Initial optional logcat dump exited $?" > evidence-cloud/logcat-dump-status.txt
+          adb shell uiautomator dump /sdcard/ui.xml 2>&1 | tee evidence-cloud/uiautomator-dump.txt || true
           adb pull /sdcard/ui.xml evidence-cloud/initial.xml || true
       - name: Seed ordinary photos and capture real Media route
         shell: bash
