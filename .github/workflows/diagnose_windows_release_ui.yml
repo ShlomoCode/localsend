@@ -15,6 +15,7 @@ jobs:
           @('[wsl2]', 'networkingMode=nat', 'localhostForwarding=false') | Set-Content "$env:USERPROFILE/.wslconfig" -Encoding ascii
           Copy-Item "$env:USERPROFILE/.wslconfig" evidence/2230/wslconfig.txt
       - name: Install supported Ubuntu 24.04 WSL2
+        timeout-minutes: 8
         uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
