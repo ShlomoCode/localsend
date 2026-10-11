@@ -75,11 +75,16 @@ readelf -d "$NATIVE_OUTPUT/stock-self-query" > "$NATIVE_OUTPUT/elf-stock.txt"
 NATIVE_TEST="$NATIVE_WORK/build-A/tests/at-spi2-atk/socket-local-experiment"
 ldd "$NATIVE_TEST" > "$NATIVE_OUTPUT/loader-A.txt"
 readelf -d "$NATIVE_TEST" > "$NATIVE_OUTPUT/elf-A.txt"
-grep -F "$NATIVE_WORK/build-A/atk-adaptor/" "$NATIVE_OUTPUT/loader-A.txt"
-grep -F "$NATIVE_WORK/build-stock/atk-adaptor/" "$NATIVE_OUTPUT/loader-stock.txt"
 cp "$NATIVE_TEST" "$NATIVE_OUTPUT/socket-local-experiment"
 for NATIVE_VARIANT in stock A; do
   NATIVE_LIBRARY="$NATIVE_WORK/build-$NATIVE_VARIANT/atk-adaptor/libatk-bridge-2.0.so.0"
+  NATIVE_LOADED_LIBRARY=$(awk '$1 == "libatk-bridge-2.0.so.0" { count++; if ($2 != "=>" || $3 !~ /^\//) invalid=1; path=$3 } END { if (count != 1 || invalid) exit 1; print path }' "$NATIVE_OUTPUT/loader-$NATIVE_VARIANT.txt")
+  test -f "$NATIVE_LOADED_LIBRARY"
+  NATIVE_LOADED_CANONICAL=$(readlink -f "$NATIVE_LOADED_LIBRARY")
+  NATIVE_EXPECTED_CANONICAL=$(readlink -f "$NATIVE_LIBRARY")
+  printf 'resolved=%s\ncanonical=%s\nexpected_canonical=%s\n' "$NATIVE_LOADED_LIBRARY" "$NATIVE_LOADED_CANONICAL" "$NATIVE_EXPECTED_CANONICAL" > "$NATIVE_OUTPUT/loader-$NATIVE_VARIANT-identity.txt"
+  test "$NATIVE_LOADED_CANONICAL" = "$NATIVE_EXPECTED_CANONICAL"
+  sha256sum "$NATIVE_LOADED_CANONICAL" > "$NATIVE_OUTPUT/loader-$NATIVE_VARIANT-library.sha256"
   readelf -n "$NATIVE_LIBRARY" > "$NATIVE_OUTPUT/bridge-build-id-$NATIVE_VARIANT.txt"
   sha256sum "$NATIVE_LIBRARY" > "$NATIVE_OUTPUT/bridge-$NATIVE_VARIANT.sha256"
   cp -L "$NATIVE_LIBRARY" "$NATIVE_OUTPUT/libatk-bridge-$NATIVE_VARIANT.so.0"
