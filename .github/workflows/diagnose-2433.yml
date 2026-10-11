@@ -1,0 +1,25 @@
+name: Diagnose AppImage GNOME dash 2433
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fedora-gnome:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot official Fedora 42 cloud VM
+        run: bash support/tests/issue2433-host.sh boot
+      - name: Prepare real GNOME Wayland and supported integration
+        run: bash support/tests/issue2433-host.sh provision
+      - name: Observe actual Shell launches and dash icons
+        run: bash support/tests/issue2433-host.sh observe
+      - name: Preserve diagnostics
+        if: always()
+        run: bash support/tests/issue2433-host.sh collect
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fedora-gnome-2433-evidence
+          path: evidence/cloud/

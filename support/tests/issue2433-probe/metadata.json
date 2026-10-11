@@ -1,0 +1,8 @@
+{
+  "uuid": "issue2433-probe@localsend.test",
+  "name": "LocalSend issue2433 observation",
+  "description": "Read actual GNOME dash and application identity",
+  "shell-version": [
+    "48"
+  ]
+}
