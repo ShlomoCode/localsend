@@ -1,0 +1,114 @@
+name: Diagnose 2007 source build pair
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Immutable baseline commit SHA
+        required: true
+        default: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+        type: string
+      candidate_ref:
+        description: Immutable candidate commit SHA (push first)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-2007-build-pair
+  cancel-in-progress: false
+
+jobs:
+  build-pair:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 210
+    env:
+      BASELINE_REF: ${{ inputs.baseline_ref }}
+      CANDIDATE_REF: ${{ inputs.candidate_ref }}
+      PAIR_OUTPUT: ${{ github.workspace }}/pair-artifacts
+      PAIR_SIGNER: ${{ runner.temp }}/2007-pair-signer.jks
+      PAIR_SIGNER_PASSWORD: localsend-diagnostic-only
+    steps:
+      - name: Require immutable source references
+        shell: bash
+        run: |
+          [[ "$BASELINE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE_REF" != "$CANDIDATE_REF" ]]
+      - name: Checkout diagnostic runner
+        uses: actions/checkout@v6
+        with:
+          path: runner
+          persist-credentials: false
+      - name: Checkout pristine baseline
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.baseline_ref }}
+          path: baseline
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout pristine candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_ref }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read and verify source toolchain pins
+        id: pins
+        shell: bash
+        run: |
+          baseline_flutter=$(jq -er '.flutter' baseline/.fvmrc)
+          candidate_flutter=$(jq -er '.flutter' candidate/.fvmrc)
+          [[ "$baseline_flutter" == 3.41.9 && "$candidate_flutter" == "$baseline_flutter" ]]
+          echo "flutter=$candidate_flutter" >> "$GITHUB_OUTPUT"
+          cmp baseline/rust-toolchain.toml candidate/rust-toolchain.toml
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Bootstrap pinned Flutter and FVM
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.pins.outputs.flutter }}
+          channel: stable
+      - name: Install FVM and create shared ephemeral test signer
+        shell: bash
+        run: |
+          dart pub global activate fvm 4.0.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+          keytool -genkeypair -keystore "$PAIR_SIGNER" -storetype JKS \
+            -storepass "$PAIR_SIGNER_PASSWORD" -keypass "$PAIR_SIGNER_PASSWORD" \
+            -alias diagnostics -keyalg RSA -keysize 2048 -validity 30 \
+            -dname 'CN=LocalSend 2007 diagnostic build pair'
+      - name: Check candidate formatting, analysis and file saver regression
+        shell: bash
+        run: bash runner/support/diagnostics/2007-build-pair.sh check candidate "$GITHUB_WORKSPACE/candidate" "$CANDIDATE_REF"
+      - name: Build baseline through normal release build
+        shell: bash
+        run: bash runner/support/diagnostics/2007-build-pair.sh build baseline "$GITHUB_WORKSPACE/baseline" "$BASELINE_REF"
+      - name: Build candidate through normal release build
+        shell: bash
+        run: bash runner/support/diagnostics/2007-build-pair.sh build candidate "$GITHUB_WORKSPACE/candidate" "$CANDIDATE_REF"
+      - name: Upload source APKs to BrowserStack (no device sessions)
+        shell: bash
+        env:
+          BS_SPRINT_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+          BS_SPRINT_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+        run: bash runner/support/diagnostics/2007-build-pair.sh upload
+      - name: Preserve APKs, checks and provenance even on failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: 2007-source-build-pair-${{ github.run_id }}
+          path: pair-artifacts
+          if-no-files-found: warn
+          retention-days: 14
