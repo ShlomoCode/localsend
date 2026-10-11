@@ -1,0 +1,16 @@
+name: Diagnose 2414 ordinary old PC VM
+on:
+  workflow_dispatch:
+jobs:
+  original-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Real applications in an ordinary 2GiB guest
+        run: bash support/diagnostics/2414-vm.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2414-original-release-vm-${{ github.run_id }}
+          path: evidence/

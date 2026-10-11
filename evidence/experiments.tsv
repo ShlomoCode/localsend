@@ -1,2 +1,3 @@
 id	variable	action	actual_result	evidence	substantive
 E00	metadata	read full issue and release dates	version and OS unknown; v1.17 plausible	STATUS.md	no
+E01	cloud-host harness	5-file real release control	apps start with portable profiles; OCR misses visible Send; no bug assertion reached	run-38103697333/	no

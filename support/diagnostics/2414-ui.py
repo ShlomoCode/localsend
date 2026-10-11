@@ -7,9 +7,13 @@ def run(*args):
     return subprocess.check_output(args, text=True)
 def screen(stage):
     p = out / (stage+'.png'); run('scrot',str(p))
-    t = run('tesseract',str(p),'stdout','--psm','11','tsv')
+    ocr = out / (stage+'-ocr.png'); run('convert',str(p),'-resize','200%',str(ocr))
+    t = run('tesseract',str(ocr),'stdout','--psm','11','tsv')
     (out/(stage+'.tsv')).write_text(t)
-    return list(csv.DictReader(io.StringIO(t),delimiter='\t'))
+    rows=list(csv.DictReader(io.StringIO(t),delimiter='\t'))
+    for row in rows:
+        for key in ['left','top','width','height']: row[key]=str(int(row[key])//2)
+    return rows
 def locate(label,stage,deadline=20):
     end=time.monotonic()+deadline; n=0
     while True:

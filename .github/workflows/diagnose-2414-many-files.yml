@@ -13,7 +13,7 @@ jobs:
       - name: Install supported desktop and original release
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr imagemagick network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
           sudo systemctl start NetworkManager
           mkdir -p evidence released/base
           curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o released/baseline.tar.gz

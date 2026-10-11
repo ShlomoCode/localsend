@@ -9,3 +9,5 @@ Historical baseline: unmodified v1.17.0 Linux x86-64 TAR release, published 2025
 Candidate existing correction: 76a356a2dd12404d2ce482b8b6aa4cf3afc7b6be (2026-08-08), included v1.18.0+, changes receive Options to ResponsiveListView.builder. Unproven hypothesis. No production patch authorized before valid failure.
 
 Plan: validate small-directory real app selection/send/receive Options/save on cloud host; repeat 5,000 ordinary fixed-content files; run ordinary 2CPU/2GiB Linux guest configuration; measure UI response, RSS/PSS, CPU, available memory; repeat baseline. Then isolate exact correction and current source using identical flow. No artificial per-process memory limit. One Actions job at a time. No BrowserStack.
+
+First cloud run [38103697333](https://github.com/ShlomoCode/localsend/actions/runs/38103697333) starts both original 1.17 apps successfully. The screenshot contains Send, but OCR misses its small text, so selection never happens. Classified as harness failure, not reproduction/nonreproduction. Fix: OCR a 2x copy of the screenshot and keep original pixels for evidence. VM script prepared but not run until small-directory flow validates.
