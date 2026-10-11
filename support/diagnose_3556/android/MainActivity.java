@@ -9,6 +9,7 @@ import java.io.*;
 import java.security.MessageDigest;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import android.media.MediaMetadataRetriever;
 
 /** Separate fixture app; uses public APIs and never changes LocalSend. */
 public final class MainActivity extends Activity {
@@ -53,7 +54,9 @@ public final class MainActivity extends Activity {
       }
       ContentValues ready=new ContentValues();ready.put(MediaStore.MediaColumns.IS_PENDING,0);getContentResolver().update(uri,ready,null,null);last=uri;
       StringBuilder hex=new StringBuilder();for(byte b:hash.digest())hex.append(String.format("%02x",b&255));
-      update(capacity()+"\nREADY name="+name+"\nuri="+uri+"\nbytes="+count+"\nsha256="+hex+"\nelapsedMs="+(SystemClock.elapsedRealtime()-start));
+      String media="";
+      if(video){MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);String duration=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);android.graphics.Bitmap frame=retriever.getFrameAtTime(0);if(frame==null)throw new IOException("MP4 frame did not decode");media="\nmediaDurationMs="+duration+" decodedFrame="+frame.getWidth()+"x"+frame.getHeight();frame.recycle();}finally{retriever.release();}}
+      update(capacity()+"\nREADY name="+name+"\nuri="+uri+"\nbytes="+count+"\nsha256="+hex+media+"\nelapsedMs="+(SystemClock.elapsedRealtime()-start));
     }catch(Exception e){if(uri!=null)getContentResolver().delete(uri,null,null);update(capacity()+"\nFAILED "+e.getClass().getSimpleName()+": "+e.getMessage());}finally{busy=false;}},"fixture-writer").start();
   }
 }

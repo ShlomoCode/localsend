@@ -14,4 +14,10 @@ Transport: common cloud relay 6245733 verifies desktop sender to Android receive
 
 Next: stage a small valid media/data fixture with a separate session-owned helper using public Android APIs, record available storage, validate real app selection and transfer, then compare File/Media/share at 16,000,000,000 bytes (decimal interpretation, explicitly recorded). Preserve ANR dialog screenshots, timing, logs, and sent/received hash.
 
+Initial cloud run [38103887707](https://github.com/ShlomoCode/localsend/actions/runs/38103887707) succeeded on diagnostic commit fa25396. Real Samsung S20 model SM-G981B, Android 10 SDK 29: shared storage has 109,451,628,544 available bytes of 116,230,434,816. The helper generated two 1,048,576-byte fixtures through MediaStore: data in 72ms, valid MP4 in 49ms. The official LocalSend application opens normally. Screenshots and UI XML are in `run-38103887707/`. The owned BrowserStack session was deleted in the workflow's finally block.
+
+Data SHA-256: bf63d8a95fcc2e64619813aae35fdcbe871fdd9264caa3f365eb3aed0f679129. MP4 SHA-256: ed01df00930a3aead33673007944163ffbadaad5bbfdf38aedaea2580e70f60c. This proves staging and startup, not selection, transfer, or a failure reproduction.
+
+Thread verified live at 2026-10-11T02:07:27Z: [issue metadata](https://github.com/localsend/localsend/issues/3556) reports `comments=0` and `updated_at=2026-10-08T15:04:23Z`; the paginated comments endpoint returned `[]`, saved in `issue-comments-live.json`. No comment exists to classify. Reporter statements are the original report; source and PR3395 explanations remain hypotheses for unspecified picker variants.
+
 Meaningful reproduction experiments completed: 0. Infrastructure checks do not count.

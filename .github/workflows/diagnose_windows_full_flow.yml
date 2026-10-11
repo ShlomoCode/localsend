@@ -4,10 +4,11 @@ on:
 jobs:
   storage-control:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 50
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      HOLD_SECONDS: '2400'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5

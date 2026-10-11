@@ -17,5 +17,6 @@ try{
  for(let i=0;i<30;i++){const s=await wd('GET',`/session/${session}/source`);if(s.includes('READY')&&s.includes('.mp4'))break;await new Promise(r=>setTimeout(r,1000));}
  await snap('small-video-ready');await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await new Promise(r=>setTimeout(r,4000));await snap('baseline-initial');
  console.log('S20 storage and small fixture snapshots captured. No large file staged or transferred.');
+ if(process.env.HOLD_SECONDS){console.log('Owned issue3556 session='+session);const end=Date.now()+Number(process.env.HOLD_SECONDS)*1000;while(Date.now()<end){await new Promise(r=>setTimeout(r,20000));try{await wd('GET',`/session/${session}/source`);}catch(e){console.log('Owned session was ended externally; closing runner.');break;}}await snap('selection-final').catch(()=>{});}
 }catch(e){writeFileSync('evidence/storage-error.txt',String(e));if(session)await snap('failure').catch(()=>{});throw e;}
 finally{if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});}
