@@ -36,3 +36,7 @@ The exact production-base c1ce322fb3acf08e44f329b8b7208b8b0d91e244 was built onc
 3. Set a window icon directly. This can mask missing desktop association without linking the running window to its installed launcher. The class metadata corrects the measured association and its existing icon together.
 
 No permanent test is added: the observable regression depends on a real integrated AppImage and GNOME Shell. A test that reads the new literal would duplicate the implementation. The diagnostic cloud checks execute that desktop behavior instead.
+
+## Extracted package validation
+
+[Run38134249334](https://github.com/ShlomoCode/localsend/actions/runs/38134249334) confirms byte-identical packaged executables and all17 application libraries, and desktop content differing only by StartupWMClass plus an empty line. Complete packages differ in incidental systemd/APT capture; PACKAGE_BOUNDARIES.md and raw manifests classify every baseline-only file. No GTK/GNOME library is missing and no common shared-library content differs. This is not a claim of identical complete packages.

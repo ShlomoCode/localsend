@@ -1,0 +1,8 @@
+--- evidence/baseline.desktop	2026-10-11 11:05:29.618549438 +0000
++++ evidence/candidate.desktop	2026-10-11 11:05:29.619549435 +0000
+@@ -9,3 +9,5 @@
+ Terminal=false
+ Categories=Utility;
+ Comment=
++
++StartupWMClass=org.localsend.localsend_app

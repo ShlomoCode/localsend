@@ -1,0 +1,505 @@
+baseline/squashfs-root/./bin/journalctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=7f3b22463cb253be77480b5838730f5f58faf62b, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/loginctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4cedb54fa9246d087078cf1db34e621d00ef8e75, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/networkctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=9f7e11ab15d280c365c127dbf930e1ebb75b8d0d, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=5b12ef0ba32fb200a2712928672429d79662e131, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd: symbolic link to ../lib/systemd/systemd
+baseline/squashfs-root/./bin/systemd-ask-password: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=5517ad9cd6418d9453c0e46a2029399be558c724, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-escape: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=a2b19038a3c18e7da84243fc13a723a9b72fa93e, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-inhibit: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=5fe8598628586e9b2195ee3c6bb2fb1388183236, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-machine-id-setup: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=feb34b5b4d039376534cc9fb3591bef6065966ee, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-notify: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=764340195adf1e26350f88611fac4c3e7f8d3694, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-sysext: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=9eb08ede3c14edc97c00b57b7732b732e965a2ab, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-sysusers: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=ceffb1eba1a58f350d630444bcdf7ba6d59b3b99, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-tmpfiles: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=85b77c364056c312d32067fd020eb2a6956b4385, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./bin/systemd-tty-ask-password-agent: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=c5a1f078f9c35dd2fabb95c030ba5e00c40ac4f0, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./etc/modules-load.d/modules.conf: broken symbolic link to ../modules
+baseline/squashfs-root/./etc/sysctl.d/99-sysctl.conf: broken symbolic link to ../sysctl.conf
+baseline/squashfs-root/./etc/systemd/journald.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/logind.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/networkd.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/pstore.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/resolved.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/sleep.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/system.conf: ASCII text
+baseline/squashfs-root/./etc/systemd/user.conf: ASCII text
+baseline/squashfs-root/./etc/xdg/systemd/user: symbolic link to ../../systemd/user
+baseline/squashfs-root/./lib/lsb/init-functions.d/40-systemd: ASCII text
+baseline/squashfs-root/./lib/modprobe.d/systemd.conf: ASCII text
+baseline/squashfs-root/./lib/systemd/libsystemd-shared-249.so: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=3ade2e8f0f369c34a420094150ffec0e30869cc8, stripped
+baseline/squashfs-root/./lib/systemd/network/80-container-host0.network: ASCII text
+baseline/squashfs-root/./lib/systemd/network/80-container-ve.network: ASCII text
+baseline/squashfs-root/./lib/systemd/network/80-container-vz.network: ASCII text
+baseline/squashfs-root/./lib/systemd/network/80-vm-vt.network: ASCII text
+baseline/squashfs-root/./lib/systemd/network/80-wifi-adhoc.network: ASCII text
+baseline/squashfs-root/./lib/systemd/network/80-wifi-ap.network.example: ASCII text
+baseline/squashfs-root/./lib/systemd/network/80-wifi-station.network.example: ASCII text
+baseline/squashfs-root/./lib/systemd/resolv.conf: ASCII text
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-bless-boot-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=567a10c63d61fc52fcb0599d72d38bb4cf5c3dc9, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-cryptsetup-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=da7564daa39c2017c2c17f806813b33c5bca6541, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-debug-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=1a14232ec4b6e8eef016777cf486006e5434ec4d, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-fstab-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=ec3badaaedd602fda12d9a5a500afdb56e9996b1, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-getty-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=e7e922d7d683e525a65f9bb456f8c47dee4a136c, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-gpt-auto-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4995d2f629279551418a3d5d03c1cb9e42ff77e5, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-hibernate-resume-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=136a86bfb088c1d5daca7b16e0f4b77b472d9de3, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-rc-local-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=88f2e3b2f6b42d9991e639d7b08885a3e133d13a, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-run-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=6bdb1ca2af49fa776b303e5450fc26931af1aa7b, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-system-update-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=c44cb86f93c37cb2431abe29c060e2cae2d0c101, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-sysv-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=ca8058c88e539f39dca1443e29bd418bfa635828, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-generators/systemd-veritysetup-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=f3df29334a8d537b4fe0f050eef47b5630ace1e5, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/system-preset/90-systemd.preset: ASCII text
+baseline/squashfs-root/./lib/systemd/system/autovt@.service: symbolic link to getty@.service
+baseline/squashfs-root/./lib/systemd/system/basic.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/blockdev@.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/bluetooth.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/boot-complete.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/console-getty.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/container-getty@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/cryptdisks-early.service: broken symbolic link to ../../../dev/null
+baseline/squashfs-root/./lib/systemd/system/cryptdisks.service: broken symbolic link to ../../../dev/null
+baseline/squashfs-root/./lib/systemd/system/cryptsetup-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/cryptsetup.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/ctrl-alt-del.target: symbolic link to reboot.target
+baseline/squashfs-root/./lib/systemd/system/dbus-org.freedesktop.hostname1.service: symbolic link to systemd-hostnamed.service
+baseline/squashfs-root/./lib/systemd/system/dbus-org.freedesktop.locale1.service: symbolic link to systemd-localed.service
+baseline/squashfs-root/./lib/systemd/system/dbus-org.freedesktop.login1.service: symbolic link to systemd-logind.service
+baseline/squashfs-root/./lib/systemd/system/dbus-org.freedesktop.timedate1.service: symbolic link to systemd-timedated.service
+baseline/squashfs-root/./lib/systemd/system/debug-shell.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/default.target: symbolic link to graphical.target
+baseline/squashfs-root/./lib/systemd/system/dev-hugepages.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/dev-mqueue.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/emergency.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/emergency.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/exit.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/final.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/first-boot-complete.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/getty-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/getty-static.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/getty.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/getty.target.wants/getty-static.service: symbolic link to ../getty-static.service
+baseline/squashfs-root/./lib/systemd/system/getty@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/graphical.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service: symbolic link to ../systemd-update-utmp-runlevel.service
+baseline/squashfs-root/./lib/systemd/system/halt.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/hibernate.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/hwclock.service: broken symbolic link to ../../../dev/null
+baseline/squashfs-root/./lib/systemd/system/hybrid-sleep.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-cleanup.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-fs.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-parse-etc.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-root-device.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-root-device.target.wants/remote-cryptsetup.target: symbolic link to ../remote-cryptsetup.target
+baseline/squashfs-root/./lib/systemd/system/initrd-root-device.target.wants/remote-veritysetup.target: symbolic link to ../remote-veritysetup.target
+baseline/squashfs-root/./lib/systemd/system/initrd-root-fs.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-switch-root.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-switch-root.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-udevadm-cleanup-db.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd-usr-fs.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/initrd.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/kexec.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/kmod-static-nodes.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/kmod.service: symbolic link to systemd-modules-load.service
+baseline/squashfs-root/./lib/systemd/system/local-fs-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/local-fs.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/machine.slice: ASCII text
+baseline/squashfs-root/./lib/systemd/system/modprobe@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/multi-user.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/multi-user.target.wants/getty.target: symbolic link to ../getty.target
+baseline/squashfs-root/./lib/systemd/system/multi-user.target.wants/systemd-ask-password-wall.path: symbolic link to ../systemd-ask-password-wall.path
+baseline/squashfs-root/./lib/systemd/system/multi-user.target.wants/systemd-logind.service: symbolic link to ../systemd-logind.service
+baseline/squashfs-root/./lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service: symbolic link to ../systemd-update-utmp-runlevel.service
+baseline/squashfs-root/./lib/systemd/system/multi-user.target.wants/systemd-user-sessions.service: symbolic link to ../systemd-user-sessions.service
+baseline/squashfs-root/./lib/systemd/system/network-online.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/network-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/network.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/nss-lookup.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/nss-user-lookup.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/paths.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/poweroff.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/printer.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/proc-sys-fs-binfmt_misc.automount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/proc-sys-fs-binfmt_misc.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/procps.service: symbolic link to systemd-sysctl.service
+baseline/squashfs-root/./lib/systemd/system/quotaon.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/rc-local.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/rc-local.service.d/debian.conf: ASCII text
+baseline/squashfs-root/./lib/systemd/system/rc.service: broken symbolic link to ../../../dev/null
+baseline/squashfs-root/./lib/systemd/system/rcS.service: broken symbolic link to ../../../dev/null
+baseline/squashfs-root/./lib/systemd/system/reboot.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/remote-cryptsetup.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/remote-fs-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/remote-fs.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/remote-veritysetup.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/rescue.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/rescue.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service: symbolic link to ../systemd-update-utmp-runlevel.service
+baseline/squashfs-root/./lib/systemd/system/rpcbind.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/runlevel0.target: symbolic link to poweroff.target
+baseline/squashfs-root/./lib/systemd/system/runlevel1.target: symbolic link to rescue.target
+baseline/squashfs-root/./lib/systemd/system/runlevel2.target: symbolic link to multi-user.target
+baseline/squashfs-root/./lib/systemd/system/runlevel3.target: symbolic link to multi-user.target
+baseline/squashfs-root/./lib/systemd/system/runlevel4.target: symbolic link to multi-user.target
+baseline/squashfs-root/./lib/systemd/system/runlevel5.target: symbolic link to graphical.target
+baseline/squashfs-root/./lib/systemd/system/runlevel6.target: symbolic link to reboot.target
+baseline/squashfs-root/./lib/systemd/system/serial-getty@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/shutdown.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sigpwr.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sleep.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/slices.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/smartcard.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sockets.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sockets.target.wants/systemd-initctl.socket: symbolic link to ../systemd-initctl.socket
+baseline/squashfs-root/./lib/systemd/system/sockets.target.wants/systemd-journald-audit.socket: symbolic link to ../systemd-journald-audit.socket
+baseline/squashfs-root/./lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket: symbolic link to ../systemd-journald-dev-log.socket
+baseline/squashfs-root/./lib/systemd/system/sockets.target.wants/systemd-journald.socket: symbolic link to ../systemd-journald.socket
+baseline/squashfs-root/./lib/systemd/system/sound.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/suspend-then-hibernate.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/suspend.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/swap.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sys-fs-fuse-connections.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sys-kernel-config.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sys-kernel-debug.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sys-kernel-tracing.mount: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sysinit.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/cryptsetup.target: symbolic link to ../cryptsetup.target
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/dev-hugepages.mount: symbolic link to ../dev-hugepages.mount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/dev-mqueue.mount: symbolic link to ../dev-mqueue.mount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/kmod-static-nodes.service: symbolic link to ../kmod-static-nodes.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/proc-sys-fs-binfmt_misc.automount: symbolic link to ../proc-sys-fs-binfmt_misc.automount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/sys-fs-fuse-connections.mount: symbolic link to ../sys-fs-fuse-connections.mount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/sys-kernel-config.mount: symbolic link to ../sys-kernel-config.mount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/sys-kernel-debug.mount: symbolic link to ../sys-kernel-debug.mount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/sys-kernel-tracing.mount: symbolic link to ../sys-kernel-tracing.mount
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-ask-password-console.path: symbolic link to ../systemd-ask-password-console.path
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-binfmt.service: symbolic link to ../systemd-binfmt.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-boot-system-token.service: symbolic link to ../systemd-boot-system-token.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-journal-flush.service: symbolic link to ../systemd-journal-flush.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-journald.service: symbolic link to ../systemd-journald.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-machine-id-commit.service: symbolic link to ../systemd-machine-id-commit.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-modules-load.service: symbolic link to ../systemd-modules-load.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-random-seed.service: symbolic link to ../systemd-random-seed.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-sysctl.service: symbolic link to ../systemd-sysctl.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-sysusers.service: symbolic link to ../systemd-sysusers.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup-dev.service: symbolic link to ../systemd-tmpfiles-setup-dev.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup.service: symbolic link to ../systemd-tmpfiles-setup.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service: symbolic link to ../systemd-update-utmp.service
+baseline/squashfs-root/./lib/systemd/system/sysinit.target.wants/veritysetup.target: symbolic link to ../veritysetup.target
+baseline/squashfs-root/./lib/systemd/system/syslog.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/system-systemd\x2dcryptsetup.slice: ASCII text
+baseline/squashfs-root/./lib/systemd/system/system-update-cleanup.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/system-update-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/system-update.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-ask-password-console.path: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-ask-password-console.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-ask-password-wall.path: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-ask-password-wall.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-backlight@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-binfmt.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-bless-boot.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-boot-check-no-failures.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-boot-system-token.service: Unicode text, UTF-8 text
+baseline/squashfs-root/./lib/systemd/system/systemd-exit.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-fsck-root.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-fsck@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-fsckd.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-fsckd.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-halt.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-hibernate-resume@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-hibernate.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-hostnamed.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-hybrid-sleep.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-initctl.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-initctl.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journal-flush.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald-audit.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald-dev-log.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald-varlink@.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-journald@.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-kexec.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-localed.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-localed.service.d/locale-gen.conf: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-logind.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-machine-id-commit.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-modules-load.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-network-generator.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-networkd-wait-online.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-networkd.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-networkd.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-poweroff.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-pstore.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-quotacheck.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-random-seed.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-reboot.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-remount-fs.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-resolved.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-rfkill.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-rfkill.socket: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-suspend-then-hibernate.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-suspend.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-sysctl.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-sysext.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-sysusers.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-time-wait-sync.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-timedated.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-tmpfiles-clean.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-tmpfiles-clean.timer: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-tmpfiles-setup-dev.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-tmpfiles-setup.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-update-utmp-runlevel.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-update-utmp.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-user-sessions.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/systemd-volatile-root.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/time-set.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/time-sync.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/timers.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/timers.target.wants/systemd-tmpfiles-clean.timer: symbolic link to ../systemd-tmpfiles-clean.timer
+baseline/squashfs-root/./lib/systemd/system/umount.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/usb-gadget.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/user-.slice.d/10-defaults.conf: ASCII text
+baseline/squashfs-root/./lib/systemd/system/user-runtime-dir@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/user.slice: ASCII text
+baseline/squashfs-root/./lib/systemd/system/user@.service: ASCII text
+baseline/squashfs-root/./lib/systemd/system/user@.service.d/timeout.conf: ASCII text
+baseline/squashfs-root/./lib/systemd/system/veritysetup-pre.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/veritysetup.target: ASCII text
+baseline/squashfs-root/./lib/systemd/system/x11-common.service: broken symbolic link to ../../../dev/null
+baseline/squashfs-root/./lib/systemd/systemd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=1dc20c4ec464ebf576ddf5ca5954836fee84b922, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-ac-power: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=2bc8222de3af99df8d13b1433bb435484a4d44e8, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-backlight: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=93247ad13afadb880f9a2049bba5764c7bd76bbc, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-binfmt: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=7c1b9c563d79f75d92ed04018e4eaee5524ffbbc, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-bless-boot: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=f4aeb3e1c713be4b0f2664b76466745155199ed9, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-boot-check-no-failures: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=88bb6f7ba6ff7b0c23165bd0dc503a53435be1e1, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-cgroups-agent: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=5f69d0cc249194b2bfeb5833bd3808ecde72962d, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-cryptsetup: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=91529407d072c631f9928154ae6aa96a57000f00, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-fsck: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=3c1a178799b7c18b9dc25b9ef2ded7381be2cad9, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-fsckd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=6ab8ad02f185bc36d97ed7617a601a0fcd5cb805, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-growfs: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=368460d3e494a724477c62510214c61e502dbaf2, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-hibernate-resume: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=581f996e9f015557c2719ecd65b991de1f62c89e, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-hostnamed: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=28359b56b485c9d09de5ca2893ea242ccd1a6ca4, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-initctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=ef10f575602bb37ceabe4184bcacf73480149e18, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-journald: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=110b059b5aaee20bf62d60fd5cc6622dbc2d2327, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-localed: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=6ef392c552ee16b0238a213012cf96162c3d9ad2, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-logind: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=9dd9597b1904d355a205d03e43da4ee0331d5d52, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-makefs: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=940621e4ed15a04f23b7041a9c38392252668cd8, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-modules-load: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=146c854fe60a6734c167e50546260d08736677e3, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-network-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=088b2749fbb29765c34c44a9250c6141976c6ace, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-networkd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=83fc6a6b93437ae102bbaaf66870f4db57e14e4a, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-networkd-wait-online: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=57c5743adcbd943ed6bd1337f9afe14aab960794, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-pstore: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=8e73b386cc168209e88a092414c71356e725426f, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-quotacheck: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4a8302ce4f40dd363dcc4922b63cf55b8693621b, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-random-seed: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=2b5e1611fca52a5918ff2547f4713ebb4a4abf9b, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-remount-fs: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=2c710afeccd553827fdca4c91ad32a34161aa7ca, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-reply-password: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=1439c30f1895e6da7456ed9146df48477696cbfe, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-resolved: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=ecdd20388a6620a3ad1aafda0518b83842c67169, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-rfkill: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=792ae8e9a31868a33a19e57d1c591661a57e1997, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-shutdown: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=3e7ad22ce12ab1c2ec36095b15671650a75417b8, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-sleep: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=824c50f82f1df29bd9e35b576f20bbbf9bc5375e, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-socket-proxyd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=f0bbc25f8a033f0430f83271394afe9e796f2bee, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-sulogin-shell: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=48e9d338201a8d642e9a24304b255f4de646cb88, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-sysctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=bb895c7a97a64b4bc622109fa6633cea0c77a8d5, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-sysv-install: POSIX shell script, ASCII text executable
+baseline/squashfs-root/./lib/systemd/systemd-time-wait-sync: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=6ef4cff628f4949b1019079cf9ece91eec45be62, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-timedated: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=f7cdb459fa8ff318100756cba2310c7a4ea518f7, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-update-utmp: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=98bba32bb4cd07cb6edbcfcfc029615d025f4c9c, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-user-runtime-dir: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=eb72e48cac6765299157c3fe390838e0069ab2a6, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-user-sessions: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=0b9dda93089ec84e684f0995935c0ea8d41aae63, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-veritysetup: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=b82453272645efc0af9ca3e73a33edcf12b0f3d1, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-volatile-root: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=2a137e16d481be56f4fa28c5f5089ff661f8fece, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/systemd/systemd-xdg-autostart-condition: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=7eb48a5a3b86c317acdbe5ebcf398b00120d479c, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./lib/udev/rules.d/70-uaccess.rules: ASCII text
+baseline/squashfs-root/./lib/udev/rules.d/71-seat.rules: ASCII text
+baseline/squashfs-root/./lib/udev/rules.d/73-seat-late.rules: ASCII text
+baseline/squashfs-root/./lib/udev/rules.d/99-systemd.rules: ASCII text
+baseline/squashfs-root/./lib/x86_64-linux-gnu/libcryptsetup.so.12: symbolic link to libcryptsetup.so.12.7.0
+baseline/squashfs-root/./lib/x86_64-linux-gnu/libcryptsetup.so.12.7.0: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=4c87e97304ac7fe6017915326e70a25cdbaaf2a9, stripped
+baseline/squashfs-root/./lib/x86_64-linux-gnu/libdevmapper.so.1.02.1: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=c8b3d98ec20ea90eeb824854a2decaf71eadbe1b, stripped
+baseline/squashfs-root/./usr/bin/bootctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=40be453d0e3b22893215b851ba77d390952d6bba, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/busctl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=f560970236954c762d0f33f1af0ebe1d19b0bf0c, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/hostnamectl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=9d3e1cb9aaf0e68e92412a665b5454b8bc6246cc, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/kernel-install: Bourne-Again shell script, ASCII text executable
+baseline/squashfs-root/./usr/bin/localectl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=339942b0c456261efd3df44150ce7dcc2e9d30f1, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/resolvectl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=8964bd25430baeed8bd1a17fe636c2c0a9881032, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-analyze: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=e0f3625119e7d73dfb5a80065bc0ea0b11f196a1, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-cat: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4568a29ec3cdb41689287042c9d0817b33bc5fe0, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-cgls: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=77fe2ed05843047cf817f3f2aa199c824ee8d4c8, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-cgtop: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4a1de7fd95763be983dd4633d2835ac126e9eb08, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-cryptenroll: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=646a2d20c89544e3d5026a081459fc7de86c5714, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-delta: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=ccf0593cf9a6e1ab568e6fdebea7aa1e37dac6d5, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-detect-virt: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=26a78cceee44f046b99d0741056e5ef7a98f800c, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-id128: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=a1f47710fbec329b64a62b4b88e4eee0e184d783, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-mount: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=53c1f6d3b492995209c7a303f9d430e637f6d4e7, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-path: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=2fbc6cd3d03f237ab17eddcc45cba320aa1f3e48, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-run: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=64566e7052499a5a66c3e81be3fdcf68c1861034, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-socket-activate: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=d9fc55355dbae4108c04b0d0a171d7062e19476c, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-stdio-bridge: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=2d4be26ea5ee1bbf3298416d4d6cd707e5209571, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/bin/systemd-umount: symbolic link to systemd-mount
+baseline/squashfs-root/./usr/bin/timedatectl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=3d9941c1daf3e62e41e3f07209d61e4ac1368879, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/lib/environment.d/99-environment.conf: broken symbolic link to ../../../etc/environment
+baseline/squashfs-root/./usr/lib/kernel/install.d/00-entry-directory.install: Bourne-Again shell script, ASCII text executable
+baseline/squashfs-root/./usr/lib/kernel/install.d/50-depmod.install: Bourne-Again shell script, ASCII text executable
+baseline/squashfs-root/./usr/lib/kernel/install.d/85-initrd.install: POSIX shell script, ASCII text executable
+baseline/squashfs-root/./usr/lib/kernel/install.d/90-loaderentry.install: Bourne-Again shell script, ASCII text executable
+baseline/squashfs-root/./usr/lib/pam.d/systemd-user: ASCII text
+baseline/squashfs-root/./usr/lib/sysctl.d/50-default.conf: ASCII text
+baseline/squashfs-root/./usr/lib/sysctl.d/50-pid-max.conf: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/boot/efi/linuxx64.efi.stub: PE32+ executable (EFI application) x86-64 (stripped to external PDB), for MS Windows
+baseline/squashfs-root/./usr/lib/systemd/boot/efi/linuxx64.elf.stub: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=e4bd880620a8402499c9170da787d8f89d3a8d21, stripped
+baseline/squashfs-root/./usr/lib/systemd/boot/efi/systemd-bootx64.efi: PE32+ executable (EFI application) x86-64 (stripped to external PDB), for MS Windows
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.be.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.be@latin.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.bg.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.de.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.fr.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.it.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.pl.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.pt_BR.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.ru.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.zh_CN.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/catalog/systemd.zh_TW.catalog: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=3127c1e3a02d402e381f262158b7350f4066e4d0, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/lib/systemd/user-generators/systemd-xdg-autostart-generator: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter lib64/ld-linux-x86-64.so.2, BuildID[sha1]=5b1fa36f2e708776e1fd246faa4bfd1dc0d8af56, for GNU/Linux 3.2.0, stripped
+baseline/squashfs-root/./usr/lib/systemd/user-preset/90-systemd.preset: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/app.slice: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/background.slice: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/basic.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/bluetooth.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/default.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/exit.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/graphical-session-pre.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/graphical-session.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/paths.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/printer.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/session.slice: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/shutdown.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/smartcard.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/sockets.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/sound.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/systemd-exit.service: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/systemd-tmpfiles-clean.service: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/systemd-tmpfiles-clean.timer: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/systemd-tmpfiles-setup.service: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/timers.target: ASCII text
+baseline/squashfs-root/./usr/lib/systemd/user/xdg-desktop-autostart.target: ASCII text
+baseline/squashfs-root/./usr/lib/sysusers.d/basic.conf: ASCII text
+baseline/squashfs-root/./usr/lib/sysusers.d/systemd-journal.conf: ASCII text
+baseline/squashfs-root/./usr/lib/sysusers.d/systemd-network.conf: ASCII text
+baseline/squashfs-root/./usr/lib/sysusers.d/systemd-resolve.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/debian.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/home.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/journal-nocow.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/legacy.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/systemd-nologin.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/systemd-pstore.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/systemd-tmp.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/systemd.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/tmp.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/var.conf: ASCII text
+baseline/squashfs-root/./usr/lib/tmpfiles.d/x11.conf: ASCII text
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libacl.so.1: symbolic link to libacl.so.1.1.2301
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libacl.so.1.1.2301: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=99117132cdc6e4b34c4d798bb10da1de61737c6d, stripped
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libargon2.so.1: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=9fe364eb89b8939be2efe99bd1a95a60b9a7825c, stripped
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libip4tc.so.2: symbolic link to libip4tc.so.2.0.0
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libip4tc.so.2.0.0: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=8d55bf1cc917b57d80f38e3a061351e733f20057, stripped
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libjson-c.so.5: symbolic link to libjson-c.so.5.1.0
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libjson-c.so.5.1.0: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=0c95d180d888c75b2b3430df4f5e497949123e36, stripped
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libkmod.so.2: symbolic link to libkmod.so.2.3.7
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libkmod.so.2.3.7: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=c127e6ccb5d1f628bf0bb21a4556b8db1eb632ef, stripped
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libseccomp.so.2: symbolic link to libseccomp.so.2.5.3
+baseline/squashfs-root/./usr/lib/x86_64-linux-gnu/libseccomp.so.2.5.3: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=3f79a2bf4089e99eb5a86eaf78e504409650e85b, stripped
+baseline/squashfs-root/./usr/share/apport/package-hooks/systemd.py: Python script, ASCII text executable
+baseline/squashfs-root/./usr/share/bash-completion/completions/bootctl: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/busctl: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/hostnamectl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bash-completion/completions/journalctl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bash-completion/completions/kernel-install: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/localectl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bash-completion/completions/loginctl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bash-completion/completions/networkctl: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/resolvectl: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemctl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-analyze: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-cat: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-cgls: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-cgtop: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-delta: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-detect-virt: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-id128: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-path: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-resolve: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/systemd-run: ASCII text
+baseline/squashfs-root/./usr/share/bash-completion/completions/timedatectl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/bug/libcryptsetup12: Bourne-Again shell script, ASCII text executable
+baseline/squashfs-root/./usr/share/bug/systemd/control: ASCII text
+baseline/squashfs-root/./usr/share/bug/systemd/script: Bourne-Again shell script, Unicode text, UTF-8 text executable
+baseline/squashfs-root/./usr/share/dbus-1/services/org.freedesktop.systemd1.service: symbolic link to ../system-services/org.freedesktop.systemd1.service
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.hostname1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.locale1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.login1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.network1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.resolve1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.systemd1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system-services/org.freedesktop.timedate1.service: ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.hostname1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.locale1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.login1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.network1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.resolve1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.systemd1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/dbus-1/system.d/org.freedesktop.timedate1.conf: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/doc/libacl1/copyright: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/doc/libargon2-1/copyright: ASCII text
+baseline/squashfs-root/./usr/share/doc/libcryptsetup12/copyright: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/doc/libdevmapper1.02.1/copyright: ASCII text
+baseline/squashfs-root/./usr/share/doc/libip4tc2/copyright: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/doc/libjson-c5/README: ASCII text
+baseline/squashfs-root/./usr/share/doc/libjson-c5/copyright: ASCII text
+baseline/squashfs-root/./usr/share/doc/libkmod2/copyright: ASCII text
+baseline/squashfs-root/./usr/share/doc/libseccomp2/copyright: ASCII text
+baseline/squashfs-root/./usr/share/doc/systemd/CODING_STYLE.md.gz: gzip compressed data, max compression, from Unix, original size modulo 2^32 25598
+baseline/squashfs-root/./usr/share/doc/systemd/DISTRO_PORTING.md: ASCII text
+baseline/squashfs-root/./usr/share/doc/systemd/ENVIRONMENT.md.gz: gzip compressed data, max compression, from Unix, original size modulo 2^32 15507
+baseline/squashfs-root/./usr/share/doc/systemd/GVARIANT-SERIALIZATION.md.gz: gzip compressed data, max compression, from Unix, original size modulo 2^32 4131
+baseline/squashfs-root/./usr/share/doc/systemd/HACKING.md.gz: gzip compressed data, max compression, from Unix, original size modulo 2^32 11320
+baseline/squashfs-root/./usr/share/doc/systemd/TRANSIENT-SETTINGS.md.gz: gzip compressed data, max compression, from Unix, original size modulo 2^32 9847
+baseline/squashfs-root/./usr/share/doc/systemd/TRANSLATORS.md: ASCII text
+baseline/squashfs-root/./usr/share/doc/systemd/UIDS-GIDS.md.gz: gzip compressed data, max compression, from Unix, original size modulo 2^32 17427
+baseline/squashfs-root/./usr/share/doc/systemd/copyright: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/lintian/overrides/libcryptsetup12: ASCII text
+baseline/squashfs-root/./usr/share/lintian/overrides/systemd: ASCII text
+baseline/squashfs-root/./usr/share/pkgconfig/systemd.pc: ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.hostname1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.locale1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.login1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.network1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.resolve1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.systemd1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/actions/org.freedesktop.timedate1.policy: XML 1.0 document, ASCII text
+baseline/squashfs-root/./usr/share/polkit-1/rules.d/systemd-networkd.rules: ASCII text
+baseline/squashfs-root/./usr/share/systemd/kbd-model-map: ASCII text
+baseline/squashfs-root/./usr/share/systemd/language-fallback-map: ASCII text
+baseline/squashfs-root/./usr/share/systemd/tmp.mount: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_bootctl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_busctl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_hostnamectl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_journalctl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_kernel-install: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_localectl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_loginctl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_networkctl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_resolvectl: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_sd_hosts_or_user_at_host: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_sd_outputmodes: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_sd_unit_files: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemctl: Unicode text, UTF-8 text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd-analyze: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd-delta: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd-inhibit: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd-path: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd-run: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_systemd-tmpfiles: ASCII text
+baseline/squashfs-root/./usr/share/zsh/vendor-completions/_timedatectl: ASCII text
+baseline/squashfs-root/./var/lib/polkit-1/localauthority/10-vendor.d/systemd-networkd.pkla: ASCII text
