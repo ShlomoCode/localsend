@@ -1,5 +1,6 @@
 """Measure screenshot pixels, independently of panel configuration and icon files."""
 import json
+import re
 import sys
 from pathlib import Path
 from PIL import Image
@@ -12,7 +13,12 @@ for path in sorted(directory.glob("*.png")):
     image = Image.open(path).convert("RGB")
     assert image.size == (3840, 2160), image.size
     scale = 2 if path.name.startswith("200") else 1
-    panel_height = 25 * scale
+    windows_path = directory / "guest-evidence" / "evidence" / (path.stem + "-windows.txt")
+    if path.stem == "100-gui-before":
+        windows_path = directory / "guest-evidence" / "evidence" / "100-live-first-windows.txt"
+    panel_match = re.search(r'"Top Panel".*3840x(\d+)\+0\+0', windows_path.read_text())
+    assert panel_match, windows_path
+    panel_height = int(panel_match.group(1))
     # BlackMATE's tray handle is gray. LocalSend is the leftmost white tray icon.
     # Keep the clock outside the region. Retain crops for independent inspection.
     crop = image.crop((3200, 0, 3840 - 140 * scale, panel_height))
