@@ -53,6 +53,11 @@ jobs:
             adb -s "$serial" shell monkey -p org.localsend.localsend_app 1
           done
           adb -s emulator-5554 install /tmp/markor.apk
+          adb -s emulator-5554 shell pm grant net.gsantner.markor android.permission.READ_EXTERNAL_STORAGE || true
+          adb -s emulator-5554 shell pm grant net.gsantner.markor android.permission.WRITE_EXTERNAL_STORAGE || true
+          adb -s emulator-5554 shell appops set net.gsantner.markor MANAGE_EXTERNAL_STORAGE allow
+          adb -s emulator-5554 shell dumpsys package net.gsantner.markor > evidence/markor-permissions.txt
+          adb -s emulator-5554 shell appops get net.gsantner.markor > evidence/markor-appops.txt
           appium --port 4723 > evidence/appium.log 2>&1 &
           sleep 5
           python3 support/diagnostics/2051/scenario.py
