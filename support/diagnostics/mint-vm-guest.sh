@@ -25,7 +25,7 @@ for ((i=0; i<180; i++)); do
 done
 [[ -n "$SESSION_PID" ]] || fail 'Cinnamon session process did not start within 180 seconds.'
 SESSION_ENV=$(tr '\0' '\n' < "/proc/$SESSION_PID/environ")
-for key in DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XAUTHORITY; do
+for key in DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR; do
   value=$(printf '%s\n' "$SESSION_ENV" | sed -n "s/^$key=//p" | head -n1)
   [[ -z "$value" ]] || export "$key=$value"
 done
@@ -38,7 +38,7 @@ done
 ps -u mint -o pid,ppid,comm,args > "$EVIDENCE/desktop-processes.txt"
 [[ -n "$DESKTOP_PID" ]] || fail 'Cinnamon desktop process did not start within 180 seconds.'
 DESKTOP_ENV=$(tr '\0' '\n' < "/proc/$DESKTOP_PID/environ")
-for key in DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XAUTHORITY LANG LC_ALL LANGUAGE; do
+for key in DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR LANG LC_ALL LANGUAGE; do
   value=$(printf '%s\n' "$DESKTOP_ENV" | sed -n "s/^$key=//p" | head -n1)
   [[ -z "$value" ]] || export "$key=$value"
 done
@@ -46,14 +46,18 @@ done
 # A running Cinnamon desktop supplies the session identity when absent there.
 export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-X-Cinnamon}"
 [[ -n "${DISPLAY:-}" && "${XDG_CURRENT_DESKTOP:-}" == *Cinnamon* && "${XDG_SESSION_TYPE:-}" == x11 ]] || fail "Expected Cinnamon/X11 session; DISPLAY=${DISPLAY:-} desktop=${XDG_CURRENT_DESKTOP:-} session=${XDG_SESSION_TYPE:-}"
-export DISPLAY XDG_RUNTIME_DIR="/run/user/$(id -u mint)"
+export DISPLAY XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u mint)}"
 BUS="$XDG_RUNTIME_DIR/bus"
 for ((i=0; i<180; i++)); do [[ -S "$BUS" ]] && break; sleep 1; done
 [[ -S "$BUS" ]] || fail 'Mint desktop D-Bus session socket did not appear within 180 seconds.'
-export DBUS_SESSION_BUS_ADDRESS="unix:path=$BUS"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$BUS}"
 export XAUTHORITY="${XAUTHORITY:-$HOME_MINT/.Xauthority}"
 export DEBIAN_FRONTEND=noninteractive
 dpkg-query -W -f='${Package} ${Version}\n' cinnamon cinnamon-session flatpak fontconfig > "$EVIDENCE/guest-package-versions.txt" 2>&1 || true
+for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+  [[ -f "$source_file" ]] || continue
+  sed -Ei '/^[[:space:]]*deb(-src)?[[:space:]].*cdrom:/s/^/# /' "$source_file"
+done
 apt-get update
 apt-get install -y xvfb openbox dbus-x11 flatpak imagemagick xdotool x11-utils x11-xserver-utils iproute2 gdb strace fontconfig locales libgtk-3-0 libayatana-appindicator3-1 libgl1-mesa-dri libegl1 libgles2 curl procps
 curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
