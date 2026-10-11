@@ -24,6 +24,7 @@ jobs:
           lscpu >> evidence/environment.txt
       - name: Real directory selection and receive Options control
         run: |
+          bash support/diagnostics/2414-network.sh
           dbus-run-session -- xvfb-run -a -s '-screen 0 1200x800x24' bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/openbox.log 2>&1 & python3 support/diagnostics/2414-ui.py' > evidence/ui-input.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
