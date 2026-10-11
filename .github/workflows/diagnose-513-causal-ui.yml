@@ -118,9 +118,11 @@ jobs:
           printf 'LocalSend issue 513 same byte control\n' > /home/probe/Downloads/513-control.txt
           cp /home/probe/Downloads/513-control.txt /home/probe/Documents/513-control.txt
           sha256sum /home/probe/{Downloads,Documents}/513-control.txt
+          stat -c '%n inode=%i size=%s' /home/probe/{Downloads,Documents}/513-control.txt
           export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0
           gdbus introspect --session --dest org.freedesktop.portal.Documents --object-path /org/freedesktop/portal/documents > /home/probe/513-portal-introspection.txt
-          nohup dbus-monitor --session "path='/org/freedesktop/portal/documents'" > /home/probe/513-portal-calls.txt 2>&1 < /dev/null &
+          # Portal method replies have no object path; include the service sender.
+          nohup dbus-monitor --session "path='/org/freedesktop/portal/documents'" "sender='org.freedesktop.portal.Documents'" > /home/probe/513-portal-calls.txt 2>&1 < /dev/null &
           gsettings set org.gnome.desktop.session idle-delay 0
           gsettings set org.gnome.desktop.screensaver lock-enabled false
           gsettings set org.gnome.desktop.interface enable-animations false

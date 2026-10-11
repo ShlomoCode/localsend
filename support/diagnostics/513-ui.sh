@@ -15,6 +15,13 @@ for maps in /proc/[0-9]*/maps; do
   printf '\n'
   cat "$maps" | grep desktop_drop
   sha256sum "/proc/$pid/root$plugin"
+  if test -e "/proc/$pid/root/home/probe/Documents/513-control.txt"; then
+    echo ACTUAL_APP_RAW_DOCUMENTS_PATH_VISIBLE
+  else
+    echo ACTUAL_APP_RAW_DOCUMENTS_PATH_NOT_VISIBLE
+  fi
+  # Inspect the actual live app's mount namespace, not another Flatpak instance.
+  sudo -u probe find "/proc/$pid/root/run/user/1000/doc" -maxdepth 6 -type f -name 513-control.txt -exec sha256sum {} \; 2>&1 || true
 done
 GUEST
 }
