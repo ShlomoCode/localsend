@@ -23,7 +23,7 @@ on:
         description: Full controls or focused early-startup discriminators
         default: full
         type: choice
-        options: ['full', 'startup']
+        options: ['full', 'startup', 'driver']
 
 jobs:
   full-session:
@@ -427,6 +427,10 @@ jobs:
           GUEST
           modes=(baseline fresh software zink x11 isolated-network software-engine adwaita adwaita-dark)
           if [ "$PROBE_GROUP" = startup ]; then modes=(baseline engine-software no-at-bridge im-simple); fi
+          if [ "$PROBE_GROUP" = driver ]; then
+            modes=(baseline software softpipe)
+            timeout 180 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo apt-get install -y --no-install-recommends mesa-utils-bin; mkdir -p /home/probe/3553-graphics-probe; cp /usr/bin/eglinfo.x86_64-linux-gnu /home/probe/3553-graphics-probe/eglinfo; sha256sum /home/probe/3553-graphics-probe/eglinfo; ldd /home/probe/3553-graphics-probe/eglinfo' > evidence/vm/renderer-probe-identity.txt 2>&1
+          fi
           for mode in "${modes[@]}"; do
             label="matrix-$mode"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode $label" <<'GUEST'
@@ -452,6 +456,7 @@ jobs:
           case "$mode" in
             fresh) mv "$HOME/.var/app/org.localsend.localsend_app" "$HOME/localsend-profile-before-fresh" ;;
             software) args+=(--env=LIBGL_ALWAYS_SOFTWARE=1) ;;
+            softpipe) args+=(--env=LIBGL_ALWAYS_SOFTWARE=1 --env=GALLIUM_DRIVER=softpipe) ;;
             zink) args+=(--env=MESA_LOADER_DRIVER_OVERRIDE=zink --env=LIBGL_ALWAYS_SOFTWARE=1) ;;
             x11) args+=(--nosocket=wayland --socket=x11 --env=GDK_BACKEND=x11) ;;
             isolated-network) args+=(--unshare=network) ;;
@@ -482,7 +487,7 @@ jobs:
             ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm
             cat "/proc/$app_pid/maps"
             printf 'STARTUP_OVERRIDE_ENV\n'
-            tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(FLUTTER_LINUX_RENDERER|NO_AT_BRIDGE|GTK_IM_MODULE|GTK_THEME|GDK_BACKEND)=' || true
+            tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(FLUTTER_LINUX_RENDERER|NO_AT_BRIDGE|GTK_IM_MODULE|GTK_THEME|GDK_BACKEND|GALLIUM_DRIVER|LIBGL_ALWAYS_SOFTWARE|MESA_LOADER_DRIVER_OVERRIDE)=' || true
             sudo nsenter -t "$app_pid" -n ss -lntup | grep 53317 || true
             printf 'MAIN_TASK_SAMPLE_HZ=%s\n' "$(getconf CLK_TCK)"
             date +%s.%N
@@ -498,6 +503,27 @@ jobs:
           GUEST
             if [ "$mode" = fresh ]; then
               timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'mv "$HOME/.var/app/org.localsend.localsend_app" "$HOME/localsend-profile-fresh-observed"; mv "$HOME/localsend-profile-before-fresh" "$HOME/.var/app/org.localsend.localsend_app"'
+            fi
+            if [ "$PROBE_GROUP" = driver ]; then
+              timeout 60 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode" > "evidence/vm/$label-runtime-egl.txt" 2>&1 <<'GUEST'
+          set -eu
+          mode=$1
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          export WAYLAND_DISPLAY=wayland-0
+          args=(--env=EGL_PLATFORM=wayland --filesystem=/home/probe/3553-graphics-probe:ro)
+          case "$mode" in
+            software) args+=(--env=LIBGL_ALWAYS_SOFTWARE=1) ;;
+            softpipe) args+=(--env=LIBGL_ALWAYS_SOFTWARE=1 --env=GALLIUM_DRIVER=softpipe) ;;
+          esac
+          # This helper runs after main-task sampling and app termination. It uses the same
+          # runtime/GL deployment and Wayland EGL path; it does not print an app-internal string.
+          set +e
+          flatpak run "${args[@]}" --command=sh org.localsend.localsend_app -c 'ldd /home/probe/3553-graphics-probe/eglinfo; timeout 20 /home/probe/3553-graphics-probe/eglinfo -B'
+          probe_result=$?
+          printf 'RUNTIME_EGL_HELPER_EXIT=%s\n' "$probe_result"
+          exit 0
+          GUEST
             fi
             sleep 3
           done
