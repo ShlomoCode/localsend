@@ -62,10 +62,18 @@ export default async function(context){
    if(index>0){
     arm.install.priorPackage=await context.wd('GET',prefix+'/appium/device/current_package');
     arm.install.priorProcess=await shell('dumpsys meminfo org.localsend.localsend_app');
-    arm.install.requestedUtc=new Date().toISOString();save();
     arm.install.terminateResult=await context.wd('POST',prefix+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});
-    await context.wd('POST',prefix+'/execute/sync',{script:'mobile:installApp',args:[{appPath:arm.appUrl}]});
-    arm.install.returnedUtc=new Date().toISOString();save();
+    // Both immutable APKs have versionCode 643. The documented default
+    // checkVersion=true can skip a same-version reinstall; disable that check
+    // and use supported in-place replacement, preserving application data.
+    arm.install.optionsDocs='https://github.com/appium/appium-uiautomator2-driver#mobile-installapp';
+    arm.install.requestPayload={script:'mobile:installApp',args:[{appPath:arm.appUrl,checkVersion:false,replace:true,timeout:120000}]};
+    arm.install.requestedUtc=new Date().toISOString();save();
+    const installResponse=await context.wd('POST',prefix+'/execute/sync',arm.install.requestPayload);
+    arm.install.returnedUtc=new Date().toISOString();
+    arm.install.responseValue=installResponse===undefined?null:installResponse;
+    arm.install.responseValueWasUndefined=installResponse===undefined;
+    writeFileSync('evidence/source-install-command.json',JSON.stringify(arm.install,null,2));save();
    }
    await context.wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    // physicalControl owns initial readiness and the normal receive/permission
