@@ -195,10 +195,13 @@ for count in (5, 5000):
         stage = "return-and-accept"
         focus("guest", rwin)
         desktop("guest", "xdotool", "getwindowgeometry", "--shell", rwin)
-        click("guest", (28, 28), rwin)
+        back_clicked = click("guest", (28, 28), rwin)
         focus("guest", rwin)
         screen("guest", case + "-returned")
-        locate("guest", "Options", case + "-accept-ready", 15)
+        # Options also names the old route title; "wants" uniquely confirms
+        # that the app responded to Back by showing receiver approval again.
+        _, approval_visible = locate("guest", "wants", case + "-accept-ready", 45)
+        result["back_first_observed_seconds"] = approval_visible["completed"] - back_clicked["started"]
         geometry = desktop("guest", "xdotool", "getwindowgeometry", "--shell", rwin)["output"]
         (OUT / (case + "-approval-geometry.txt")).write_text(geometry)
         bounds = dict(line.split("=", 1) for line in geometry.splitlines() if "=" in line)
