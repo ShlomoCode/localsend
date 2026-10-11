@@ -271,6 +271,14 @@ public final class MainActivity extends Activity {
     fileResult=new TextView(this);layout.addView(fileResult);
     Button hash=new Button(this);hash.setText("Verify received file");hash.setContentDescription("Verify received file");hash.setAllCaps(false);layout.addView(hash);
     hash.setOnClickListener(v->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,1461);});
+    Button wifi=new Button(this);wifi.setText("Open Wi-Fi settings");wifi.setContentDescription("Open Wi-Fi settings");wifi.setAllCaps(false);layout.addView(wifi);
+    wifi.setOnClickListener(v->{
+      Intent intent=new Intent(android.provider.Settings.ACTION_WIFI_SETTINGS);
+      android.content.ComponentName resolved=intent.resolveActivity(getPackageManager());
+      if(resolved==null){fileResult.setText("WIFI_SETTINGS_UNAVAILABLE");return;}
+      fileResult.setText("WIFI_SETTINGS_RESOLVED "+resolved.flattenToShortString());
+      startActivity(intent);
+    });
     Button control=new Button(this);control.setText("Start socket control");control.setContentDescription("Start socket control");control.setAllCaps(false);layout.addView(control);
     Button actual=new Button(this);actual.setText("Relay to LocalSend");actual.setContentDescription("Relay to LocalSend");actual.setAllCaps(false);layout.addView(actual);
     Button reverse=new Button(this);reverse.setText("Relay from LocalSend");reverse.setContentDescription("Relay from LocalSend");reverse.setAllCaps(false);layout.addView(reverse);
@@ -283,8 +291,8 @@ public final class MainActivity extends Activity {
     Button metrics=new Button(this);metrics.setText("Show transport status");metrics.setContentDescription("Show transport status");metrics.setAllCaps(false);layout.addView(metrics);
     for(Button unused:new Button[]{reverse,coalesced,large,largeCoalesced,reverseControl,transportControl})unused.setVisibility(android.view.View.GONE);
     serviceModeButtons=new Button[]{control,actual,reverse,coalesced,large,largeCoalesced};
-    control.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("control",true),53319,null,"Socket control running"));
-    actual.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("control",false),null,null,"Relaying to LocalSend localhost:53317"));
+    control.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("control",true).putExtra("downlink","persistent"),53319,null,"Socket control running"));
+    actual.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("control",false).putExtra("downlink","persistent"),null,null,"Relaying to LocalSend localhost:53317"));
     reverse.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("reverse",true).putExtra("peerAbsoluteMs",15*60000L),53318,null,"Receiving LocalSend connections at localhost:53318"));
     coalesced.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("reverse",true).putExtra("transport","coalesced").putExtra("peerAbsoluteMs",15*60000L),53318,"coalesced","Receiving LocalSend connections (coalesced) at localhost:53318"));
     large.setOnClickListener(v->startObservedService(text,new Intent(this,RelayService.class).putExtra("reverse",true).putExtra("peerAbsoluteMs",90*60000L),53318,null,"Receiving large diagnostic at localhost:53318"));

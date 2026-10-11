@@ -1,6 +1,6 @@
 # Run only in an isolated cloud Windows desktop. No app binaries or profiles are changed.
 # Atomically submit commands/<id>.json; wait for results/<id>.json before sending another.
-param([Parameter(Mandatory=$true)][string]$OutputDirectory,[int]$TimeoutSeconds=5400,[string]$ReceiverName='')
+param([Parameter(Mandatory=$true)][string]$OutputDirectory,[int]$TimeoutSeconds=5400,[string]$ReceiverName='',[string]$FfmpegPath='')
 $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
 $OutputDirectory=[IO.Path]::GetFullPath($OutputDirectory)
 [void][IO.Directory]::CreateDirectory($OutputDirectory)
@@ -9,7 +9,7 @@ $commands=Join-Path $OutputDirectory 'commands'; $results=Join-Path $OutputDirec
 $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 $report=[ordered]@{status='starting';startedUtc=[DateTime]::UtcNow.ToString('o');release='1.14.0';artifactUrl='https://github.com/localsend/localsend/releases/download/v1.14.0/LocalSend-1.14.0-windows-x86-64.zip';environmentScope='Actual OS is recorded below. Windows Server is supplementary to reported Windows 11. Loopback relay differs from LAN.';runner=$env:RUNNER_NAME;image=$env:ImageOS;os=$null;archive=$null;executable=$null;processId=$null;fixtures=@{};actions=@();errors=@();terminalError=$null;reporter10054Observed=$false;networkInterruption=$null;quit=$null}
 $statusPath=Join-Path $OutputDirectory 'status.json'; $readyPath=Join-Path $OutputDirectory 'ready.json'
-$app=$null; $appHwnd=[IntPtr]::Zero; $rule=$null; $sequence=0
+$app=$null; $appHwnd=[IntPtr]::Zero; $rule=$null; $sequence=0;$appStartedTicks=$null;$recorder=$null
 function Json($path,$value) { [IO.File]::WriteAllText("$path.tmp",(ConvertTo-Json -InputObject $value -Depth 15),[Text.UTF8Encoding]::new($false)); Move-Item -LiteralPath "$path.tmp" -Destination $path -Force }
 function Persist { Json $statusPath $report }
 function Remaining([int]$maximum=30000) { $r=[int][Math]::Min($maximum,($deadline-[DateTime]::UtcNow).TotalMilliseconds); if($r -le 0){throw 'Diagnostic deadline expired.'}; return $r }
@@ -86,6 +86,11 @@ public class SenderControl {
  public long Hwnd,Parent; public int Pid,Id,Left,Top,Width,Height;
  public string ClassName,Text; public bool Visible,Enabled,FileNameAncestor;
 }
+public class SenderTextObservation {
+ public long Hwnd,MessageResult; public int Pid,TimeoutMs,Win32Error;
+ public bool Success,TimedOut,Truncated; public string Text,Error;
+ public SenderControl Control;
+}
 public static class SenderInput {
  [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left,Top,Right,Bottom; }
  private delegate bool EnumProc(IntPtr hwnd,IntPtr data);
@@ -98,6 +103,28 @@ public static class SenderInput {
  [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int size);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd,StringBuilder text,int size);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint message,UIntPtr wParam,StringBuilder lParam,uint flags,uint timeout,out UIntPtr result);
+ [DllImport("kernel32.dll")] private static extern void SetLastError(uint error);
+ public static SenderTextObservation ReadEdit(IntPtr root,SenderControl expected,int timeoutMs) {
+  var observation=new SenderTextObservation {Hwnd=expected.Hwnd,Pid=expected.Pid,TimeoutMs=timeoutMs,Text=""};
+  SenderControl actual=null;
+  foreach(var control in Children(root))if(control.Hwnd==expected.Hwnd)actual=control;
+  observation.Control=actual;
+  if(actual==null||actual.Pid!=expected.Pid||actual.Id!=expected.Id||actual.Parent!=expected.Parent||actual.ClassName!="Edit"||!actual.FileNameAncestor||!actual.Visible||!actual.Enabled||actual.Left!=expected.Left||actual.Top!=expected.Top||actual.Width!=expected.Width||actual.Height!=expected.Height){observation.Error="Native Edit ownership, ancestry or geometry changed; WM_GETTEXT withheld.";return observation;}
+  if(timeoutMs<1||timeoutMs>2000){observation.Error="WM_GETTEXT requires a 1..2000ms bound.";return observation;}
+  var text=new StringBuilder(32768);UIntPtr result;
+  SetLastError(0);
+  // WM_GETTEXT is marshalled by Windows between processes. Abort on hang or exit;
+  // block reentrancy while the bounded read is in progress (SMTO flags 0x23).
+  IntPtr outcome=SendMessageTimeout(new IntPtr(actual.Hwnd),0x000D,new UIntPtr((uint)text.Capacity),text,0x23,(uint)timeoutMs,out result);
+  int error=Marshal.GetLastWin32Error();
+  observation.Success=outcome!=IntPtr.Zero;observation.Win32Error=error;observation.MessageResult=(long)result.ToUInt64();
+  observation.TimedOut=!observation.Success&&error==1460;
+  observation.Truncated=observation.Success&&result.ToUInt64()>=(ulong)(text.Capacity-1);
+  observation.Text=text.ToString();
+  if(!observation.Success)observation.Error=error==0?"WM_GETTEXT timed out or failed without a Win32 error.":new System.ComponentModel.Win32Exception(error).Message;
+  return observation;
+ }
  public static SenderControl[] Children(IntPtr root) {
   var controls=new List<SenderControl>();
   EnumChildWindows(root,(hwnd,data)=>{
@@ -173,7 +200,10 @@ function Worker($script,$arguments,$result,[int]$timeout=20000){
  $process=Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList (@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$script+'"'))+$arguments) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
  try{if(-not $process.WaitForExit((Remaining $timeout))){throw "Worker timeout: $script; inspect $stdout and $stderr"};if($process.ExitCode -ne 0 -or -not(Test-Path $result)){throw "Worker failed: $script; exit $($process.ExitCode); inspect $stdout and $stderr"};return Get-Content -LiteralPath $result -Raw | ConvertFrom-Json}finally{if(-not $process.HasExited){$process.Kill();[void]$process.WaitForExit(5000)}}
 }
-function Window([IntPtr]$hwnd=$appHwnd){$w=@([ReceiverNative]::All()|Where-Object{$_.Hwnd -eq $hwnd.ToInt64() -and $_.Visible});if($w.Count -ne 1 -or $w[0].Width -lt 100){throw 'Owned visible window unavailable.'};return $w[0]}
+function Window([IntPtr]$hwnd=$appHwnd){
+ $app.Refresh();if($app.HasExited -or ($appStartedTicks -and $app.StartTime.ToUniversalTime().Ticks -ne $appStartedTicks)){throw 'Original sender process identity unavailable.'}
+ $w=@([ReceiverNative]::All()|Where-Object{$_.Hwnd -eq $hwnd.ToInt64() -and $_.Pid -eq $app.Id -and $_.Visible});if($w.Count -ne 1 -or $w[0].Width -lt 100){throw 'Owned visible window unavailable.'};return $w[0]
+}
 function Focus([IntPtr]$hwnd=$appHwnd){[void][ReceiverNative]::Activate($hwnd);Start-Sleep -Milliseconds 200;if([ReceiverNative]::GetForegroundWindow() -ne $hwnd){throw 'Owned window is not foreground; input withheld.'}}
 function Snapshot([string]$label,[IntPtr]$hwnd=$appHwnd){
  $script:sequence++;$name=('{0:D4}-{1}' -f $script:sequence,($label -replace '[^a-zA-Z0-9-]','-'));$w=Window $hwnd
@@ -190,9 +220,17 @@ function Snapshot([string]$label,[IntPtr]$hwnd=$appHwnd){
 }
 function LabelBounds($s,[string]$label){
  $uia=@($s.uia.tree|Where-Object{$_.name -ceq $label -and -not $_.offscreen -and $_.enabled -and $_.width -gt 0})
+ if($label -eq 'Done'){$uia=@($uia|Where-Object{$_.type -eq 'ControlType.Button'})}
  if($uia.Count -eq 1){return @{x=$uia[0].x;y=$uia[0].y;width=$uia[0].width;height=$uia[0].height;method='UIA bounds'}}
  $wanted=$label.Split(' ');$words=@($s.ocr.words);$found=@()
  for($i=0;$i -le $words.Count-$wanted.Count;$i++){$ok=$true;for($j=0;$j -lt $wanted.Count;$j++){if($words[$i+$j].text -cne $wanted[$j] -or [Math]::Abs($words[$i+$j].y-$words[$i].y) -gt $words[$i].height){$ok=$false;break}};if($ok){$group=@($words[$i..($i+$wanted.Count-1)]);$left=($group.x|Measure-Object -Minimum).Minimum;$top=($group.y|Measure-Object -Minimum).Minimum;$right=($group|ForEach-Object{$_.x+$_.width}|Measure-Object -Maximum).Maximum;$bottom=($group|ForEach-Object{$_.y+$_.height}|Measure-Object -Maximum).Maximum;$found+=@{x=$s.window.Left+$left;y=$s.window.Top+$top;width=$right-$left;height=$bottom-$top;method='Native OCR word bounds'}}}
+ if($label -eq 'Done'){
+  # v1.14.0 ProgressPage puts its actionable Done beside Advanced in the
+  # bottom card; a separate file-row status also says Done. Observe both labels
+  # on that card row and reject the status-row occurrence.
+  $advanced=@($s.ocr.words|Where-Object{$_.text -ceq 'Advanced' -and $_.y -gt $s.window.Height*0.6})
+  if($advanced.Count -eq 1){$anchor=$advanced[0];$found=@($found|Where-Object{$_.x -gt $s.window.Left+$anchor.x+$anchor.width -and [Math]::Abs($_.y-($s.window.Top+$anchor.y)) -le [Math]::Max($_.height,$anchor.height)})}
+ }
  if($found.Count -ne 1){throw "Label not unique in live UI: $label ($($found.Count) OCR matches)"};return $found[0]
 }
 function Click([string]$label){
@@ -284,7 +322,7 @@ function Probe($command){
 }
 function NativePicker([IntPtr]$hwnd,[string]$path,[string]$id){
  $dialog=Window $hwnd;if($dialog.Pid -ne $app.Id -or $dialog.ClassName -ne '#32770'){throw 'Picker is not the owned native dialog.'}
- $children=@([SenderInput]::Children($hwnd));$evidence=@{dialog=$dialog;before=$children;typed=$null;after=$null;method='Observed native Edit HWND mouse focus, ordinary keyboard input, GetWindowText verification, observed native Open mouse click'}
+ $children=@([SenderInput]::Children($hwnd));$evidence=@{dialog=$dialog;before=$children;typed=$null;after=$null;method='Observed native Edit HWND mouse focus, ordinary keyboard input, bounded cross-process WM_GETTEXT verification, observed native Open mouse click'}
  $record=Join-Path $OutputDirectory ($id+'-picker-native.json');Json $record $evidence
  $edits=@($children|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Edit' -and $_.FileNameAncestor -and $_.Width -gt 0})
  $buttons=@($children|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Button' -and $_.Id -eq 1 -and $_.Text -match '^(&)?Open$'})
@@ -295,7 +333,13 @@ function NativePicker([IntPtr]$hwnd,[string]$path,[string]$id){
  [System.Windows.Forms.SendKeys]::SendWait($escaped);Start-Sleep -Milliseconds 200
  $after=@([SenderInput]::Children($hwnd));$actual=@($after|Where-Object{$_.Hwnd -eq $edit.Hwnd -and $_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Edit' -and $_.FileNameAncestor})
  $evidence.typed=$actual;$evidence.after=$after;Json $record $evidence
- if($actual.Count -ne 1 -or $actual[0].Text -cne $path){throw 'Actual native File name text differs from fixture path; Open withheld.'}
+ if($actual.Count -ne 1){throw 'Actual native File name Edit ownership differs; Open withheld.'}
+ # Cross-process GetWindowText cannot read an Edit value. Use Windows-marshalled
+ # WM_GETTEXT solely to observe the field; typing remains ordinary keyboard input.
+ $textObservation=[SenderInput]::ReadEdit($hwnd,$edit,(Remaining 2000))
+ $evidence['textObservation']=$textObservation;Json $record $evidence
+ if(-not $textObservation.Success -or $textObservation.Truncated){throw 'Bounded native WM_GETTEXT did not return a complete field value; inspect retained timeout/error details. Open withheld.'}
+ if($textObservation.Text -cne $path){throw 'Actual native File name value differs from fixture path; Open withheld.'}
  $snapshot=Snapshot 'native-picker-path-verified' $hwnd
  $open=@([SenderInput]::Children($hwnd)|Where-Object{$_.Hwnd -eq $buttons[0].Hwnd -and $_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Button' -and $_.Id -eq 1 -and $_.Text -match '^(&)?Open$'})
  if($open.Count -ne 1){throw 'Observed native Open control changed before click.'};$button=$open[0]
@@ -306,8 +350,56 @@ function NativePicker([IntPtr]$hwnd,[string]$path,[string]$id){
  $report.actions+=@{name='native-picker-open';utc=[DateTime]::UtcNow.ToString('o');nativeEvidence=$record;screenshot=$snapshot.screenshot;fileName=$path;button=$button}
  return @{acted=$true;nativeEvidence=$record;screenshot=$snapshot.screenshot}
 }
+function StartRecording {
+ if($recorder -and -not $recorder.HasExited){throw 'Continuous recorder is already active.'}
+ $exe=$FfmpegPath;if(-not $exe){$exe=$env:FFMPEG_PATH};if(-not $exe){$command=Get-Command ffmpeg -ErrorAction SilentlyContinue;if($command){$exe=$command.Source}}
+ if(-not $exe -or -not(Test-Path -LiteralPath $exe)){$report['recording']=@{status='unsupported';reason='No existing cloud ffmpeg executable; no tools downloaded.'};Persist;throw 'Continuous video requires an existing trusted cloud ffmpeg executable.'}
+ $path=Join-Path $OutputDirectory 'windows-continuous.mkv'
+ $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$exe;$start.Arguments='-hide_banner -y -f gdigrab -framerate 10 -i desktop -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -t '+[Math]::Ceiling((Remaining ([int]::MaxValue))/1000)+' "'+$path+'"';$start.UseShellExecute=$false;$start.RedirectStandardInput=$true;$start.CreateNoWindow=$true
+ $script:recorder=[Diagnostics.Process]::Start($start)
+ $report['recording']=@{status='recording';path=$path;processId=$recorder.Id;startedUtc=[DateTime]::UtcNow.ToString('o');source='Continuous real desktop gdigrab at 10fps; original timeline retained';command=$start.Arguments;executable=$exe;executableSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash;timing='Action and screenshot UTC timestamps retained in status; ffmpeg records capture PTS.'}
+ Start-Sleep -Milliseconds 1000;$recorder.Refresh();if($recorder.HasExited){$report.recording.status='failed';$report.recording.exitCode=$recorder.ExitCode;Persist;throw 'Continuous recorder exited during initialization.'};Persist;return $report.recording
+}
+function StopRecording {
+ if(-not $recorder){return @{status='not-started'}}
+ if(-not $recorder.HasExited){$recorder.StandardInput.WriteLine('q');$recorder.StandardInput.Flush();if(-not $recorder.WaitForExit(15000)){$recorder.Kill();[void]$recorder.WaitForExit(5000);$report.recording.status='incomplete-forced-stop'}}
+ if($report.recording.status -ne 'incomplete-forced-stop'){$report.recording.status='capture-finished'}
+ $report.recording.finishedUtc=[DateTime]::UtcNow.ToString('o');$report.recording.exitCode=$recorder.ExitCode
+ if(Test-Path $report.recording.path){$report.recording.sha256=(Get-FileHash -LiteralPath $report.recording.path -Algorithm SHA256).Hash;$report.recording.bytes=(Get-Item -LiteralPath $report.recording.path).Length}
+ $report.recording['verification']='Cloud decode/frame/PTS inspection still required; successful capture process alone is insufficient.';return $report.recording
+}
+function ErrorDetails {
+ Focus;$s=Snapshot 'before-error-details';$error=LabelBounds $s 'Error'
+ # v1.14.0 ProgressPage renders a warning-coloured 20px info glyph beside the
+ # failed file-row Error label. Require its actual connected pixels, not a
+ # blind offset, before invoking the details dialog.
+ $left=[int]($error.x-$s.window.Left+$error.width+4);$top=[int]($error.y-$s.window.Top-8)
+ $width=[Math]::Min(52,$s.window.Width-$left);$height=[Math]::Min([int]($error.height+20),$s.window.Height-$top)
+ if($left -lt 0 -or $top -lt 0 -or $width -lt 20 -or $height -lt 20){throw 'Error icon search region outside owned window.'}
+ $image=[Drawing.Bitmap]::new($s.screenshot);$mask=@{};$components=@()
+ try{
+  for($y=0;$y -lt $height;$y++){for($x=0;$x -lt $width;$x++){$c=$image.GetPixel($left+$x,$top+$y);$spread=[Math]::Max($c.R,[Math]::Max($c.G,$c.B))-[Math]::Min($c.R,[Math]::Min($c.G,$c.B));if($spread -ge 40 -and $c.R -ge 130 -and $c.G -ge 60 -and $c.B -le 180){$mask[$y*$width+$x]=$true}}}
+  while($mask.Count -gt 0){$seed=@($mask.Keys)[0];$queue=[Collections.Generic.Queue[int]]::new();$queue.Enqueue($seed);$mask.Remove($seed);$xs=@();$ys=@()
+   while($queue.Count -gt 0){$point=$queue.Dequeue();$px=$point%$width;$py=[int][Math]::Floor($point/$width);$xs+=$px;$ys+=$py;foreach($neighbor in @(@(($px-1),$py),@(($px+1),$py),@($px,($py-1)),@($px,($py+1)))){$nx=$neighbor[0];$ny=$neighbor[1];if($nx -ge 0 -and $nx -lt $width -and $ny -ge 0 -and $ny -lt $height){$key=$ny*$width+$nx;if($mask.ContainsKey($key)){$mask.Remove($key);$queue.Enqueue($key)}}}}
+   $minx=($xs|Measure-Object -Minimum).Minimum;$maxx=($xs|Measure-Object -Maximum).Maximum;$miny=($ys|Measure-Object -Minimum).Minimum;$maxy=($ys|Measure-Object -Maximum).Maximum;$cw=$maxx-$minx+1;$ch=$maxy-$miny+1
+   if($cw -ge 10 -and $cw -le 30 -and $ch -ge 10 -and $ch -le 30 -and [Math]::Abs($cw-$ch) -le 5 -and $xs.Count -ge 40){$components+=@{x=$s.window.Left+$left+$minx;y=$s.window.Top+$top+$miny;width=$cw;height=$ch;pixels=$xs.Count}}
+  }
+ }finally{$image.Dispose()}
+ Json (Join-Path $OutputDirectory ('error-glyph-'+$sequence+'.json')) @{screenshot=$s.screenshot;errorLabel=$error;search=@{left=$left;top=$top;width=$width;height=$height};components=$components;contract='v1.14.0 file-row Error + warning info icon; saturated warning pixels, compact near-square connected component'}
+ if($components.Count -ne 1){throw 'No unique observed warning info glyph; details click withheld.'};$glyph=$components[0]
+ if(-not(FreshPixels $s $glyph)){throw 'Error glyph changed before input.'}
+ [SenderInput]::Click([int]($glyph.x+$glyph.width/2),[int]($glyph.y+$glyph.height/2));$report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='observed-file-error-info-glyph';bounds=$glyph;evidence=$s.screenshot}
+ Start-Sleep -Milliseconds 400;$details=Snapshot 'file-error-details'
+ [void](LabelBounds $details 'Error');$report['errorDetails']=$details
+ return $details
+}
 function Execute($c){
  switch($c.action){
+  'record-start' { return StartRecording }
+  'record-stop' { return StopRecording }
+  'recorder-start' { return StartRecording }
+  'recorder-stop' { return StopRecording }
+  'error-details' { return ErrorDetails }
   'screenshot' { Focus; return Snapshot ('command-'+$c.id) }
   'click' { if(-not $c.label){throw 'click needs exact label.'};Click $c.label;return Snapshot ('after-'+$c.id) }
   'add-favorite' {
@@ -321,6 +413,7 @@ function Execute($c){
    return Snapshot 'favorite-confirmed'
   }
   'select' {
+   if($c.fixture -eq 'failed' -and (-not $recorder -or $recorder.HasExited)){throw 'Start a real continuous recorder before selecting the failed fixture.'}
    $f=Fixture $c.fixture;Focus;$s=Snapshot 'before-selection'
    $names=$s.ocr.text+' '+(($s.uia.tree.name)-join ' ')
    if($names -match 'Finished'){Click 'Done'}
@@ -394,7 +487,7 @@ try {
   $report.fixtures[$entry.key]=@{path=$path;bytes=(Get-Item $path).Length;sha256=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();selected=$false;pattern='byte at offset i = i mod 256'}
  }
  $rule='LocalSend1461-'+[Guid]::NewGuid().ToString('N');New-NetFirewallRule -Name $rule -DisplayName $rule -Direction Inbound -Program $exe.FullName -Action Allow -Profile Any|Out-Null
- $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;$report.processId=$app.Id
+ $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;$report.processId=$app.Id;$appStartedTicks=$app.StartTime.ToUniversalTime().Ticks;$report['processStartedUtc']=$app.StartTime.ToUniversalTime().ToString('o')
  $until=[DateTime]::UtcNow.AddSeconds(60);$windows=@()
  do{Start-Sleep -Milliseconds 500;$app.Refresh();if($app.HasExited){throw 'Official sender exited at startup.'};$windows=@([ReceiverNative]::All()|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Width -gt 300})}until($windows.Count -gt 0 -or [DateTime]::UtcNow -ge $until)
  if($windows.Count -ne 1){throw 'Single sender window unavailable.'};$appHwnd=[IntPtr]::new($windows[0].Hwnd);Focus;$initial=Snapshot 'ready'
@@ -414,6 +507,7 @@ try {
  if($report.status -ne 'stopped'){throw 'Controller deadline expired.'}
 }catch{$report.status='failed';$report.errors+=$_.Exception.ToString();if($app -and -not $app.HasExited){try{Focus;[void](Snapshot 'failure')}catch{}}}
 finally{
+ if($recorder){try{[void](StopRecording)}catch{$report.errors+='Recorder cleanup: '+$_.Exception.ToString()}}
  if($app -and -not $app.HasExited){Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue;$report.cleanup='Forced process cleanup is not normal Quit evidence.'}
  if($rule){Remove-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue}
  $report.finishedUtc=[DateTime]::UtcNow.ToString('o');Persist

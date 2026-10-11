@@ -18,7 +18,11 @@ public final class RelayService extends Service {
   private volatile HttpURLConnection pullConnection;
   private volatile Thread pullThread;
   private volatile int ownedStartId;
-  private String endpoint,token,transport="legacy";
+  private String endpoint,token,transport="legacy",downlink="poll";
+  private volatile String downlinkStreamId="",downlinkOutcome="not-opened";
+  private volatile String downlinkNativeError="",retirementReason="",retirementOutcome="not-requested";
+  private volatile long downlinkFirstReadMs,downlinkClosedMs;
+  private static volatile String lastDownlinkObservation="{}";
   private long peerAbsoluteMs=15*60000;
   private final String instance=java.util.UUID.randomUUID().toString().replace("-","").substring(0,8);
   private final ConcurrentHashMap<String,HttpURLConnection> uploads=new ConcurrentHashMap<>();
@@ -33,13 +37,17 @@ public final class RelayService extends Service {
   }
   public static JSONObject transportStatus() throws JSONException {
     RelayService service=activeService;JSONObject result=new JSONObject();
+    result.put("lastDownlinkObservation",new JSONObject(lastDownlinkObservation));
     if(service==null)return result.put("servicePresent",false).put("running",false).put("ready",false).put("lifecycle","stopped");
     ServerSocket bound=service.reverse?service.listener:service.control;
     boolean listenerBound=bound!=null&&bound.isBound()&&!bound.isClosed();
     result.put("servicePresent",true).put("instance",service.instance).put("running",service.running).put("ready",service.ready)
       .put("lifecycle",service.lifecycle).put("firstPullSucceeded",service.firstPullSucceeded).put("lastFailure",service.lastFailure)
       .put("listenerHost",listenerBound?"127.0.0.1":JSONObject.NULL).put("listenerPort",listenerBound?bound.getLocalPort():JSONObject.NULL)
-      .put("transport",service.transport).put("maxQueueBytes",QUEUE_LIMIT).put("readBufferBytes",READ_BUFFER).put("peerAbsoluteMs",service.peerAbsoluteMs);
+      .put("transport",service.transport).put("downlink",service.downlink).put("downlinkStreamId",service.downlinkStreamId)
+      .put("downlinkOutcome",service.downlinkOutcome).put("downlinkFirstReadMs",service.downlinkFirstReadMs).put("downlinkClosedMs",service.downlinkClosedMs)
+      .put("downlinkNativeError",service.downlinkNativeError).put("retirementReason",service.retirementReason).put("retirementOutcome",service.retirementOutcome)
+      .put("maxQueueBytes",QUEUE_LIMIT).put("readBufferBytes",READ_BUFFER).put("peerAbsoluteMs",service.peerAbsoluteMs);
     JSONObject peers=new JSONObject();
     for(String id:service.uploadMetrics.keySet()){
       UploadMetrics m=service.uploadMetrics.get(id);
@@ -73,9 +81,12 @@ public final class RelayService extends Service {
       if(peerAbsoluteMs!=15*60000&&peerAbsoluteMs!=90*60000)throw new IOException("Invalid logical peer deadline");
       if(transport==null)transport=config.optString("transport","legacy");
       if(!transport.equals("legacy")&&!transport.equals("stream")&&!transport.equals("coalesced"))throw new IOException("Invalid transport mode");
+      downlink=intent.getStringExtra("downlink");if(downlink==null)downlink=config.optString("downlink","poll");
+      if(!downlink.equals("poll")&&!downlink.equals("persistent"))throw new IOException("Invalid downlink mode");
       trace("transport-mode:"+transport,"-");
       if(!running||activeService!=this)return;
       if(reverse)startReverse();else if(targetPort==53319)startControl();
+      if(downlink.equals("persistent")){persistentDownlink();return;}
       while(running&&activeService==this){
         JSONArray batch=new JSONArray(request("GET","/pull",null));
         if(!running||activeService!=this)break;
@@ -84,6 +95,64 @@ public final class RelayService extends Service {
       }
     }catch(Exception e){failActiveService("pull-or-handler-failure",e);}},"relay-pull");pullThread.start();
     return START_NOT_STICKY;
+  }
+  private void persistentDownlink()throws Exception{
+    HttpURLConnection c=(HttpURLConnection)new URL(endpoint+"/downlink").openConnection();
+    c.setConnectTimeout(10000);c.setReadTimeout(0);c.setRequestMethod("GET");c.setRequestProperty("Authorization","Bearer "+token);
+    pullConnection=c;downlinkOutcome="diagnostic-opening";InputStream input=null;
+    try{
+      if(!running||activeService!=this)throw new IOException("Owned stream cancelled before request");
+      if(c.getResponseCode()!=200)throw new IOException("Persistent downlink response "+c.getResponseCode());
+      downlinkStreamId=c.getHeaderField("x-relay-stream-id");
+      if(downlinkStreamId==null||!downlinkStreamId.matches("[0-9]{1,20}"))throw new IOException("Missing physical downlink generation");
+      trace("persistent-downlink-headers:"+downlinkStreamId,"-");
+      // A zero read timeout permits only actual EOF/IOException to end this physical
+      // stream. No quiet period, heartbeat or UI action is translated to peer error.
+      input=new BufferedInputStream(c.getInputStream(),READ_BUFFER);
+        ByteArrayOutputStream line=new ByteArrayOutputStream();int b;
+        while(running&&activeService==this){
+          b=input.read();
+          if(b==-1){downlinkOutcome="native-http-eof";trace("persistent-downlink-native-eof:"+downlinkStreamId,"-");throw new EOFException("Persistent downlink physical response ended");}
+          if(b=='\n'){
+            JSONArray batch;
+            try{batch=new JSONArray(line.toString("UTF-8"));}catch(JSONException invalid){downlinkOutcome="diagnostic-framing-failure";trace(downlinkOutcome,"-");throw invalid;}
+            line.reset();if(batch.length()>8){downlinkOutcome="diagnostic-batch-bound";throw new IOException("Persistent batch exceeds bound");}
+            if(!firstPullSucceeded){downlinkFirstReadMs=SystemClock.elapsedRealtime();firstPullSucceeded=true;ready=true;lifecycle="ready";downlinkOutcome="established-first-line";trace("persistent-downlink-first-read:"+downlinkStreamId,"-");}
+            try{for(int i=0;i<batch.length()&&running&&activeService==this;i++)handle(batch.getJSONObject(i));}
+            catch(Exception handler){downlinkOutcome="diagnostic-handler-failure";trace(downlinkOutcome+":"+handler.getClass().getSimpleName(),"-");throw handler;}
+          }else{if(line.size()>=QUEUE_LIMIT){downlinkOutcome="diagnostic-line-bound";throw new IOException("Persistent line exceeds bound");}line.write(b);}
+        }
+      downlinkOutcome="diagnostic-owned-stop";downlinkClosedMs=SystemClock.elapsedRealtime();
+    }catch(Exception error){
+      downlinkClosedMs=SystemClock.elapsedRealtime();downlinkNativeError=error.getClass().getSimpleName();
+      if(!running||destroying||activeService!=this){downlinkOutcome="diagnostic-owned-stop";trace(downlinkOutcome+":"+downlinkStreamId,"-");}
+      else if(!downlinkOutcome.startsWith("diagnostic-")){downlinkOutcome="physical-read-failure:"+error.getClass().getSimpleName();trace(downlinkOutcome+":"+downlinkStreamId,"-");}
+      throw error;
+    }finally{
+      // Retirement must precede closing the body. Otherwise a local parser or
+      // handler failure could be mistaken for physical Wi-Fi loss at the server.
+      if(downlinkOutcome.startsWith("diagnostic-")&&!downlinkOutcome.equals("diagnostic-owned-stop"))retireDownlink(downlinkOutcome);
+      rememberDownlink();if(input!=null)try{input.close();}catch(Exception ignored){}
+      if(pullConnection==c)pullConnection=null;c.disconnect();
+    }
+  }
+  private void rememberDownlink(){
+    try{lastDownlinkObservation=new JSONObject().put("instance",instance).put("streamId",downlinkStreamId).put("outcome",downlinkOutcome)
+      .put("firstReadMs",downlinkFirstReadMs).put("closedMs",downlinkClosedMs).put("nativeErrorClass",downlinkNativeError)
+      .put("retirementReason",retirementReason).put("retirementOutcome",retirementOutcome).toString();}catch(JSONException ignored){}
+  }
+  private void retireDownlink(String reason){
+    retirementReason=reason;
+    if(downlinkStreamId==null||downlinkStreamId.isEmpty()){retirementOutcome="no-established-generation";rememberDownlink();return;}
+    HttpURLConnection retirement=null;
+    try{
+      retirement=(HttpURLConnection)new URL(endpoint+"/downlink-retire").openConnection();retirement.setConnectTimeout(3000);retirement.setReadTimeout(3000);retirement.setRequestMethod("POST");retirement.setDoOutput(true);
+      retirement.setRequestProperty("Authorization","Bearer "+token);retirement.setRequestProperty("Content-Type","application/json");
+      byte[] body=new JSONObject().put("streamId",downlinkStreamId).put("reason",reason).toString().getBytes("UTF-8");retirement.setFixedLengthStreamingMode(body.length);
+      try(OutputStream output=retirement.getOutputStream()){output.write(body);}
+      int code=retirement.getResponseCode();retirementOutcome=code==200?"acknowledged":"http"+code;trace("diagnostic-downlink-retire:"+reason+":"+retirementOutcome,"-");
+    }catch(Exception failure){retirementOutcome="failed:"+failure.getClass().getSimpleName();trace("diagnostic-downlink-retire-report-failed:"+reason+":"+failure.getClass().getSimpleName(),"-");}
+    finally{rememberDownlink();if(retirement!=null)retirement.disconnect();}
   }
   private void failActiveService(String origin,Exception error){
     if(!running||destroying||activeService!=this){trace("retired-worker-exit:"+origin,"-");return;}
@@ -248,6 +317,7 @@ public final class RelayService extends Service {
     try{if(listener!=null)listener.close();if(control!=null)control.close();}catch(Exception ignored){}
     // Cancellation/join run off the UI thread. Status remains 'stopping' until the owned pull worker is gone.
     new Thread(()->{
+      if(downlink.equals("persistent")&&downlinkClosedMs==0)retireDownlink("service-cleanup");
       HttpURLConnection pull=pullConnection;if(pull!=null)pull.disconnect();
       for(String id:sockets.keySet())closeOwnedPeer(id,"service-close");sockets.clear();
       for(HttpURLConnection upload:uploads.values())upload.disconnect();uploads.clear();

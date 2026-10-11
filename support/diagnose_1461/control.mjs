@@ -19,7 +19,7 @@ const report={status:'preparing',startedUtc:new Date().toISOString(),issue:1461,
  release:'1.14.0',device:'Samsung Galaxy S23',android:'13.0',
  boundaries:['Windows Server 2022 differs from Windows 11','Galaxy S23 Android 13 differs from Redmi K40 HyperOS Android 13','Cloud relay differs from shared LAN'],
  actions:[],cases:[],cleanupErrors:[]};
-const r=relay({token:process.env.RELAY_TOKEN});
+const r=relay({token:process.env.RELAY_TOKEN,downlink:'persistent'});
 let session,sessionCreationAttempted=false,child,childExit,commandId=0,deadline=Date.now()+30*60000;
 const base=()=>'/session/'+session;
 async function wd(method,url,body){
@@ -39,8 +39,8 @@ const labels=xml=>nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);
 const source=()=>wd('GET',base()+'/source');
 async function snap(name,xml){const value=xml||await source();save(name+'.xml',value);fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(await wd('GET',base()+'/screenshot'),'base64'));return value;}
 async function wait(predicate,ms,message){const end=Math.min(deadline,Date.now()+ms);let last;do{last=await source();if(predicate(last))return last;await sleep(1000);}while(Date.now()<end);await snap('failed-wait-'+Date.now(),last);throw Error(message);}
-async function tap(name){
- const xml=await source();const found=nodes(xml).filter(n=>(n.text===name||n['content-desc']===name)&&n.enabled==='true'&&n.displayed==='true');
+async function tap(name,{action=false}={}){
+ const xml=await source();const found=nodes(xml).filter(n=>(n.text===name||n['content-desc']===name)&&n.enabled==='true'&&n.displayed==='true'&&(!action||n.clickable==='true'||n.class==='android.widget.Button'));
  assert.equal(found.length,1,'Expected one visible enabled control '+name);
  const n=found[0],bounds=n.bounds?.match(/^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/);assert(bounds,'Missing actual control bounds');
  const x=Math.round((+bounds[1]+ +bounds[3])/2),y=Math.round((+bounds[2]+ +bounds[4])/2);
@@ -60,32 +60,75 @@ async function command(action,fields={}){
  assert(value.status==='passed',action+' failed; inspect Windows evidence');return value;
 }
 async function accept(name){
- const xml=await wait(s=>labels(s).includes('Accept'),90000,'Android incoming approval absent');await snap(name+'-incoming',xml);await tap('Accept');
+ const xml=await wait(s=>labels(s).includes('Accept'),90000,'Android incoming approval absent');await snap(name+'-incoming',xml);await tap('Accept',{action:true});
  await snap(name+'-accepted');
 }
 async function receivedHash(fixture,name){
  await wait(s=>labels(s).some(x=>/Finished|Done/.test(x)),180000,'Android transfer did not finish');await snap(name+'-received');
- await activate('org.localsend.cloudtransport');await tap('Verify received file');
- const basename=path.win32.basename(fixture.path);await wait(s=>labels(s).includes(basename),30000,'SAF picker did not expose received file '+basename);await snap(name+'-hash-picker');await tap(basename);
+ await activate('org.localsend.cloudtransport');await tap('Verify received file',{action:true});
+ const basename=path.win32.basename(fixture.path);
+ let picker=await wait(s=>nodes(s).some(n=>/documentsui/.test(n.package||'')),30000,'Public document picker absent');
+ if(!labels(picker).includes(basename)){
+  const drawer=nodes(picker).filter(n=>n.enabled==='true'&&n.displayed==='true'&&/^(Show roots|Show navigation drawer|Open navigation drawer)$/.test(n['content-desc']||''));
+  assert.equal(drawer.length,1,'Document picker navigation drawer not uniquely observed');await snap(name+'-picker-navigation',picker);await tap(drawer[0]['content-desc']);
+  await wait(s=>labels(s).includes('Downloads'),10000,'Downloads destination absent from observed picker roots');await tap('Downloads');
+ }
+ await wait(s=>labels(s).includes(basename),30000,'Observed Downloads picker did not expose saved file '+basename);await snap(name+'-hash-picker');await tap(basename);
  const xml=await wait(s=>labels(s).some(v=>v.startsWith('RECEIVED_FILE_HASH\n')),60000,'Public SAF hash missing');await snap(name+'-hash',xml);
  const value=JSON.parse(labels(xml).find(v=>v.startsWith('RECEIVED_FILE_HASH\n')).slice('RECEIVED_FILE_HASH\n'.length));
  assert.equal(value.status,'passed');assert.equal(value.bytes,fixture.bytes);assert.equal(value.sha256,fixture.sha256);
  report.controlHash=value;await activate('org.localsend.localsend_app');
- await tap('Done');
+ await tap('Done',{action:true});
 }
-async function normalWifiDisconnect(){
- // Use the actual Android system Wi-Fi switch. Closing diagnostic sockets is not this experiment.
- await wd('POST',base()+'/appium/device/start_activity',{appPackage:'com.android.settings',appActivity:'.Settings$WifiSettingsActivity'});
- const xml=await wait(s=>nodes(s).some(n=>n.class==='android.widget.Switch'&&n.enabled==='true'),30000,'System Wi-Fi switch not exposed');
- await snap('wifi-before-disconnect',xml);
- const switches=nodes(xml).filter(n=>n.class==='android.widget.Switch'&&n.enabled==='true'&&n.displayed==='true');assert.equal(switches.length,1,'Ambiguous system Wi-Fi switch');
- assert.equal(switches[0].checked,'true','Wi-Fi must be on before normal disconnect');
- const elements=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.Switch'});assert.equal(elements.length,1);
- const element=elements[0]['element-6066-11e4-a52e-4f735466cecf']||elements[0].ELEMENT;
+function wifiSwitches(xml){return nodes(xml).filter(n=>/Switch/.test(n.class||'')&&n.enabled==='true'&&n.displayed==='true'&&['true','false'].includes(n.checked));}
+async function toggleWifi(expected,name,{requireActivePeer=false}={}){
+ const xml=await source(),switches=wifiSwitches(xml);assert.equal(switches.length,1,'Ambiguous observed system Wi-Fi switch');
+ assert(nodes(xml).some(n=>n.package==='com.android.settings')&&labels(xml).some(v=>/Wi-Fi/.test(v)),'Observed switch is not on native Wi-Fi settings');
+ assert.equal(switches[0].checked,expected?'false':'true','Unexpected Wi-Fi starting state');
+ const n=switches[0],bounds=n.bounds?.match(/^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/);assert(bounds,'Missing observed Wi-Fi switch bounds');
+ await snap(name+'-before',xml);
+ if(requireActivePeer){const state=r.status();assert(state.activePeerIds.includes(report.interruptedPeer),'Large-upload peer already ended before Wi-Fi input');assert(state.peerChunks[report.interruptedPeer].fromSender.bytes<report.largeFixtureBytes*0.9,'Source may already have finished before Wi-Fi input');save('transport-immediately-before-wifi-input.json',state);}
  report.wifiSwitchMayHaveChanged=true;
- await wd('POST',base()+'/element/'+element+'/click',{});report.actions.push({utc:new Date().toISOString(),label:'Normal Android Settings Wi-Fi off',before:switches[0]});
- const off=await wait(s=>nodes(s).some(n=>n.class==='android.widget.Switch'&&n.checked==='false'),30000,'System Wi-Fi did not switch off');await snap('wifi-off',off);
+ await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'wifi1461',parameters:{pointerType:'touch'},actions:[
+  {type:'pointerMove',duration:0,origin:'viewport',x:Math.round((+bounds[1]+ +bounds[3])/2),y:Math.round((+bounds[2]+ +bounds[4])/2)},
+  {type:'pointerDown',button:0},{type:'pause',duration:100},{type:'pointerUp',button:0}]}]});
+ report.actions.push({utc:new Date().toISOString(),label:name,before:n});
+ const changed=await wait(s=>wifiSwitches(s).length===1&&wifiSwitches(s)[0].checked===String(expected),30000,'System Wi-Fi did not change');
+ await snap(name,changed);return changed;
+}
+async function normalWifiDisconnect({requireActivePeer=false}={}){
+ // Use the actual Android system Wi-Fi switch. Closing diagnostic sockets is not this experiment.
+ await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});
+ await wait(s=>wifiSwitches(s).length===1&&nodes(s).some(n=>n.package==='com.android.settings'),30000,'Resolved native Settings Wi-Fi switch not exposed');
+ await toggleWifi(false,'wifi-off',{requireActivePeer});
  report.wifiDisconnectObserved=true;
+}
+function successfulFileControl(value,phase){
+ const result=value.result;assert.equal(result?.phase,phase,'Wrong file-control phase');
+ assert.equal(result.rename?.success,true,'Ordinary control rename failed');assert.equal(result.delete?.success,true,'Ordinary control delete failed');
+ assert.equal(result.restored,true,'File-control source restoration failed');
+ for(const handle of [result.handlesBefore,result.handlesAfter]){
+  assert(handle?.raw&&fs.existsSync(handle.raw),'Handle observation evidence absent');
+  assert([0,1].includes(handle.exitCode),'Handle observation invocation failed');
+  const raw=fs.readFileSync(handle.raw,'utf8');assert(/No matching handles found\./.test(raw),'Successful file control unexpectedly retains matching handles');
+ }
+ return result;
+}
+function partialReceive(xml,basename){
+ const text=labels(xml).join('\n');
+ const percents=[...text.matchAll(/(?:^|\s)(\d+(?:\.\d+)?)\s*%/g)].map(m=>Number(m[1]));
+ return text.includes('Receiving')&&text.includes(basename)&&!text.includes('Finished')&&percents.some(p=>p>0&&p<100);
+}
+async function helperLossEvidence(streamId,name){
+ await activate('org.localsend.cloudtransport');const end=Date.now()+30000;let status,xml,observed;
+ do{await tap('Show transport status',{action:true});xml=await wait(s=>labels(s).some(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n')),10000,'Retired helper transport observation absent');
+  status=JSON.parse(labels(xml).find(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n')).slice('HELPER_TRANSPORT_STATUS\n'.length));observed=status.lastDownlinkObservation;
+  if(observed?.streamId===streamId&&observed.closedMs>0)break;assert(Date.now()<end,'No matching Android native physical closure observed');await sleep(1000);
+ }while(true);await snap(name,xml);
+ assert(/^physical-read-failure:/.test(observed.outcome),'Helper stream closure was diagnostic or unclassified');
+ assert(observed.firstReadMs>0&&observed.closedMs>=observed.firstReadMs,'Helper never established physical read or missing native closure time');
+ assert(!observed.retirementReason||observed.retirementReason==='service-cleanup','Diagnostic retirement preceded link closure');
+ save(name+'.json',status);return observed;
 }
 async function forwardControls(){
  await tap('Start socket control');
@@ -103,8 +146,42 @@ async function forwardControls(){
   assert.equal(returned.count,count);assert.equal(returned.sha256,expected);cases.push({count,sha256:expected,returned,halfClosed:true,replyReadThroughEof:true});
  }
  save('forward-physical-control.json',{status:'passed',scope:'Opaque transport checksum and half-close control, not app reproduction',cases});
+ // An independent active control socket must terminate from the observed physical link closure.
+ // Neither the timer below nor cleanup may manufacture a qualifying TCP failure.
+ const stream=r.status().persistent;assert(stream?.established,'Persistent physical downlink not established');
+ const opened=r.status().opened;let closed=null;
+ const physical=net.connect({host:'127.0.0.1',port:53318,allowHalfOpen:true});
+ physical.on('end',()=>{closed={kind:'native-socket-eof',utc:new Date().toISOString()};});
+ physical.on('error',error=>{closed={kind:'native-socket-error',code:error.code,utc:new Date().toISOString()};});
+ physical.on('close',hadError=>{closed={...closed,kind:closed?.kind||'native-socket-close',hadError,utc:new Date().toISOString()};});
+ try{
+  await new Promise((resolve,reject)=>{physical.once('connect',resolve);physical.once('error',reject);});physical.write(Buffer.alloc(65537,7));
+  const activeEnd=Date.now()+30000;let peer;
+  do{peer=r.status().activePeerIds.find(id=>r.status().peerDownlink[id]===stream.id&&r.status().peerChunks[id]?.fromSender.bytes===65537);if(peer)break;assert(Date.now()<activeEnd,'Physical dropout socket did not progress');await sleep(100);}while(true);
+  assert.equal(r.status().opened,opened+1,'Unexpected socket opened during transport loss control');
+  save('physical-dropout-before.json',r.status());await normalWifiDisconnect();
+  const lossEnd=Date.now()+60000;let event;
+  do{event=r.status().streamHistory.find(e=>e.id===stream.id&&e.physical&&e.ownedPeers.includes(peer));if(event&&closed&&!r.status().activePeerIds.includes(peer))break;assert(Date.now()<lossEnd,'Normal Wi-Fi off did not produce a native downlink abort and native Windows peer close; no synthetic reset substituted');await sleep(250);}while(true);
+  const androidLoss=await helperLossEvidence(stream.id,'physical-dropout-helper');
+  save('physical-dropout-control.json',{status:'passed',scope:'Transport loss propagation only, not LocalSend failure',streamId:stream.id,peer,event,androidLoss,closed,status:r.status()});
+  await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Physical control Wi-Fi restore unavailable');await toggleWifi(true,'physical-control-wifi-restored');
+ }finally{physical.destroy();}
+ await activate('org.localsend.cloudtransport');
  await tap('Stop helper');await wait(s=>labels(s).some(v=>v.includes('HELPER_SERVICE_STATUS')&&v.includes('"servicePresent":false')),45000,'Control helper not stopped');
  const end=Date.now()+10000;while(r.status().peers){assert(Date.now()<end,'Control peers not closed');await sleep(100);}
+}
+async function preserveAndroidRecording(){
+ const end=Date.now()+45000;let value;
+ do{
+  const response=await fetch('https://api-cloud.browserstack.com/app-automate/sessions/'+session+'.json',{headers:{authorization:auth},signal:AbortSignal.timeout(15000)});
+  assert(response.ok,'Owned BrowserStack recording metadata unavailable');value=(await response.json()).automation_session;
+  if(value?.video_url)break;await sleep(3000);
+ }while(Date.now()<end);
+ assert(value?.video_url,'Owned BrowserStack video was not published');
+ const response=await fetch(value.video_url,{signal:AbortSignal.timeout(60000)});assert(response.ok,'Owned BrowserStack recording download failed');
+ const binary=Buffer.from(await response.arrayBuffer());assert(binary.length>0&&binary.length<256*1024*1024,'Owned recording has unexpected size');
+ fs.writeFileSync(path.join(out,'android-session.mp4'),binary);
+ save('android-recording.json',{session,status:value.status,duration:value.duration,bytes:binary.length,sha256:createHash('sha256').update(binary).digest('hex'),source:'Video URL returned by authenticated owned BrowserStack session API; capability URL omitted'});
 }
 try{
  const capacityResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
@@ -127,18 +204,30 @@ try{
  const readyFile=path.join(windows,'ready.json'),end=Date.now()+180000;
  while(!fs.existsSync(readyFile)){assert(!childExit,'Windows sender startup failed');assert(Date.now()<end,'Windows startup deadline');await sleep(500);}
  const ready=JSON.parse(fs.readFileSync(readyFile,'utf8'));save('windows-ready.json',ready);
- await command('probe',{fixture:'control',phase:'before-selection'});await command('probe',{fixture:'failed',phase:'before-selection'});
+ successfulFileControl(await command('probe',{fixture:'control',phase:'before-selection'}),'before-selection');
+ successfulFileControl(await command('probe',{fixture:'failed',phase:'before-selection'}),'before-selection');
  await command('add-favorite');await command('select',{fixture:'control'});await command('send');await accept('control');await receivedHash(ready.fixtures.control,'control');
- await command('probe',{fixture:'control',phase:'after-success'});
- await command('select',{fixture:'failed'});await command('send');await accept('interrupted');
+ successfulFileControl(await command('probe',{fixture:'control',phase:'after-success'}),'after-success');
+ await command('record-start');await command('select',{fixture:'failed'});await command('send');await accept('interrupted');
  const before=r.status().fromSender;const progressEnd=Date.now()+90000;
  while(r.status().fromSender-before<1048576){assert(Date.now()<progressEnd,'No real source data progression before disconnect');await sleep(250);}
  await command('probe',{fixture:'failed',phase:'during-upload'});
- await normalWifiDisconnect();await command('screenshot',{label:'after-disconnect'});
+ const partial=await wait(s=>partialReceive(s,path.win32.basename(ready.fixtures.failed.path)),30000,'Actual Android partial receive progression absent');await snap('interrupted-partial-receive',partial);
+ const active=r.status();save('interrupted-active-transport.json',active);
+ const peers=active.activePeerIds?.filter(id=>active.peerChunks[id]?.fromSender.bytes>=1048576)||[];assert.equal(peers.length,1,'Expected one observed active large-upload peer');
+ report.interruptedPeer=peers[0];report.interruptedStream=active.peerDownlink[peers[0]];report.largeFixtureBytes=ready.fixtures.failed.bytes;await command('screenshot',{label:'active-immediately-before-network-off'});
+ await normalWifiDisconnect({requireActivePeer:true});await command('screenshot',{label:'after-disconnect'});
+ const physicalEnd=Date.now()+60000;let physicalLoss;
+ do{physicalLoss=r.status().streamHistory.find(e=>e.id===report.interruptedStream&&e.physical&&e.ownedPeers.includes(report.interruptedPeer));if(physicalLoss)break;assert(Date.now()<physicalEnd,'Actual transfer network loss had no native physical downlink abort; synthetic/deadline failures excluded');await sleep(250);}while(true);
+ report.physicalLoss=physicalLoss;report.androidPhysicalLoss=await helperLossEvidence(report.interruptedStream,'actual-network-helper-loss');save('actual-network-loss.json',{windows:physicalLoss,android:report.androidPhysicalLoss});
  await command('record-interruption',{kind:'normal-network-interruption',evidence:'../wifi-off.png; actual Android Settings switch verified true→false'});
  await sleep(15000);const after=await command('probe',{fixture:'failed',phase:'after-terminal-error'});report.cases.push({name:'normal-wifi-disconnect',probe:after});
- await command('quit');const quit=await command('probe',{fixture:'failed',phase:'after-quit'});report.cases.push({name:'after-app-quit',probe:quit});
- report.status='observations-complete';report.reproduced=false;
+ const details=await command('error-details');report.errorDetails=details;
+ const errorText=details.result?.ocr?.text+' '+((details.result?.uia?.tree||[]).map(n=>n.name).join(' '));assert(/DioException|SocketException|connection|network/i.test(errorText),'Actual error details lack a network-failure observation');
+ await command('click',{label:'Close'});
+ await command('quit');const quit=await command('probe',{fixture:'failed',phase:'after-quit'});report.cases.push({name:'after-app-quit',probe:quit});successfulFileControl(quit,'after-quit');
+ report.windowsRecording=await command('record-stop');assert.equal(report.windowsRecording.result.status,'capture-finished');assert.equal(report.windowsRecording.result.exitCode,0);assert(report.windowsRecording.result.bytes>0,'Continuous Windows recording absent');
+ report.status='observations-complete';report.reproduced=null;report.verdict='Await independent inspection of terminal error, physical interruption provenance and source-owner handle evidence';
 }catch(error){report.status='incomplete';report.error=redact(error.stack||error);process.exitCode=1;if(session){try{await snap('failure');}catch(e){report.snapshotError=redact(e.message);}}}
 finally{
  deadline=Date.now()+180000;
@@ -149,8 +238,8 @@ finally{
  }catch(e){report.cleanupErrors.push(redact(e.message));}}
  if(child&&!childExit){try{await command('stop');}catch{child.kill();}}
  // Restore only this owned device's Wi-Fi before session cleanup when the normal switch was changed.
- if(session&&report.wifiSwitchMayHaveChanged){try{const xml=await source();const sw=nodes(xml).filter(n=>n.class==='android.widget.Switch'&&n.checked==='false');if(sw.length===1){const e=await wd('POST',base()+'/element',{using:'class name',value:'android.widget.Switch'});await wd('POST',base()+'/element/'+(e['element-6066-11e4-a52e-4f735466cecf']||e.ELEMENT)+'/click',{});await snap('wifi-restored');}}catch(e){report.cleanupErrors.push(redact(e.message));}}
- if(session){try{await wd('DELETE',base());}catch(e){report.cleanupErrors.push(redact(e.message));}}
+ if(session&&report.wifiSwitchMayHaveChanged){try{await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Restore Wi-Fi switch unavailable');if(wifiSwitches(await source())[0].checked==='false')await toggleWifi(true,'wifi-restored');}catch(e){report.cleanupErrors.push(redact(e.message));}}
+ if(session){try{await wd('DELETE',base());await preserveAndroidRecording();}catch(e){report.cleanupErrors.push(redact(e.message));}}
  try{await r.stop();}catch(e){report.cleanupErrors.push(redact(e.message));}
  save('relay-trace.json',r.trace);save('relay-status.json',r.status());report.finishedUtc=new Date().toISOString();save('results.json',report);
 }
