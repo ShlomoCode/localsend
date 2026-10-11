@@ -9,6 +9,17 @@ xdg-user-dirs-update
 test "$(xdg-user-dir DOWNLOAD)" = /home/probe/Downloads
 mkdir -p /home/probe/Downloads
 cat /home/probe/.config/user-dirs.dirs > /evidence/"$ROLE"/user-dirs.txt
+command -v qarma kdialog zenity > /evidence/"$ROLE"/picker-tools.txt || true
+if [ "${CAPTURE_PICKER:-false}" = true ]; then
+  mkdir -p /home/probe/picker-tools
+  for backend in zenity kdialog; do
+    if [ -x "/usr/bin/$backend" ]; then
+      cp /home/probe/picker-wrapper.sh "/home/probe/picker-tools/$backend"
+      chmod +x "/home/probe/picker-tools/$backend"
+    fi
+  done
+  export PATH="/home/probe/picker-tools:$PATH"
+fi
 sha256sum /home/probe/LocalSend.AppImage > /evidence/"$ROLE"/release-sha256.txt
 cat /etc/os-release > /evidence/"$ROLE"/environment.txt
 dpkg-query -W libgtk-3-0 zenity xfce4-session >> /evidence/"$ROLE"/environment.txt

@@ -7,9 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends imagemagick pyt
 RUN if [ "$PICKER_BACKEND" = kdialog ]; then apt-get update && apt-get install -y kdialog && rm -rf /var/lib/apt/lists/*; fi
 USER probe
 WORKDIR /home/probe
-RUN curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.8.0/LocalSend-1.8.0.AppImage -o LocalSend.AppImage && chmod +x LocalSend.AppImage && ./LocalSend.AppImage --appimage-extract
+ARG APP_VERSION=1.8.0
+RUN curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v${APP_VERSION}/LocalSend-${APP_VERSION}.AppImage -o LocalSend.AppImage && chmod +x LocalSend.AppImage && ./LocalSend.AppImage --appimage-extract
 COPY support/diagnostics/402-ui.py /home/probe/ui.py
 COPY support/diagnostics/402-session.sh /home/probe/session.sh
 COPY support/diagnostics/402-root.sh /home/probe/root.sh
+COPY support/diagnostics/402-picker-wrapper.sh /home/probe/picker-wrapper.sh
 USER root
 ENTRYPOINT ["bash", "/home/probe/root.sh"]
