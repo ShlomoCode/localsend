@@ -9,9 +9,16 @@ on:
       repeats:
         description: Number of independent off/on pairs
         default: '1'
+      trace:
+        description: Add symmetric supporting route instrumentation
+        type: boolean
+        default: false
+      version:
+        description: Official Windows ZIP release version
+        default: '1.16.1'
 jobs:
   release:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -30,9 +37,13 @@ jobs:
         shell: pwsh
         run: |
           $evidence="$env:RUNNER_TEMP/evidence2277"
-          & ./support/diagnostics/prepare2277.ps1 -SourceDirectory source2277 -EvidenceDirectory $evidence
+          New-Item -ItemType Directory -Force $evidence | Out-Null
+          if ('${{ inputs.trace }}' -eq 'true') {
+            & ./support/diagnostics/prepare2277.ps1 -SourceDirectory source2277 -EvidenceDirectory $evidence
+          }
           flutter --version --machine > "$evidence/flutter.json"
           Push-Location source2277/app
+          Copy-Item lib/pages/web_send_page.dart "$evidence/baseline-source.dart"
           flutter pub get
           if ($LASTEXITCODE -ne 0) { throw 'Historical dependency resolution failed' }
           Copy-Item pubspec.lock "$evidence/resolved-pubspec.lock"
@@ -41,11 +52,11 @@ jobs:
           Copy-Item build/windows/x64/runner/Release "$env:RUNNER_TEMP/baseline2277" -Recurse
           $path=(Resolve-Path lib/pages/web_send_page.dart).Path
           $source=[IO.File]::ReadAllText($path)
-          $marker="        _trace('callback didPop=' + didPop.toString());"
+          $marker=if ('${{ inputs.trace }}' -eq 'true') {"        _trace('callback didPop=' + didPop.toString());"} else {'      onPopInvokedWithResult: (_, __) async {'}
           if (-not $source.Contains($marker)) { throw 'Trace marker missing' }
           $source=$source.Replace($marker,$marker+"`n        if (_stateEnum != _ServerState.running) {`n          return;`n        }`n")
           [IO.File]::WriteAllText($path,$source)
-          Copy-Item $path "$evidence/instrumented-guard.dart"
+          Copy-Item $path "$evidence/guard-source.dart"
           git diff -- lib/pages/web_send_page.dart > "$evidence/source-diagnostic.diff"
           flutter build windows --release
           if ($LASTEXITCODE -ne 0) { throw 'Historical guard build failed' }
@@ -54,7 +65,7 @@ jobs:
       - name: Download official reported release
         shell: pwsh
         run: |
-          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.16.1/LocalSend-1.16.1-windows-x86-64.zip -OutFile $env:RUNNER_TEMP/app.zip
+          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v${{ inputs.version }}/LocalSend-${{ inputs.version }}-windows-x86-64.zip -OutFile $env:RUNNER_TEMP/app.zip
           Expand-Archive $env:RUNNER_TEMP/app.zip $env:RUNNER_TEMP/release
       - name: Install OCR
         run: choco install tesseract --no-progress -y
@@ -63,6 +74,7 @@ jobs:
         run: |
           $exe = (Get-ChildItem $env:RUNNER_TEMP/release -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
           if ('${{ inputs.causal }}' -eq 'true') {
+            & ./support/diagnostics/windows2277.ps1 -Executable $exe -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/official" -Repeat ${{ inputs.repeats }}
             & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/baseline2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/baseline" -Repeat ${{ inputs.repeats }}
             & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/guard2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/guard" -Repeat ${{ inputs.repeats }}
           } else {

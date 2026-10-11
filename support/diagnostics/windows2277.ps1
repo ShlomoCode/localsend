@@ -64,6 +64,8 @@ foreach($case in $cases) {
   [Desktop2277]::MoveWindow($script:process.MainWindowHandle,0,0,1000,760,$true)|Out-Null
   [Desktop2277]::SetForegroundWindow($script:process.MainWindowHandle)|Out-Null
   Start-Sleep -Seconds 2;Screenshot "$name-initial"
+  $stored=Get-Content "$folder/settings.json" -Raw|ConvertFrom-Json
+  @{animations=$stored.'flutter.ls_enable_animations';port=$stored.'flutter.ls_port';locale=$stored.'flutter.ls_locale'}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-profile.json"
   Word 'Send' "$name-initial";Screenshot "$name-send"
   Word 'Text' "$name-send";Screenshot "$name-text-dialog"
   $prompt=Import-Csv "$EvidenceDirectory/$name-text-dialog.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'message'}|Select-Object -First 1
