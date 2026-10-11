@@ -1,0 +1,26 @@
+name: Diagnose issue 2007 desktop OCR
+on:
+  push:
+    branches: [codex/bug-2007-diagnostics]
+    paths: [.github/workflows/diagnose-2007-ocr.yml]
+  workflow_dispatch:
+jobs:
+  inspect-real-screenshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read the failed control artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr python3-pil
+          gh run download 38103679659 --repo ShlomoCode/localsend --dir /tmp/ocr-reference
+          mkdir -p evidence
+          /usr/bin/python3 support/diagnostics/2007-ocr-probe.py
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue-2007-ocr-${{ github.run_id }}
+          path: evidence/
