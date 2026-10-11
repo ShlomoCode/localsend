@@ -65,7 +65,9 @@ foreach($animations in @($false,$true)) {
   if(!$prompt){throw 'Type message dialog missing'}
   Click 500 ([int]$prompt.top+50) 'Text-input-focus'
   [System.Windows.Forms.SendKeys]::SendWait('asdasd')
-  Screenshot "$name-text-filled";Word 'Confirm' "$name-text-filled"
+  Screenshot "$name-text-filled"
+  # Confirm bounds x531-616/y434-470 verified in the first retained text-dialog screenshot.
+  Click 574 452 'Confirm-text';Start-Sleep -Milliseconds 800
   Start-Sleep -Seconds 2;Screenshot "$name-selected"
   $nearby=Import-Csv "$EvidenceDirectory/$name-selected.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'Nearby'}|Select-Object -First 1
   if(!$nearby){throw 'Selected Send page missing Nearby devices'}
