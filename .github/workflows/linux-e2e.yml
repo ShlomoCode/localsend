@@ -23,6 +23,35 @@ on:
         type: boolean
         default: false
 jobs:
+  api:
+    if: inputs.regression_controls && inputs.source_ref != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
+      - name: Read pinned Flutter version
+        id: flutter
+        run: echo "version=$(jq -r .flutter source/.fvmrc)" >> "$GITHUB_OUTPUT"
+      - uses: flutter-actions/setup-flutter@v4
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+      - name: Verify additive public API and omitted-ID compatibility
+        run: |
+          cp support/diagnostics/3546/tray_identity_test.dart source/app/test/tray_identity_3546_test.dart
+          cd source
+          flutter pub get
+          cd app
+          flutter test test/tray_identity_3546_test.dart 2>&1 | tee ../../api-results.txt
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: tray-api-${{ github.run_id }}
+          path: api-results.txt
   build:
     if: inputs.source_ref != '' && inputs.source_run_id == ''
     runs-on: ubuntu-24.04
