@@ -1,0 +1,47 @@
+name: Record favorites dialog
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recording:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - name: Prepare tooling and MSIX helper
+        shell: pwsh
+        run: |
+          choco install tesseract ffmpeg --no-progress -y
+          dart pub global activate fvm
+          fvm use 3.41.9 --force
+          $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
+          & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
+          & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
+      - name: Build exact candidate source
+        working-directory: app
+        run: |
+          fvm flutter pub get
+          fvm flutter build windows --release
+      - name: Capture actual desktop apps
+        shell: powershell
+        run: |
+          $ffmpeg = (Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName
+          if (!$ffmpeg) { throw 'ffmpeg missing' }
+          & ./support/test/windows/record-favorites.ps1 -Executable "$env:GITHUB_WORKSPACE/app/build/windows/x64/runner/Release/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/favorites-recording" -Ffmpeg $ffmpeg
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: favorites-recording
+          path: |
+            ${{ runner.temp }}/favorites-recording/*.mp4
+            ${{ runner.temp }}/favorites-recording/*.json
+            ${{ runner.temp }}/favorites-recording/*.txt
+            ${{ runner.temp }}/favorites-recording/*.srt
+            ${{ runner.temp }}/favorites-recording/*.png
+          if-no-files-found: error
