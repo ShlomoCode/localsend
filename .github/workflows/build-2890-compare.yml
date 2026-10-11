@@ -1,9 +1,11 @@
 name: Build controlled 2890 comparison
 on:
-  push:
-    branches: [codex/diagnose-2890]
-    paths: [.github/workflows/build-2890-compare.yml]
   workflow_dispatch:
+    inputs:
+      checks_only:
+        description: Check the existing fix source without rebuilding
+        type: boolean
+        default: false
 jobs:
   build:
     runs-on: windows-latest
@@ -21,12 +23,14 @@ jobs:
           flutter-version: 3.41.9
           channel: stable
       - name: Prepare required MSIX helper
+        if: ${{ !inputs.checks_only }}
         shell: pwsh
         run: |
           $makepri = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin/10.*/x64/makepri.exe" | Select-Object -Last 1
           & $makepri.FullName new /pr support/build/msix/content /cf support/build/msix/priconfig.xml /mn support/build/msix/content/AppxManifest.xml /of support/build/msix/content/resources.pri /o
           & "C:/Program Files (x86)/Windows Kits/10/App Certification Kit/makeappx.exe" pack /o /d support/build/msix/content /nv /p app/windows/localsend_msix_helper.msix
       - name: Build unchanged production base
+        if: ${{ !inputs.checks_only }}
         working-directory: app
         shell: pwsh
         run: |
@@ -35,6 +39,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {throw "Baseline build failed"}
           Copy-Item build/windows/x64/runner/Release $env:RUNNER_TEMP/baseline2890 -Recurse
           git rev-parse HEAD | Set-Content $env:RUNNER_TEMP/baseline2890/source-commit.txt
+      - name: Resolve check dependencies
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: flutter pub get
       - name: Apply only existing scrolling correction
         shell: pwsh
         run: |
@@ -42,6 +50,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {throw "Existing fix did not apply"}
           git diff | Set-Content $env:RUNNER_TEMP/candidate-diff.txt
       - name: Build matched existing-fix candidate
+        if: ${{ !inputs.checks_only }}
         working-directory: app
         shell: pwsh
         run: |
@@ -49,11 +58,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) {throw "Candidate build failed"}
           Copy-Item build/windows/x64/runner/Release $env:RUNNER_TEMP/candidate2890 -Recurse
           Copy-Item $env:RUNNER_TEMP/candidate-diff.txt $env:RUNNER_TEMP/candidate2890/
+      - name: Check existing fix formatting
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: dart format --set-exit-if-changed lib/widget/dialogs/favorite_dialog.dart
+      - name: Analyze existing fix
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: flutter analyze lib/widget/dialogs/favorite_dialog.dart
+      - name: Verify existing favorites data behavior
+        if: ${{ inputs.checks_only }}
+        working-directory: app
+        run: flutter test test/unit/provider/favorites_provider_test.dart
       - uses: actions/upload-artifact@v6
+        if: ${{ !inputs.checks_only }}
         with:
           name: baseline2890-c1ce
           path: ${{ runner.temp }}/baseline2890
       - uses: actions/upload-artifact@v6
+        if: ${{ !inputs.checks_only }}
         with:
           name: candidate2890-pr3192
           path: ${{ runner.temp }}/candidate2890
