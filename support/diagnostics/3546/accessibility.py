@@ -117,16 +117,25 @@ def prepare_hide(stage):
 
 
 def quit_via_menu(pid, stage):
-    # Ctrl+Q is LocalSend's supported Linux Quit shortcut in the original release.
-    subprocess.run(["xdotool", "search", "--name", "^LocalSend$", "windowactivate", "--sync"], check=True)
-    time.sleep(.5)
-    snapshot(stage + "-quit-shortcut-before")
-    active = subprocess.check_output(["xdotool", "getwindowfocus", "getwindowname"], text=True).strip()
-    assert active == "LocalSend", f"Quit shortcut focus is {active!r}"
-    # Activate a Flutter control as well as its native top-level window.
-    subprocess.run(["xdotool", "mousemove", "294", "229", "click", "1"], check=True)
-    time.sleep(.5)
-    subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+q"], check=True)
+    item = registered_item(pid)
+    service, path = item["address"].split("/", 1)
+    detail = subprocess.run(["busctl", "--user", "introspect", service, "/" + path, "org.kde.StatusNotifierItem"], capture_output=True, text=True)
+    Path(f"evidence/{stage}-sni.txt").write_text(detail.stdout + detail.stderr)
+    click(find("Show hidden icons", "button"))
+    node = find("org.localsend.localsend_app", "button")
+    bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+    # The icon is at the leading edge of the popup row, not the label center.
+    subprocess.run(["xdotool", "mousemove", str(bounds.x + 10), str(bounds.y + bounds.height // 2), "click", "1"], check=True)
+    time.sleep(1)
+    snapshot(stage + "-left-tray-menu")
+    try:
+        quit_item = find("Quit LocalSend", "menu item")
+    except RuntimeError:
+        subprocess.run(["xdotool", "mousemove", str(bounds.x + 10), str(bounds.y + bounds.height // 2), "click", "3"], check=True)
+        time.sleep(1)
+        snapshot(stage + "-right-tray-menu")
+        quit_item = find("Quit LocalSend", "menu item")
+    click(quit_item)
     for _ in range(40):
         try:
             exited, _ = os.waitpid(pid, os.WNOHANG)
@@ -139,7 +148,7 @@ def quit_via_menu(pid, stage):
         except ProcessLookupError:
             return
         time.sleep(.25)
-    raise RuntimeError("LocalSend's Ctrl+Q Quit shortcut did not stop the application")
+    raise RuntimeError("LocalSend's tray Quit action did not stop the application")
 
 
 snapshot("accessibility")
