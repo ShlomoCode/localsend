@@ -49,6 +49,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,1000));
   }
   assert(accept,'Original Android app did not render receive approval');
+  const acceptRect=await wd('GET',prefix+'/element/'+accept['element-6066-11e4-a52e-4f735466cecf']+'/rect');
+  writeFileSync('evidence/android-input.json',JSON.stringify({action:'Accept',utc:new Date().toISOString(),rect:acceptRect},null,2));
   await wd('POST',prefix+'/element/'+accept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   await new Promise(r=>setTimeout(r,3500));
   await snapshot('after-accept');

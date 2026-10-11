@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime, timezone
 import io
 import os
 from pathlib import Path
@@ -9,16 +10,19 @@ from PIL import Image
 out = Path('evidence')
 
 def run(*args):
-    print('INPUT', args, flush=True)
+    print('INPUT', datetime.now(timezone.utc).isoformat(), args, flush=True)
     return subprocess.check_output(args, text=True)
 
-def screen(name):
+def screen(name, sidebar=False):
     path = out / (name + '.png')
     run('scrot', str(path))
     # Preserve the original evidence screenshot. Enlarge a separate OCR input
     # so 13 px desktop labels are recognized, then map bounds back to pixels.
     ocr_path = out / (name + '-ocr.png')
     source = Image.open(path)
+    offset_y = 100 if sidebar else 0
+    if sidebar:
+        source = source.crop((0, 100, 256, 300))
     source.resize((source.width * 3, source.height * 3), Image.Resampling.LANCZOS).save(ocr_path)
     tsv = run('tesseract', str(ocr_path), 'stdout', '--psm', '11', 'tsv')
     (out / (name + '.tsv')).write_text(tsv)
@@ -26,11 +30,12 @@ def screen(name):
     for word in words:
         for key in ['left', 'top', 'width', 'height']:
             word[key] = str(int(word[key]) // 3)
+        word['top'] = str(int(word['top']) + offset_y)
     return words
 
 def text(name, stage, scroll=False):
     for attempt in range(12 if scroll else 1):
-        words = screen(stage + '-' + str(attempt))
+        words = screen(stage + '-' + str(attempt), sidebar=name in ['Settings', 'Send'])
         matches = [w for w in words if w['text'].strip() == name]
         if matches:
             w = matches[0]
