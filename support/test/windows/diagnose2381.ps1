@@ -69,7 +69,7 @@ function Word([string]$word,[string]$snap) {
  $rows = Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"
  $row = $rows | Where-Object { $_.text -eq $word } | Select-Object -First 1
  if (-not $row) {
-  if ($word -eq "Cancel" -and $snap -like "favorites*") {
+  if ($word -eq "Cancel" -and $snap -like "*favorites*") {
    # Two-row Favorites Cancel verified at x474-524/y477-495, including the wider exact-name dialog.
    Click 500 485
    return
@@ -363,81 +363,89 @@ Copy-Item $saved[0].path "$preserved/$($saved[0].name)"
 Start-Sleep -Seconds 2
 Screenshot "sender-transfer-completed"
 if($currentView -and $CandidateExecutable) {
+ $script:previousWriteTicks=$saved[0].lastWriteTicks
+ function RunMatchedPhase([string]$phase,[string]$PhaseExecutable) {
  # Preserve the real receiver and complete private sender profile. Only replace
  # sender program files; settings and certificates are never re-created.
  Click 930 714
- Screenshot "baseline-sender-done"
+ Screenshot "$phase-previous-sender-done"
  [Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
  Click 930 714
- Screenshot "baseline-receiver-done"
- ExportSettings "sender" "baseline-sender-before-replacement"
- ExportSettings "receiver" "baseline-receiver-before-replacement"
+ Screenshot "$phase-previous-receiver-done"
+ ExportSettings "sender" "$phase-sender-before-replacement"
+ ExportSettings "receiver" "$phase-receiver-before-replacement"
  $receiverId=$apps.receiver.Id
  $senderFolder="$EvidenceDirectory/sender-app"
  Stop-Process -Id $apps.sender.Id -Force
  Start-Sleep -Seconds 3
  $privateProfile=Get-Content "$senderFolder/settings.json" -Raw
  Get-ChildItem $senderFolder | Where-Object {$_.Name -ne "settings.json"} | Remove-Item -Recurse -Force
- Get-ChildItem (Split-Path $CandidateExecutable) | Where-Object {$_.Name -ne "settings.json"} | Copy-Item -Destination $senderFolder -Recurse
+ Get-ChildItem (Split-Path $PhaseExecutable) | Where-Object {$_.Name -ne "settings.json"} | Copy-Item -Destination $senderFolder -Recurse
  if((Get-Content "$senderFolder/settings.json" -Raw) -cne $privateProfile) {throw "Sender profile changed during binary replacement"}
- Get-FileHash $CandidateExecutable -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-executable-hash.json"
+ Get-FileHash $PhaseExecutable -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-executable-hash.json"
  $apps.sender=Start-Process "$senderFolder/localsend_app.exe" -WorkingDirectory $senderFolder -PassThru
  Start-Sleep -Seconds 12
  $apps.sender.Refresh()
  if(!$apps.sender.MainWindowHandle) {throw "Candidate sender did not open"}
  if((Get-Process -Id $receiverId).HasExited) {throw "Preserved receiver stopped"}
- @{receiverPidBefore=$receiverId;receiverPidAfter=$apps.receiver.Id;senderPidAfter=$apps.sender.Id;profileByteIdenticalBeforeStart=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-replacement.json"
+ @{receiverPidBefore=$receiverId;receiverPidAfter=$apps.receiver.Id;senderPidAfter=$apps.sender.Id;profileByteIdenticalBeforeStart=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-replacement.json"
  [Desktop2381]::MoveWindow($apps.sender.MainWindowHandle,0,0,1000,760,$true) | Out-Null
  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
- Screenshot "candidate-initial"
- Word "Send" "candidate-initial"
+ Screenshot "$phase-initial"
+ Word "Send" "$phase-initial"
  Click 497 212
  Start-Sleep -Seconds 8
- Screenshot "candidate-nearby-after-scan"
+ Screenshot "$phase-nearby-after-scan"
  Click 868 288
- Screenshot "candidate-device-details"
+ Screenshot "$phase-device-details"
  Click 36 59
- Screenshot "candidate-details-returned"
+ Screenshot "$phase-details-returned"
  Click 576 212
- Screenshot "candidate-favorites-reopened"
- ExportSettings "sender" "candidate-sender-before-transfer"
- ExportSettings "receiver" "candidate-receiver-before-transfer"
+ Screenshot "$phase-favorites-reopened"
+ ExportSettings "sender" "$phase-sender-before-transfer"
+ ExportSettings "receiver" "$phase-receiver-before-transfer"
  $candidateStored=Get-Content "$senderFolder/settings.json" -Raw | ConvertFrom-Json
  $candidateFavorites=@($candidateStored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
- $candidateFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/candidate-favorites.json"
+ $candidateFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/$phase-favorites.json"
  if(($candidateFavorites | ConvertTo-Json -Compress -Depth 5) -cne ($customFavorites | ConvertTo-Json -Compress -Depth 5)) {throw "Favorite identity, aliases or order changed across replacement"}
- Word "Cancel" "candidate-favorites-reopened"
- Screenshot "candidate-selection"
- Word "File" "candidate-selection"
- Screenshot "candidate-native-file-picker"
+ Word "Cancel" "$phase-favorites-reopened"
+ Screenshot "$phase-selection"
+ Word "File" "$phase-selection"
+ Screenshot "$phase-native-file-picker"
  Click 400 442
  Paste (Resolve-Path $fixture).Path
- Screenshot "candidate-native-file-picker-filled"
+ Screenshot "$phase-native-file-picker-filled"
  Click 464 473
  Start-Sleep -Seconds 3
- Screenshot "candidate-file-selected"
+ Screenshot "$phase-file-selected"
  $candidateBefore=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
- $candidateBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-sockets-before.json"
- Word "My" "candidate-file-selected"
+ $candidateBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-transfer-sockets-before.json"
+ Word "My" "$phase-file-selected"
  Start-Sleep -Seconds 3
- Screenshot "candidate-transfer-requested"
+ Screenshot "$phase-transfer-requested"
  $candidateAfter=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
- $candidateAfter | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-sockets-after.json"
- @($candidateAfter | Where-Object {$candidateBefore.LocalPort -notcontains $_.LocalPort}) | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-new-sockets.json"
+ $candidateAfter | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-transfer-sockets-after.json"
+ @($candidateAfter | Where-Object {$candidateBefore.LocalPort -notcontains $_.LocalPort}) | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-transfer-new-sockets.json"
  [Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
  Start-Sleep -Seconds 2
- Screenshot "candidate-receiver-request"
+ Screenshot "$phase-receiver-request"
  Click 566 702
  Start-Sleep -Seconds 5
- Screenshot "candidate-receiver-completed"
+ Screenshot "$phase-receiver-completed"
  $candidateSaved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
- $candidateSaved | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-saved-files.json"
- if(@($candidateSaved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $_.lastWriteTicks -gt $saved[0].lastWriteTicks}).Count -lt 1) {throw "Candidate actual receive did not write a new matching fixture"}
+ $candidateSaved | ConvertTo-Json | Set-Content "$EvidenceDirectory/$phase-transfer-saved-files.json"
+ $matchingNew=@($candidateSaved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $_.lastWriteTicks -gt $script:previousWriteTicks})
+ if($matchingNew.Count -lt 1) {throw "Matched phase did not write a new matching fixture"}
+ $script:previousWriteTicks=($matchingNew | Measure-Object -Property lastWriteTicks -Maximum).Maximum
  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
- Screenshot "candidate-sender-completed"
- ExportSettings "sender" "candidate-sender-after-transfer"
- ExportSettings "receiver" "candidate-receiver-after-transfer"
- throw "Matched transfer checkpoint: inspect before/after selected route and aliases before adding controls"
+ Screenshot "$phase-sender-completed"
+ ExportSettings "sender" "$phase-sender-after-transfer"
+ ExportSettings "receiver" "$phase-receiver-after-transfer"
+ }
+ RunMatchedPhase "candidate-first" $CandidateExecutable
+ RunMatchedPhase "baseline-repeat" $Executable
+ RunMatchedPhase "candidate-repeat" $CandidateExecutable
+ throw "Matched double red/green checkpoint: inspect actual chosen routes and aliases before adding controls"
 }
 if($currentView) {throw "Current first transfer checkpoint: inspect selected route and route switching"}
 # Actual Finished screens in run 38107089706 have Done at x930/y714.
