@@ -66,6 +66,7 @@ for i in $(seq 1 600); do
   sleep 1
 done
 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo journalctl -b --no-pager' > evidence/cloud/guest-journal.log
+ssh "${ssh_opts[@]}" probe@127.0.0.1 'tail -100 /work/evidence/cloud/hyprland.log'
 scp -r -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no probe@127.0.0.1:/work/evidence/cloud/. evidence/cloud/
 printf 'screendump %s\n' "$PWD/evidence/cloud/guest-final.ppm" | sudo socat - UNIX-CONNECT:/tmp/tray3484/monitor
 sudo chown -R "$(id -u):$(id -g)" evidence/cloud

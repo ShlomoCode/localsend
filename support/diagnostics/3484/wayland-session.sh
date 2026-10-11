@@ -60,14 +60,16 @@ quickshell -p "$OMARCHY_PATH/shell/shell.qml" ipc call shell debugBarGeometry > 
 busctl --user list > "$out/$app_case/dbus-names.txt"
 busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > "$out/$app_case/tray-items.txt"
 for service in $(awk -v pid="$app_pid" '$2 == pid {print $1}' "$out/$app_case/dbus-names.txt"); do
-  busctl --user tree --list "$service" > "$out/$app_case/dbus-tree-${service}.txt" || true
+  service_file=${service//:/_}
+  busctl --user tree --list "$service" > "$out/$app_case/dbus-tree-${service_file}.txt" || true
   while read -r object_path; do
     if [[ "$object_path" = /org/ayatana/NotificationItem/* ]]; then
-      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Title > "$out/$app_case/sni-title.txt"
-      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Id > "$out/$app_case/sni-id.txt"
+      busctl --user introspect "$service" "$object_path" > "$out/$app_case/sni-introspection-${service_file}.txt" 2>&1 || true
+      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Title > "$out/$app_case/sni-title.txt" 2>&1 || true
+      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Id > "$out/$app_case/sni-id.txt" 2>&1 || true
       busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem ToolTip > "$out/$app_case/sni-tooltip.txt" || true
     fi
-  done < "$out/$app_case/dbus-tree-${service}.txt"
+  done < "$out/$app_case/dbus-tree-${service_file}.txt"
 done
 grim "$out/$app_case/before-hover.png"
 for repeat in 1 2; do
