@@ -9,6 +9,7 @@ public class ReceiverWindow {
 public static class ReceiverNative {
  [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
  [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X,Y; }
+ [StructLayout(LayoutKind.Sequential)] private struct GUITHREADINFO { public uint cbSize,flags; public IntPtr active,focus,capture,menuOwner,moveSize,caret; public RECT caretRect; }
  private delegate bool EnumProc(IntPtr hwnd,IntPtr data);
  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback,IntPtr data);
  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
@@ -19,6 +20,22 @@ public static class ReceiverNative {
  [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd,int command);
  [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] private static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] private static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
+ [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread,ref GUITHREADINFO info);
+ public static string FocusState(IntPtr app) {
+  uint owner,focusedOwner; uint thread=GetWindowThreadProcessId(app,out owner);
+  var info=new GUITHREADINFO { cbSize=(uint)Marshal.SizeOf(typeof(GUITHREADINFO)) };
+  if(!GetGUIThreadInfo(thread,ref info)) return "unavailable";
+  GetWindowThreadProcessId(info.focus,out focusedOwner);
+  return "foreground="+GetForegroundWindow()+" app="+app+" focus="+info.focus+" owner="+owner+" focusedOwner="+focusedOwner;
+ }
+ public static bool HasKeyboardFocus(IntPtr app) {
+  uint owner,focusedOwner; uint thread=GetWindowThreadProcessId(app,out owner);
+  var info=new GUITHREADINFO { cbSize=(uint)Marshal.SizeOf(typeof(GUITHREADINFO)) };
+  return GetForegroundWindow()==app && GetGUIThreadInfo(thread,ref info) && info.focus!=IntPtr.Zero &&
+   GetWindowThreadProcessId(info.focus,out focusedOwner)!=0 && focusedOwner==owner;
+ }
  [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr hwnd,ref POINT point);
  [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out RECT rect);
  [DllImport("user32.dll")] private static extern IntPtr ChildWindowFromPointEx(IntPtr hwnd,POINT point,uint flags);
@@ -47,15 +64,10 @@ public static class ReceiverNative {
   POINT point=new POINT { X=x,Y=y }; RECT rect;
   if(!IsWindowVisible(app)||!ScreenToClient(app,ref point)||!GetClientRect(app,out rect)||
    point.X<0||point.Y<0||point.X>=rect.Right||point.Y>=rect.Bottom) return false;
-  IntPtr target=app;
-  for(int depth=0;depth<4;depth++) {
-   IntPtr child=ChildWindowFromPointEx(target,point,1);
-   if(child==IntPtr.Zero||child==target) break;
-   MapWindowPoints(target,child,ref point,1); target=child;
-  }
-  uint owner,childOwner; GetWindowThreadProcessId(app,out owner); GetWindowThreadProcessId(target,out childOwner);
-  if(owner!=childOwner) return false;
-  IntPtr packed=new IntPtr((point.Y<<16)|(point.X&0xFFFF));
-  return PostMessage(target,0x0200,IntPtr.Zero,packed)&&PostMessage(target,0x0201,new IntPtr(1),packed)&&PostMessage(target,0x0202,IntPtr.Zero,packed);
+  Activate(app);
+  if(!SetCursorPos(x,y)) return false;
+  mouse_event(0x0002,0,0,0,UIntPtr.Zero);
+  mouse_event(0x0004,0,0,0,UIntPtr.Zero);
+  return true;
  }
 }

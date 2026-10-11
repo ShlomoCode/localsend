@@ -85,7 +85,16 @@ function SendToReceiver([string]$Ip) {
   $dialog=Snapshot 'address-dialog'
   ClickIpAddressTab $dialog
   $mode=Snapshot 'ip-mode'
-  ClickWord $mode 'IP:'
+  # The retained original dialog places the field between its mode row and Example label.
+  $hashtag=@($mode.words | Where-Object text -CEQ 'Hashtag')
+  $example=@($mode.words | Where-Object text -CEQ 'Example:')
+  if($hashtag.Count -ne 1 -or $example.Count -ne 1 -or $example[0].y-$hashtag[0].y -lt 60 -or $example[0].y-$hashtag[0].y -gt 140) { throw 'Input field anchors were not uniquely rendered.' }
+  $fieldX=[int]($mode.window.Left+$example[0].x+100)
+  $fieldY=[int]($mode.window.Top+($hashtag[0].y+$hashtag[0].height+$example[0].y)/2)
+  if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($mode.window.Hwnd),$fieldX,$fieldY)) { throw 'Native input field click failed.' }
+  Start-Sleep -Milliseconds 500
+  [ReceiverNative]::FocusState([IntPtr]::new($mode.window.Hwnd)) | Set-Content (Join-Path $evidence ('focus-'+$currentCase+'.txt'))
+  if(-not [ReceiverNative]::HasKeyboardFocus([IntPtr]::new($mode.window.Hwnd))) { throw 'Original app does not own keyboard focus; no paste.' }
   [Windows.Forms.Clipboard]::SetText($Ip)
   [Windows.Forms.SendKeys]::SendWait('^a')
   [Windows.Forms.SendKeys]::SendWait('^v')
