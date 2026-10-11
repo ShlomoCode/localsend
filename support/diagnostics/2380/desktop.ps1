@@ -30,6 +30,7 @@ public static class Desktop2861 {
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint msg,UIntPtr wparam,IntPtr lparam,uint flags,uint timeout,out UIntPtr result);
 }
 "@
 New-Item -ItemType Directory -Force $EvidenceDirectory|Out-Null
