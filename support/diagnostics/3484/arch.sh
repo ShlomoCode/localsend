@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 pacman -Syu --noconfirm
-pacman -S --noconfirm base-devel git curl jq gtk3 libayatana-appindicator libayatana-indicator fuse2 xdg-user-dirs quickshell hyprland xorg-server-xvfb xdotool imagemagick tesseract tesseract-data-eng dbus openbox mesa ttf-dejavu sudo
+pacman -S --noconfirm base-devel git curl jq gtk3 libayatana-appindicator libayatana-indicator fuse2 xdg-user-dirs quickshell hyprland xorg-server-xvfb xdotool imagemagick tesseract tesseract-data-eng dbus openbox mesa ttf-dejavu sudo flameshot
 pacman -Q > /work/evidence/cloud/package-versions.txt
 cat /etc/os-release > /work/evidence/cloud/os-release.txt
 useradd -m -G wheel investigator

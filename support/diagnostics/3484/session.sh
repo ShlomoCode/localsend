@@ -6,6 +6,16 @@ quickshell -p "$OMARCHY_PATH/shell/shell.qml" > "$out/quickshell.log" 2>&1 &
 shell_pid=$!
 sleep 8
 kill -0 "$shell_pid"
+flameshot > "$out/flameshot.log" 2>&1 &
+control_pid=$!
+sleep 8
+kill -0 "$control_pid"
+for x in 12 24 36 48 60 72; do
+  xdotool mousemove "$x" 16
+  sleep 2
+  import -window root "$out/control-${x}.png"
+  tesseract "$out/control-${x}.png" "$out/control-${x}" 2>/dev/null
+done
 localsend > "$out/localsend.log" 2>&1 &
 app_pid=$!
 printf '%s\n' "$app_pid" > "$out/app-pid.txt"
