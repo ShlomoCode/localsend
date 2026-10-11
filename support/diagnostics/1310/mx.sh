@@ -15,6 +15,7 @@ cat "$mxroot/MX-23.2_x64.iso.sha256" > evidence/mx/published-sha256.txt
 expected=$(awk '{print $1;exit}' "$mxroot/MX-23.2_x64.iso.sha256")
 actual=$(sha256sum "$mxroot/mx.iso" | awk '{print $1}')
 test "$expected" = "$actual"
+printf 'media_verified=true\n' >> "$GITHUB_OUTPUT"
 qemu-img create -f qcow2 "$mxroot/disk.qcow2" 24G
 opts=(-p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" -o ConnectTimeout=5)
 cleanup() {
