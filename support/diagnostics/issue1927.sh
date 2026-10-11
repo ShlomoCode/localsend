@@ -4,11 +4,13 @@ mkdir -p evidence
 OUT=$(realpath evidence)
 exec > >(tee "$OUT/run.log") 2>&1
 { date -u; uname -a; cat /etc/os-release; flatpak --version; flatpak info --user org.localsend.localsend_app; flatpak info --user --show-metadata org.localsend.localsend_app; } > "$OUT/identity.txt"
+if [ "${EXISTING_DESKTOP:-0}" != 1 ]; then
 export DISPLAY=:99
 Xvfb :99 -screen 0 1280x800x24 -nolisten tcp > "$OUT/xvfb.log" 2>&1 &
 sleep 2
 openbox > "$OUT/openbox.log" 2>&1 &
 sleep 2
+fi
 flatpak run --user org.localsend.localsend_app > "$OUT/app.log" 2>&1 &
 for i in $(seq 1 30); do
   wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1 || true)
@@ -49,11 +51,11 @@ state() {
   local label=$1 instance app_pid
   instance=$(flatpak ps --columns=instance,application | awk '$2=="org.localsend.localsend_app" {print $1; exit}')
   test -n "$instance"
-  flatpak enter "$instance" sh -c 'ls -la /home/runner/.config/autostart; cat /home/runner/.config/autostart/*.desktop' > "$OUT/$label-sandbox-entry.txt" 2>&1 || true
+  flatpak enter "$instance" sh -c 'ls -la "$1/.config/autostart"; cat "$1/.config/autostart/"*.desktop' sh "$HOME" > "$OUT/$label-sandbox-entry.txt" 2>&1 || true
   app_pid=$(pgrep -n -x localsend)
   sudo cat "/proc/$app_pid/environ" | tr '\0' '\n' | grep -E '^(HOME|XDG_CONFIG_HOME|FLATPAK_ID|container)=' > "$OUT/$label-app-environment.txt"
-  sudo ls -la "/proc/$app_pid/root/home/runner/.config/autostart" > "$OUT/$label-process-root.txt" 2>&1 || true
-  sudo find "/proc/$app_pid/root/home/runner" -maxdepth 4 -name '*.desktop' -exec cat {} \; >> "$OUT/$label-process-root.txt" 2>&1 || true
+  sudo ls -la "/proc/$app_pid/root$HOME/.config/autostart" > "$OUT/$label-process-root.txt" 2>&1 || true
+  sudo find "/proc/$app_pid/root$HOME" -maxdepth 4 -name '*.desktop' -exec cat {} \; >> "$OUT/$label-process-root.txt" 2>&1 || true
   { ls -la "$HOME/.config/autostart"; cat "$HOME/.config/autostart/"*.desktop; } > "$OUT/$label-host-entry.txt" 2>&1 || true
   ps -eo pid,ppid,comm,args | grep -E '[l]ocalsend|[b]wrap' > "$OUT/$label-processes.txt"
   import -window "$wid" "$OUT/$label.png"
@@ -61,7 +63,8 @@ state() {
 for repeat in 1 2; do
   label="default-$repeat"
   launch_settings "$label"
-  ffmpeg -nostdin -y -f x11grab -video_size 1280x800 -framerate 15 -i :99 -t 10 -c:v libx264 -pix_fmt yuv420p "$OUT/$label-toggle.mp4" > "$OUT/$label-recording.log" 2>&1 &
+  screen_size=$(xdpyinfo | sed -n 's/.*dimensions:[[:space:]]*\([0-9]*x[0-9]*\).*/\1/p')
+  ffmpeg -nostdin -y -f x11grab -video_size "$screen_size" -framerate 15 -i "$DISPLAY" -t 10 -c:v libx264 -pix_fmt yuv420p "$OUT/$label-toggle.mp4" > "$OUT/$label-recording.log" 2>&1 &
   recording_pid=$!
   date -u --iso-8601=ns > "$OUT/$label-inputs.txt"
   xdotool mousemove --window "$wid" 825 422 click 1
