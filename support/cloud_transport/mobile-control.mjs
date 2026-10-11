@@ -48,4 +48,5 @@ try {
  writeFileSync('mobile-control-final-status.json',JSON.stringify({results,metrics:r.status()},null,2));
  if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});
  await r.stop();
+ writeFileSync('relay-trace.json',JSON.stringify(r.trace,null,2));
 }
