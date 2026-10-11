@@ -12,6 +12,7 @@ capture() {
 }
 key() { qevent "{\"execute\":\"human-monitor-command\",\"arguments\":{\"command-line\":\"sendkey $1\"}}"; sleep 2; }
 qevent() {
+  printf '%s %s\n' "$(date +%s.%N)" "$1" >> evidence/vm/action-timings.txt
   { printf '%s\n' '{"execute":"qmp_capabilities"}'; sleep .1; printf '%s\n' "$1"; sleep .1; } | timeout 2 sudo socat - UNIX-CONNECT:$qmp >> evidence/vm/input-qmp.log
 }
 move() {
@@ -19,6 +20,11 @@ move() {
   qevent "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":$x}},{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":$y}}]}}"
 }
 button() { qevent "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"btn\",\"data\":{\"down\":$1,\"button\":\"left\"}}]}}"; }
+record() {
+  ffmpeg -y -loglevel warning -f x11grab -video_size 1280x800 -framerate 15 -i :99.0 -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "evidence/vm/$1.mp4" > "evidence/vm/$1-record.log" 2>&1 &
+  record_pid=$!
+  sleep 1
+}
 sleep 15
 capture 00-startup
 read -r width height < <(identify -format '%w %h\n' evidence/vm/00-startup.png)
@@ -31,6 +37,7 @@ capture 01-windows
 # Select the sole file using the file manager's actual selection action.
 key ctrl-a
 capture 02-downloads-selected
+record downloads-drag
 move 330 155
 button true
 move 350 175
@@ -38,13 +45,14 @@ move 500 400
 move 600 650
 capture 03-downloads-drag-overlay
 button false
-sleep 8
+sleep 2
 capture 04-downloads-drop
 move 600 705
 button true
 button false
 sleep 2
 capture 04b-downloads-app-result
+wait "$record_pid"
 # Relaunch the application to avoid keeping an earlier selection.
 /home/runner/513-vm/ssh 'flatpak kill org.localsend.localsend_app; export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0; nohup flatpak run org.localsend.localsend_app >>/home/probe/513-app.log 2>&1 </dev/null &'
 sleep 10
@@ -58,6 +66,7 @@ button false
 sleep 3
 key ctrl-a
 capture 05-documents-selected
+record documents-drag
 move 330 155
 button true
 move 350 175
@@ -65,13 +74,14 @@ move 500 400
 move 600 650
 capture 06-documents-drag-overlay
 button false
-sleep 8
+sleep 2
 capture 07-documents-drop
 move 600 705
 button true
 button false
 sleep 2
 capture 07b-documents-app-result
+wait "$record_pid"
 # Repeat the exact Documents condition in fresh application processes.
 for repetition in 2 3; do
   /home/runner/513-vm/ssh "printf '\\nDOCUMENTS_REPEAT_$repetition\\n' >> /home/probe/513-app.log; flatpak kill org.localsend.localsend_app; export XDG_RUNTIME_DIR=/run/user/\$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus WAYLAND_DISPLAY=wayland-0; nohup flatpak run org.localsend.localsend_app >>/home/probe/513-app.log 2>&1 </dev/null &"

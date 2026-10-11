@@ -13,7 +13,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick
+          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick xvfb tigervnc-viewer ffmpeg
           mkdir -p evidence/vm /home/runner/513-vm
           curl -fL --retry 3 -o /home/runner/513-vm/fedora.qcow2 https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/38/Cloud/x86_64/images/Fedora-Cloud-Base-38-1.6.x86_64.qcow2
           sha256sum /home/runner/513-vm/fedora.qcow2 > evidence/vm/image-sha256.txt
@@ -96,6 +96,10 @@ jobs:
       - name: Drive real Files drag input and capture each transition
         run: |
           set -euo pipefail
+          Xvfb :99 -screen 0 1280x800x24 -ac > evidence/vm/record-xvfb.log 2>&1 &
+          sleep 2
+          DISPLAY=:99 vncviewer -FullScreen -ViewOnly -RemoteResize=0 127.0.0.1:5901 > evidence/vm/record-viewer.log 2>&1 &
+          sleep 3
           bash support/diagnostics/513-ui.sh
       - name: Collect raw guest logs
         if: always()

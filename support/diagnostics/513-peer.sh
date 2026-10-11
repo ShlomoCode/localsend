@@ -23,8 +23,6 @@ sudo ip netns exec issue513peer ip route add 224.0.0.0/4 dev peer1
 ip -brief address
 sudo ip netns exec issue513peer ip -brief address
 export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0
-nohup sudo --preserve-env=XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,WAYLAND_DISPLAY ip netns exec issue513peer sudo --preserve-env=XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,WAYLAND_DISPLAY -u probe flatpak run \
-  --env=XDG_DATA_HOME="$app_home/peer/data" --env=XDG_CONFIG_HOME="$app_home/peer/config" --env=XDG_CACHE_HOME="$app_home/peer/cache" \
-  org.localsend.localsend_app > /home/probe/513-peer.log 2>&1 < /dev/null &
+nohup sudo ip netns exec issue513peer runuser -l probe -c "env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS WAYLAND_DISPLAY=wayland-0 flatpak run --env=XDG_DATA_HOME=$app_home/peer/data --env=XDG_CONFIG_HOME=$app_home/peer/config --env=XDG_CACHE_HOME=$app_home/peer/cache org.localsend.localsend_app" > /home/probe/513-peer.log 2>&1 < /dev/null &
 GUEST
 sleep 12
