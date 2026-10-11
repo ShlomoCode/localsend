@@ -14,6 +14,13 @@ jobs:
             Invoke-WebRequest "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-windows-x86-64.zip" -OutFile "$env:RUNNER_TEMP/$version.zip"
             Expand-Archive "$env:RUNNER_TEMP/$version.zip" "$env:RUNNER_TEMP/releases/$version"
           }
+      - name: Download exact untouched current baseline
+        uses: actions/download-artifact@v6
+        with:
+          name: baseline2890-c1ce
+          run-id: 38132668217
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/releases/current
       - name: Render actual Settings in controlled windows
         shell: powershell
         run: ./support/diagnostics/windows2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/evidence2861

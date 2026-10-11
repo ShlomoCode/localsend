@@ -12,7 +12,14 @@ public static class Desktop2861 {
  }
  public static DevMode NewMode() { return new DevMode { size=(ushort)Marshal.SizeOf(typeof(DevMode)), extra=0 }; }
  public static string ModeLayout() { return "size="+Marshal.SizeOf(typeof(DevMode))+",dmSize="+Marshal.OffsetOf(typeof(DevMode),"size")+",fields="+Marshal.OffsetOf(typeof(DevMode),"fields")+",width="+Marshal.OffsetOf(typeof(DevMode),"width")+",height="+Marshal.OffsetOf(typeof(DevMode),"height"); }
- [DllImport("user32.dll",EntryPoint="EnumDisplaySettingsW",ExactSpelling=true,SetLastError=true)] public static extern bool EnumDisplaySettings(string device,int mode,ref DevMode d);
+ public static object PrepareDisplay() {
+  var d=NewMode(); int inputSize=d.size;bool ok=EnumDisplaySettings(null,-1,ref d);int error=Marshal.GetLastWin32Error();
+  int returnedSize=d.size;uint previousWidth=d.width,previousHeight=d.height;int test=-999,apply=-999;
+  if(ok) { d.width=1920;d.height=1080;d.fields=0x180000;test=ChangeDisplaySettings(ref d,2);if(test==0)apply=ChangeDisplaySettings(ref d,0); }
+  return new {inputSize,returnedSize,ok,error,previousWidth,previousHeight,test,apply};
+ }
+ public static object StringIdentity(string value) { return new { isNull=value==null,length=value==null?-1:value.Length }; }
+ [DllImport("user32.dll",EntryPoint="EnumDisplaySettingsW",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] public static extern bool EnumDisplaySettings(string device,int mode,ref DevMode d);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DevMode d,int flags);
  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left,top,right,bottom; }
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -27,15 +34,9 @@ public static class Desktop2861 {
 New-Item -ItemType Directory -Force $EvidenceDirectory|Out-Null
 Start-Transcript "$EvidenceDirectory/transcript.txt"
 # Prepare only this disposable cloud desktop before launching any application.
-$mode=[Desktop2861]::NewMode()
 [Desktop2861]::ModeLayout()|Set-Content "$EvidenceDirectory/mode-layout.txt"
-$enumResult=[Desktop2861]::EnumDisplaySettings($null,-1,[ref]$mode)
-@{size=$mode.size;enum=$enumResult;error=[Runtime.InteropServices.Marshal]::GetLastWin32Error();processSession=(Get-Process -Id $PID).SessionId;video=@(Get-CimInstance Win32_VideoController|Select-Object Name,CurrentHorizontalResolution,CurrentVerticalResolution)}|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/display-enumeration.json"
-if($enumResult) {
- $mode.width=1920;$mode.height=1080;$mode.fields=0x180000
- $displayResult=[Desktop2861]::ChangeDisplaySettings([ref]$mode,0)
- @{result=$displayResult;requestedWidth=1920;requestedHeight=1080}|ConvertTo-Json|Set-Content "$EvidenceDirectory/display-setup.json"
-}
+[Desktop2861]::StringIdentity($null)|ConvertTo-Json|Set-Content "$EvidenceDirectory/powershell-null-binding.json"
+[Desktop2861]::PrepareDisplay()|ConvertTo-Json|Set-Content "$EvidenceDirectory/display-setup.json"
 Start-Sleep -Seconds 3
 $desktop=[System.Windows.Automation.AutomationElement]::RootElement
 for($attempt=0;$attempt -lt 8;$attempt++) {
@@ -67,7 +68,8 @@ function Click([int]$x,[int]$y,[string]$name) {
 }
 Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,OSArchitecture|ConvertTo-Json|Set-Content "$EvidenceDirectory/environment.json"
 @{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;commit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;processor=$env:PROCESSOR_ARCHITECTURE;screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.ToString();textScale=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor;logPixels=(Get-ItemProperty 'HKCU:/Control Panel/Desktop' -ErrorAction SilentlyContinue).LogPixels}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
-foreach($version in @('1.17.0','1.18.2')) {foreach($locale in @('en','uk')) {
+Get-ChildItem 'C:/Windows/Fonts' -Filter '*seg*'|Get-FileHash -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/segoe-fonts.json"
+foreach($version in @('1.17.0','1.18.2','current')) {foreach($locale in @('en','uk','fr')) {
  $name="$version-$locale";$source="$ReleaseRoot/$version";$folder="$EvidenceDirectory/$name-app"
  Copy-Item $source $folder -Recurse
  $exe=(Get-ChildItem $folder -Recurse -Filter localsend_app.exe|Select-Object -First 1).FullName
