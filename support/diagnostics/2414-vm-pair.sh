@@ -38,7 +38,7 @@ users:
     ssh_authorized_keys:
       - $probe_key
 package_update: true
-packages: [xvfb, openbox, xdotool, scrot, network-manager, gsettings-desktop-schemas, at-spi2-core, libayatana-appindicator3-1, libsecret-1-0, libgtk-3-0, libegl1, libgles2, libgl1-mesa-dri, libopengl0, libglx-mesa0, openssh-server]
+packages: [xvfb, openbox, xdotool, xclip, xinput, scrot, network-manager, gsettings-desktop-schemas, at-spi2-core, libayatana-appindicator3-1, libsecret-1-0, libgtk-3-0, libegl1, libgles2, libgl1-mesa-dri, libopengl0, libglx-mesa0, openssh-server]
 CONFIG
 printf "instance-id: issue2414-pair\nlocal-hostname: issue2414-receiver\n" > "$vm_root/meta-data"
 cloud-localds "$vm_disk_root/seed.iso" "$vm_root/user-data" "$vm_root/meta-data"

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 import shlex
 import shutil
+import statistics
 import subprocess
 import threading
 import time
@@ -273,6 +274,40 @@ def reaction_timing(input_timing, observation, host_started):
             "note": "Observed capture bounds include SSH/input/capture overhead and polling; not isolated render latency."}
 
 
+def analyze_input_frames(burst, folder, roi):
+    """Read the copied burst only after recording has finished in the guest."""
+    frames = [json.loads(line) for line in (folder / "frames.jsonl").read_text().splitlines()]
+    if not frames:
+        raise RuntimeError("Input burst has no retained frames")
+    rows = []
+    for frame in frames:
+        field = folder / (frame["frame"] + "-field.png")
+        left, top, width, height = roi["left"] + 15, roi["top"] + 108, roi["width"] - 30, 53
+        execute(["convert", str(folder / frame["frame"]), "-crop", f"{width}x{height}+{left}+{top}",
+                 "+repage", "-resize", "300%", str(field)])
+        tsv = execute(["tesseract", str(field), "stdout", "--psm", "7", "tsv"])
+        (folder / (frame["frame"] + "-field.tsv")).write_text(tsv)
+        words = list(csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE))
+        tokens = [word.get("text") or "" for word in words if word.get("text")]
+        rows.append({**frame, "field_ocr_tokens_raw": tokens, "exact_draft_ocr_match": "Probe2414.txt" in tokens,
+                     "since_input_start": {key: frame[key] - burst["input"]["started"] for key in ("started", "completed")},
+                     "since_input_exit": {key: frame[key] - burst["input"]["completed"] for key in ("started", "completed")}})
+    durations = [frame["completed"] - frame["started"] for frame in frames]
+    gaps = [later["started"] - earlier["started"] for earlier, later in zip(frames, frames[1:])]
+    matching = [frame for frame in rows if frame["exact_draft_ocr_match"]]
+    report = {"mode": burst["mode"], "frame_count": len(frames), "input": burst["input"],
+              "field_roi_absolute": {"left": left, "top": top, "width": width, "height": height},
+              "capture_duration_median_seconds": statistics.median(durations) if durations else None,
+              "capture_duration_max_seconds": max(durations) if durations else None,
+              "actual_frame_start_gap_median_seconds": statistics.median(gaps) if gaps else None,
+              "actual_frame_start_gap_max_seconds": max(gaps) if gaps else None,
+              "first_exact_draft_ocr_frame": matching[0] if matching else None,
+              "interpretation": "Exact OCR match is an observed bound, not first paint. Caret/recognition can delay matching. Inspect all raw frames. Idle pre-input frames and helper/task metrics quantify observation overhead; both modes use identical instrumentation.",
+              "frames": rows}
+    (folder / "frame-analysis.json").write_text(json.dumps(report, indent=2))
+    return {key: value for key, value in report.items() if key != "frames"}
+
+
 def options_interaction_probes(count, case, window):
     probes = {"count": count, "classification": "in-progress", "deadline_note":
               "A 45-second observation deadline is an automation/discovery result, not evidence of hang or OOM."}
@@ -353,29 +388,56 @@ def options_interaction_probes(count, case, window):
         probes["editor_open"] = {"classification": "file-name-dialog-observed",
                                  **reaction_timing(opened, dialog, host_started)}
         screen("guest", case + "-editor-textfield-before")
-        # v1.17 FileNameInputDialog has autofocus:true. Confirm focus through
-        # observed draft text rather than assuming that autofocus took effect.
-        host_started = time.monotonic()
-        draft_input = desktop("guest", "xdotool", "key", "--clearmodifiers", "ctrl+a")
-        typed = desktop("guest", "xdotool", "type", "--clearmodifiers", "--delay", "40", "Probe2414.txt")
-        draft_words, draft = observe_probe(
-            lambda frame: any(word["text"].strip() == "Probe2414.txt" for word in frame)
-            and any(word["text"].strip() == "Cancel" for word in frame),
-            case + "-editor-draft", 45, dialog_count=count)
-        probes["draft_input"] = {"classification": "draft-visible-in-dialog", "select_all": draft_input,
-                                 **reaction_timing(typed, draft, host_started)}
-        cancel = next(word for word in draft_words if word["text"].strip() == "Cancel")
-        host_started = time.monotonic()
-        cancelled = click("guest", (cancel["left"] + cancel["width"] // 2,
-                                     cancel["top"] + cancel["height"] // 2))
-        returned_words, returned = observe_probe(
-            lambda frame: same_file_rows(filename_rows(frame), before)
-            and any(word["text"].strip() == "Options" for word in frame)
-            and not any(word["text"].strip() in ("Cancel", "Probe2414.txt") for word in frame),
-            case + "-editor-cancel-return", 45)
-        probes["editor_cancel"] = {"classification": "original-filenames-restored-without-draft",
-                                   "rows": filename_rows(returned_words),
-                                   **reaction_timing(cancelled, returned, host_started)}
+        probes["input_mode_repeats"] = []
+        probes["input_order"] = "typing,paste alternated three times; same instrumentation in five-file control and 5000-file case"
+        for repeat in range(3):
+            for mode in ("typing", "paste"):
+                name = case + "-input-" + mode + "-" + str(repeat)
+                record = {"mode": mode, "repeat": repeat, "original_filename": original}
+                probes["input_mode_repeats"].append(record)
+                if repeat != 0 or mode != "typing":
+                    host_started = time.monotonic()
+                    reopened = click("guest", pencil)
+                    _, reopened_observation = observe_probe(
+                        lambda frame: {"Enter", "file", "name", "Cancel", "Original:"}.issubset(
+                            {word["text"].strip() for word in frame}) and original in filename_rows(frame),
+                        name + "-editor-open", 45, dialog_count=count)
+                    record["editor_open"] = reaction_timing(reopened, reopened_observation, host_started)
+                # No OCR/SCP occurs during the synchronous guest burst. Copy the
+                # batch after all input/frame/task/event observers have stopped.
+                burst = guest("input-burst", mode, name)
+                record["burst"] = burst
+                folder = OUT / name
+                execute(SCP + ["-r", "probe@127.0.0.1:" + burst["folder"], str(folder)], 90)
+                record["raw_batch_local"] = str(folder)
+                retain()
+                roi_stage = case + "-editor-open" if repeat == 0 and mode == "typing" else name + "-editor-open"
+                roi_paths = list(OUT.glob(roi_stage + "-*-dialog-roi.json"))
+                if not roi_paths:
+                    raise RuntimeError("No observed dialog ROI for input batch")
+                roi = json.loads(max(roi_paths, key=lambda item: item.stat().st_mtime).read_text())
+                record["batch_analysis"] = analyze_input_frames(burst, folder, roi)
+                draft_words, draft = observe_probe(
+                    lambda frame: any(word["text"].strip() == "Probe2414.txt" for word in frame)
+                    and any(word["text"].strip() == "Cancel" for word in frame)
+                    and original in filename_rows(frame), name + "-draft-after-burst", 45, dialog_count=count)
+                record["draft_after_burst"] = {"classification": "draft-and-original-visible-in-dialog", "capture": draft}
+                cancel = next(word for word in draft_words if word["text"].strip() == "Cancel")
+                record["cancel_observed_token"] = cancel
+                host_started = time.monotonic()
+                cancelled = click("guest", (cancel["left"] + cancel["width"] // 2,
+                                             cancel["top"] + cancel["height"] // 2))
+                returned_words, returned = observe_probe(
+                    lambda frame: same_file_rows(filename_rows(frame), before)
+                    and any(word["text"].strip() == "Options" for word in frame)
+                    and not any(word["text"].strip() in ("Cancel", "Probe2414.txt") for word in frame),
+                    name + "-cancel-return", 45)
+                record["cancel"] = {"classification": "original-filenames-restored-without-draft",
+                                    "rows": filename_rows(returned_words),
+                                    **reaction_timing(cancelled, returned, host_started)}
+                if mode == "paste":
+                    record["clipboard_release"] = guest("input-release", name)
+                retain()
         probes["classification"] = "wheel-and-editor-cancel-observed"
         retain()
         return probes

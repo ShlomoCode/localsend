@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = Path("/home/probe")
@@ -33,6 +34,164 @@ def monitor(pid, count):
             output.write(json.dumps(sample) + "\n")
             output.flush()
             time.sleep(.5)
+
+
+def input_burst(state, mode, name):
+    """Sample pixels and proc tasks while injecting ordinary desktop input."""
+    if mode not in ("typing", "paste") or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise ValueError("Invalid input burst mode/name")
+    for binary in ("xinput", "stdbuf", "scrot", "xdotool", "xclip"):
+        if not shutil.which(binary):
+            raise RuntimeError("Input observer prerequisite unavailable: " + binary)
+    folder = OUT / name
+    folder.mkdir()
+    stop = threading.Event()
+    first_frame = threading.Event()
+    errors = []
+    input_records = []
+    observer = subprocess.Popen(["stdbuf", "-oL", "-eL", "xinput", "test-xi2", "--root"],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def record_events():
+        with (folder / "xinput-events.jsonl").open("w") as log:
+            for line in observer.stdout:
+                log.write(json.dumps({"guest_monotonic_received": time.monotonic(),
+                                      "utc_ns_received": time.time_ns(), "raw": line.rstrip("\n")}) + "\n")
+                log.flush()
+
+    def capture_frames():
+        with (folder / "frames.jsonl").open("w") as log:
+            index = 0
+            next_capture = time.monotonic()
+            while not stop.is_set():
+                start = time.monotonic()
+                path = folder / f"frame-{index:04d}.png"
+                try:
+                    subprocess.run(["scrot", str(path)], check=True, timeout=3)
+                    log.write(json.dumps({"frame": path.name, "started": start, "completed": time.monotonic(),
+                                          "target_interval_seconds": .1}) + "\n")
+                    log.flush()
+                    first_frame.set()
+                except Exception as error:
+                    errors.append("capture: " + str(error))
+                    stop.set()
+                    break
+                index += 1
+                next_capture += .1
+                if next_capture < time.monotonic():
+                    next_capture = time.monotonic()
+                stop.wait(max(0, next_capture - time.monotonic()))
+
+    def capture_tasks():
+        with (folder / "tasks-metrics.jsonl").open("w") as log:
+            while not stop.is_set():
+                start = time.monotonic()
+                record = {"started": start, "utc_ns": time.time_ns(),
+                          "clock_ticks_per_second": os.sysconf("SC_CLK_TCK"),
+                          "thread_role_note": "Task IDs/comm are observed; Flutter main thread identity is unverified.", "tasks": {}}
+                for path in Path(f"/proc/{state['pid']}/task").glob("*"):
+                    try:
+                        record["tasks"][path.name] = {"stat": (path / "stat").read_text(), "comm": (path / "comm").read_text()}
+                    except OSError as error:
+                        record["tasks"][path.name] = {"error": str(error)}
+                for label, source in [("receiver_status", f"/proc/{state['pid']}/status"),
+                                      ("receiver_pss", f"/proc/{state['pid']}/smaps_rollup"),
+                                      ("meminfo", "/proc/meminfo"), ("helper_stat", f"/proc/{os.getpid()}/stat"),
+                                      ("xinput_stat", f"/proc/{observer.pid}/stat")]:
+                    try:
+                        record[label] = Path(source).read_text()
+                    except OSError as error:
+                        record[label] = str(error)
+                record["completed"] = time.monotonic()
+                log.write(json.dumps(record) + "\n")
+                log.flush()
+                stop.wait(max(0, .1 - (time.monotonic() - start)))
+
+    def input_command(argv):
+        record = {"argv": argv, "started": time.monotonic(), "utc_ns": time.time_ns()}
+        result = subprocess.run(argv, check=True, text=True, capture_output=True, timeout=15)
+        record.update({"completed": time.monotonic(), "stdout": result.stdout, "stderr": result.stderr})
+        input_records.append(record)
+        (folder / "input-commands.json").write_text(json.dumps(input_records, indent=2))
+        return record
+
+    threads = [threading.Thread(target=record_events, daemon=True), threading.Thread(target=capture_frames, daemon=True),
+               threading.Thread(target=capture_tasks, daemon=True)]
+    report = {"mode": mode, "folder": str(folder), "helper_pid": os.getpid(), "xinput_pid": observer.pid,
+              "observer_scope": "XI2 root observer, no focus change/exclusive grab. Received-line timestamps include client scheduling/buffering; raw X event time remains in lines. No app consumption acknowledgement.",
+              "sampling_note": "Identical 10Hz target frame/task sampling in both modes/counts, with one second idle before input and eight seconds observation after. No OCR or SCP during burst."}
+    clipboard = None
+    try:
+        if mode == "paste":
+            # xclip owns the real CLIPBOARD selection until after Ctrl+V has
+            # been consumed; it is a normal X selection, not app injection.
+            clipboard = subprocess.Popen(["xclip", "-selection", "clipboard", "-in", "-quiet"], stdin=subprocess.PIPE,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+            clipboard.stdin.write("Probe2414.txt")
+            clipboard.stdin.close()
+            report["clipboard_pid"] = clipboard.pid
+            state["clipboard_pid"] = clipboard.pid
+            STATE.write_text(json.dumps(state))
+            clipboard_ready = False
+            ready_deadline = time.monotonic() + 3
+            while time.monotonic() < ready_deadline:
+                try:
+                    if command("xclip", "-selection", "clipboard", "-out") == "Probe2414.txt":
+                        clipboard_ready = True
+                        break
+                except subprocess.CalledProcessError:
+                    pass
+                time.sleep(.1)
+            if not clipboard_ready:
+                raise RuntimeError("Clipboard content verification failed")
+        for thread in threads:
+            thread.start()
+        if not first_frame.wait(5):
+            raise RuntimeError("No initial burst frame")
+        time.sleep(1)
+        if observer.poll() is not None:
+            raise RuntimeError("XI2 observer exited before input")
+        report["select_all"] = input_command(["xdotool", "key", "--clearmodifiers", "ctrl+a"])
+        if mode == "typing":
+            report["input"] = input_command(["xdotool", "type", "--clearmodifiers", "--delay", "40", "Probe2414.txt"])
+        else:
+            report["input"] = input_command(["xdotool", "key", "--clearmodifiers", "ctrl+v"])
+        stop.wait(8)
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        report["classification"] = "input-and-frame-burst-retained"
+    except Exception as error:
+        report.update({"classification": "observer-or-input-infrastructure-failure", "failure": str(error)})
+        raise
+    finally:
+        stop.set()
+        observer.terminate()
+        try:
+            observer.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            observer.kill()
+        # An ordinary clipboard owner remains available until the host has
+        # observed the paste and cancelled the dialog, even after the burst.
+        if clipboard and report.get("classification") != "input-and-frame-burst-retained":
+            clipboard.terminate()
+            try:
+                clipboard.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                clipboard.kill()
+        for thread in threads:
+            if thread.ident is not None:
+                thread.join(timeout=4)
+        report["errors"] = errors
+        report["completed"] = time.monotonic()
+        event_file = folder / "xinput-events.jsonl"
+        event_text = event_file.read_text() if event_file.exists() else ""
+        report["xi2_raw_key_event_headers"] = len(re.findall(r"RawKeyPress|RawKeyRelease", event_text))
+        if report.get("classification") == "input-and-frame-burst-retained" and report["xi2_raw_key_event_headers"] == 0:
+            report.update({"classification": "observer-or-input-infrastructure-failure", "failure": "No XI2 raw key events retained"})
+        (folder / "burst-result.json").write_text(json.dumps(report, indent=2))
+    if report.get("failure"):
+        raise RuntimeError(report["failure"])
+    return report
 
 
 def main():
@@ -77,7 +236,25 @@ def main():
             time.sleep(1)
         raise RuntimeError("Receiver window missing (infrastructure)")
     state = json.loads(STATE.read_text())
-    if action == "desktop":
+    if action == "input-burst":
+        print(json.dumps(input_burst(state, sys.argv[2], sys.argv[3])))
+    elif action == "input-release":
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", sys.argv[2]):
+            raise ValueError("Invalid input burst name")
+        report_path = OUT / sys.argv[2] / "burst-result.json"
+        report = json.loads(report_path.read_text())
+        pid = report.get("clipboard_pid")
+        if pid and state.get("clipboard_pid") == pid:
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                pass
+            state.pop("clipboard_pid", None)
+            STATE.write_text(json.dumps(state))
+        report["clipboard_released_guest_monotonic"] = time.monotonic()
+        report_path.write_text(json.dumps(report, indent=2))
+        print(json.dumps({"clipboard_released": True, "guest_monotonic": time.monotonic()}))
+    elif action == "desktop":
         # SSH receives quoted argv; no UI label or OCR text becomes shell code.
         argv = sys.argv[2:]
         with (OUT / ("files-%s-input.jsonl" % state["count"])).open("a") as log:
@@ -103,7 +280,9 @@ def main():
                           len(files) == state["count"] and {file.name for file in files} == expected
                           and complete_files == state["count"]}))
     elif action == "stop":
-        for key in ("pid", "sampler_pid"):
+        for key in ("pid", "sampler_pid", "clipboard_pid"):
+            if key not in state:
+                continue
             try:
                 os.kill(state[key], 15)
             except ProcessLookupError:
