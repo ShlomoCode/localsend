@@ -15,7 +15,12 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     networking.networkmanager.enable = true;
     programs.nm-applet.enable = true;
     programs.localsend.enable = true;
-    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc ];
+    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc
+      (writeScriptBin "mate-scale-ui" ''
+        #!${(python3.withPackages (p: [ p.pyatspi ])).interpreter}
+        ${builtins.readFile ./mate-scale-ui.py}
+      '')
+    ];
     virtualisation.memorySize = 4096;
     virtualisation.cores = 2;
     virtualisation.resolution = { x = 3840; y = 2160; };
@@ -50,6 +55,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     user_command("dconf write /org/mate/session/idle-delay 0")
     user_command("gsettings set org.mate.interface window-scaling-factor 1")
     user_command("gsettings set org.mate.interface gtk-theme BlackMATE")
+    user_command("gsettings set org.mate.interface accessibility true")
     machine.sleep(8)
     machine.wait_until_succeeds("pgrep nm-applet")
     machine.succeed("install -d -o alice -g users /tmp/evidence")
@@ -72,8 +78,18 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
         ("100-live-return", 1, False), ("200-fresh", 2, True),
         ("100-fresh", 1, True), ("200-live-repeat", 2, False),
         ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True),
-        ("200-panel-replace", 2, False), ("100-panel-replace", 1, False)]:
-        user_command("gsettings set org.mate.interface window-scaling-factor " + str(scale))
+        ("200-panel-replace", 2, False), ("100-panel-replace", 1, False),
+        ("200-gui", 2, False), ("100-gui", 1, False)]:
+        if label == "200-gui":
+            user_command("sh -c 'mate-display-properties > /tmp/evidence/display-ui.log 2>&1 &' ")
+            machine.wait_for_window("Monitor Preferences", 60)
+            machine.screenshot("100-gui-before")
+        if label.endswith("gui"):
+            user_command("mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1")
+            machine.sleep(3)
+            assert user_command("gsettings get org.mate.interface window-scaling-factor").strip() == str(scale)
+        else:
+            user_command("gsettings set org.mate.interface window-scaling-factor " + str(scale))
         machine.sleep(8)
         if label.endswith("panel-replace"):
             user_command("sh -c 'mate-panel --replace > /tmp/evidence/" + label + "-panel.log 2>&1 &' ")

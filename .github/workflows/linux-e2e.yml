@@ -19,7 +19,7 @@ jobs:
       - name: Run the unmodified NixOS 25.05 package on MATE
         run: |
           set -euo pipefail
-          for variant in baseline panel-fix; do
+          for variant in baseline; do
             mkdir -p "evidence/$variant"
             fixed=false
             if [ "$variant" = panel-fix ]; then fixed=true; fi
@@ -32,7 +32,6 @@ jobs:
           set -euo pipefail
           python3 -m pip install Pillow
           python3 support/diagnostics/2751/measure.py evidence/baseline
-          python3 support/diagnostics/2751/measure.py evidence/panel-fix
       - uses: actions/upload-artifact@v4
         if: always()
         with:
