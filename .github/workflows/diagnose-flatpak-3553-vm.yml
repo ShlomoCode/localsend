@@ -1,11 +1,6 @@
 name: Diagnose Flatpak startup 3553 in GNOME VM
 
 on:
-  push:
-    branches:
-      - codex/diagnose-flatpak-3553
-    paths:
-      - .github/workflows/diagnose-flatpak-3553-vm.yml
   workflow_dispatch:
     inputs:
       start_version:
@@ -13,6 +8,11 @@ on:
         default: '24.04'
         type: choice
         options: ['24.04', '26.04']
+      package_version:
+        description: Legitimate Flathub package identity
+        default: released
+        type: choice
+        options: ['released', 'previous-25.08']
 
 jobs:
   full-session:
@@ -108,6 +108,8 @@ jobs:
           grep -q 'Skylake' evidence/vm/guest-cpu.txt
 
       - name: Install and compare official deb and released Flatpak in the GDM session
+        env:
+          PACKAGE_VERSION: ${{ inputs.package_version || 'released' }}
         run: |
           set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
@@ -154,6 +156,15 @@ jobs:
             tail -60 evidence/vm/install.log
             tail -80 evidence/vm/install-monitor.log || true
             exit "$install_status"
+          fi
+          if [ "$PACKAGE_VERSION" = previous-25.08 ]; then
+            timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/previous-package-install.log 2>&1 <<'GUEST'
+          set -e
+          sudo flatpak install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Platform.GL.default//25.08
+          sudo flatpak update -y --commit=31f3f559da9fc85ec88a82923e3d7287a873240573cbb9d6bd54bf4a26ad1ccd org.localsend.localsend_app
+          flatpak info org.localsend.localsend_app
+          flatpak info --show-metadata org.localsend.localsend_app
+          GUEST
           fi
           timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/guest-environment.txt 2>&1 <<'GUEST'
           uname -a
@@ -282,7 +293,7 @@ jobs:
           done
           echo "KERNEL_38_READY=$ready" | tee evidence/vm/kernel38-environment.txt
           timeout 15 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
-            'uname -a; loginctl list-sessions; flatpak info --show-commit org.localsend.localsend_app; flatpak info --show-commit org.freedesktop.Platform//26.08' \
+            'uname -a; loginctl list-sessions; flatpak info --show-commit org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' \
             >> evidence/vm/kernel38-environment.txt 2>&1 || true
           test "$ready" = 1
           for kind in deb flatpak; do

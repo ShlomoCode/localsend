@@ -1,9 +1,6 @@
 name: Diagnose Flatpak startup 3553
 
 on:
-  push:
-    branches:
-      - codex/diagnose-flatpak-3553
   workflow_dispatch:
 
 jobs:
