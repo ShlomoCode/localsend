@@ -1,6 +1,6 @@
 # Issue 2414 investigation
 
-Status: preparing cloud real-app harness. No reproduction observed yet.
+Status: real five-file control passes; 5,000-file Options opens on the high-memory host with a sharp memory increase. Ordinary 2 GiB receiver-guest experiment is active. No historical hang or OOM reproduced yet.
 
 Reported behavior: sending a directory with 5,000 files to an old PC, then receiving Options, causes hang, large memory use, and OOM. Reporter attributes it to eager file widgets. OS, architecture, exact version, RAM, filename lengths, and file content are unspecified. Other comments about large-file transfers/timeouts are separate claims and will not replace this one.
 

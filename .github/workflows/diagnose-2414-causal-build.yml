@@ -1,0 +1,51 @@
+name: Diagnose 2414 source builds
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact parent/fix pair, or frozen fork main snapshot
+        type: choice
+        required: true
+        default: pair
+        options: [pair, current]
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-2414-causal-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: diagnostics
+          persist-credentials: false
+      - name: Install official Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev
+      - name: Select pinned source and SDK
+        id: source
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: bash diagnostics/support/diagnostics/2414-causal-build.sh select
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.source.outputs.flutter }}
+          channel: stable
+          cache: false
+      - name: Build actual application bundles sequentially
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: bash diagnostics/support/diagnostics/2414-causal-build.sh build
+      - name: Upload binaries and build provenance
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: issue-2414-source-${{ inputs.revision }}-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
