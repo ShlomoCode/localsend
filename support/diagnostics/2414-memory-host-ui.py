@@ -73,9 +73,10 @@ def host_frame(name):
 def approval_button(count, label, words):
     match = next((word for word in words if word['text'].strip()==label), None)
     if match is None:
-        # PSM 11 misses the white-on-color action labels in the retained prior
-        # screenshot. Inspect each bounded button region after observation.
-        left, top, width, height = (513,650,113,41) if label=='Accept' else (376,650,118,41)
+        # Full-frame PSM 11 misses the action labels. Whole-button PSM 7 also
+        # includes the icon/rounded border on the retained Debian Back frame;
+        # inspect only its observed text bounds, still requiring the exact label.
+        left, top, width, height = (558,658,60,24) if label=='Accept' else (420,658,66,24)
         source = OUT/f'files-{count}-back.png'
         crop = OUT/f'files-{count}-back-{label.lower()}-ocr.png'
         run(['convert',str(source),'-crop',f'{width}x{height}+{left}+{top}','+repage','-resize','300%',str(crop)])
@@ -283,11 +284,16 @@ def run_case(count):
         result['options_stages']=[]
         for delay,label in [(1,'options-plus-1'),(5,'options-plus-5'),(10,'options-plus-10')]:
             time.sleep(max(0,start+delay-time.monotonic()))
+            actual_host_offset=time.monotonic()-start
+            measurement=guest('stage',label)
             result['options_stages'].append({'requested_offset_seconds':delay,
-                                            'actual_host_offset_seconds':time.monotonic()-start,
-                                            'measurement':guest('stage',label)})
+                                            'actual_host_offset_seconds':actual_host_offset,
+                                            'actual_guest_offset_from_input_seconds':measurement['guest_monotonic']-result['options_click']['started'],
+                                            'measurement':measurement})
         result['hold_elapsed_host_seconds']=time.monotonic()-start
-        guest('capture','options-after-hold')
+        held_capture=guest('capture','options-after-hold')
+        result['held_options_capture']=held_capture
+        result['held_capture_guest_offset_from_input_seconds']=held_capture['started']-result['options_click']['started']
         result['metrics_after_hold']=guest('metrics')
         if (result['metrics_after_hold']['records'] <= result['metrics_before_metadata']['records']
                 or result['metrics_after_hold']['read_error_records']
@@ -308,9 +314,9 @@ def run_case(count):
         held_words=ocr(OUT/f'files-{count}-options-after-hold.png')
         result['held_options_list_observed']=(any(word['text'].strip()=='Options' and word['top']<100 for word in held_words)
                                               and {'Save','Files','49B'}.issubset(result['options-after-hold_tokens']))
-        result['options_observation_limit_seconds']=10
+        result['nominal_options_hold_after_input_wrapper_seconds']=10
         if not result['held_options_list_observed']:
-            raise RuntimeError('Options list not observed at ten-second limit; cause unknown')
+            raise RuntimeError('Options list not observed after nominal ten-second hold; cause unknown')
         result['stage']='return'
         guest('stage','before-cancel')
         click('guest',(28,28),rwin)
