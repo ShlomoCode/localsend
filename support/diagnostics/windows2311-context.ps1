@@ -17,7 +17,8 @@ $shortcut.TargetPath=$exe;$shortcut.Save()
 Start-Process explorer.exe -ArgumentList ('/select,"'+$fixture+'"')
 Start-Sleep 3
 $shellApp=New-Object -ComObject Shell.Application
-$window=@($shellApp.Windows()|Where-Object {$_.LocationURL -like '*evidence*'}|Select-Object -Last 1)
+$parentPath=[IO.Path]::GetDirectoryName($fixture)
+$window=@($shellApp.Windows()|Where-Object {try{[IO.Path]::GetFullPath(([Uri]$_.LocationURL).LocalPath).TrimEnd('\') -eq $parentPath.TrimEnd('\')}catch{$false}}|Select-Object -Last 1)
 if($window.Count -ne 1){throw 'Explorer fixture window was not found'}
 $shell.AppActivate([int](Get-Process explorer|Select-Object -Last 1).Id)|Out-Null
 $root=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window[0].HWND)
@@ -41,10 +42,14 @@ try{[void][Explorer2311]::ShowWindow($hwnd,9);[void][Explorer2311]::SetForegroun
 if([Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Explorer foreground could not be established; no context-menu keys were sent'}
 $filename=[IO.Path]::GetFileNameWithoutExtension($fixture)
 $items=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
-$item=@($items|Where-Object {$_.Current.Name -eq $filename -or $_.Current.Name -eq [IO.Path]::GetFileName($fixture)}|Select-Object -Last 1)
+$item=@($items|Where-Object {$_.Current.ControlType -eq [Windows.Automation.ControlType]::ListItem -and ($_.Current.Name -eq $filename -or $_.Current.Name -eq [IO.Path]::GetFileName($fixture))}|Select-Object -Last 1)
 if($item.Count -ne 1){throw 'Explorer did not expose the fixture selection'}
 $item[0].GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
 $item[0].SetFocus()
+$selected=$item[0].GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected
+$focused=[Windows.Automation.AutomationElement]::FocusedElement
+@{hwnd=$hwnd.ToInt64();foreground=[Explorer2311]::GetForegroundWindow().ToInt64();fixture=$fixture;folder=$window[0].LocationURL;selected=$selected;item=$item[0].Current.Name;focused=$focused.Current.Name;focusedType=$focused.Current.ControlType.ProgrammaticName}|ConvertTo-Json|Set-Content "evidence/context-$Case-selection.json"
+if(!$selected -or [Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Fixture selection or Explorer focus was lost before Shift+F10'}
 [Windows.Forms.SendKeys]::SendWait('+{F10}')
 Start-Sleep 1
 function Snapshot([string]$phase){
@@ -55,12 +60,12 @@ function Snapshot([string]$phase){
  return $all
 }
 $all=Snapshot 'opened'
-$send=@($all|Where-Object {$_.Current.Name -eq 'Send to'}|Select-Object -Last 1)
+$send=@($all|Where-Object {$_.Current.ControlType -eq [Windows.Automation.ControlType]::MenuItem -and $_.Current.Name -eq 'Send to'}|Select-Object -Last 1)
 if($send.Count -ne 1){throw 'Actual Explorer Send to menu is unavailable'}
 try{$send[0].GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()}catch{$send[0].SetFocus();[Windows.Forms.SendKeys]::SendWait('{RIGHT}')}
 Start-Sleep 1
 $all=Snapshot 'send-to'
-$entry=@($all|Where-Object {$_.Current.Name -eq 'LocalSend'}|Select-Object -Last 1)
+$entry=@($all|Where-Object {$_.Current.ControlType -eq [Windows.Automation.ControlType]::MenuItem -and $_.Current.Name -eq 'LocalSend'}|Select-Object -Last 1)
 if($entry.Count -ne 1){throw 'LocalSend was not listed in actual Send to submenu'}
 try{$entry[0].GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()}catch{$entry[0].SetFocus();[Windows.Forms.SendKeys]::SendWait('{ENTER}')}
 Start-Sleep 2
