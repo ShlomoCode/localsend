@@ -1,6 +1,9 @@
 name: Build 2051 current URI comparison
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2051-open]
+    paths: [.github/workflows/diagnose-2051-current.yml]
 jobs:
   build:
     runs-on: ubuntu-22.04
