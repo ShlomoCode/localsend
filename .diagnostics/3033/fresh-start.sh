@@ -1,7 +1,7 @@
 set -eu
 . /home/probe/session-env
 scale=$1
-root=/home/probe/evidence/fresh-start-$scale
+root=/home/probe/evidence/fresh-start-verified-$scale
 mkdir -p "$root"
 python3 /home/probe/monitor-scale.py "$scale" > "$root/monitor-state.json"
 cat "$root/monitor-state.json"
@@ -10,7 +10,7 @@ for trial in 1 2 3; do
   sleep 1
   log="$root/trial-$trial.log"
   profile=/tmp/localsend-3033-fresh-$scale-$trial
-  flatpak run --env=WAYLAND_DEBUG=1 --env=GDK_BACKEND=wayland --env=XDG_CONFIG_HOME="$profile/config" --env=XDG_DATA_HOME="$profile/data" org.localsend.localsend_app > "$log" 2>&1 < /dev/null &
+  flatpak run --env=WAYLAND_DEBUG=1 --env=GDK_BACKEND=wayland --command=sh org.localsend.localsend_app -c 'mkdir -p "$1/config" "$1/data"; export XDG_CONFIG_HOME="$1/config" XDG_DATA_HOME="$1/data"; exec localsend' sh "$profile" > "$log" 2>&1 < /dev/null &
   launcher=$!
   sleep 7
   printf "\nFRESH_START_SCALE=%s TRIAL=%s\n" "$scale" "$trial"
