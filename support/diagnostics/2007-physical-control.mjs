@@ -63,6 +63,17 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   writeFileSync('evidence/control-completed','verified\n');
   await new Promise(r=>desktop.once('exit',r));
   assert.equal(desktop.exitCode,0,'Desktop control did not complete');
+  // Inspect the physical device's legitimate file-manager entry point only
+  // after saved-file byte equality succeeds. No file is deleted here.
+  await wd('POST',prefix+'/appium/device/press_keycode',{keycode:3});
+  await new Promise(r=>setTimeout(r,1500));
+  await snapshot('file-manager-home');
+  const manager=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="File Manager" or @content-desc="File Manager" or @text="Files" or @content-desc="Files"]'}).catch(()=>null);
+  if(manager){
+   await wd('POST',prefix+'/element/'+manager['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   await new Promise(r=>setTimeout(r,1500));
+   await snapshot('file-manager-open');
+  }
  } finally {
   if(desktop.exitCode===null)desktop.kill('SIGTERM');
   proxy?.close();
