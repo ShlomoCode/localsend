@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
@@ -52,6 +53,7 @@ export default class GeometryOracle extends Extension {
                 gtkApplicationId: observe(() => w.get_gtk_application_id()),
                 minimized: observe(() => w.minimized),
                 actorVisible: observe(() => actor.visible),
+                compositorFocused: observe(() => global.display.focusWindow === w),
                 monitor: observe(() => w.get_monitor()),
                 frameStage: frame,
                 bufferStage: buffer,
@@ -63,6 +65,7 @@ export default class GeometryOracle extends Extension {
         });
         return JSON.stringify({schema: 1, shellVersion: Config.PACKAGE_VERSION,
             compositorWayland: observe(() => Meta.is_wayland_compositor()),
+            shellThemeScaleFactor: observe(() => St.ThemeContext.get_for_stage(global.stage).scale_factor),
             monotonicStartUs: start, monotonicEndUs: GLib.get_monotonic_time(),
             stageSize: {width: global.stage.width, height: global.stage.height},
             windows});

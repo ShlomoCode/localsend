@@ -9,8 +9,6 @@ case_name=$2
 mkdir -p "$3"
 output=$(realpath "$3")
 package=/home/probe/evidence/source-flatpak/$case_name
-descriptor=/home/probe/source-input/whole-bundle-descriptor.accepted.json
-engine=$(cat "$package/engine-variant.txt")
 root=/proc/$pid/root
 cp "/proc/$pid/stat" "$output/stat-before.txt"
 cp "/proc/$pid/status" "$output/status.txt"
@@ -28,13 +26,14 @@ if grep -Eq '^LD_PRELOAD=.+' "$output/display-loader-environment.txt"; then exit
 for name in libflutter_linux_gtk.so libapp.so; do
   awk -v library="/$name" '$NF ~ library "$" {print $NF}' "$output/maps.txt" | sort -u > "$output/$name.paths"
   [[ $(cat "$output/$name.paths") == "/app/lib/$name" ]]
-  field=engine_so_sha256
-  [[ $name != libapp.so ]] || field=libapp_sha256
-  [[ $(sha256sum "$root/app/lib/$name" | awk '{print $1}') == $(jq -r --arg v "$engine" --arg f "$field" '.variants[$v][$f]' "$descriptor") ]]
 done
-# All original source-bundle files survive normal packaging unchanged.
-(cd "$root/app" && sha256sum -c "/home/probe/source-input/$engine/artifact/provenance/bundle-files-SHA256SUMS") \
-  > "$output/source-bundle-files-check.txt"
+# Source-to-package verification retains normal ELF debug/strip transformations.
+# The running namespace must exactly match every verified packaged bundle file.
+[[ -s "$package/bundle-verification/packaged-all50-SHA256SUMS" ]]
+jq -e '.status == "pass" and .filesVerified == 50' "$package/bundle-verification/result.json" \
+  > "$output/package-equivalence-result.json"
+(cd "$root/app" && sha256sum -c "$package/bundle-verification/packaged-all50-SHA256SUMS") \
+  > "$output/packaged-bundle-files-check.txt"
 awk '$NF ~ /\/libatk-bridge[^/]*\.so/ {print $NF}' "$output/maps.txt" | sort -u > "$output/bridge-paths.txt"
 [[ $(wc -l < "$output/bridge-paths.txt") == 1 ]]
 bridge=$(cat "$output/bridge-paths.txt")

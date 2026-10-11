@@ -8,6 +8,7 @@ from gi.repository import Gio, GLib
 parser = argparse.ArgumentParser()
 parser.add_argument("--pid", type=int, help="Require exactly one window with this Mutter host PID")
 parser.add_argument("--backend", choices=["wayland", "x11"])
+parser.add_argument("--require-focused", action="store_true", help="Require compositor focus on the PID-verified window")
 args = parser.parse_args()
 try:
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
@@ -21,6 +22,11 @@ try:
     compositor = snapshot["compositorWayland"]
     if compositor["error"] is not None or compositor["value"] is not True:
         raise ValueError("GNOME compositor is not verified Wayland")
+    scale = snapshot["shellThemeScaleFactor"]
+    if scale["error"] is not None or not isinstance(scale["value"], (int, float)) or scale["value"] <= 0:
+        raise ValueError("Shell theme scale is unavailable or invalid")
+    if args.require_focused and args.pid is None:
+        raise ValueError("--require-focused needs --pid to establish window identity")
     if args.pid is not None:
         windows = [w for w in snapshot["windows"] if w["pid"]["value"] == args.pid]
         if len(windows) != 1:
@@ -33,6 +39,9 @@ try:
                 raise ValueError("Required observation failed: " + field)
         if args.backend and window["backend"]["value"]["name"] != args.backend:
             raise ValueError("Target window has unexpected backend")
+        if args.require_focused and (window["compositorFocused"]["error"] is not None
+                                     or window["compositorFocused"]["value"] is not True):
+            raise ValueError("Target window is not verified compositor focus")
 except Exception as error:
     print(json.dumps({"oracleError": str(error)}), file=sys.stderr, flush=True)
     sys.exit(1)

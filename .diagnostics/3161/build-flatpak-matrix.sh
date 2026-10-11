@@ -47,6 +47,7 @@ sha256sum "$output/flathub/A-production.patch" > "$output/A-source-patch.sha256"
       a = {"name"=>"at-spi2-core-254-source", "buildsystem"=>"meson",
         "config-opts"=>["-Dlibdir=lib","-Ddocs=false","-Dintrospection=disabled","-Dgtk2_atk_adaptor=false","-Duse_systemd=false"],
         "sources"=>[{"type"=>"archive", "url"=>"https://codeload.github.com/GNOME/at-spi2-core/tar.gz/2b2085e3bb98c35cfeaf33a9b2852c610c3a9b7b",
+          "dest-filename"=>"at-spi2-core-254.tar.gz",
           "sha256"=>"ef4f2a528f76edc7cb37b70d0143a51fa5e049ae93198c4426befd2c250c3b03"}]}
       a["sources"] << {"type"=>"patch","path"=>"A-production.patch"} if bridge == "A"
       m["modules"].insert(-2,a)
@@ -74,8 +75,8 @@ for engine in control B; do
     find "$output/$case_name/build/files/lib" -name 'libatk-bridge*.so*' -type f -exec sha256sum {} \; \
       > "$output/$case_name/bridge-SHA256SUMS"
     [[ -s "$output/$case_name/bridge-SHA256SUMS" ]]
-    engine_hash=$(sha256sum "$output/$case_name/build/files/lib/libflutter_linux_gtk.so" | awk '{print $1}')
-    [[ $engine_hash == $(jq -r --arg v "$engine" '.variants[$v].engine_so_sha256' "$descriptor") ]]
+    bash "$input/verify-packaged-bundle.sh" "$input/$engine/bundle" \
+      "$output/$case_name/build/files" "$output/$case_name/bundle-verification"
     sha256sum "$output/$case_name/build/files/localsend_app" "$output/$case_name/build/files/lib/libapp.so" \
       "$output/$case_name/build/files/lib/libflutter_linux_gtk.so" > "$output/$case_name/app-SHA256SUMS"
     printf '%s\n' "$engine" > "$output/$case_name/engine-variant.txt"
