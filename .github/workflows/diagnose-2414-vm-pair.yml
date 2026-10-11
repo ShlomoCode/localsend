@@ -1,0 +1,35 @@
+name: Diagnose 2414 host and VM pair
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-2414-vm-pair
+  cancel-in-progress: false
+jobs:
+  real-app-pair:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate diagnostic syntax in cloud
+        run: |
+          bash -n support/diagnostics/2414-vm-pair.sh
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ('2414-host-pair-ui.py', '2414-receiver-driver.py'):
+              path = Path('support/diagnostics') / name
+              ast.parse(path.read_text(), filename=str(path))
+          PY
+      - name: Run five-file control, then 5000-file case
+        run: bash support/diagnostics/2414-vm-pair.sh
+      - name: Retain evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2414-host-vm-pair-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
