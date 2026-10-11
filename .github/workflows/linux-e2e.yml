@@ -22,6 +22,10 @@ on:
         description: Supported Nix build or unchanged official 1.17 tar through FHS wrapper
         type: string
         default: 'nix'
+      runtime_only:
+        description: Capture desktop daemon PATH and wrappers without starting LocalSend
+        type: boolean
+        default: false
 jobs:
   mate-4k:
     runs-on: ubuntu-24.04
@@ -46,12 +50,14 @@ jobs:
           MIN_ICON_SIZE: ${{ inputs.min_icon_size }}
           NIXPKGS_REVISION: ${{ inputs.nixpkgs_revision }}
           APP_ROUTE: ${{ inputs.app_route }}
+          RUNTIME_ONLY: ${{ inputs.runtime_only }}
         run: |
           set -euo pipefail
           [[ "$PANEL_SIZE" =~ ^(20|24)$ ]]
           [[ "$MIN_ICON_SIZE" =~ ^(16|24)$ ]]
           [[ "$NIXPKGS_REVISION" =~ ^(6132ff3ee5a9509d0aeb66a01a7d662c6384289b|11cb3517b3af6af300dd6c055aeda73c9bf52c48)$ ]]
           [[ "$APP_ROUTE" =~ ^(nix|official)$ ]]
+          [[ "$RUNTIME_ONLY" =~ ^(true|false)$ ]]
           for variant in baseline; do
             mkdir -p "evidence/$variant"
             printf '%s\n' "$NIXPKGS_REVISION" > "evidence/$variant/nixpkgs-revision.txt"
@@ -65,7 +71,7 @@ jobs:
             fi
             fixed=false
             if [ "$variant" = panel-fix ]; then fixed=true; fi
-            nix-build support/diagnostics/2751/mate.nix -A driver --arg panelFix "$fixed" --arg panelSize "$PANEL_SIZE" --arg minIconSize "$MIN_ICON_SIZE" --argstr revision "$NIXPKGS_REVISION" --argstr appRoute "$APP_ROUTE" --no-out-link | tee "evidence/$variant/driver-path.txt"
+            nix-build support/diagnostics/2751/mate.nix -A driver --arg panelFix "$fixed" --arg panelSize "$PANEL_SIZE" --arg minIconSize "$MIN_ICON_SIZE" --argstr revision "$NIXPKGS_REVISION" --argstr appRoute "$APP_ROUTE" --arg runtimeOnly "$RUNTIME_ONLY" --no-out-link | tee "evidence/$variant/driver-path.txt"
             driver=$(tail -1 "evidence/$variant/driver-path.txt")
             "$driver/bin/nixos-test-driver" --no-interactive --global-timeout 900 -o "$PWD/evidence/$variant" 2>&1 | tee "evidence/$variant/test-driver.log"
           done
@@ -83,6 +89,7 @@ jobs:
             if [ -n "$source" ]; then cp -R "$source" evidence/; fi
           done
       - name: Measure rendered icon pixels and retain tray crops
+        if: inputs.runtime_only != true
         run: |
           set -euo pipefail
           python3 -m pip install Pillow

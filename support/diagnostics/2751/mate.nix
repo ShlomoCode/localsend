@@ -1,4 +1,4 @@
-{ panelFix ? false, panelSize ? 24, minIconSize ? 24, appRoute ? "nix", revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
+{ panelFix ? false, panelSize ? 24, minIconSize ? 24, appRoute ? "nix", runtimeOnly ? false, revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
 let
   nixpkgs = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${revision}.tar.gz";
 in
@@ -87,76 +87,86 @@ in {
     user_command("xrandr --verbose > /tmp/evidence/xrandr.txt")
     assert "3840x2160" in user_command("xrandr | grep 'current 3840 x 2160\\|3840x2160.*\\*'"), "The display is not running at 4K"
     user_command("dconf dump /org/mate/ > /tmp/evidence/mate-initial.dconf")
-    user_command("sh -c 'localsend_app > /tmp/evidence/localsend.log 2>&1 &' ")
-    try:
-        machine.wait_for_window("LocalSend", 60)
-        machine.wait_for_open_port(53317)
-    except Exception:
-        machine.succeed("cat /tmp/evidence/localsend.log")
-        machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/startup-processes.txt")
-        raise
-    finally:
-        machine.copy_from_vm("/tmp/evidence", "guest-startup-evidence")
-    for label, scale, restart in [
-        ("100-live-first", 1, False), ("200-gui", 2, False), ("100-gui", 1, False),
-        ("200-live", 2, False),
-        ("100-live-return", 1, False), ("200-fresh", 2, True),
-        ("100-fresh", 1, True), ("200-live-repeat", 2, False),
-        ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True),
-        ("200-panel-replace", 2, False), ("100-panel-replace", 1, False)]:
-        if label == "200-gui":
-            user_command("sh -c 'mate-display-properties > /tmp/evidence/display-ui.log 2>&1 &' ")
-            machine.wait_for_window("Monitor Preferences", 60)
-            machine.screenshot("100-gui-before")
-            display_window = user_command("xdotool search --onlyvisible --name '^Monitor Preferences$' | head -1").strip()
-            geometry_text = user_command("xdotool getwindowgeometry --shell " + display_window)
-            user_command("xdotool getwindowgeometry --shell " + display_window + " > /tmp/evidence/display-ui-geometry.txt")
-            geometry = dict(line.split("=", 1) for line in geometry_text.splitlines())
-            # The current 3840x2160 screenshot from run38135333888 shows the
-            # 200% radio label at (1938,1166), with client origin (1682,862).
-            # Use that observed client offset and require the same layout size.
-            assert int(geometry["WIDTH"]) == 565 and int(geometry["HEIGHT"]) == 435, geometry
-        if label.endswith("gui"):
-            try:
-                if scale == 2:
-                    user_command("xdotool mousemove --window " + display_window + " 256 304 click 1")
-                    user_command("printf '%s\\n' 'Mouse click on observed 200% radio label at client256,304' >> /tmp/evidence/display-ui-actions.log")
-                else:
-                    # The clicked 200% radio retains focus; Left selects its
-                    # preceding 100% member through GTK's normal keyboard UI.
-                    user_command("xdotool windowactivate --sync " + display_window + " key Left")
-                    user_command("printf '%s\\n' 'Left key from focused 200% radio to100%' >> /tmp/evidence/display-ui-actions.log")
-            finally:
-                machine.copy_from_vm("/tmp/evidence", "guest-gui-attempt-" + label)
-            machine.sleep(3)
-            assert user_command("gsettings get org.mate.interface window-scaling-factor").strip() == str(scale)
-        else:
-            user_command("gsettings set org.mate.interface window-scaling-factor " + str(scale))
-        machine.sleep(8)
-        if label.endswith("panel-replace"):
-            user_command("sh -c 'mate-panel --replace > /tmp/evidence/" + label + "-panel.log 2>&1 &' ")
-            machine.sleep(10)
-            machine.wait_until_succeeds("pgrep mate-panel")
-        machine.wait_until_succeeds("pgrep mate-panel")
-        if restart:
-            machine.succeed("pkill -u alice -f '[l]ocalsend_app'")
-            machine.sleep(3)
-            user_command("sh -c 'localsend_app >> /tmp/evidence/localsend.log 2>&1 &' ")
+    daemon_pid = machine.succeed("pgrep -u alice -f 'libexec/mate-settings-daemon$' | head -1").strip()
+    assert daemon_pid, "The actual settings daemon process was not found"
+    machine.succeed("readlink /proc/" + daemon_pid + "/exe > /tmp/evidence/daemon-executable.txt")
+    machine.succeed("tr '\\0' '\\n' < /proc/" + daemon_pid + "/environ | sed -n '/^PATH=/p;/^XDG_DATA_DIRS=/p' > /tmp/evidence/daemon-environment.txt")
+    machine.succeed("cat ${pkgs.mate.mate-settings-daemon}/libexec/mate-settings-daemon > /tmp/evidence/daemon-wrapper.txt")
+    daemon_path = machine.succeed("tr '\\0' '\\n' < /proc/" + daemon_pid + "/environ | sed -n 's/^PATH=//p'").strip()
+    assert daemon_path, "The actual daemon PATH was not recovered"
+    user_command("env PATH=" + shlex.quote(daemon_path) + " sh -c 'command -v killall > /tmp/evidence/daemon-resolved-killall.txt; readlink -f $(command -v killall) >> /tmp/evidence/daemon-resolved-killall.txt; killall --version >> /tmp/evidence/daemon-resolved-killall.txt 2>&1'")
+    machine.copy_from_vm("/tmp/evidence", "guest-runtime-evidence")
+    if not ${if runtimeOnly then "True" else "False"}:
+        user_command("sh -c 'localsend_app > /tmp/evidence/localsend.log 2>&1 &' ")
+        try:
             machine.wait_for_window("LocalSend", 60)
             machine.wait_for_open_port(53317)
-        machine.sleep(8)
-        user_command("xwininfo -root -tree > /tmp/evidence/" + label + "-windows.txt")
-        user_command("dconf dump /org/mate/ > /tmp/evidence/" + label + ".dconf")
-        user_command("busctl --user list > /tmp/evidence/" + label + "-bus.txt")
-        user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > /tmp/evidence/" + label + "-items.txt")
-        items = shlex.split(user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems"))
-        for item in items[2:]:
-            service, path = item.split("/", 1)
-            user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
-        machine.screenshot(label)
-        machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
-        machine.succeed("for pid in $(pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; done > /tmp/evidence/" + label + "-executables.txt")
-        machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
+        except Exception:
+            machine.succeed("cat /tmp/evidence/localsend.log")
+            machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/startup-processes.txt")
+            raise
+        finally:
+            machine.copy_from_vm("/tmp/evidence", "guest-startup-evidence")
+        for label, scale, restart in [
+            ("100-live-first", 1, False), ("200-gui", 2, False), ("100-gui", 1, False),
+            ("200-live", 2, False),
+            ("100-live-return", 1, False), ("200-fresh", 2, True),
+            ("100-fresh", 1, True), ("200-live-repeat", 2, False),
+            ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True),
+            ("200-panel-replace", 2, False), ("100-panel-replace", 1, False)]:
+            if label == "200-gui":
+                user_command("sh -c 'mate-display-properties > /tmp/evidence/display-ui.log 2>&1 &' ")
+                machine.wait_for_window("Monitor Preferences", 60)
+                machine.screenshot("100-gui-before")
+                display_window = user_command("xdotool search --onlyvisible --name '^Monitor Preferences$' | head -1").strip()
+                geometry_text = user_command("xdotool getwindowgeometry --shell " + display_window)
+                user_command("xdotool getwindowgeometry --shell " + display_window + " > /tmp/evidence/display-ui-geometry.txt")
+                geometry = dict(line.split("=", 1) for line in geometry_text.splitlines())
+                # The current 3840x2160 screenshot from run38135333888 shows the
+                # 200% radio label at (1938,1166), with client origin (1682,862).
+                # Use that observed client offset and require the same layout size.
+                assert int(geometry["WIDTH"]) == 565 and int(geometry["HEIGHT"]) == 435, geometry
+            if label.endswith("gui"):
+                try:
+                    if scale == 2:
+                        user_command("xdotool mousemove --window " + display_window + " 256 304 click 1")
+                        user_command("printf '%s\\n' 'Mouse click on observed 200% radio label at client256,304' >> /tmp/evidence/display-ui-actions.log")
+                    else:
+                        # The clicked 200% radio retains focus; Left selects its
+                        # preceding 100% member through GTK's normal keyboard UI.
+                        user_command("xdotool windowactivate --sync " + display_window + " key Left")
+                        user_command("printf '%s\\n' 'Left key from focused 200% radio to100%' >> /tmp/evidence/display-ui-actions.log")
+                finally:
+                    machine.copy_from_vm("/tmp/evidence", "guest-gui-attempt-" + label)
+                machine.sleep(3)
+                assert user_command("gsettings get org.mate.interface window-scaling-factor").strip() == str(scale)
+            else:
+                user_command("gsettings set org.mate.interface window-scaling-factor " + str(scale))
+            machine.sleep(8)
+            if label.endswith("panel-replace"):
+                user_command("sh -c 'mate-panel --replace > /tmp/evidence/" + label + "-panel.log 2>&1 &' ")
+                machine.sleep(10)
+                machine.wait_until_succeeds("pgrep mate-panel")
+            machine.wait_until_succeeds("pgrep mate-panel")
+            if restart:
+                machine.succeed("pkill -u alice -f '[l]ocalsend_app'")
+                machine.sleep(3)
+                user_command("sh -c 'localsend_app >> /tmp/evidence/localsend.log 2>&1 &' ")
+                machine.wait_for_window("LocalSend", 60)
+                machine.wait_for_open_port(53317)
+            machine.sleep(8)
+            user_command("xwininfo -root -tree > /tmp/evidence/" + label + "-windows.txt")
+            user_command("dconf dump /org/mate/ > /tmp/evidence/" + label + ".dconf")
+            user_command("busctl --user list > /tmp/evidence/" + label + "-bus.txt")
+            user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > /tmp/evidence/" + label + "-items.txt")
+            items = shlex.split(user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems"))
+            for item in items[2:]:
+                service, path = item.split("/", 1)
+                user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
+            machine.screenshot(label)
+            machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
+            machine.succeed("for pid in $(pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; done > /tmp/evidence/" + label + "-executables.txt")
+            machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';
 }) {}
