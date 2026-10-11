@@ -54,6 +54,15 @@ BOOT
 genisoimage -quiet -o /home/runner/issue733-mint/probe.iso -V PROBE -r /tmp/issue733-mint/seed
 qemu-img create -f qcow2 /home/runner/issue733-mint/flatpak.qcow2 12G
 sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -boot d -drive file=/home/runner/issue733-mint/mint.iso,media=cdrom,readonly=on -drive file=/home/runner/issue733-mint/probe.iso,media=cdrom,readonly=on -drive file=/home/runner/issue733-mint/flatpak.qcow2,if=virtio,format=qcow2 -device virtio-vga -usb -device usb-tablet -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2277-:22 -device virtio-net-pci,netdev=net0 -display none -monitor unix:/tmp/issue733-mint/monitor,server,nowait -serial file:evidence/cloud/serial.log -daemonize
+sleep 10
+printf 'screendump %s/evidence/cloud/boot-menu.ppm\n' "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue733-mint/monitor >/dev/null
+sudo chmod a+r evidence/cloud/boot-menu.ppm
+convert evidence/cloud/boot-menu.ppm evidence/cloud/boot-menu.png
+tesseract evidence/cloud/boot-menu.png stdout > evidence/cloud/boot-menu.txt 2>/dev/null
+if grep -q 'Start Linux Mint' evidence/cloud/boot-menu.txt; then
+  printf 'sendkey ret 80\n' | sudo socat - UNIX-CONNECT:/tmp/issue733-mint/monitor >/dev/null
+  date -u --iso-8601=ns > evidence/cloud/boot-selection.txt
+fi
 ready=0
 for n in $(seq 1 18); do
   sleep 15

@@ -9,10 +9,19 @@ jobs:
     timeout-minutes: 70
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble unchanged historical Flathub package
-        run: bash support/diagnostics/733/package.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue733-38169002134
+          run-id: 38169002134
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: retained
+      - name: Reuse unchanged historical package
+        run: |
+          mkdir -p evidence
+          cp -a retained/package evidence/package
       - name: Prepare reported Mint desktop and actual two apps
         run: bash support/diagnostics/733/mint.sh
       - name: Retain every outcome
