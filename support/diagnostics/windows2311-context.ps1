@@ -41,15 +41,26 @@ foreach($thread in $threads){if($thread -and $thread -ne $current -and [Explorer
 try{[void][Explorer2311]::ShowWindow($hwnd,9);[void][Explorer2311]::SetForegroundWindow($hwnd)}finally{foreach($thread in $attached){[void][Explorer2311]::AttachThreadInput($current,$thread,$false)}}
 if([Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Explorer foreground could not be established; no context-menu keys were sent'}
 $filename=[IO.Path]::GetFileNameWithoutExtension($fixture)
-$items=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
-$item=@($items|Where-Object {$_.Current.ControlType -eq [Windows.Automation.ControlType]::ListItem -and ($_.Current.Name -eq $filename -or $_.Current.Name -eq [IO.Path]::GetFileName($fixture))}|Select-Object -Last 1)
-if($item.Count -ne 1){throw 'Explorer did not expose the fixture selection'}
-$item[0].GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
-$item[0].SetFocus()
-$selected=$item[0].GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected
+$deadline=[DateTime]::UtcNow.AddSeconds(10)
+do{
+ $items=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+ $item=@($items|Where-Object {$_.Current.ControlType.ProgrammaticName -in @('ControlType.ListItem','ControlType.DataItem') -and ($_.Current.Name -eq $filename -or $_.Current.Name -eq [IO.Path]::GetFileName($fixture))}|Select-Object -Last 1)
+ $shellSelection=@($window[0].Document.SelectedItems()|ForEach-Object {$_.Path})
+ if($item.Count -or ($shellSelection.Count -eq 1 -and $shellSelection[0] -eq $fixture)){break}
+ Start-Sleep -Milliseconds 250
+}while([DateTime]::UtcNow -lt $deadline)
+@($items|ForEach-Object {try{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}}catch{}})|ConvertTo-Json -Depth 4|Set-Content "evidence/context-$Case-explorer-items.json"
+$selected=$false
+if($item.Count){
+ $item[0].GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+ $item[0].SetFocus()
+ $selected=$item[0].GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected
+}
+$shellSelection=@($window[0].Document.SelectedItems()|ForEach-Object {$_.Path})
+$exactShellSelection=$shellSelection.Count -eq 1 -and $shellSelection[0] -eq $fixture
 $focused=[Windows.Automation.AutomationElement]::FocusedElement
-@{hwnd=$hwnd.ToInt64();foreground=[Explorer2311]::GetForegroundWindow().ToInt64();fixture=$fixture;folder=$window[0].LocationURL;selected=$selected;item=$item[0].Current.Name;focused=$focused.Current.Name;focusedType=$focused.Current.ControlType.ProgrammaticName}|ConvertTo-Json|Set-Content "evidence/context-$Case-selection.json"
-if(!$selected -or [Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Fixture selection or Explorer focus was lost before Shift+F10'}
+@{hwnd=$hwnd.ToInt64();foreground=[Explorer2311]::GetForegroundWindow().ToInt64();fixture=$fixture;folder=$window[0].LocationURL;selected=$selected;shellSelectedPaths=$shellSelection;exactShellSelection=$exactShellSelection;focused=$focused.Current.Name;focusedType=$focused.Current.ControlType.ProgrammaticName}|ConvertTo-Json|Set-Content "evidence/context-$Case-selection.json"
+if(!$exactShellSelection -or [Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Exact fixture selection or Explorer focus was lost before Shift+F10'}
 [Windows.Forms.SendKeys]::SendWait('+{F10}')
 Start-Sleep 1
 function Snapshot([string]$phase){
