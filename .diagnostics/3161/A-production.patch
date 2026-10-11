@@ -1,0 +1,312 @@
+--- a/atk-adaptor/adaptors/socket-adaptor.c
++++ b/atk-adaptor/adaptors/socket-adaptor.c
+@@ -24,13 +24,224 @@
+ 
+ #include <atk/atk.h>
+ #include <droute/droute.h>
++#include <errno.h>
++#include <string.h>
+ 
++#include "accessible-register.h"
+ #include "accessible-stateset.h"
+ #include "bridge.h"
+ #include "introspection.h"
+ #include "object.h"
+ #include "spi-dbus.h"
+ 
++/* Experimental same-process dispatch. GTK objects and SpiRegister mutations
++ * must remain confined to the thread that initializes this adaptor. */
++static GThread *socket_owner_thread;
++
++typedef struct
++{
++  GWeakRef socket;
++  gchar *parent_id;
++  GThread *owner;
++} LocalSocketBinding;
++
++typedef struct _LocalSocketCall LocalSocketCall;
++struct _LocalSocketCall
++{
++  AtkComponent *plug;
++  AtkComponent *socket;
++  LocalSocketCall *previous;
++};
++
++typedef enum
++{
++  LOCAL_EXTENTS,
++  LOCAL_POSITION,
++  LOCAL_SIZE
++} LocalSocketMethod;
++
++static GPrivate active_local_calls = G_PRIVATE_INIT (NULL);
++
++static void atspi_plug_component_get_extents (AtkComponent *, gint *, gint *, gint *, gint *, AtkCoordType);
++static void atspi_plug_component_get_position (AtkComponent *, gint *, gint *, AtkCoordType);
++static void atspi_plug_component_get_size (AtkComponent *, gint *, gint *);
++
++static void
++local_socket_binding_free (gpointer data)
++{
++  LocalSocketBinding *binding = data;
++  g_weak_ref_clear (&binding->socket);
++  g_thread_unref (binding->owner);
++  g_free (binding->parent_id);
++  g_free (binding);
++}
++
++static gboolean
++split_socket_id (gchar *id, gchar **bus, gchar **path)
++{
++  gchar *separator;
++  if (!id || !*id || !(separator = strchr (id + 1, ':')))
++    return FALSE;
++  *separator = '\0';
++  *bus = id;
++  *path = separator + 1;
++  return dbus_validate_bus_name (*bus, NULL) && dbus_validate_path (*path, NULL);
++}
++
++/* SpiRegister's atoi lookup is permissive; reject aliases before using it. */
++static gboolean
++canonical_socket_path (const gchar *path)
++{
++  const gchar *prefix = "/org/a11y/atspi/accessible/";
++  const gchar *number;
++  gchar *end, *canonical;
++  guint64 index;
++  gboolean valid;
++  if (!g_str_has_prefix (path, prefix))
++    return FALSE;
++  number = path + strlen (prefix);
++  if (!g_ascii_isdigit (*number))
++    return FALSE;
++  errno = 0;
++  index = g_ascii_strtoull (number, &end, 10);
++  if (errno || *end || index == 0 || index > G_MAXINT)
++    return FALSE;
++  /* Match ref_to_path's existing %d format. Values above G_MAXINT produce
++   * a minus sign there, which is not permitted in a D-Bus object path. */
++  canonical = g_strdup_printf ("%s%d", prefix, (gint) index);
++  valid = g_str_equal (canonical, path);
++  g_free (canonical);
++  return valid;
++}
++
++/* Bind once at Embedded, then acquire an owning reference via GWeakRef for
++ * each query. This also invalidates on g_object_run_dispose(), even if another
++ * reference keeps the socket alive. Never revive a stale binding by lookup. */
++static void
++bind_local_socket (AtkObject *plug, const gchar *id)
++{
++  LocalSocketBinding *binding = g_new0 (LocalSocketBinding, 1);
++  gchar *copy = g_strdup (id), *bus, *path;
++  const gchar *unique = NULL;
++  binding->parent_id = g_strdup (id);
++  binding->owner = g_thread_ref (g_thread_self ());
++  g_weak_ref_init (&binding->socket, NULL);
++  if (g_thread_self () == socket_owner_thread)
++    unique = dbus_bus_get_unique_name (spi_global_app_data->bus);
++  if (g_thread_self () == socket_owner_thread && spi_global_register &&
++      split_socket_id (copy, &bus, &path) && unique &&
++      g_str_equal (bus, unique) && canonical_socket_path (path))
++    {
++      GObject *target = spi_global_register_path_to_object (path);
++      if (target && ATK_IS_SOCKET (target) && target != G_OBJECT (plug))
++        g_weak_ref_set (&binding->socket, target);
++    }
++  g_debug ("socket Embedded parent=%s thread=%p owner=%p",
++           id, (void *) g_thread_self (), (void *) socket_owner_thread);
++  g_free (copy);
++  g_object_set_data_full (G_OBJECT (plug), "spi-local-socket-binding", binding,
++                          local_socket_binding_free);
++}
++
++/* TRUE means handled locally (including an invalid local destination).
++ * FALSE is exclusively a valid destination on a different bus connection. */
++static gboolean
++local_socket_call (AtkComponent *plug, LocalSocketMethod method,
++                   gint *x, gint *y, gint *width, gint *height,
++                   AtkCoordType coord_type)
++{
++  gchar *id = NULL, *copy = NULL, *bus, *path;
++  const gchar *unique;
++  LocalSocketBinding *binding;
++  GObject *target = NULL;
++  LocalSocketCall call, *active;
++  gboolean handled = TRUE;
++  const gchar *reason = "wrong-thread";
++
++  if (x) *x = -1;
++  if (y) *y = -1;
++  if (width) *width = -1;
++  if (height) *height = -1;
++  /* Do not even read borrowed qdata or the global connection off-thread. */
++  if (g_thread_self () != socket_owner_thread)
++    goto out;
++  reason = "invalid-id";
++  id = g_strdup (g_object_get_data (G_OBJECT (plug), "dbus-plug-parent"));
++  copy = g_strdup (id);
++  if (!spi_global_app_data || !spi_global_app_data->bus ||
++      !split_socket_id (copy, &bus, &path))
++    goto out;
++  unique = dbus_bus_get_unique_name (spi_global_app_data->bus);
++  if (!unique)
++    goto out;
++  if (!g_str_equal (bus, unique))
++    {
++      handled = FALSE;
++      reason = "remote";
++      goto out;
++    }
++  reason = "invalid-path";
++  if (!spi_global_register || !canonical_socket_path (path))
++    goto out;
++  binding = g_object_get_data (G_OBJECT (plug), "spi-local-socket-binding");
++  reason = "stale-binding";
++  if (!binding || binding->owner != g_thread_self () ||
++      !g_str_equal (binding->parent_id, id) ||
++      !(target = g_weak_ref_get (&binding->socket)))
++    goto out;
++  reason = "removed-or-replaced";
++  if (spi_global_register_path_to_object (path) != target)
++    goto out;
++  reason = "invalid-target";
++  if (!ATK_IS_SOCKET (target) || target == G_OBJECT (plug))
++    goto out;
++  reason = "cycle";
++  active = g_private_get (&active_local_calls);
++  for (LocalSocketCall *cursor = active; cursor; cursor = cursor->previous)
++    if (cursor->plug == plug || cursor->socket == ATK_COMPONENT (target))
++      goto out;
++  call.plug = plug;
++  call.socket = ATK_COMPONENT (target);
++  call.previous = active;
++  g_private_set (&active_local_calls, &call);
++  /* Keep the initiating plug alive if callbacks drop its external owner. */
++  g_object_ref (plug);
++  if (method == LOCAL_EXTENTS)
++    atk_component_get_extents (call.socket, x, y, width, height, coord_type);
++  else if (method == LOCAL_POSITION)
++    atk_component_get_position (call.socket, x, y, coord_type);
++  else
++    atk_component_get_size (call.socket, width, height);
++  g_private_set (&active_local_calls, active);
++  reason = "local";
++  g_object_unref (plug);
++out:
++  {
++    const gchar *target_type = target ? G_OBJECT_TYPE_NAME (target) : "(none)";
++    const gchar *parent_type = "not-queried";
++    AtkObject *parent = NULL;
++    /* Only the native socket's inherited parent getter is queried, after the
++     * public geometry call, while target is held on its owner thread. Never
++     * introduce get_parent callbacks for a custom socket subtype. */
++    if (target && g_str_equal (reason, "local") && G_OBJECT_TYPE (target) == ATK_TYPE_SOCKET)
++      {
++        parent = atk_object_get_parent (ATK_OBJECT (target));
++        parent_type = parent ? G_OBJECT_TYPE_NAME (parent) : "(none)";
++      }
++    /* plug may have lost its external owner during dispatch. Print its pointer
++     * value only: no dereference after releasing our temporary plug ref. */
++    g_debug ("socket geometry method=%d coord=%d id=%s result=%s plug=%p target=%p target-type=%s parent=%p parent-type=%s thread=%p x=%d y=%d w=%d h=%d",
++             method, coord_type, id ? id : "(none)", reason, (void *) plug,
++             (void *) target, target_type, (void *) parent, parent_type,
++             (void *) g_thread_self (), x ? *x : -1, y ? *y : -1,
++             width ? *width : -1, height ? *height : -1);
++  }
++  g_clear_object (&target);
++  g_free (copy);
++  g_free (id);
++  return handled;
++}
++
+ static DBusMessage *
+ new_socket_call_message (AtkComponent *component, const char *member)
+ {
+@@ -54,13 +265,14 @@
+       g_free (bus_parent);
+       return message;
+     }
++  g_free (bus_parent);
+   return NULL;
+ }
+ 
+ static void
+ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gint *width, gint *height, AtkCoordType coord_type)
+ {
+-  DBusMessage *message = new_socket_call_message (component, "GetExtents");
++  DBusMessage *message;
+   DBusMessage *reply;
+   dbus_uint32_t coord_type_dbus = coord_type;
+   DBusError error;
+@@ -68,6 +280,11 @@
+   DBusMessageIter iter, iter_struct;
+   dbus_int32_t tmp;
+ 
++  if (local_socket_call (component, LOCAL_EXTENTS, x, y, width, height, coord_type))
++    return;
++  message = new_socket_call_message (component, "GetExtents");
++  if (!message)
++    return;
+   dbus_error_init (&error);
+   dbus_message_append_args (message, DBUS_TYPE_UINT32, &coord_type_dbus, DBUS_TYPE_INVALID);
+   reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
+@@ -111,12 +328,17 @@
+ static void
+ atspi_plug_component_get_position (AtkComponent *component, gint *x, gint *y, AtkCoordType coord_type)
+ {
+-  DBusMessage *message = new_socket_call_message (component, "GetPosition");
++  DBusMessage *message;
+   DBusMessage *reply;
+   dbus_uint32_t coord_type_dbus = coord_type;
+   DBusError error;
+   dbus_int32_t x_dbus, y_dbus;
+ 
++  if (local_socket_call (component, LOCAL_POSITION, x, y, NULL, NULL, coord_type))
++    return;
++  message = new_socket_call_message (component, "GetPosition");
++  if (!message)
++    return;
+   dbus_error_init (&error);
+   dbus_message_append_args (message, DBUS_TYPE_UINT32, &coord_type_dbus, DBUS_TYPE_INVALID);
+   reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
+@@ -149,11 +371,16 @@
+                                gint *width,
+                                gint *height)
+ {
+-  DBusMessage *message = new_socket_call_message (component, "GetSize");
++  DBusMessage *message;
+   DBusMessage *reply;
+   DBusError error;
+   dbus_uint32_t width_dbus, height_dbus;
+ 
++  if (local_socket_call (component, LOCAL_SIZE, NULL, NULL, width, height, ATK_XY_SCREEN))
++    return;
++  message = new_socket_call_message (component, "GetSize");
++  if (!message)
++    return;
+   dbus_error_init (&error);
+   reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
+                                                      message, -1, &error);
+@@ -193,8 +420,11 @@
+     {
+       return droute_invalid_arguments_error (message);
+     }
++  if (g_thread_self () != socket_owner_thread)
++    return droute_not_yet_handled_error (message);
+   id = g_strconcat (dbus_message_get_sender (message), ":", path, NULL);
+   g_object_set_data_full (G_OBJECT (object), "dbus-plug-parent", id, (GDestroyNotify) g_free);
++  bind_local_socket (object, id);
+ 
+   if (ATK_IS_COMPONENT (object))
+     {
+@@ -221,6 +451,7 @@
+ void
+ spi_initialize_socket (DRoutePath *path)
+ {
++  socket_owner_thread = g_thread_self ();
+   droute_path_add_interface (path,
+                              ATSPI_DBUS_INTERFACE_SOCKET,
+                              spi_org_a11y_atspi_Socket,

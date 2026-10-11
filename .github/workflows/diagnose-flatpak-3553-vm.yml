@@ -1,4 +1,7 @@
-name: Diagnose GNOME Zoom 3161
+name: Diagnose GNOME source Flatpak 3161
+concurrency:
+  group: issue3161-gnome-diagnostic
+  cancel-in-progress: false
 on:
   workflow_dispatch:
 jobs:
@@ -6,6 +9,22 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 360
     steps:
+      - uses: actions/checkout@v4
+      - name: Check source diagnostic script syntax on the cloud runner
+        run: |
+          set -euo pipefail
+          bash -n .diagnostics/3161/prepare-whole-bundle.sh
+          bash -n .diagnostics/3161/build-flatpak-matrix.sh
+          bash -n .diagnostics/3161/launch-source-flatpak.sh
+          bash -n .diagnostics/3161/verify-live-flatpak.sh
+      - name: Verify approved complete control and B source bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .diagnostics/3161/prepare-whole-bundle.sh .diagnostics/3161/whole-bundle-descriptor.accepted.json control /tmp/localsend-source-input/control
+          bash .diagnostics/3161/prepare-whole-bundle.sh .diagnostics/3161/whole-bundle-descriptor.accepted.json B /tmp/localsend-source-input/B
+          cp .diagnostics/3161/whole-bundle-descriptor.accepted.json .diagnostics/3161/flatpak-original.yml .diagnostics/3161/A-production.patch .diagnostics/3161/build-flatpak-matrix.sh .diagnostics/3161/launch-source-flatpak.sh .diagnostics/3161/verify-live-flatpak.sh /tmp/localsend-source-input/
+          cp -r .diagnostics/3161/geometry-oracle /tmp/localsend-source-input/
       - name: Install VM tools and prepare Debian 13 guest
         env:
           START_VERSION: trixie
@@ -46,6 +65,15 @@ jobs:
             - openssh-server
             - libayatana-appindicator3-1
             - python3-pyatspi
+            - flatpak-builder
+            - ruby
+            - jq
+            - git
+            - ostree
+            - orca
+            - dbus-x11
+            - x11-utils
+            - gnome-shell-extensions
           runcmd:
             - [sh, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm3/daemon.conf"]
             - [systemctl, set-default, graphical.target]
@@ -84,6 +112,8 @@ jobs:
             -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 6144 \
             -drive file=/home/runner/localsend-vm/debian.img,if=virtio,format=qcow2 \
             -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
+            -audiodev wav,id=audio3161,path=$GITHUB_WORKSPACE/evidence/vm/guest-audio.wav,out.frequency=16000,out.channels=1 \
+            -device ich9-intel-hda -device hda-duplex,audiodev=audio3161 \
             "${gpu_args[@]}" -usb -device usb-tablet \
             -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
             -device virtio-net-pci,netdev=net0 \
@@ -149,6 +179,29 @@ jobs:
           lspci -nn
           loginctl list-sessions
           GUEST
+
+      - name: Build normal source-defined Flatpak packages inside the pinned SDK
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          scp "${ssh_opts[@]/-p/-P}" -r /tmp/localsend-source-input probe@127.0.0.1:/home/probe/source-input
+          timeout 10200 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash /home/probe/source-input/build-flatpak-matrix.sh /home/probe/source-input" > evidence/vm/source-flatpak-build.log 2>&1
+
+      - name: Install supported compositor oracle before a fresh GNOME session
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'export XDG_RUNTIME_DIR=/run/user/$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus; sh /home/probe/source-input/geometry-oracle/install-guest.sh; sudo systemctl restart gdm3' > evidence/vm/geometry-oracle-install.log 2>&1
+          ready=0
+          for attempt in $(seq 1 30); do
+            if timeout 12 ssh "${ssh_opts[@]}" probe@127.0.0.1 'export XDG_RUNTIME_DIR=/run/user/$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus; /usr/bin/python3 /home/probe/source-input/geometry-oracle/snapshot-guest.py' > evidence/vm/oracle-ready.json 2> evidence/vm/oracle-ready-error.txt; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ready" = 1
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'export XDG_RUNTIME_DIR=/run/user/$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus; dpkg-query -W gnome-shell libmutter-16-0 python3-pyatspi; gnome-extensions info localsend-geometry-oracle@diagnostics.invalid' > evidence/vm/oracle-packages.txt 2>&1
 
       - name: Prepare live VM controls
         run: |
@@ -224,7 +277,7 @@ jobs:
           /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/ready.png"
       - uses: actions/upload-artifact@v4
         with:
-          name: gnome-zoom-3161-ready
+          name: gnome-source-3161-ready
           path: evidence/vm/ready.png
       - name: Live UI round 1
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -234,7 +287,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-1
+          name: gnome-source-3161-round-1
           path: evidence/vm/round-1/
       - name: Live UI round 2
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -244,7 +297,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-2
+          name: gnome-source-3161-round-2
           path: evidence/vm/round-2/
       - name: Live UI round 3
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -254,7 +307,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-3
+          name: gnome-source-3161-round-3
           path: evidence/vm/round-3/
       - name: Live UI round 4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -264,7 +317,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-4
+          name: gnome-source-3161-round-4
           path: evidence/vm/round-4/
       - name: Live UI round 5
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -274,7 +327,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-5
+          name: gnome-source-3161-round-5
           path: evidence/vm/round-5/
       - name: Live UI round 6
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -284,7 +337,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-6
+          name: gnome-source-3161-round-6
           path: evidence/vm/round-6/
       - name: Live UI round 7
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -294,7 +347,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-7
+          name: gnome-source-3161-round-7
           path: evidence/vm/round-7/
       - name: Live UI round 8
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -304,7 +357,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-8
+          name: gnome-source-3161-round-8
           path: evidence/vm/round-8/
       - name: Live UI round 9
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -314,7 +367,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-9
+          name: gnome-source-3161-round-9
           path: evidence/vm/round-9/
       - name: Live UI round 10
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -324,7 +377,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-10
+          name: gnome-source-3161-round-10
           path: evidence/vm/round-10/
       - name: Live UI round 11
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -334,7 +387,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-11
+          name: gnome-source-3161-round-11
           path: evidence/vm/round-11/
       - name: Live UI round 12
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -344,7 +397,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-12
+          name: gnome-source-3161-round-12
           path: evidence/vm/round-12/
       - name: Live UI round 13
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -354,7 +407,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-13
+          name: gnome-source-3161-round-13
           path: evidence/vm/round-13/
       - name: Live UI round 14
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -364,7 +417,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-14
+          name: gnome-source-3161-round-14
           path: evidence/vm/round-14/
       - name: Live UI round 15
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -374,7 +427,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-15
+          name: gnome-source-3161-round-15
           path: evidence/vm/round-15/
       - name: Live UI round 16
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -384,7 +437,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-16
+          name: gnome-source-3161-round-16
           path: evidence/vm/round-16/
       - name: Live UI round 17
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -394,7 +447,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-17
+          name: gnome-source-3161-round-17
           path: evidence/vm/round-17/
       - name: Live UI round 18
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -404,7 +457,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-18
+          name: gnome-source-3161-round-18
           path: evidence/vm/round-18/
       - name: Live UI round 19
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -414,7 +467,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-19
+          name: gnome-source-3161-round-19
           path: evidence/vm/round-19/
       - name: Live UI round 20
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -424,7 +477,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-20
+          name: gnome-source-3161-round-20
           path: evidence/vm/round-20/
       - name: Live UI round 21
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -434,7 +487,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-21
+          name: gnome-source-3161-round-21
           path: evidence/vm/round-21/
       - name: Live UI round 22
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -444,7 +497,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-22
+          name: gnome-source-3161-round-22
           path: evidence/vm/round-22/
       - name: Live UI round 23
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -454,7 +507,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-23
+          name: gnome-source-3161-round-23
           path: evidence/vm/round-23/
       - name: Live UI round 24
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -464,7 +517,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-24
+          name: gnome-source-3161-round-24
           path: evidence/vm/round-24/
       - name: Live UI round 25
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -474,7 +527,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-25
+          name: gnome-source-3161-round-25
           path: evidence/vm/round-25/
       - name: Live UI round 26
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -484,7 +537,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-26
+          name: gnome-source-3161-round-26
           path: evidence/vm/round-26/
       - name: Live UI round 27
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -494,7 +547,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-27
+          name: gnome-source-3161-round-27
           path: evidence/vm/round-27/
       - name: Live UI round 28
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -504,7 +557,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-28
+          name: gnome-source-3161-round-28
           path: evidence/vm/round-28/
       - name: Live UI round 29
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -514,7 +567,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-29
+          name: gnome-source-3161-round-29
           path: evidence/vm/round-29/
       - name: Live UI round 30
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -524,7 +577,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-30
+          name: gnome-source-3161-round-30
           path: evidence/vm/round-30/
       - name: Live UI round 31
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -534,7 +587,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-31
+          name: gnome-source-3161-round-31
           path: evidence/vm/round-31/
       - name: Live UI round 32
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -544,7 +597,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-32
+          name: gnome-source-3161-round-32
           path: evidence/vm/round-32/
       - name: Live UI round 33
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -554,7 +607,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-33
+          name: gnome-source-3161-round-33
           path: evidence/vm/round-33/
       - name: Live UI round 34
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -564,7 +617,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-34
+          name: gnome-source-3161-round-34
           path: evidence/vm/round-34/
       - name: Live UI round 35
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -574,7 +627,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-35
+          name: gnome-source-3161-round-35
           path: evidence/vm/round-35/
       - name: Live UI round 36
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -584,7 +637,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-36
+          name: gnome-source-3161-round-36
           path: evidence/vm/round-36/
       - name: Live UI round 37
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -594,7 +647,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-37
+          name: gnome-source-3161-round-37
           path: evidence/vm/round-37/
       - name: Live UI round 38
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -604,7 +657,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-38
+          name: gnome-source-3161-round-38
           path: evidence/vm/round-38/
       - name: Live UI round 39
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -614,7 +667,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-39
+          name: gnome-source-3161-round-39
           path: evidence/vm/round-39/
       - name: Live UI round 40
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -624,7 +677,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-40
+          name: gnome-source-3161-round-40
           path: evidence/vm/round-40/
       - name: Live UI round 41
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -634,7 +687,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-41
+          name: gnome-source-3161-round-41
           path: evidence/vm/round-41/
       - name: Live UI round 42
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -644,7 +697,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-42
+          name: gnome-source-3161-round-42
           path: evidence/vm/round-42/
       - name: Live UI round 43
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -654,7 +707,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-43
+          name: gnome-source-3161-round-43
           path: evidence/vm/round-43/
       - name: Live UI round 44
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -664,7 +717,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-44
+          name: gnome-source-3161-round-44
           path: evidence/vm/round-44/
       - name: Live UI round 45
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -674,7 +727,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-45
+          name: gnome-source-3161-round-45
           path: evidence/vm/round-45/
       - name: Live UI round 46
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -684,7 +737,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-46
+          name: gnome-source-3161-round-46
           path: evidence/vm/round-46/
       - name: Live UI round 47
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -694,7 +747,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-47
+          name: gnome-source-3161-round-47
           path: evidence/vm/round-47/
       - name: Live UI round 48
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
@@ -704,7 +757,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
         with:
-          name: gnome-zoom-3161-round-48
+          name: gnome-source-3161-round-48
           path: evidence/vm/round-48/
       - name: Collect session diagnostics and identities
         if: always()
@@ -712,12 +765,13 @@ jobs:
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
           if [ -f /tmp/localsend-vm/video.pid ]; then kill -INT "$(cat /tmp/localsend-vm/video.pid)" || true; sleep 3; fi
           timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'journalctl --user -b --no-pager; sudo journalctl -b -p warning --no-pager' > evidence/vm/session-journal.txt 2>&1 || true
-          timeout 30 scp "${ssh_opts[@]/-p/-P}" -r probe@127.0.0.1:/home/probe/evidence evidence/vm/guest-files || true
+          timeout 600 scp "${ssh_opts[@]/-p/-P}" -r probe@127.0.0.1:/home/probe/evidence evidence/vm/guest-files || true
           /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/final.png" || true
+          printf 'quit\n' | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
           sudo chown -R "$(id -u):$(id -g)" evidence/vm
           chmod -R a+rX evidence/vm
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gnome-zoom-3161-evidence
+          name: gnome-source-3161-evidence
           path: evidence/vm/

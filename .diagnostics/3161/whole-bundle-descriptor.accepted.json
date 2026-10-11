@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "root_accepted": true,
+  "repository": "ShlomoCode/localsend",
+  "app_build_run_id": "38164164206",
+  "source_sha": "c1ce322fb3acf08e44f329b8b7208b8b0d91e244",
+  "framework_sha": "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694",
+  "engine_sha": "42d3d75a56efe1a2e9902f52dc8006099c45d937",
+  "variants": {
+    "control": {
+      "artifact_id": 11711782451,
+      "artifact_name": "issue2754-c1ce-engine-control-linux-x64",
+      "bundle_sha256": "7370c93ee6074881d6b35b924d56d7ec95ba0deb34a9ea32aec1f7533338e32e",
+      "engine_so_sha256": "a5d59efac8589f609dd783a6c3b35b314b1bc0a9b0ac023af23321f7f50b21ff",
+      "libapp_sha256": "a5c223e03b29818f3982a28d8893f56f60aa5bf7921b9c095fd16f2b80344a66",
+      "manifest_sha256": "dc736f34184b00041bd9990455d89e1c0de4be3d944c0c9f109351d9494331a0"
+    },
+    "B": {
+      "artifact_id": 11711368558,
+      "artifact_name": "issue2754-c1ce-engine-B-linux-x64",
+      "bundle_sha256": "1fa3fb6808e47c6259031c52b6c49c05d241fd6475431aefb577556cd454922d",
+      "engine_so_sha256": "1cb9ec7c0516575ef5cdcd452a5de53761680539e5f5d78db7c88a7bad254ab3",
+      "libapp_sha256": "e34ebc05ed2bd6bea8ce59b4e088bb7f2904f86a8f04e0ad21269d5dc6f156d5",
+      "manifest_sha256": "1acf47f4d03876660bc0454e1da8eb46a30d790116f90da01dfa97a3d17db6a3"
+    }
+  },
+  "scope": "Complete source-built c1ce control/B bundles accepted for diagnostic runtime. Normal source-defined Flatpak packaging requires its own loaded-namespace and UI gates. This descriptor does not establish a shipping fix."
+}

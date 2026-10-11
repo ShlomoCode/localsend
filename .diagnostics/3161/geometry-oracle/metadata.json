@@ -1,0 +1,7 @@
+{
+  "uuid": "localsend-geometry-oracle@diagnostics.invalid",
+  "name": "LocalSend geometry diagnostic",
+  "description": "Read-only Mutter window identity and geometry snapshots",
+  "shell-version": ["48"],
+  "version": 1
+}
