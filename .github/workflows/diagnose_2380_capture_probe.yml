@@ -64,6 +64,7 @@ jobs:
           $video="$env:RUNNER_TEMP/actual-capture.mp4"
           $clock=[System.Diagnostics.Stopwatch]::StartNew()
           $recorder=Start-Process $ffmpeg -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','3','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-stats_period','0.25','-progress',$progress,$video) -RedirectStandardOutput "$env:RUNNER_TEMP/actual-record.log" -RedirectStandardError "$env:RUNNER_TEMP/actual-record-error.log" -PassThru
+          $ownedRecorderHandle=$recorder.Handle
           $summary=@{stage='actual-capture';status='running';pid=$recorder.Id;progressFile=$progress}
           try {
             do {
@@ -94,6 +95,7 @@ jobs:
           $progress=NewCaptureProgressPath $env:RUNNER_TEMP 'early'
           $clock=[System.Diagnostics.Stopwatch]::StartNew()
           $recorder=Start-Process $ffmpeg -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','3','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-progress',$progress,"$env:RUNNER_TEMP/early-capture.mp4") -RedirectStandardOutput "$env:RUNNER_TEMP/early-record.log" -RedirectStandardError "$env:RUNNER_TEMP/early-record-error.log" -PassThru
+          $ownedRecorderHandle=$recorder.Handle
           try {} finally {FinishOwnedRecorder 'early' $recorder $clock $progress $env:RUNNER_TEMP}
           $cleanup=Get-Content "$env:RUNNER_TEMP/early-cleanup.json" -Raw|ConvertFrom-Json
           if($cleanup.forcedRecorderTermination -or $cleanup.exitCode -ne 0 -or $cleanup.elapsedFromStart -gt 45){throw 'Early failure cleanup did not finalize normally within monotonic grace'}

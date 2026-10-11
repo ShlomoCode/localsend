@@ -28,5 +28,5 @@ function FinishOwnedRecorder($name,$process,$clock,$progressFile,$outputDirector
   $remaining=RemainingCaptureGrace $clock
   if(!$process.WaitForExit($remaining)){$forced=$true;$process.Kill();$process.WaitForExit()}
  }
- @{forcedRecorderTermination=$forced;utc=[DateTime]::UtcNow.ToString('o');exitCode=$process.ExitCode;elapsedFromStart=$clock.Elapsed.TotalSeconds;progressFile=$progressFile;lastProgress=$(if(Test-Path $progressFile){Get-Content $progressFile -Raw}else{''})}|ConvertTo-Json|Set-Content "$outputDirectory/$name-cleanup.json"
+ @{forcedRecorderTermination=$forced;utc=[DateTime]::UtcNow.ToString('o');exitCode=$process.ExitCode;elapsedFromStart=$clock.Elapsed.TotalSeconds;progressFile=$progressFile;lastProgress=$(if(Test-Path $progressFile){[System.IO.File]::ReadAllText($progressFile)}else{''})}|ConvertTo-Json|Set-Content "$outputDirectory/$name-cleanup.json"
 }

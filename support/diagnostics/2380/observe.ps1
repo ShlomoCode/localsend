@@ -188,6 +188,8 @@ $cases=@(
    $progress=NewCaptureProgressPath $EvidenceDirectory $name
    $recorderClock=[System.Diagnostics.Stopwatch]::StartNew()
    $recording=Start-Process $env:FFMPEG2380 -NoNewWindow -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','30','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-stats_period','0.25','-progress',$progress,"$EvidenceDirectory/$name.mp4") -RedirectStandardOutput "$EvidenceDirectory/$name-record.log" -RedirectStandardError "$EvidenceDirectory/$name-record-error.log" -PassThru
+   # Retain the native handle before exit; PS5 otherwise loses ExitCode after waiting.
+   $ownedRecorderHandle=$recording.Handle
    $readyDeadline=[DateTime]::UtcNow.AddSeconds(15)
    do {
     if($recording.HasExited){throw 'Recorder exited before application launch'}
