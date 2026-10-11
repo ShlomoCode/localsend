@@ -26,7 +26,7 @@ test -n "$shell_pid"
 # Whitelist session variables; never export/log the rest of the process environment.
 while IFS= read -r -d '' entry; do
   case "$entry" in
-    DISPLAY=*|XAUTHORITY=*|XDG_RUNTIME_DIR=*|DBUS_SESSION_BUS_ADDRESS=*|XDG_SESSION_TYPE=*|XDG_CURRENT_DESKTOP=*) export "$entry" ;;
+    DISPLAY=*|XAUTHORITY=*|XDG_RUNTIME_DIR=*|DBUS_SESSION_BUS_ADDRESS=*|XDG_SESSION_TYPE=*|XDG_CURRENT_DESKTOP=*|XDG_DATA_DIRS=*|XDG_CONFIG_DIRS=*|GTK_PATH=*|GTK_MODULES=*|GDK_PIXBUF_MODULE_FILE=*|GDK_PIXBUF_MODULEDIR=*) export "$entry" ;;
   esac
 done < "/proc/$shell_pid/environ"
 test "${XDG_SESSION_TYPE:-}" = x11
@@ -38,6 +38,9 @@ export OMP_THREAD_LIMIT=1
 printf 'DISPLAY=%s\nXAUTHORITY=%s\nXDG_RUNTIME_DIR=%s\nDBUS_SESSION_BUS_ADDRESS=%s\nXDG_SESSION_TYPE=%s\nXDG_CURRENT_DESKTOP=%s\n' \
   "$DISPLAY" "$XAUTHORITY" "$XDG_RUNTIME_DIR" "${DBUS_SESSION_BUS_ADDRESS:?}" "$XDG_SESSION_TYPE" "${XDG_CURRENT_DESKTOP:-}" \
   > "$EVIDENCE_ROOT/sender/session-environment.txt"
+printf 'XDG_DATA_DIRS=%s\nXDG_CONFIG_DIRS=%s\nGTK_PATH=%s\nGTK_MODULES=%s\nGDK_PIXBUF_MODULE_FILE=%s\nGDK_PIXBUF_MODULEDIR=%s\n' \
+  "${XDG_DATA_DIRS:-}" "${XDG_CONFIG_DIRS:-}" "${GTK_PATH:-}" "${GTK_MODULES:-}" "${GDK_PIXBUF_MODULE_FILE:-}" "${GDK_PIXBUF_MODULEDIR:-}" \
+  >> "$EVIDENCE_ROOT/sender/session-environment.txt"
 xdg-user-dirs-update
 test "$(xdg-user-dir DOWNLOAD)" = /home/probe/Downloads
 mkdir -p /home/probe/Downloads
