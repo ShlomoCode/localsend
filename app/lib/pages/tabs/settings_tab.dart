@@ -216,7 +216,7 @@ class SettingsTab extends StatelessWidget {
                   },
                 ),
                 if (checkPlatformWithFileSystem())
-                  _SettingsEntry(
+                  _FolderTargetEntry(
                     label: t.settingsTab.receive.destination,
                     child: TextButton(
                       style: TextButton.styleFrom(
@@ -612,6 +612,40 @@ class SettingsTab extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _FolderTargetEntry extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _FolderTargetEntry({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 15),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              Text(label),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: constraints.maxWidth < 150 ? constraints.maxWidth : 150,
+                  maxWidth: constraints.maxWidth,
+                ),
+                child: IntrinsicWidth(child: child),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
