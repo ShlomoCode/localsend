@@ -36,6 +36,7 @@ jobs:
           github-token: ${{ github.token }}
           run-id: 38132747719
       - uses: actions/download-artifact@v6
+        if: inputs.evidence_run == '' && inputs.old_libc_run == '' && inputs.wayland_run == ''
         with:
           name: issue2690-evidence-38150744622
           path: evidence/history
@@ -48,7 +49,46 @@ jobs:
           USE_C1CE: ${{ inputs.use_c1ce }}
           SOURCE_FIRST: ${{ inputs.source_first }}
         run: bash support/diagnostics/2690/inspect.sh
+      - uses: actions/download-artifact@v6
+        if: inputs.evidence_run != '' || inputs.old_libc_run != '' || inputs.wayland_run != ''
+        with:
+          name: issue2690-evidence-${{ inputs.evidence_run || inputs.old_libc_run || inputs.wayland_run }}
+          path: evidence/cloud
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.evidence_run || inputs.old_libc_run || inputs.wayland_run }}
+      - name: Retry Focal with existing artifacts
+        if: inputs.old_libc_run != ''
+        run: |
+          printf '%s\n' '${{ inputs.old_libc_run }}' > evidence/cloud/old-libc-input-run.txt
+          sha256sum -c evidence/cloud/repacked-new-client.sha256
+          sha256sum -c evidence/cloud/repacked-candidate.sha256
+          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage
+          cp evidence/cloud/launch/results.tsv evidence/cloud/launch/prior-results.tsv
+          curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage -o evidence/cloud/current.AppImage
+          echo '19f21613d1834f6caa69517113670461a3f10b80a2a315f86548c0663d9c0aaf  evidence/cloud/current.AppImage' | sha256sum -c -
+          chmod a+x evidence/cloud/current.AppImage
+          docker pull ubuntu:20.04
+          docker image inspect ubuntu:20.04 > evidence/cloud/old-libc-image.json
+          docker run --privileged --name issue2690-old-libc -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" ubuntu:20.04 bash /diagnostic/old-libc.sh > evidence/cloud/old-libc.log 2>&1
+      - name: Clean-home Weston with existing artifacts
+        if: inputs.wayland_run != ''
+        run: |
+          printf '%s\n' '${{ inputs.wayland_run }}' > evidence/cloud/wayland-input-run.txt
+          sha256sum -c evidence/cloud/repacked-new-client.sha256
+          sha256sum -c evidence/cloud/repacked-candidate.sha256
+          sha256sum -c evidence/cloud/repacked-baseline.sha256
+          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage evidence/cloud/repacked-baseline.AppImage
+          if [[ -f evidence/cloud/launch/wayland-results.tsv ]]; then
+            mv evidence/cloud/launch/wayland-results.tsv evidence/cloud/launch/prior-wayland-results.tsv
+          fi
+          curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage -o evidence/cloud/current.AppImage
+          echo '19f21613d1834f6caa69517113670461a3f10b80a2a315f86548c0663d9c0aaf  evidence/cloud/current.AppImage' | sha256sum -c -
+          chmod a+x evidence/cloud/current.AppImage
+          docker pull gentoo/stage3:latest
+          docker image inspect gentoo/stage3:latest > evidence/cloud/gentoo-image.json
+          docker run --privileged --name issue2690-wayland -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" gentoo/stage3:latest bash /diagnostic/prepare-wayland.sh
       - name: Require all four runtime gates and retain PNGs
+        if: inputs.evidence_run == ''
         run: |
           for scenario in new-client control-new-client old-libc-new-client; do
             test "$(awk -v scenario="$scenario" '$1 == scenario && $3 == "running" { n++ } END { print n+0 }' evidence/cloud/launch/results.tsv)" = 3
@@ -64,42 +104,6 @@ jobs:
           for screenshot in evidence/cloud/launch/*.xwd; do
             ffmpeg -loglevel error -y -f xwd_pipe -i "$screenshot" -frames:v 1 "${screenshot%.xwd}.png"
           done
-      - uses: actions/download-artifact@v6
-        if: inputs.evidence_run != '' || inputs.old_libc_run != '' || inputs.wayland_run != ''
-        with:
-          name: issue2690-evidence-${{ inputs.evidence_run || inputs.old_libc_run || inputs.wayland_run }}
-          path: evidence/cloud
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.evidence_run || inputs.old_libc_run || inputs.wayland_run }}
-      - name: Retry Focal with existing artifacts
-        if: inputs.old_libc_run != ''
-        run: |
-          printf '%s\n' '${{ inputs.old_libc_run }}' > evidence/cloud/old-libc-input-run.txt
-          sha256sum -c evidence/cloud/repacked-new-client.sha256
-          sha256sum -c evidence/cloud/repacked-candidate.sha256
-          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage
-          mv evidence/cloud/launch/results.tsv evidence/cloud/launch/prior-results.tsv
-          curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage -o evidence/cloud/current.AppImage
-          echo '19f21613d1834f6caa69517113670461a3f10b80a2a315f86548c0663d9c0aaf  evidence/cloud/current.AppImage' | sha256sum -c -
-          chmod a+x evidence/cloud/current.AppImage
-          docker pull ubuntu:20.04
-          docker image inspect ubuntu:20.04 > evidence/cloud/old-libc-image.json
-          docker run --privileged --name issue2690-old-libc -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" ubuntu:20.04 bash /diagnostic/old-libc.sh > evidence/cloud/old-libc.log 2>&1
-      - name: Clean-home Weston with existing artifacts
-        if: inputs.wayland_run != ''
-        run: |
-          printf '%s\n' '${{ inputs.wayland_run }}' > evidence/cloud/wayland-input-run.txt
-          sha256sum -c evidence/cloud/repacked-new-client.sha256
-          sha256sum -c evidence/cloud/repacked-candidate.sha256
-          sha256sum -c evidence/cloud/repacked-baseline.sha256
-          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage evidence/cloud/repacked-baseline.AppImage
-          mv evidence/cloud/launch/wayland-results.tsv evidence/cloud/launch/prior-wayland-results.tsv
-          curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage -o evidence/cloud/current.AppImage
-          echo '19f21613d1834f6caa69517113670461a3f10b80a2a315f86548c0663d9c0aaf  evidence/cloud/current.AppImage' | sha256sum -c -
-          chmod a+x evidence/cloud/current.AppImage
-          docker pull gentoo/stage3:latest
-          docker image inspect gentoo/stage3:latest > evidence/cloud/gentoo-image.json
-          docker run --privileged --name issue2690-wayland -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" gentoo/stage3:latest bash /diagnostic/prepare-wayland.sh
       - name: Compact existing evidence
         if: inputs.evidence_run != ''
         env:

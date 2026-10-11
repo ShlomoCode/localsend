@@ -53,5 +53,6 @@ emerge --info > /evidence/wayland-info.txt
 gcc /diagnostic/gtk-control.c -o /tmp/gtk-control $(pkg-config --cflags --libs gtk+-3.0)
 readelf -Ws /usr/lib64/libEGL_mesa.so.0 > /evidence/mesa-egl-symbols.txt
 readelf -Ws /usr/lib64/libwayland-client.so.0 > /evidence/host-client-symbols.txt
-readelf -Ws /evidence/package-candidate/AppDir/usr/lib/x86_64-linux-gnu/libwayland-client.so.0 > /evidence/candidate-client-symbols.txt
+# The immutable negative-control AppImage's symbols were retained with its build.
+cp /evidence/candidate-client-symbols.txt /evidence/inspected-candidate-client-symbols.txt
 su tester -c 'DISPLAY=:99 WAYLAND_FRESH_HOME=1 WAYLAND_FOCUSED=1 dbus-run-session -- bash /diagnostic/wayland.sh'

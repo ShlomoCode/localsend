@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euxo pipefail
 production=3613f65
+cp evidence/history/candidate-client-symbols.txt evidence/cloud/candidate-client-symbols.txt
 git fetch --depth=1 origin codex/bug-2690-packaging-proposal
 test "$(git rev-parse FETCH_HEAD)" = "$(git rev-parse "$production")"
 git diff --exit-code "$production" -- support/build/appimage/build_wayland_client.sh support/build/appimage/AppImageBuilder_x86_64.yml .github/workflows/build_linux_appimage_x64.yml support/scripts/compile_linux_appimage.sh
