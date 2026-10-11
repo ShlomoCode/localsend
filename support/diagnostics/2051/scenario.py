@@ -87,7 +87,7 @@ def transfer(content, phase):
         raise RuntimeError("Sent content absent from saved files")
     return xml, saved
 
-def open_actual(filename, phase):
+def open_actual(filename, phase, viewer="Markor"):
     recording = subprocess.Popen(["adb", "-s", R, "shell", "screenrecord", "/sdcard/" + phase + ".mp4"])
     try:
         click(R, filename, phase + "-before-file-row")
@@ -96,8 +96,8 @@ def open_actual(filename, phase):
             click(R, "Open", phase + "-before-open")
         time.sleep(3)
         xml = snapshot(R, phase + "-viewer")
-        if "Markor" in labels(xml):
-            click(R, "Markor", phase + "-before-markor")
+        if viewer in labels(xml):
+            click(R, viewer, phase + "-before-viewer-choice")
             xml = snapshot(R, phase + "-chooser")
         if "Just once" in labels(xml):
             click(R, "Just once", phase + "-before-just-once")
@@ -136,6 +136,26 @@ try:
     print("RESULT", result, flush=True)
     if not result["viewer_has_A"] and not result["viewer_has_B"]:
         raise RuntimeError("Viewer observation incomplete")
+    if result["viewer_has_B"]:
+        adb(R, "shell", "input", "keyevent", "4")
+        time.sleep(2)
+        other = open_actual(displayed, "B-open-html", viewer="HTML Viewer")
+        (ROOT / "other-viewer-result.json").write_text(json.dumps({"viewer": "HTML Viewer", "has_A": "ISSUE2051_CONTENT_A" in other, "has_B": "ISSUE2051_CONTENT_B" in other}, indent=2))
+        adb(R, "shell", "input", "keyevent", "4")
+        time.sleep(2)
+        click(R, "Done", "B-before-history-done")
+        home = snapshot(R, "B-before-history")
+        buttons = [n for n in ET.fromstring(home).iter() if n.get("class") == "android.widget.Button"]
+        if not buttons:
+            raise RuntimeError("Home history icon missing")
+        a,b,c,d = map(int, re.findall(r"\d+", buttons[0].get("bounds")))
+        print("INPUT_HISTORY_ICON", buttons[0].get("bounds"), flush=True)
+        touch(R, (a+c)//2, (b+d)//2)
+        history = snapshot(R, "B-history")
+        click(R, "Show menu", "B-history-before-menu")
+        snapshot(R, "B-history-menu")
+        historical = open_actual("Open file", "B-history-open")
+        (ROOT / "history-result.json").write_text(json.dumps({"has_A": "ISSUE2051_CONTENT_A" in historical, "has_B": "ISSUE2051_CONTENT_B" in historical}, indent=2))
 finally:
     for serial,name in [(R,"receiver-final"),(S,"sender-final")]:
         try:
