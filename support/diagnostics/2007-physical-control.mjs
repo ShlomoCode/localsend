@@ -12,7 +12,12 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const numberedName=fixtureName.replace(/\.txt$/,'-2.txt');
  const repeatResend=process.env.ISSUE_2007_REPEAT_RESEND==='1';
  const sourceComparison=process.env.ISSUE_2007_SOURCE_COMPARISON==='1';
+ const receiverRelease=process.env.ISSUE_2007_RECEIVER_RELEASE||process.env.ISSUE_2007_RELEASE||'1.18.2';
+ const sourceIdentity=sourceComparison?{senderRelease:process.env.ISSUE_2007_RELEASE,receiverSourceSha:process.env.ISSUE_2007_RECEIVER_SOURCE_SHA}:{};
  if(sourceComparison){
+  assert.equal(process.env.ISSUE_2007_RELEASE,'current-c1ce','The unchanged Linux sender must retain its known UI release mode');
+  assert(/^[0-9a-f]{40}$/.test(sourceIdentity.receiverSourceSha),'Each receive requires immutable receiver source identity');
+  assert.equal(receiverRelease.endsWith(sourceIdentity.receiverSourceSha),true,'Receiver result label must include its actual source SHA');
   assert.equal(process.env.ISSUE_2007_FINALIZE_INTERVENTION||'','', 'Source comparison must never invoke helper scanner');
   assert.equal(process.env.ISSUE_2007_SCAN_COMPARISON,'0');
   assert.equal(process.env.ISSUE_2007_POST_DELETE_WAIT,'0');
@@ -265,7 +270,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName});
   const actual=Buffer.from(encoded,'base64');
   writeFileSync('evidence/android-saved-'+fixtureName,actual);
-  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:actual.equals(expected),transport:transportStatus()},null,2));
+  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:receiverRelease,...sourceIdentity,sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:actual.equals(expected),transport:transportStatus()},null,2));
   assert.deepEqual(actual,expected,'Saved Android file differs from selected desktop file');
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
@@ -513,7 +518,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const actualSavedPath=receiverFileDone?(numberedByteExact?deviceFolder+'/'+numberedName:byteExact?resendDestination:null):null;
    const submission=JSON.parse(readFileSync(`evidence/${stage}-submission.json`,'utf8'));
    if(saved)writeFileSync(stage==='resend'?'evidence/android-resaved-'+resendInput.name:`evidence/android-${stage}-resaved-`+resendInput.name,saved);
-   const result={stage,observedResultUtc,receiverFailed:receiverSource.includes('Finished with error'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name===fixtureName,fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()};
+   const result={stage,observedResultUtc,receiverFailed:receiverSource.includes('Finished with error'),release:receiverRelease,...sourceIdentity,deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name===fixtureName,fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()};
    writeFileSync(`evidence/actual-${stage}-result.json`,JSON.stringify(result,null,2));
    writeFileSync(`evidence/${stage}-completed`,`${stage} outcome observed; inspect byteExact and endpoint evidence\n`);
    if(receiverSource.includes('Finished with error')){
