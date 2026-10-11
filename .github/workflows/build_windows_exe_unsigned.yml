@@ -1,75 +1,165 @@
-name: Build windows exe (unsigned)
-
+name: Diagnose 3393 Windows Android networking
 on:
   workflow_dispatch:
-
-env:
-  FLUTTER_VERSION: "3.41.9"
-
+    inputs:
+      scenario:
+        type: choice
+        options: [software-emulator, windows11-sender-ui, physical-control]
+        default: software-emulator
+      bs_device:
+        type: choice
+        options: [Google Pixel 9, OnePlus 13R, Samsung Galaxy S25]
+        default: Google Pixel 9
+      picker_dwell_ms:
+        type: choice
+        options: ['10000', '20000', '30000']
+        default: '10000'
+permissions:
+  contents: read
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Get version from pubspec.yaml
-        id: get_version
-        run: |
-          VERSION=$(sed -n 's/^version: \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' app/pubspec.yaml)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-  build_windows_exe_x86_64:
-    needs: build
+  windows-android:
+    if: inputs.scenario == 'software-emulator'
     runs-on: windows-latest
-
+    timeout-minutes: 40
     steps:
-      - name: Fix long file paths
-        run: git config --system core.longpaths true
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-
-      # Required by the CMake install step (app/windows/CMakeLists.txt installs localsend_msix_helper.msix)
-      - name: Build MSIX helper
+      - uses: actions/checkout@v4
+      - name: Inspect virtualization and SDK
+        shell: pwsh
         run: |
-          $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
-          & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
-          & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
-
-      - name: Dependencies
-        working-directory: app
-        run: flutter pub get
-
-      - name: Compile for Windows
-        working-directory: app
-        run: flutter build windows
-
-      - name: Prepare Inno Setup payload
+          New-Item -ItemType Directory evidence -Force | Out-Null
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content evidence/os.json
+          Get-CimInstance Win32_Processor | Select-Object Name,VirtualizationFirmwareEnabled,SecondLevelAddressTranslationExtensions | ConvertTo-Json | Set-Content evidence/cpu.json
+          Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform | Out-String | Set-Content evidence/whpx.txt
+          "ANDROID_HOME=$env:ANDROID_HOME ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT" | Set-Content evidence/sdk.txt
+          Get-ChildItem "$env:ANDROID_HOME" | Out-String | Add-Content evidence/sdk.txt
+          & "$env:ANDROID_HOME/emulator/emulator.exe" -accel-check 2>&1 | Tee-Object evidence/accel.txt
+          exit 0
+      - name: Prepare Android15 software emulator and released applications
+        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno" | Out-Null
-          Copy-Item -Path "app\build\windows\x64\runner\Release\*" -Destination "${{ runner.temp }}\inno" -Recurse
-          Copy-Item -Path "app\assets\packaging\logo.ico" -Destination "${{ runner.temp }}\inno"
-          Copy-Item -Path "support\build\windows\x64\*" -Destination "${{ runner.temp }}\inno" -Recurse
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno-result" | Out-Null
-
-      # SkipMsixHelper: the helper would be unsigned and Add-AppxPackage rejects unsigned packages
-      - name: Compile installer (unsigned)
-        run: iscc /DSkipSignTool /DSkipMsixHelper "/DPayloadDir=${{ runner.temp }}\inno" "/DResultDir=${{ runner.temp }}\inno-result" support\scripts\compile_windows_exe-inno.iss
-
-      - name: Rename installer
-        run: Rename-Item -Path "${{ runner.temp }}\inno-result\localsend.exe" -NewName "LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe"
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v6
+          $sdkmanager = "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
+          1..100 | ForEach-Object { 'y' } | & $sdkmanager 'system-images;android-35;google_apis;x86_64' 'platform-tools' 'emulator' 2>&1 | Tee-Object evidence/sdk-install.txt
+          if ($LASTEXITCODE -ne 0) { throw 'SDK installation failed' }
+          'no' | & "$env:ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" create avd -n issue2311 -k 'system-images;android-35;google_apis;x86_64' --force
+          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-android-x64.apk -OutFile evidence/android.apk
+          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile evidence/windows.zip
+          Get-FileHash evidence/android.apk,evidence/windows.zip | ConvertTo-Json | Set-Content evidence/artifact-hashes.json
+          Expand-Archive evidence/windows.zip sender
+          Start-Process "$env:ANDROID_HOME/emulator/emulator.exe" -ArgumentList '-avd issue2311 -accel off -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 2048 -cores 2' -RedirectStandardOutput evidence/emulator.stdout.txt -RedirectStandardError evidence/emulator.stderr.txt
+          $adb = "$env:ANDROID_HOME/platform-tools/adb.exe"
+          $deadline = (Get-Date).AddMinutes(22)
+          do {
+            Start-Sleep 15
+            $boot = & $adb shell getprop sys.boot_completed 2>&1
+            "$(Get-Date -Format o) $boot" | Add-Content evidence/boot.txt
+          } until ($boot -match '^1' -or (Get-Date) -gt $deadline)
+          if ($boot -notmatch '^1') { throw 'Android15 did not boot before deadline' }
+          & $adb shell getprop | Set-Content evidence/android-properties.txt
+          & $adb install evidence/android.apk | Set-Content evidence/install.txt
+          & $adb forward tcp:53317 tcp:53317
+          & $adb shell monkey -p org.localsend.localsend_app 1 | Set-Content evidence/android-launch.txt
+          Start-Sleep 15
+          & $adb shell uiautomator dump /sdcard/window.xml
+          & $adb pull /sdcard/window.xml evidence/android-window.xml
+          & $adb shell screencap -p /sdcard/startup.png
+          & $adb pull /sdcard/startup.png evidence/android-startup.png
+          & $adb logcat -d | Set-Content evidence/android-logcat.txt
+          $exe = Get-ChildItem sender -Recurse -Filter localsend_app.exe | Select-Object -First 1
+          Start-Process $exe.FullName -ArgumentList (Join-Path $PWD 'evidence/artifact-hashes.json')
+          Start-Sleep 10
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $image = New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($image)
+          $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+          $image.Save((Join-Path $PWD 'evidence/windows-startup.png'))
+          Get-Process localsend_app | Select-Object Id,MainWindowTitle,MainWindowHandle | ConvertTo-Json | Set-Content evidence/windows-process.json
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: windows-exe-x86-64-unsigned
-          path: ${{ runner.temp }}\inno-result\LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe
-          if-no-files-found: error
+          name: issue2311-network-feasibility
+          path: evidence
+          retention-days: 14
+  physical-control:
+    if: inputs.scenario == 'physical-control'
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      BS_LOCAL_ID: issue2311-${{ github.run_id }}
+      BASELINE_APP: bs://59b2370a166b5e36a4c948c50f22b70255046822
+      BS_DEVICE: ${{ inputs.bs_device || 'Google Pixel 9' }}
+      PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
+      BS_OS: '15.0'
+      SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2311.mjs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: x64
+      - name: Prepare isolated relay capability and helper
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:/tmp/helper,evidence | Out-Null
+          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+      - name: Build the separate transport app
+        shell: pwsh
+        run: ./support/cloud_transport/build-helper.ps1
+      - name: Start Local and run the physical app control in one process scope
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
+          Expand-Archive C:/tmp/bs-local.zip C:/tmp/bs-local-bin -Force
+          Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
+          Start-Process node -ArgumentList support/cloud_transport/local.mjs -RedirectStandardOutput "$PWD/evidence/local.stdout.txt" -RedirectStandardError "$PWD/evidence/local.stderr.txt"
+          $deadline=(Get-Date).AddSeconds(240)
+          while(-not (Test-Path C:/tmp/helper/local-ready) -and (Get-Date) -lt $deadline){Start-Sleep 2}
+          if(-not (Test-Path C:/tmp/helper/local-ready)){
+            Get-Content evidence/local.stdout.txt,evidence/local.stderr.txt -ErrorAction SilentlyContinue
+            throw 'BrowserStack Local did not become ready'
+          }
+          Start-Sleep -Seconds 15
+          Get-Process node,BrowserStackLocal -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,StartTime | ConvertTo-Json | Set-Content evidence/local-processes-before-session.json
+          curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/upload -F file=@C:/tmp/helper/cloud-transport-helper.apk -o C:/tmp/helper/upload.json
+          if($LASTEXITCODE -ne 0){throw 'Helper upload failed'}
+          $env:HELPER_APP=(Get-Content C:/tmp/helper/upload.json | ConvertFrom-Json).app_url
+          if(-not $env:HELPER_APP){throw 'No helper app URL'}
+          node support/cloud_transport/mobile-control.mjs
+      - name: Collect session identity
+        if: always()
+        shell: pwsh
+        run: Copy-Item C:/tmp/helper/session-id evidence/session-id -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2311-physical-control
+          path: |
+            evidence
+            !evidence/release/**
+            !evidence/**/*.zip
+            mobile-control-results.json
+            mobile-control-final-status.json
+            mobile-control-error.txt
+            helper-failure-source.xml
+            helper-failure.png
+            localsend-source.xml
+            relay-trace.json
+          retention-days: 14
+  windows11-sender-ui:
+    if: inputs.scenario == 'windows11-sender-ui'
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select a real file through the original Windows sender
+        shell: pwsh
+        run: |
+          ./support/diagnostics/windows_release_ui_probe.ps1 -OutputDirectory evidence -ReleaseVersion 1.17.0 -AssetArchitecture x86-64 -RunnerLabel windows-11-arm -FixtureTimestampUtc '2026-10-11T00:00:00Z' -FixtureFileName issue2311-payload.txt -SelectionMethod PathEntry
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2311-windows11-sender-ui
+          path: evidence
+          retention-days: 14
