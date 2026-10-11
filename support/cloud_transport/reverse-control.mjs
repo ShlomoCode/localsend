@@ -18,7 +18,13 @@ const listener=net.createServer({allowHalfOpen:true},s=>{
  const id='android-'+(++next);sockets.set(id,s);
  readers.push((async()=>{
   await push({id,kind:'open'});
-  for await(const data of s)await push({id,kind:'data',data:data.toString('base64')});
+  // Async iteration destroys the simulated accepted socket at readable EOF.
+  // Preserve its writable half, as Android Socket does, for the target reply.
+  await new Promise((ok,no)=>{
+   let pending=Promise.resolve();
+   s.on('data',data=>{s.pause();pending=pending.then(()=>push({id,kind:'data',data:data.toString('base64')}));pending.then(()=>s.resume(),no);});
+   s.once('end',()=>pending.then(ok,no));s.once('error',no);
+  });
   await push({id,kind:'eof'});
  })());
 });await new Promise(ok=>listener.listen(53320,'127.0.0.1',ok));
