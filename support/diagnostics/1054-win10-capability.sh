@@ -168,8 +168,8 @@ if ! grep -q -- '--retry-all-errors' "$OUT/curl-help-all.txt"; then
 fi
 # A receive reset (curl 56) is not retried by --retry alone. This GET restarts
 # its output file on retry; final size/hash checks remain required. The retry
-# restart budget is 330s plus at most one already-started 300s attempt.
-curl --fail --location --retry-all-errors --retry 2 --retry-max-time 330 --max-time 300 \
+# restart budget is 240s plus at most one already-started 600s attempt.
+curl --fail --location --retry-all-errors --retry 2 --retry-max-time 240 --max-time 600 \
   --dump-header "$OUT/iso-headers.txt" "$URL" --output "$ISO"
 printf '%s  %s\n' 'ef7312733a9f5d7d51cfa04ac497671995674ca5e1058d5164d6028f0938d668' "$ISO" > "$OUT/iso.expected.sha256"
 shasum -a 256 -c "$OUT/iso.expected.sha256" | tee "$OUT/iso-verification.txt"
