@@ -1,0 +1,34 @@
+name: Diagnose 402 Linux picker symlink
+on:
+  workflow_dispatch:
+concurrency:
+  group: issue402-diagnostic
+  cancel-in-progress: false
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare unchanged historical release desktops
+        run: |
+          mkdir -p evidence/cloud
+          chmod 777 evidence/cloud
+          docker build -f support/diagnostics/402-desktop.Dockerfile -t issue402-desktop .
+          docker network create --subnet 172.29.40.0/24 issue402-net
+      - name: Select and transfer through actual applications
+        run: |
+          docker run -d --name issue402-receiver --network issue402-net -e ROLE=receiver -v "$PWD/evidence/cloud:/evidence" issue402-desktop
+          docker run -d --name issue402-sender --network issue402-net -e ROLE=sender -v "$PWD/evidence/cloud:/evidence" issue402-desktop
+          result=0
+          for name in issue402-sender issue402-receiver; do
+            status=$(timeout 600 docker wait "$name") || status=124
+            docker logs "$name" > "evidence/cloud/$name.log" 2>&1
+            test "$status" = 0 || result=1
+          done
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue402-historical-picker-evidence
+          path: evidence/cloud
