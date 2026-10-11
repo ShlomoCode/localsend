@@ -13,6 +13,10 @@ on:
         description: Retest identical matched binaries from run 38112811480
         type: boolean
         default: false
+      video_sequence:
+        description: Live off then on in same process, official versus saved guard versus current
+        type: boolean
+        default: false
       trace:
         description: Add symmetric supporting route instrumentation
         type: boolean
@@ -83,15 +87,15 @@ jobs:
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/evidence2277" | Out-Null
           Get-FileHash "$env:RUNNER_TEMP/app.zip" -Algorithm SHA256 | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/evidence2277/official-zip.json"
       - name: Download untouched current baseline
-        if: ${{ inputs.current }}
+        if: ${{ inputs.current || inputs.video_sequence }}
         uses: actions/download-artifact@v6
         with:
           name: baseline2381-c1ce
           run-id: 38108284774
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/release
+          path: ${{ runner.temp }}/${{ inputs.video_sequence && 'current2277' || 'release' }}
       - name: Download saved matched pair
-        if: ${{ inputs.reuse_pair }}
+        if: ${{ inputs.reuse_pair || inputs.video_sequence }}
         uses: actions/download-artifact@v6
         with:
           name: matched-builds2277
@@ -104,7 +108,12 @@ jobs:
         shell: powershell
         run: |
           $exe = (Get-ChildItem $env:RUNNER_TEMP/release -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
-          if ('${{ inputs.causal }}' -eq 'true' -or '${{ inputs.reuse_pair }}' -eq 'true') {
+          if ('${{ inputs.video_sequence }}' -eq 'true') {
+            $currentExe = (Get-ChildItem $env:RUNNER_TEMP/current2277 -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
+            & ./support/diagnostics/windows2277.ps1 -Executable $exe -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/official-live" -Repeat ${{ inputs.repeats }} -VideoSequence
+            & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/guard2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/guard-live" -Repeat ${{ inputs.repeats }} -VideoSequence
+            & ./support/diagnostics/windows2277.ps1 -Executable $currentExe -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/current-live" -Repeat ${{ inputs.repeats }} -VideoSequence
+          } elseif ('${{ inputs.causal }}' -eq 'true' -or '${{ inputs.reuse_pair }}' -eq 'true') {
             & ./support/diagnostics/windows2277.ps1 -Executable $exe -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/official" -Repeat ${{ inputs.repeats }}
             & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/baseline2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/baseline" -Repeat ${{ inputs.repeats }}
             & ./support/diagnostics/windows2277.ps1 -Executable "$env:RUNNER_TEMP/guard2277/localsend_app.exe" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2277/guard" -Repeat ${{ inputs.repeats }}

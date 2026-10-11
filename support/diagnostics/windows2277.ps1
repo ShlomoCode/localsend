@@ -1,4 +1,4 @@
-param([string]$Executable,[string]$EvidenceDirectory,[int]$Repeat=1,[string]$TextPayload='123456')
+param([string]$Executable,[string]$EvidenceDirectory,[int]$Repeat=1,[string]$TextPayload='123456',[switch]$VideoSequence)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -50,7 +50,7 @@ Get-ChildItem (Join-Path (Split-Path $Executable) 'data') -Recurse -Filter app.s
 Set-Content "$EvidenceDirectory/payload2277.txt" 'LocalSend issue 2277 exact navigation payload'
 $results=@()
 $cases=@()
-for($trial=1;$trial -le $Repeat;$trial++){foreach($animations in @($false,$true)){$cases+=@{animations=$animations;trial=$trial}}}
+for($trial=1;$trial -le $Repeat;$trial++){foreach($animations in @($false,$true)){if(!$VideoSequence -or !$animations){$cases+=@{animations=$animations;trial=$trial}}}}
 foreach($case in $cases) {
  $animations=$case.animations
  $backBefore=@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count
@@ -87,7 +87,15 @@ foreach($case in $cases) {
   # The gear at x616 is Send mode; x537 is the separate manual-address action.
   Click 616 ([int]$nearby.top+[int]$nearby.height/2) 'Send-mode-menu'
   Start-Sleep -Milliseconds 800;Screenshot "$name-send-mode-menu"
-  Word 'link' "$name-send-mode-menu";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
+  Word 'Share' "$name-send-mode-menu";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
+  if($VideoSequence) {
+   $rows=Import-Csv "$EvidenceDirectory/$name-web-share.tsv" -Delimiter "`t"
+   $auto=$rows|Where-Object{$_.text -eq 'Automatically'}|Select-Object -First 1
+   $request=$rows|Where-Object{$_.text -eq 'requests' -and [Math]::Abs([int]$_.top-[int]$auto.top) -lt 8}|Select-Object -First 1
+   if(!$auto -or !$request){throw 'Cannot locate auto accept checkbox'}
+   Click ([int]$request.left+[int]$request.width+26) ([int]$auto.top+[int]$auto.height/2) 'Enable-auto-accept-first-visit'
+   Start-Sleep -Milliseconds 800;Screenshot "$name-web-share-auto-accept"
+  }
   # A single click on the Material back arrow, whose location is checked in retained screenshot.
   Click 28 60 'Back-single'
   foreach($delay in @(100,500,1500,5000)) {Start-Sleep -Milliseconds $delay;Screenshot "$name-after-back-$delay"}
@@ -95,6 +103,43 @@ foreach($case in $cases) {
   Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue|Select-Object LocalAddress,LocalPort,OwningProcess|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-listeners-final.json"
   $outcome=if($final.blackFraction -gt 0.95){'black-window'}elseif($final.words -contains 'Selection'){'returned-send'}else{'other-state'}
   $results+=@{case=$name;status='scenario-reached';outcome=$outcome;backCount=(@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count-$backBefore);pid=$final.pid;hwnd=$final.hwnd;exited=$final.exited;error=$null}
+  if($VideoSequence) {
+   if($outcome -ne 'returned-send'){throw 'Video sequence off visit did not return to Send'}
+   $before="$name-after-back-5000"
+   $name='live-animations-on-'+$case.trial
+   $backBefore=@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count
+   Word 'Settings' $before
+   $animationRow=$null
+   for($scroll=0;$scroll -lt 5;$scroll++) {
+    Screenshot "$name-settings-$scroll"
+    $animationRow=Import-Csv "$EvidenceDirectory/$name-settings-$scroll.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'Animations'}|Select-Object -First 1
+    if($animationRow){break}
+    $script:actions+=@{utc=[DateTime]::UtcNow.ToString('o');action='Scroll-settings';foreground=[Desktop2277]::GetForegroundWindow().ToInt64()}
+    [Desktop2277]::SetCursorPos(700,600)|Out-Null
+    [Desktop2277]::mouse_event(2048,0,0,4294966936,[UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 600
+   }
+   if(!$animationRow){throw 'Animations setting not visible'}
+   # Center of the 150px settings control column at this retained 1000px window.
+   Click 821 ([int]$animationRow.top+[int]$animationRow.height/2) 'Enable-animations-live'
+   Start-Sleep -Seconds 2;Screenshot "$name-settings-enabled"
+   $stored=Get-Content "$folder/settings.json" -Raw|ConvertFrom-Json
+   if($stored.'flutter.ls_enable_animations' -ne $true){throw 'Live animation toggle did not persist'}
+   @{animations=$stored.'flutter.ls_enable_animations';pid=$script:process.Id;hwnd=$script:process.MainWindowHandle.ToInt64()}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-profile.json"
+   Word 'Receive' "$name-settings-enabled";Screenshot "$name-receive"
+   Word 'Send' "$name-receive";Screenshot "$name-selected"
+   $nearby=Import-Csv "$EvidenceDirectory/$name-selected.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'Nearby'}|Select-Object -First 1
+   if(!$nearby){throw 'Retained Send selection missing'}
+   Click 616 ([int]$nearby.top+[int]$nearby.height/2) 'Send-mode-menu'
+   Start-Sleep -Milliseconds 800;Screenshot "$name-send-mode-menu"
+   Word 'Share' "$name-send-mode-menu";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
+   Click 28 60 'Back-single'
+   foreach($delay in @(100,500,1500,5000)){Start-Sleep -Milliseconds $delay;Screenshot "$name-after-back-$delay"}
+   $final=Get-Content "$EvidenceDirectory/$name-after-back-5000-state.json" -Raw|ConvertFrom-Json
+   Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue|Select-Object LocalAddress,LocalPort,OwningProcess|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-listeners-final.json"
+   $outcome=if($final.blackFraction -gt 0.95){'black-window'}elseif($final.words -contains 'Selection'){'returned-send'}else{'other-state'}
+   $results+=@{case=$name;status='scenario-reached';outcome=$outcome;backCount=(@($script:actions|Where-Object{$_.action -eq 'Back-single'}).Count-$backBefore);pid=$final.pid;hwnd=$final.hwnd;exited=$final.exited;error=$null}
+  }
  } catch {$results+=@{case=$name;status='harness-or-app-blocker';error=$_.Exception.ToString()}}
  finally {
   $script:actions|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/inputs.json"
