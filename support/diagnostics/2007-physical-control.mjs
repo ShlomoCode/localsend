@@ -81,6 +81,28 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await wd('POST',prefix+'/element/'+manager['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    await new Promise(r=>setTimeout(r,1500));
    await snapshot('file-manager-open');
+   const managerSource=readFileSync('evidence/android-file-manager-open.xml','utf8');
+   if(managerSource.includes('id/agree_button')){
+    const agree=await wd('POST',prefix+'/element',{using:'id',value:'com.google.android.apps.nbu.files:id/agree_button'});
+    await wd('POST',prefix+'/element/'+agree['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+    await new Promise(r=>setTimeout(r,1500));
+    await snapshot('files-after-continue');
+    if(readFileSync('evidence/android-files-after-continue.xml','utf8').includes('permission_allow_button')){
+     const allow=await wd('POST',prefix+'/element',{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'});
+     await wd('POST',prefix+'/element/'+allow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+     await new Promise(r=>setTimeout(r,1500));
+     await snapshot('files-after-permission');
+    }
+   }
+   const downloads=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="Downloads"]'});
+   await wd('POST',prefix+'/element/'+downloads['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   await new Promise(r=>setTimeout(r,2000));
+   await snapshot('files-downloads');
+   const file=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="A.txt"]'});
+   const rect=await wd('GET',prefix+'/element/'+file['element-6066-11e4-a52e-4f735466cecf']+'/rect');
+   await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
+   await new Promise(r=>setTimeout(r,1000));
+   await snapshot('files-A-selected');
   }
  } finally {
   if(desktop.exitCode===null)desktop.kill('SIGTERM');
