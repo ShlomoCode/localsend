@@ -15,12 +15,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     networking.networkmanager.enable = true;
     programs.nm-applet.enable = true;
     programs.localsend.enable = true;
-    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc
-      (writeScriptBin "mate-scale-ui" ''
-        #!${(python3.withPackages (p: [ p.pyatspi p.pygobject3 ])).interpreter}
-        ${builtins.readFile ./mate-scale-ui.py}
-      '')
-    ];
+    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc ];
     virtualisation.memorySize = 4096;
     virtualisation.cores = 2;
     virtualisation.resolution = { x = 3840; y = 2160; };
@@ -55,7 +50,6 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     user_command("dconf write /org/mate/session/idle-delay 0")
     user_command("gsettings set org.mate.interface window-scaling-factor 1")
     user_command("gsettings set org.mate.interface gtk-theme BlackMATE")
-    user_command("gsettings set org.mate.interface accessibility true")
     machine.sleep(8)
     machine.wait_until_succeeds("pgrep nm-applet")
     machine.succeed("install -d -o alice -g users /tmp/evidence")
@@ -84,11 +78,25 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
             user_command("sh -c 'mate-display-properties > /tmp/evidence/display-ui.log 2>&1 &' ")
             machine.wait_for_window("Monitor Preferences", 60)
             machine.screenshot("100-gui-before")
-            display_gi = machine.succeed("tr '\\0' '\\n' < /proc/$(pgrep -u alice -f '[m]ate-display-properties' | head -1)/environ | sed -n 's/^GI_TYPELIB_PATH=//p'").strip()
-            assert display_gi, "The real display dialog GI typelib environment was not recovered"
+            display_window = user_command("xdotool search --onlyvisible --name '^Monitor Preferences$' | head -1").strip()
+            geometry_text = user_command("xdotool getwindowgeometry --shell " + display_window)
+            user_command("xdotool getwindowgeometry --shell " + display_window + " > /tmp/evidence/display-ui-geometry.txt")
+            geometry = dict(line.split("=", 1) for line in geometry_text.splitlines())
+            # The current 3840x2160 screenshot from run38135333888 shows the
+            # 200% radio label at (1938,1166). Refuse input if the real window
+            # has moved outside that observed layout.
+            assert 1660 <= int(geometry["X"]) <= 1710 and 820 <= int(geometry["Y"]) <= 885, geometry
+            assert 500 <= int(geometry["WIDTH"]) <= 650 and 400 <= int(geometry["HEIGHT"]) <= 520, geometry
         if label.endswith("gui"):
             try:
-                user_command("GI_TYPELIB_PATH=" + shlex.quote(display_gi) + " mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1 || { cat /tmp/evidence/display-ui-actions.log; exit 1; }")
+                if scale == 2:
+                    user_command("xdotool mousemove 1938 1166 click 1")
+                    user_command("printf '%s\\n' 'Mouse click on observed 200% radio label:1938,1166' >> /tmp/evidence/display-ui-actions.log")
+                else:
+                    # The clicked 200% radio retains focus; Left selects its
+                    # preceding 100% member through GTK's normal keyboard UI.
+                    user_command("xdotool windowactivate --sync " + display_window + " key Left")
+                    user_command("printf '%s\\n' 'Left key from focused 200% radio to100%' >> /tmp/evidence/display-ui-actions.log")
             finally:
                 machine.copy_from_vm("/tmp/evidence", "guest-gui-attempt-" + label)
             machine.sleep(3)
