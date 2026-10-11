@@ -10,6 +10,10 @@ on:
         description: Package the existing source-built c1ce Linux artifact
         type: boolean
         default: false
+      source_first:
+        description: Build/install client into fresh AppDir before normal builder creation
+        type: boolean
+        default: false
       old_libc_run:
         description: Existing packed artifacts to retry only the Focal gate
         type: string
@@ -35,6 +39,7 @@ jobs:
         if: inputs.evidence_run == '' && inputs.old_libc_run == '' && inputs.wayland_run == ''
         env:
           USE_C1CE: ${{ inputs.use_c1ce }}
+          SOURCE_FIRST: ${{ inputs.source_first }}
         run: bash support/diagnostics/2690/inspect.sh
       - uses: actions/download-artifact@v6
         if: inputs.evidence_run != '' || inputs.old_libc_run != '' || inputs.wayland_run != ''

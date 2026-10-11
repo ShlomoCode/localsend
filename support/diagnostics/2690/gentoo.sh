@@ -31,7 +31,7 @@ su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baselin
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-current /evidence/current.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-repacked /evidence/repacked-baseline.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh candidate /evidence/repacked-candidate.AppImage'
-su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh new-client /evidence/repacked-new-client.AppImage'
+su tester -c 'DISPLAY=:99 TRACE_LOADER=1 dbus-run-session -- bash /diagnostic/launch.sh new-client /evidence/repacked-new-client.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-client /evidence/repacked-cursor-egl.AppImage libwayland-client.so.0'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-client-only /evidence/repacked-client-only.AppImage libwayland-cursor.so.0'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-cursor-only /evidence/repacked-cursor-only.AppImage libwayland-egl.so.1'
@@ -42,7 +42,7 @@ find /usr/lib* /lib* -name 'libwayland*' > /evidence/wayland-after.txt
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-current /evidence/current.AppImage'
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-candidate /evidence/repacked-candidate.AppImage'
-su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-new-client /evidence/repacked-new-client.AppImage'
+su tester -c 'DISPLAY=:99 TRACE_LOADER=1 dbus-run-session -- bash /diagnostic/launch.sh control-new-client /evidence/repacked-new-client.AppImage'
 for variant in cursor-egl client-only cursor-only egl-only; do
   su tester -c "DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-$variant /evidence/repacked-$variant.AppImage"
 done

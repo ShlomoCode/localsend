@@ -14,9 +14,23 @@ curl -fsSL --retry 3 --max-time 120 https://distfiles.gentoo.org/distfiles/8c/wa
 echo '64176eaa46e4969903e286f8e5ef8331affc17fdf03ac9b58381d2b23162b7a3  wayland-1.26.0.tar.xz' | sha256sum -c -
 sha256sum wayland-1.26.0.tar.xz > client-source.sha256
 tar -xf wayland-1.26.0.tar.xz
-meson setup build wayland-1.26.0 --buildtype=release -Dtests=false -Ddocumentation=false
+configure_args=(--buildtype=release -Dtests=false -Ddocumentation=false)
+if [[ ${SOURCE_FIRST:-false} == true ]]; then
+  configure_args+=(--prefix=/usr --libdir=lib/x86_64-linux-gnu)
+fi
+meson setup build wayland-1.26.0 "${configure_args[@]}"
 ninja -C build
-cp build/src/libwayland-client.so.0.26.0 client-jammy.so
+if [[ ${SOURCE_FIRST:-false} == true ]]; then
+  # Normal full upstream installation; client selection occurs later during fresh assembly.
+  DESTDIR=/work/upstream-install meson install -C build
+  cp build/meson-logs/install-log.txt upstream-install-log.txt
+  (cd upstream-install && find . -type f -print0 | sort -z | xargs -0 sha256sum) > upstream-install-files.txt
+  (cd upstream-install && find . -type l -printf '%p -> %l\n' | sort) > upstream-install-links.txt
+  cp upstream-install/usr/lib/x86_64-linux-gnu/libwayland-client.so.0.26.0 client-jammy.so
+  cp wayland-1.26.0/COPYING client-COPYING.txt
+else
+  cp build/src/libwayland-client.so.0.26.0 client-jammy.so
+fi
 readelf -d client-jammy.so > client-jammy-dynamic.txt
 grep -Fq 'Library soname: [libwayland-client.so.0]' client-jammy-dynamic.txt
 readelf -Ws client-jammy.so > client-jammy-symbols.txt
