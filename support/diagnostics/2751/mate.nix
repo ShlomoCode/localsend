@@ -85,7 +85,10 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
             machine.wait_for_window("Monitor Preferences", 60)
             machine.screenshot("100-gui-before")
         if label.endswith("gui"):
-            user_command("mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1")
+            try:
+                user_command("mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1 || { cat /tmp/evidence/display-ui-actions.log; exit 1; }")
+            finally:
+                machine.copy_from_vm("/tmp/evidence", "guest-gui-attempt-" + label)
             machine.sleep(3)
             assert user_command("gsettings get org.mate.interface window-scaling-factor").strip() == str(scale)
         else:
