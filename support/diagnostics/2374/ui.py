@@ -147,7 +147,9 @@ def find_scrolled(label, tag, direction, attempts=15):
 
 
 def open_network(tag, enable_advanced=False, filtered=False):
-    click(locate('Settings', tag + '-settings-button'))
+    # The real normalized baseline screenshot shows the small sidebar label
+    # at (107,232); sparse full-screen OCR omits it. Crop that visible area.
+    click(locate('Settings', tag + '-settings-button', roi=(65, 205, 175, 60), psm=6))
     if enable_advanced:
         click(find_scrolled('Advanced', tag + '-advanced', 5))
         time.sleep(.5)
