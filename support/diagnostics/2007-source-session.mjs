@@ -83,6 +83,7 @@ export default async function(context){
    arm.install.verifiedUtc=new Date().toISOString();
    writeFileSync('evidence/source-install.json',JSON.stringify(arm,null,2));save();
    assert.equal(arm.install.installedApkSha256,arm.apkSha256,'Installed APK must equal the immutable signed source-build APK; no cloud rewriting');
+   process.env.ISSUE_2007_RELEASE=`source-${label}-${provenance.source_sha}`;
    Object.assign(process.env,{ISSUE_2007_FIXTURE_NAME:arm.fixtureName,ISSUE_2007_FIXTURE_SEED:run,ISSUE_2007_STORAGE_OBSERVER:'1',ISSUE_2007_OBSERVER_PREPARED:index===0?'0':'1',ISSUE_2007_REPEAT_RESEND:'0',ISSUE_2007_BASELINE_ONLY:'0',ISSUE_2007_RETRY_INTERVENTION:'',ISSUE_2007_FINALIZE_INTERVENTION:'',ISSUE_2007_SCAN_COMPARISON:'0',ISSUE_2007_DELETE_TIMING:'absence',ISSUE_2007_DELETE_ACTION:'trash',ISSUE_2007_VARIANT:'unchanged',ISSUE_2007_POST_DELETE_WAIT:'0',ISSUE_2007_RESTART_RECEIVER:'0',ISSUE_2007_DESTINATION:'downloads',ISSUE_2007_PRESERVE_DESTINATION:index===0?'0':'1'});
    await physicalControl(context);
    for(const [key,file] of [['initialReceive','actual-app-control.json'],['trash','actual-deletion.json'],['resend','actual-resend-result.json'],['beforeReceive','storage-before-baseline.json'],['beforeTrash','storage-before-trash.json'],['afterTrash','storage-after-trash.json'],['afterResend','storage-after-resend.json']])arm[key]=JSON.parse(readFileSync(join(evidence,file),'utf8'));
