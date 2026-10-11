@@ -7,19 +7,19 @@ on:
         type: string
         default: ''
       panel_size:
-        description: Supported panel size in logical pixels (20 or24)
+        description: Supported panel size in logical pixels (20 or 24)
         type: string
         default: '24'
       min_icon_size:
-        description: Supported notification area minimum icon size (16 or24)
+        description: Supported notification area minimum icon size (16 or 24)
         type: string
         default: '24'
       nixpkgs_revision:
-        description: Report-date pin or official NixOS25.05 release commit
+        description: Report-date pin or official NixOS 25.05 release commit
         type: string
         default: '6132ff3ee5a9509d0aeb66a01a7d662c6384289b'
       app_route:
-        description: Supported Nix build or official unchanged1.17 tar through FHS wrapper
+        description: Supported Nix build or unchanged official 1.17 tar through FHS wrapper
         type: string
         default: 'nix'
 jobs:
@@ -39,7 +39,7 @@ jobs:
           test -e /dev/kvm
           sudo chmod 666 /dev/kvm
           df -h
-      - name: Run the unmodified NixOS 25.05 package on MATE
+      - name: Run unchanged LocalSend 1.17 on a supported MATE desktop
         if: inputs.artifact_run == ''
         env:
           PANEL_SIZE: ${{ inputs.panel_size }}

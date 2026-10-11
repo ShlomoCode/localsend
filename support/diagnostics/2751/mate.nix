@@ -84,8 +84,15 @@ in {
     assert "3840x2160" in user_command("xrandr | grep 'current 3840 x 2160\\|3840x2160.*\\*'"), "The display is not running at 4K"
     user_command("dconf dump /org/mate/ > /tmp/evidence/mate-initial.dconf")
     user_command("sh -c 'localsend_app > /tmp/evidence/localsend.log 2>&1 &' ")
-    machine.wait_for_window("LocalSend", 60)
-    machine.wait_for_open_port(53317)
+    try:
+        machine.wait_for_window("LocalSend", 60)
+        machine.wait_for_open_port(53317)
+    except Exception:
+        machine.succeed("cat /tmp/evidence/localsend.log")
+        machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/startup-processes.txt")
+        raise
+    finally:
+        machine.copy_from_vm("/tmp/evidence", "guest-startup-evidence")
     for label, scale, restart in [
         ("100-live-first", 1, False), ("200-gui", 2, False), ("100-gui", 1, False),
         ("200-live", 2, False),
