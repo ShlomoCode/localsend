@@ -39,6 +39,7 @@ public final class MainActivity extends Activity {
     long free=new StatFs(Environment.getExternalStorageDirectory().getPath()).getAvailableBytes();
     if(free<size+2147483648L){update(capacity()+"\nINSUFFICIENT_STORAGE requested="+size);return;}
     busy=true;
+    update(capacity()+"\nSTAGING requestedBytes="+size);
     new Thread(()->{Uri uri=null;long start=SystemClock.elapsedRealtime();try{
       String name="issue3556-"+System.currentTimeMillis()+"-"+size+(video?".mp4":".bin");
       ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);values.put(MediaStore.MediaColumns.MIME_TYPE,video?"video/mp4":"application/octet-stream");values.put(MediaStore.MediaColumns.RELATIVE_PATH,video?"Movies/Issue3556":"Download/Issue3556");values.put(MediaStore.MediaColumns.IS_PENDING,1);
