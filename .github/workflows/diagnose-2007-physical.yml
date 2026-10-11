@@ -18,7 +18,8 @@ jobs:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue2007-${{ github.run_id }}
-      BASELINE_APP: bs://d5703b8a4cb6bc74c349f36d8f2ed3c3b9a28441
+      BASELINE_APP: bs://e0759f0fb2caac2dc8df57e2555514289dd2e043
+      ISSUE_2007_RELEASE: 1.16.1
       BS_DEVICE: Vivo Y21
       BS_OS: '11.0'
       ISSUE_2007_VARIANT: ${{ inputs.scenario || 'unchanged' }}
@@ -39,9 +40,10 @@ jobs:
           sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr python3-pil network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
           sudo systemctl start NetworkManager
           mkdir -p evidence released
-          curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o released/linux.tar.gz
-          echo '287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16  released/linux.tar.gz' | sha256sum -c -
+          curl -fL https://github.com/localsend/localsend/releases/download/v1.16.1/LocalSend-1.16.1-linux-x86-64.tar.gz -o released/linux.tar.gz
+          echo '4082de313cc4f2cb123415aa8ed23146930c871b5d6bc14653e47375af46d332  released/linux.tar.gz' | sha256sum -c -
           sha256sum released/linux.tar.gz > evidence/artifact-sha256.txt
+          echo 'official 1.16.1 Android arm64 f575c642d1c9ee37475bf0d30e138d2672e0857216addaebc327041339aeb064' >> evidence/artifact-sha256.txt
           tar xf released/linux.tar.gz -C released
       - name: Verify transparent transport control
         run: node support/cloud_transport/control.mjs
