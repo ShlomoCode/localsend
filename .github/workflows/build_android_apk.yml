@@ -16,7 +16,51 @@ jobs:
           flutter-version: '3.41.9'
           cache: true
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build unmodified current app with diagnostic signing
+      - name: Dependencies and format evidence
+        working-directory: app
+        run: |
+          mkdir -p ../evidence-build
+          flutter pub get
+          dart format lib/pages/tabs/settings_tab.dart lib/widget/dialogs/text_field_with_actions.dart test/widget/dialogs/text_field_with_actions_test.dart
+          git diff > ../evidence-build/format.patch
+      - name: Prove original widget fails cancellation assertion
+        working-directory: app
+        run: |
+          cp lib/widget/dialogs/text_field_with_actions.dart ../evidence-build/candidate-widget.dart
+          git show c1ce322fb3acf08e44f329b8b7208b8b0d91e244:app/lib/widget/dialogs/text_field_with_actions.dart > lib/widget/dialogs/text_field_with_actions.dart
+          cat > test/bug_2462_baseline_test.dart <<'DART'
+          import 'package:flutter/material.dart';
+          import 'package:flutter_test/flutter_test.dart';
+          import 'package:localsend_app/widget/dialogs/text_field_with_actions.dart';
+          void main() {
+            testWidgets('unconfirmed edit must not change saved alias', (tester) async {
+              final controller = TextEditingController(text: 'Original alias');
+              await tester.pumpWidget(MaterialApp(
+                theme: ThemeData(inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder())),
+                home: Scaffold(body: TextFieldWithActions(name: 'Alias', controller: controller, onChanged: (_) {}, actions: [])),
+              ));
+              addTearDown(() async { await tester.pumpWidget(const SizedBox.shrink()); controller.dispose(); });
+              await tester.tap(find.widgetWithText(TextButton, 'Original alias'));
+              await tester.pumpAndSettle();
+              await tester.enterText(find.byType(TextFormField), 'Edited alias');
+              expect(controller.text, 'Original alias');
+            });
+          }
+          DART
+          if flutter test test/bug_2462_baseline_test.dart > ../evidence-build/baseline-widget.log 2>&1; then
+            echo 'Original widget unexpectedly passed'; exit 1
+          fi
+          grep -F "Expected: 'Original alias'" ../evidence-build/baseline-widget.log
+          grep -F "Actual: 'Edited alias'" ../evidence-build/baseline-widget.log
+          cp ../evidence-build/candidate-widget.dart lib/widget/dialogs/text_field_with_actions.dart
+          rm test/bug_2462_baseline_test.dart
+      - name: Check candidate regression behavior
+        working-directory: app
+        run: |
+          flutter test test/widget/dialogs/text_field_with_actions_test.dart --reporter expanded | tee ../evidence-build/candidate-tests.log
+          flutter analyze --no-pub | tee ../evidence-build/analyze.log
+          sha256sum lib/pages/tabs/settings_tab.dart lib/widget/dialogs/text_field_with_actions.dart test/widget/dialogs/text_field_with_actions_test.dart > ../evidence-build/validated-source-sha256.txt
+      - name: Build candidate app with diagnostic signing
         working-directory: app
         run: |
           mkdir -p ../evidence-build
@@ -24,13 +68,12 @@ jobs:
           flutter --version > ../evidence-build/flutter-version.txt
           rustc --version > ../evidence-build/rust-version.txt
           sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/' android/app/build.gradle
-          flutter pub get
           flutter build apk --release --target-platform android-arm64
           sha256sum build/app/outputs/flutter-apk/app-release.apk > ../evidence-build/apk-sha256.txt
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: issue2462-current-android
+          name: issue2462-candidate-android
           path: |
             app/build/app/outputs/flutter-apk/app-release.apk
             evidence-build
