@@ -628,21 +628,24 @@ class _FolderTargetEntry extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 15),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          return Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              Text(label),
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  minWidth: constraints.maxWidth < 150 ? constraints.maxWidth : 150,
-                  maxWidth: constraints.maxWidth,
+          return SizedBox(
+            width: constraints.maxWidth,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                Text(label),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth: constraints.maxWidth < 150 ? constraints.maxWidth : 150,
+                    maxWidth: constraints.maxWidth,
+                  ),
+                  child: IntrinsicWidth(child: child),
                 ),
-                child: IntrinsicWidth(child: child),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
