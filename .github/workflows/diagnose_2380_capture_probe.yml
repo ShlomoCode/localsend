@@ -1,6 +1,9 @@
 name: Probe issue 2380 recorder readiness
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/bug-2380-diagnostic']
+    paths: ['.github/workflows/diagnose_2380_capture_probe.yml']
 jobs:
   probe:
     runs-on: windows-11-arm
