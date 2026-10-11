@@ -3,6 +3,8 @@ import {mkdirSync,readFileSync,writeFileSync,appendFileSync,existsSync,createWri
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
+import net from 'node:net';
+import {createHash} from 'node:crypto';
 import {relay} from '../cloud_transport/relay.mjs';
 
 // Drive the unmodified apps. This 1 MiB control cannot establish 16GB throughput.
@@ -18,11 +20,12 @@ function redact(value){let s=String(value);for(const secret of [...secrets,auth]
 const save=(name,value)=>writeFileSync(path.join(output,name),typeof value==='string'?redact(value):redact(JSON.stringify(value,null,2)));
 const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
- requestedOrientation:'PORTRAIT',observedOrientation:null,cleanupErrors:[],
+ requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
  release:'1.18.2',scenario:'Actual 1 MiB MP4 Android File/Recent selection, favorite registration/send, Windows UI Accept and saved hash',
  boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','1 MiB control cannot extrapolate stable throughput or 16GB behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
-let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false;
+let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
+const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
 const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317});
 async function wd(method,url,body){
  const started=Date.now();
@@ -34,14 +37,20 @@ async function wd(method,url,body){
  appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
   utc:new Date(started).toISOString(),method,path:url,body:url==='/session'?'[private capability references omitted]':body,
   status:response.status,elapsedMs:Date.now()-started}))+'\n');
- if(!response.ok||json.value?.error)throw Error('WebDriver '+response.status+' '+redact(json.value?.error||'invalid response'));
+ if(!response.ok||json.value?.error)throw Error('WebDriver '+response.status+' '+redact(json.value?.error||'invalid response')+' '+redact(String(json.value?.message||'').slice(0,600)));
  return json.value;
 }
 const base=()=>'/session/'+session;
 async function source(){return wd('GET',base()+'/source');}
 async function snap(name,xml){
  const text=xml||await source();save(name+'.xml',text);
- writeFileSync(path.join(output,name+'.png'),Buffer.from(await wd('GET',base()+'/screenshot'),'base64'));
+ const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
+ writeFileSync(path.join(output,name+'.png'),png);
+ const pngValid=png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+ const hierarchy=nodes(text).find(n=>n.class==='hierarchy');
+ report.snapshots.push({name,utc:new Date().toISOString(),width:pngValid?png.readUInt32BE(16):null,
+  height:pngValid?png.readUInt32BE(20):null,sourceWidth:Number(hierarchy?.width)||null,sourceHeight:Number(hierarchy?.height)||null,
+  primarypackage:nodes(text).find(n=>n.package)?.package||null});
  return text;
 }
 function decode(text){return text.replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16)))
@@ -69,7 +78,12 @@ async function tap(using,value){
 }
 const click=name=>tap('accessibility id',name);
 const ui=expression=>tap('-android uiautomator','new UiSelector().'+expression);
-async function activate(appId){await wd('POST',base()+'/appium/device/activate_app',{appId});}
+async function activate(appId){
+ await wd('POST',base()+'/appium/device/activate_app',{appId});
+ await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});
+ report.actions.push({utc:new Date().toISOString(),label:'Request PORTRAIT after activation',appId,
+  observedOrientation:await wd('GET',base()+'/orientation')});
+}
 function receiverResult(){
  const file=path.join(windowsOutput,'results.json');
  if(!existsSync(file))return null;
@@ -98,9 +112,95 @@ async function startReceiver(fixture){
  }
  throw Error('Windows receiver readiness exceeded 180 seconds');
 }
+function expectedControl(count){
+ const bytes=Buffer.alloc(count);
+ for(let i=0;i<count;i++)bytes[i]=(i*31+7)&255;
+ return {count,sha256:createHash('sha256').update(bytes).digest('hex')};
+}
+async function stopPhysicalServer(){
+ if(!physicalServer)return;
+ const server=physicalServer;physicalServer=null;
+ const closed=new Promise((ok,no)=>server.close(error=>error?no(error):ok()));
+ const end=Date.now()+2000;
+ while(physicalSockets.size&&Date.now()<end)await sleep(100);
+ for(const socket of physicalSockets)socket.destroy();
+ await closed;
+ physicalTrace.push({utc:new Date().toISOString(),event:'temporary-control-server-closed'});
+}
+async function runPhysicalReverseControl(){
+ const expected=[0,1,65537].map(expectedControl),metricsBefore=r.status();
+ physicalServer=net.createServer({allowHalfOpen:true},socket=>{
+  physicalSockets.add(socket);const index=physicalCases.length;
+  const entry={index,openedUtc:new Date().toISOString(),expected:expected[index]||null,count:0,sha256:null,readHalfClosed:false,replyFlushed:false};
+  physicalCases.push(entry);const hash=createHash('sha256');
+  physicalTrace.push({utc:entry.openedUtc,event:'control-socket-open',index});
+  socket.setTimeout(180000,()=>socket.destroy(new Error('Physical reverse control idle timeout')));
+  socket.on('data',data=>{
+   entry.count+=data.length;hash.update(data);
+   physicalTrace.push({utc:new Date().toISOString(),event:'control-data',index,bytes:data.length,total:entry.count});
+  });
+  socket.once('end',()=>{
+   entry.readHalfClosed=true;entry.readHalfClosedUtc=new Date().toISOString();entry.sha256=hash.digest('hex');
+   entry.byteExact=entry.expected?.count===entry.count&&entry.expected?.sha256===entry.sha256;
+   physicalTrace.push({utc:entry.readHalfClosedUtc,event:'control-readable-eof-before-reply',index,count:entry.count,sha256:entry.sha256});
+   socket.end(JSON.stringify({count:entry.count,sha256:entry.sha256}),()=>{
+    entry.replyFlushed=true;entry.replyFlushedUtc=new Date().toISOString();
+    physicalTrace.push({utc:entry.replyFlushedUtc,event:'control-reply-flushed-after-half-close',index});
+   });
+  });
+  socket.on('error',error=>{entry.error=redact(error.message);physicalTrace.push({utc:new Date().toISOString(),event:'control-socket-error',index,error:entry.error});});
+  socket.once('close',()=>{physicalSockets.delete(socket);entry.closedUtc=new Date().toISOString();physicalTrace.push({utc:entry.closedUtc,event:'control-socket-close',index});});
+ });
+ await new Promise((ok,no)=>{physicalServer.once('error',no);physicalServer.listen(53317,'127.0.0.1',ok);});
+ physicalTrace.push({utc:new Date().toISOString(),event:'temporary-control-server-listening',port:53317});
+ await snap('reverse-control-before');await click('Run reverse byte control');
+ const passed=await waitFor(s=>{
+  const text=labels(s).join('\n');
+  if(text.includes('REVERSE_CONTROL_FAILED'))throw Error('Physical reverse control failed; no actual transfer is attempted');
+  return text.includes('REVERSE_CONTROL_PASSED counts=0,1,65537');
+ },600000,'Physical reverse byte/half-close control timed out; no actual transfer is attempted');
+ await snap('reverse-control-passed',passed);
+ const details=labels(passed).find(v=>v.includes('REVERSE_CONTROL_PASSED counts=0,1,65537'));
+ const native=JSON.parse(details.split('\n').find(line=>line.startsWith('['))||'null');
+ assert(Array.isArray(native),'Android control result JSON missing');
+ assert.deepEqual(native.map(c=>c.count),[0,1,65537],'Android control case counts differ');
+ for(let i=0;i<expected.length;i++){
+  assert.equal(native[i].sha256,expected[i].sha256,'Android control deterministic hash mismatch');
+  assert.equal(native[i].replyAfterShutdownOutput,true);assert.equal(native[i].replyReadThroughEof,true);
+ }
+ await stopPhysicalServer();
+ assert.equal(physicalCases.length,3,'Windows control case count differs');
+ for(let i=0;i<expected.length;i++){
+  assert.equal(physicalCases[i].count,expected[i].count);assert.equal(physicalCases[i].sha256,expected[i].sha256);
+  assert(physicalCases[i].readHalfClosed&&physicalCases[i].replyFlushed&&!physicalCases[i].error,'Windows half-close response was not verified');
+ }
+ report.physicalReverseControl={status:'passed',scope:'Transport proof only; temporary TCP server and native helper, not LocalSend app reproduction',
+  expected,android:native,windows:physicalCases,metricsBefore,metricsAfter:r.status()};
+ save('reverse-physical-controls.json',report.physicalReverseControl);save('reverse-physical-trace.json',physicalTrace);
+}
+function visibleFavoriteFields(xml){
+ return nodes(xml).filter(n=>{
+  const bounds=(n.bounds||'').match(/^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/);
+  return n.class==='android.widget.EditText'&&n.displayed==='true'&&n.enabled==='true'&&bounds&&
+   Number(bounds[3])>Number(bounds[1])&&Number(bounds[4])>Number(bounds[2]);
+ });
+}
+async function hideFavoriteKeyboard(stage){
+ try{await wd('POST',base()+'/appium/device/hide_keyboard',{});}catch(error){
+  const observed=await source();
+  await snap('favorite-hide-keyboard-error-'+stage,observed);
+  const keyboardAbsent=/keyboard.*(?:not.*(?:shown|open|present|visible)|already.*hidden)|no .*keyboard/i.test(error.message);
+  if(!keyboardAbsent||visibleFavoriteFields(observed).length!==3)throw Error('Keyboard hide failed without an absent-keyboard message and three visible favorite fields: '+redact(error.message));
+  report.actions.push({utc:new Date().toISOString(),label:'Keyboard hide error tolerated after observing three visible fields',stage,error:redact(error.message)});
+ }
+}
 async function addFavorite(){
  await click('Favorites');await snap('favorites-before-add');await click('Add');
- const xml=await waitFor(s=>nodes(s).filter(n=>n.class==='android.widget.EditText').length===3,30000,'Favorite dialog must expose exactly three EditTexts');
+ // v1.18.2 auto-focuses IP. The keyboard can collapse all dialog fields in landscape.
+ // Hide it before waiting for fields, including when the preceding app rotated the device.
+ await hideFavoriteKeyboard('initial');
+ await snap('favorite-edit-keyboard-hidden-initial');
+ const xml=await waitFor(s=>visibleFavoriteFields(s).length===3,30000,'Favorite dialog must expose exactly three visible EditTexts');
  await snap('favorite-edit-before',xml);
  // v1.18.2 FavoriteEditDialog orders name, IP, and port; verify observed field bounds.
  const elements=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.EditText'});
@@ -116,7 +216,7 @@ async function addFavorite(){
  }
  save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i]})));
  await snap('favorite-edit-filled');
- await wd('POST',base()+'/appium/device/hide_keyboard',{});
+ await hideFavoriteKeyboard('before-confirm');
  const confirmSource=await waitFor(s=>nodes(s).some(n=>(n['content-desc']==='Confirm'||n.text==='Confirm')&&
   n.enabled==='true'&&n.displayed==='true'&&/\[\d+,\d+\]\[\d+,\d+\]/.test(n.bounds||'')),30000,'Confirm did not remain visible after hiding the native keyboard');
  const confirm=await wd('POST',base()+'/element',{using:'accessibility id',value:'Confirm'});
@@ -143,8 +243,8 @@ try{
   firstMatch:[{}]}});
  session=created.sessionId;assert(session,'No BrowserStack session ID');save('session.json',{session,device:report.device,android:report.android});
  await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});
- report.observedOrientation=await wd('GET',base()+'/orientation');
- assert.equal(report.observedOrientation,'PORTRAIT','The small transfer control requires portrait orientation');
+ report.initialObservedOrientation=await wd('GET',base()+'/orientation');
+ assert.equal(report.initialObservedOrientation,'PORTRAIT','The small transfer control requires initial portrait orientation');
  await wd('POST',base()+'/timeouts',{implicit:5000});
  await wd('POST',base()+'/appium/settings',{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
  await snap('fixture-before');await click('Stage small video');
@@ -159,10 +259,12 @@ try{
  assert(mediaDurationMs>0,'Fixture helper did not report positive video duration');
  assert(decodedFrame&&Number(decodedFrame[1])>0&&Number(decodedFrame[2])>0,'Fixture helper did not decode a video frame');
  report.fixture={name,bytes,sha256,mediaDurationMs,decodedFrame:{width:Number(decodedFrame[1]),height:Number(decodedFrame[2])},details};save('fixture.json',report.fixture);
- await startReceiver(report.fixture);
  await activate('org.localsend.cloudtransport');await snap('relay-before');await click('Relay from LocalSend');
  await waitFor(s=>labels(s).some(v=>v.includes('Receiving LocalSend connections at localhost:53318')),30000,'Relay UI did not confirm reverse mode');
  await snap('relay-running');
+ await runPhysicalReverseControl();
+ // The temporary control server is fully closed before the real release binds TCP 53317.
+ await startReceiver(report.fixture);
  await activate('org.localsend.localsend_app');
  await waitFor(s=>s.includes('org.localsend.localsend_app'),30000,'LocalSend did not activate');await snap('localsend-initial');
  await click('Send\nTab 2 of 3');await click('File');
@@ -217,6 +319,7 @@ try{
  if(session)await snap('failure').catch(()=>{});
  process.exitCode=1;
 }finally{
+ try{await stopPhysicalServer();}catch(error){report.cleanupErrors.push('Temporary control server stop: '+redact(error.message));process.exitCode=1;}
  if(receiver&&!receiverExit){
   writeFileSync(path.join(windowsOutput,'stop'),'stop');
   await Promise.race([receiverDone,sleep(15000)]);
@@ -237,6 +340,8 @@ try{
   }
  }
  if(startedRelay){try{await r.stop();}catch(error){report.cleanupErrors.push('Relay stop: '+redact(error.message));process.exitCode=1;}}
+ save('reverse-physical-controls.json',report.physicalReverseControl||{status:'incomplete',scope:'Transport proof only; actual LocalSend transfer gate not passed',windows:physicalCases});
+ save('reverse-physical-trace.json',physicalTrace);
  save('relay-trace.json',r.trace);save('relay-final-status.json',r.status());save('results.json',report);
 }
 
