@@ -75,7 +75,38 @@ def word(rows, text):
     return hits[0]
 
 def click_word(rows, text):
-    click(*xy(word(rows, text)))
+    if any(r['text'].lower()==text.lower() for r in rows):
+        click(*xy(word(rows, text)))
+        return
+    if text not in ('Add', 'Confirm', 'Cancel'):
+        raise RuntimeError('Missing rendered label '+text)
+    # Run5 favorites-empty.png shows ordinary Material action placement.
+    # OCR misses the small button captions. Locate the real filled action by
+    # its connected foreground color, retain bounds, and use its Cancel neighbor.
+    latest = [e for e in events if e['event']=='screenshot' and e['stage']==stage][-1]['name']
+    image = Image.open(out/(latest+'.png')).convert('RGB')
+    pixels = image.load()
+    points = {(x,y) for y in range(250,650) for x in range(450,850) if pixels[x,y][0]<40 and 80<pixels[x,y][1]<150 and 50<pixels[x,y][2]<145}
+    groups = []
+    while points:
+        seed = points.pop()
+        pending = [seed]
+        group = [seed]
+        while pending:
+            x,y = pending.pop()
+            for neighbor in ((x-1,y),(x+1,y),(x,y-1),(x,y+1)):
+                if neighbor in points:
+                    points.remove(neighbor)
+                    pending.append(neighbor)
+                    group.append(neighbor)
+        if len(group)>500: groups.append(group)
+    if len(groups)!=1:
+        raise RuntimeError('Expected one visible filled dialog action, found '+str(len(groups)))
+    group = groups[0]
+    left, right = min(p[0] for p in group), max(p[0] for p in group)
+    top, bottom = min(p[1] for p in group), max(p[1] for p in group)
+    record('rendered-dialog-action', stage=stage, action=text, screenshot=latest, bounds=[left,top,right,bottom], pixels=len(group))
+    click(left-48 if text=='Cancel' else (left+right)//2, (top+bottom)//2)
 
 def fill(x, y, value):
     click(x, y)
