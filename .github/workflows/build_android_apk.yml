@@ -83,7 +83,17 @@ jobs:
           fi
           sha256sum "$ISSUE_DIAGNOSTIC_APK" > evidence-cloud/apk-sha256.txt
           unzip -Z1 "$ISSUE_DIAGNOSTIC_APK" | grep '^lib/' > evidence-cloud/apk-libraries.txt
-          adb install -r "$ISSUE_DIAGNOSTIC_APK" 2>&1 | tee evidence-cloud/install.log
+          if [ '${{ inputs.apk }}' = current-c1ce ]; then
+            # This artifact has full ARM64 app libraries but x64 plugin stubs.
+            # Ask PackageManager for the supported full ABI, preserving the APK.
+            adb install --abi arm64-v8a -r "$ISSUE_DIAGNOSTIC_APK" 2>&1 | tee evidence-cloud/install.log
+          else
+            adb install -r "$ISSUE_DIAGNOSTIC_APK" 2>&1 | tee evidence-cloud/install.log
+          fi
+          adb shell dumpsys package org.localsend.localsend_app > evidence-cloud/installed-package.txt
+          if [ '${{ inputs.apk }}' = current-c1ce ]; then
+            grep 'primaryCpuAbi=arm64-v8a' evidence-cloud/installed-package.txt
+          fi
           adb shell am start -n org.localsend.localsend_app/.MainActivity 2>&1 | tee evidence-cloud/launch.log
           sleep 5
           adb exec-out screencap -p > evidence-cloud/initial.png
