@@ -19,6 +19,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   writeFileSync(`evidence/${label}-lifecycle-capability.json`,JSON.stringify({failures,appState,processFlagsUnavailable:true},null,2));
  }
  async function click(label) { const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:label});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{}); }
+ async function nativeText(text) { const e=await wd('POST',`/session/${session}/element`,{using:'xpath',value:`//*[@text="${text}"]`});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{}); }
  try {
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2026-10-11T00:00:00Z','-FixtureFileName',controlFile,'-DiagnosticPeerPort',String(senderPort)]);
   await source('control-before');await lifecycle('control-before');
@@ -59,6 +60,25 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await new Promise(resolve=>setTimeout(resolve,10000));
   await source('calibration-native-picker-after-hold');await lifecycle('calibration-native-picker-after-hold');await ui('snapshot',0,0,'windows-calibration-native-picker-after-hold');
   writeFileSync('evidence/calibration-picker-time.json',JSON.stringify({entered:new Date(entered).toISOString(),observedDwellMs:Date.now()-entered,exactTimingTrial:false},null,2));
-  results.push({case:'picker-calibration',dwellTest:false,nativeUiObserved:true});
+  await nativeText('Documents');
+  const documents=await source('calibration-documents-folder');
+  if(!documents.includes('package="com.google.android.documentsui"')||!documents.includes('text="Documents"'))throw new Error('Native Documents folder was not observed');
+  await nativeText('Use this folder');
+  const permission=await source('calibration-folder-permission');
+  if(permission.includes('text="Allow"')){await nativeText('Allow');}
+  const destination=await source('calibration-selected-destination');
+  if(!destination.includes('/storage/emulated/0/Documents'))throw new Error('Options did not show the selected Documents destination');
+  const selectedShot=await wd('GET',`/session/${session}/screenshot`);writeFileSync('evidence/calibration-selected-destination.png',Buffer.from(selectedShot,'base64'));
+  await lifecycle('calibration-after-folder-selection');
+  await wd('POST',`/session/${session}/back`,{});
+  await source('calibration-before-accept');await click('Accept');
+  await new Promise(resolve=>setTimeout(resolve,3000));
+  await source('calibration-after-accept');await lifecycle('calibration-after-accept');
+  await ui('snapshot',0,0,'windows-calibration-after-accept');
+  const repeatFile=`issue3393-${process.env.GITHUB_RUN_ID}-picker-calibration.txt`;
+  const repeatSaved=await wd('POST',`/session/${session}/appium/device/pull_file`,{path:`/sdcard/Documents/${repeatFile}`});
+  const repeatData=Buffer.from(repeatSaved,'base64');writeFileSync('evidence/calibration-saved-payload.txt',repeatData);
+  if(repeatData.toString()!=='LocalSend issue3393 picker-calibration unique payload')throw new Error('Native-picker saved content differs from sender payload');
+  results.push({case:'picker-calibration',dwellTest:false,nativeUiObserved:true,fileName:repeatFile,destination:'/sdcard/Documents',savedContentVerified:true});
  } finally { writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2)); }
 }
