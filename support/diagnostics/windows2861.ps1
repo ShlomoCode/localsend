@@ -1,4 +1,4 @@
-param([string]$ReleaseRoot,[string]$EvidenceDirectory)
+param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Versions=@('1.17.0','1.18.2','current'),[string[]]$Locales=@('en','uk','fr'))
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -82,7 +82,7 @@ function Click([int]$x,[int]$y,[string]$name) {
 Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,OSArchitecture|ConvertTo-Json|Set-Content "$EvidenceDirectory/environment.json"
 @{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;commit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;processor=$env:PROCESSOR_ARCHITECTURE;screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.ToString();textScale=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor;logPixels=(Get-ItemProperty 'HKCU:/Control Panel/Desktop' -ErrorAction SilentlyContinue).LogPixels}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
 Get-ChildItem 'C:/Windows/Fonts' -Filter '*seg*'|Get-FileHash -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/segoe-fonts.json"
-foreach($version in @('1.17.0','1.18.2','current')) {foreach($locale in @('en','uk','fr')) {
+foreach($version in $Versions) {foreach($locale in $Locales) {
  $name="$version-$locale";$source="$ReleaseRoot/$version";$folder="$EvidenceDirectory/$name-app"
  Copy-Item $source $folder -Recurse
  $exe=(Get-ChildItem $folder -Recurse -Filter localsend_app.exe|Select-Object -First 1).FullName

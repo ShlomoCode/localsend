@@ -7,6 +7,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: baseline2890-c1ce
+          run-id: 38132668217
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/releases/current
       - name: Inspect supported Windows text-size UI
         shell: powershell
         run: ./support/diagnostics/text-size2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/text-size-evidence

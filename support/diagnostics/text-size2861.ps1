@@ -66,15 +66,38 @@ $setupInputs|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-inputs.json"
 [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
 if([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width -lt 1215){throw 'Desktop smaller than original screenshot; do not run report scenario'}
 
-Start-Process 'ms-settings:easeofaccess-display'
-Start-Sleep -Seconds 8
-$elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-$elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/text-size-uia.json"
-$bmp=New-Object System.Drawing.Bitmap(1920,1080);$g=[System.Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen(0,0,0,0,$bmp.Size);$bmp.Save("$EvidenceDirectory/text-size.png",[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
-$sliders=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Slider}
-foreach($slider in $sliders) {
- try {$range=[System.Windows.Automation.RangeValuePattern]$slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
-  @{name=$slider.Current.Name;value=$range.Current.Value;minimum=$range.Current.Minimum;maximum=$range.Current.Maximum;readOnly=$range.Current.IsReadOnly}|ConvertTo-Json|Set-Content "$EvidenceDirectory/text-size-range.json"
- }catch{$_|Out-String|Set-Content "$EvidenceDirectory/text-size-range-error.txt"}
+
+function Screen([string]$name) {
+ $bmp=New-Object System.Drawing.Bitmap(1920,1080);$g=[System.Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen(0,0,0,0,$bmp.Size);$bmp.Save("$EvidenceDirectory/$name.png",[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+}
+foreach($scale in @(100,125,150)) {
+ Start-Process 'ms-settings:easeofaccess-display';Start-Sleep -Seconds 8
+ $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $slider=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Slider -and $_.Current.Name -eq 'Text size'}|Select-Object -First 1
+ if(!$slider){throw 'Observed Text size slider unavailable'}
+ $range=[System.Windows.Automation.RangeValuePattern]$slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+ $before=$range.Current.Value
+ if($before -ne $scale) {
+  $range.SetValue($scale);Start-Sleep -Seconds 1
+  $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $apply=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -eq 'Apply' -and $_.Current.IsEnabled}|Select-Object -First 1
+  if(!$apply){throw 'Observed Apply button unavailable'}
+  ([System.Windows.Automation.InvokePattern]$apply.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+  Start-Sleep -Seconds 12
+ }
+ $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $slider=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Slider -and $_.Current.Name -eq 'Text size'}|Select-Object -First 1
+ $range=[System.Windows.Automation.RangeValuePattern]$slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+ $actual=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor
+ @{requested=$scale;before=$before;slider=$range.Current.Value;osTextScale=$actual;action='RangeValue.SetValue and visible Apply Invoke';utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content "$EvidenceDirectory/scale-$scale-setting.json"
+ Screen "scale-$scale-setting"
+ if($range.Current.Value -ne $scale -or ($actual -and $actual -ne $scale)){throw 'Windows text size did not apply'}
+ # Close the observed Settings window through its accessibility window pattern.
+ $settings=$elements|Where-Object{$_.Current.Name -eq 'Settings' -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window -and $_.Current.NativeWindowHandle -ne 0}|Select-Object -First 1
+ if($settings){try{([System.Windows.Automation.WindowPattern]$settings.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)).Close()}catch{[System.Windows.Forms.SendKeys]::SendWait('%{F4}')}}
+ Start-Sleep -Seconds 2
+ Stop-Transcript
+ & "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale" -Versions @('current') -Locales @('en','uk','fr')
+ Start-Transcript "$EvidenceDirectory/transcript.txt" -Append
 }
 Stop-Transcript
