@@ -4,6 +4,14 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UI
 Add-Type @"
 using System;using System.Runtime.InteropServices;
 public static class Desktop2861 {
+ [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] public struct DevMode {
+ [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string device;
+ public ushort spec,driver,size,extra;public uint fields;public int x,y;public uint orientation,fixedOutput;public short color,duplex,yResolution,ttOption,collate;
+ [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string form;
+ public ushort logPixels;public uint bits,width,height,flags,frequency,icmMethod,icmIntent,mediaType,dither,reserved1,reserved2,panningWidth,panningHeight;
+ }
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern bool EnumDisplaySettings(string device,int mode,ref DevMode d);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DevMode d,int flags);
  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left,top,right,bottom; }
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int z,bool repaint);
@@ -16,6 +24,26 @@ public static class Desktop2861 {
 "@
 New-Item -ItemType Directory -Force $EvidenceDirectory|Out-Null
 Start-Transcript "$EvidenceDirectory/transcript.txt"
+# Prepare only this disposable cloud desktop before launching any application.
+New-Item 'HKLM:/SOFTWARE/Policies/Microsoft/Windows/OOBE' -Force|Out-Null
+Set-ItemProperty 'HKLM:/SOFTWARE/Policies/Microsoft/Windows/OOBE' DisablePrivacyExperience 1
+Get-Process CloudExperienceHost,CloudExperienceHostBroker,UserOOBEBroker,WWAHost -ErrorAction SilentlyContinue|Stop-Process -Force
+$mode=New-Object Desktop2861+DevMode;$mode.size=[Runtime.InteropServices.Marshal]::SizeOf($mode)
+if([Desktop2861]::EnumDisplaySettings($null,-1,[ref]$mode)) {
+ $mode.width=1920;$mode.height=1080;$mode.fields=0x180000
+ $displayResult=[Desktop2861]::ChangeDisplaySettings([ref]$mode,0)
+ @{result=$displayResult;requestedWidth=1920;requestedHeight=1080}|ConvertTo-Json|Set-Content "$EvidenceDirectory/display-setup.json"
+}
+Start-Sleep -Seconds 3
+$desktop=[System.Windows.Automation.AutomationElement]::RootElement
+for($attempt=0;$attempt -lt 8;$attempt++) {
+ $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-uia-$attempt.json"
+ $next=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -in @('Next','Accept')}|Select-Object -First 1
+ if(!$next){break}
+ try{([System.Windows.Automation.InvokePattern]$next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()}catch{break}
+ Start-Sleep -Seconds 1
+}
 $script:inputs=@()
 function Capture([string]$name) {
  $bmp=New-Object System.Drawing.Bitmap(1215,738);$g=[System.Drawing.Graphics]::FromImage($bmp)
@@ -39,11 +67,13 @@ foreach($version in @('1.17.0','1.18.2')) {foreach($locale in @('en','uk')) {
  $appdir=Split-Path $exe
  @{'flutter.ls_port'=53361;'flutter.ls_alias'='Bug2861';'flutter.ls_locale'=$locale;'flutter.ls_theme'='dark';'flutter.ls_save_window_placement'=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 "$appdir/settings.json"
  Get-FileHash $exe -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-executable.json"
+ New-NetFirewallRule -DisplayName "Bug2861 $name inbound" -Direction Inbound -Program $exe -Action Allow -Profile Any|Out-Null
  $script:p=Start-Process $exe -WorkingDirectory $appdir -PassThru
  try {
   Start-Sleep -Seconds 15;$script:p.Refresh();if(!$script:p.MainWindowHandle){throw 'No app window'}
   [Desktop2861]::MoveWindow($script:p.MainWindowHandle,0,0,1215,738,$true)|Out-Null;[Desktop2861]::SetForegroundWindow($script:p.MainWindowHandle)|Out-Null
   Start-Sleep -Seconds 2;Capture "$name-initial"
+  if([Desktop2861]::GetForegroundWindow() -ne $script:p.MainWindowHandle){throw 'LocalSend not foreground; scenario not reached'}
   Click 110 243 'Settings rail';Capture "$name-settings-top"
   for($step=1;$step -le 4;$step++) {
    [Desktop2861]::SetCursorPos(750,620)|Out-Null;[Desktop2861]::mouse_event(2048,0,0,4294967176,[UIntPtr]::Zero)
