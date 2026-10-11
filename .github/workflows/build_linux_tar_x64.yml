@@ -74,6 +74,8 @@ jobs:
           docker run --privileged --name issue2690-wayland -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" gentoo/stage3:latest bash /diagnostic/prepare-wayland.sh
       - name: Compact existing evidence
         if: inputs.evidence_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg squashfs-tools binutils
@@ -92,6 +94,23 @@ jobs:
                 readelf --dyn-syms --wide "$target"
               } > "evidence/cloud/packed-$library.txt"
             done
+            if [[ -f evidence/cloud/main-source-tar.sha256 ]]; then
+              gh run download 38132747719 --repo ShlomoCode/localsend --name issue2754-c1ce-flutter3419-linux-x64 --dir /tmp/issue2690-source
+              echo '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  /tmp/issue2690-source/source-bundle.tar.gz' | sha256sum -c -
+              mkdir /tmp/issue2690-source-app
+              tar -xzf /tmp/issue2690-source/source-bundle.tar.gz -C /tmp/issue2690-source-app localsend_app
+              for kind in source packed; do
+                if [[ $kind == source ]]; then executable=/tmp/issue2690-source-app/localsend_app; else executable=/tmp/issue2690-packed/localsend_app; fi
+                {
+                  sha256sum "$executable"
+                  readelf -h "$executable"
+                  readelf -l "$executable"
+                  readelf -d "$executable"
+                  readelf -V "$executable"
+                } > "evidence/cloud/executable-$kind-elf.txt"
+              done
+              diff -u evidence/cloud/executable-source-elf.txt evidence/cloud/executable-packed-elf.txt > evidence/cloud/executable-elf-diff.txt || test "$?" = 1
+            fi
           fi
           shopt -s nullglob
           for screenshot in evidence/cloud/launch/*.xwd; do
