@@ -10,6 +10,7 @@ const OBJECT_PATH = '/org/localsend/DockProbe';
 const EVIDENCE_DIR = '/home/probe/evidence/';
 const xml = `<node><interface name="org.localsend.DockProbe">
   <method name="Inspect"><arg type="s" direction="out"/></method>
+  <method name="Dump"><arg type="s" direction="in"/></method>
   <method name="LeaveOverview"/><method name="ShowOverview"/><method name="Launch"><arg type="s" direction="in"/></method>
   <method name="Capture"><arg type="s" direction="in"/><arg type="s" direction="out"/></method>
 </interface></node>`;
@@ -117,6 +118,11 @@ export default class DockProbe {
         this._object = Gio.DBusExportedObject.wrapJSObject(xml, {
             Inspect() {
                 return inspect();
+            },
+            Dump(filename) {
+                if (!filename.startsWith(EVIDENCE_DIR) || !filename.endsWith('.json'))
+                    throw new Error('Evidence JSON must remain in the test directory');
+                GLib.file_set_contents(filename, inspect());
             },
             ShowOverview() { Main.overview.show(); },
             Launch(id) { const app = Shell.AppSystem.get_default().lookup_app(id); if (!app) throw new Error(`Missing app ${id}`); app.activate(); },
