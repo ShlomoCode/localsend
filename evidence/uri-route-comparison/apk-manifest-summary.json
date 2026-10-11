@@ -1,0 +1,86 @@
+{
+  "manifestSha256": "12cc84245ecbd9d47c70ead8f5dc8d229ac3cda96cd6024d8ddb458139b97109",
+  "manifest": {
+    "versionCode": 643,
+    "versionName": "1.18.2",
+    "compileSdkVersion": 36,
+    "compileSdkVersionCodename": "16",
+    "package": "org.localsend.localsend_app",
+    "platformBuildVersionCode": 36,
+    "platformBuildVersionName": 16
+  },
+  "uses-sdk": {
+    "minSdkVersion": 24,
+    "targetSdkVersion": 37
+  },
+  "permissions": [
+    {
+      "name": "android.permission.INTERNET"
+    },
+    {
+      "name": "android.permission.READ_EXTERNAL_STORAGE",
+      "maxSdkVersion": 32
+    },
+    {
+      "name": "android.permission.WRITE_EXTERNAL_STORAGE"
+    },
+    {
+      "name": "android.permission.READ_MEDIA_IMAGES"
+    },
+    {
+      "name": "android.permission.READ_MEDIA_VIDEO"
+    },
+    {
+      "name": "android.permission.ACCESS_MEDIA_LOCATION"
+    },
+    {
+      "name": "android.permission.QUERY_ALL_PACKAGES"
+    },
+    {
+      "name": "android.permission.REQUEST_INSTALL_PACKAGES"
+    },
+    {
+      "name": "android.permission.BIND_QUICK_SETTINGS_TILE"
+    },
+    {
+      "name": "android.permission.ACCESS_LOCAL_NETWORK"
+    },
+    {
+      "name": "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+    },
+    {
+      "name": "android.permission.FOREGROUND_SERVICE"
+    },
+    {
+      "name": "android.permission.WAKE_LOCK"
+    },
+    {
+      "name": "android.permission.RECEIVE_BOOT_COMPLETED"
+    },
+    {
+      "name": "android.permission.POST_NOTIFICATIONS"
+    },
+    {
+      "name": "android.permission.ACCESS_NETWORK_STATE"
+    },
+    {
+      "name": "android.permission.ACCESS_WIFI_STATE"
+    },
+    {
+      "name": "android.permission.READ_MEDIA_AUDIO"
+    },
+    {
+      "name": "org.localsend.localsend_app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    }
+  ],
+  "application": {
+    "label": "LocalSend",
+    "icon": "0x7f0d0000",
+    "name": "android.app.Application",
+    "banner": "0x7f070073",
+    "extractNativeLibs": false,
+    "usesCleartextTraffic": true,
+    "appComponentFactory": "androidx.core.app.CoreComponentFactory",
+    "requestLegacyExternalStorage": true
+  }
+}

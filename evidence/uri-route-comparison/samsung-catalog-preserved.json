@@ -1,0 +1,34 @@
+[
+  {
+    "os": "android",
+    "os_version": "12.0",
+    "device": "Samsung Galaxy S21",
+    "realMobile": true,
+    "device_tier": "Tier 4",
+    "device_limit": 5
+  },
+  {
+    "os": "android",
+    "os_version": "11.0",
+    "device": "Samsung Galaxy S21 Ultra",
+    "realMobile": true,
+    "device_tier": "Tier 3",
+    "device_limit": 16
+  },
+  {
+    "os": "android",
+    "os_version": "11.0",
+    "device": "Samsung Galaxy S21",
+    "realMobile": true,
+    "device_tier": "Tier 2",
+    "device_limit": 40
+  },
+  {
+    "os": "android",
+    "os_version": "10.0",
+    "device": "Samsung Galaxy S20",
+    "realMobile": true,
+    "device_tier": "Tier 3",
+    "device_limit": 16
+  }
+]

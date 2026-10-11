@@ -1,0 +1,1740 @@
+{
+  "input": "evidence/uri-route-comparison/AndroidManifest.axml",
+  "sha256": "12cc84245ecbd9d47c70ead8f5dc8d229ac3cda96cd6024d8ddb458139b97109",
+  "bytes": 15572,
+  "elements": [
+    {
+      "name": "manifest",
+      "line": 2,
+      "offset": 8068,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "versionCode",
+          "value": 643,
+          "raw": null,
+          "type": 16,
+          "data": 643,
+          "resourceId": "0x101021b"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "versionName",
+          "value": "1.18.2",
+          "raw": "1.18.2",
+          "type": 3,
+          "data": 35,
+          "resourceId": "0x101021c"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "compileSdkVersion",
+          "value": 36,
+          "raw": null,
+          "type": 16,
+          "data": 36,
+          "resourceId": "0x1010572"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "compileSdkVersionCodename",
+          "value": "16",
+          "raw": "16",
+          "type": 3,
+          "data": 36,
+          "resourceId": "0x1010573"
+        },
+        {
+          "namespace": null,
+          "name": "package",
+          "value": "org.localsend.localsend_app",
+          "raw": "org.localsend.localsend_app",
+          "type": 3,
+          "data": 110,
+          "resourceId": null
+        },
+        {
+          "namespace": null,
+          "name": "platformBuildVersionCode",
+          "value": 36,
+          "raw": null,
+          "type": 16,
+          "data": 36,
+          "resourceId": null
+        },
+        {
+          "namespace": null,
+          "name": "platformBuildVersionName",
+          "value": 16,
+          "raw": null,
+          "type": 16,
+          "data": 16,
+          "resourceId": null
+        }
+      ]
+    },
+    {
+      "name": "uses-sdk",
+      "line": 7,
+      "offset": 8244,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "minSdkVersion",
+          "value": 24,
+          "raw": null,
+          "type": 16,
+          "data": 24,
+          "resourceId": "0x101020c"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "targetSdkVersion",
+          "value": 37,
+          "raw": null,
+          "type": 16,
+          "data": 37,
+          "resourceId": "0x1010270"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 11,
+      "offset": 8344,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.INTERNET",
+          "raw": "android.permission.INTERNET",
+          "type": 3,
+          "data": 63,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 12,
+      "offset": 8424,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.READ_EXTERNAL_STORAGE",
+          "raw": "android.permission.READ_EXTERNAL_STORAGE",
+          "type": 3,
+          "data": 66,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "maxSdkVersion",
+          "value": 32,
+          "raw": null,
+          "type": 16,
+          "data": 32,
+          "resourceId": "0x1010271"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 15,
+      "offset": 8524,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.WRITE_EXTERNAL_STORAGE",
+          "raw": "android.permission.WRITE_EXTERNAL_STORAGE",
+          "type": 3,
+          "data": 73,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 16,
+      "offset": 8604,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.READ_MEDIA_IMAGES",
+          "raw": "android.permission.READ_MEDIA_IMAGES",
+          "type": 3,
+          "data": 68,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 17,
+      "offset": 8684,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.READ_MEDIA_VIDEO",
+          "raw": "android.permission.READ_MEDIA_VIDEO",
+          "type": 3,
+          "data": 69,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 18,
+      "offset": 8764,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.ACCESS_MEDIA_LOCATION",
+          "raw": "android.permission.ACCESS_MEDIA_LOCATION",
+          "type": 3,
+          "data": 55,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 19,
+      "offset": 8844,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.QUERY_ALL_PACKAGES",
+          "raw": "android.permission.QUERY_ALL_PACKAGES",
+          "type": 3,
+          "data": 65,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 20,
+      "offset": 8924,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.REQUEST_INSTALL_PACKAGES",
+          "raw": "android.permission.REQUEST_INSTALL_PACKAGES",
+          "type": 3,
+          "data": 71,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 21,
+      "offset": 9004,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.BIND_QUICK_SETTINGS_TILE",
+          "raw": "android.permission.BIND_QUICK_SETTINGS_TILE",
+          "type": 3,
+          "data": 59,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 24,
+      "offset": 9084,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.ACCESS_LOCAL_NETWORK",
+          "raw": "android.permission.ACCESS_LOCAL_NETWORK",
+          "type": 3,
+          "data": 54,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 30,
+      "offset": 9164,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+          "raw": "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+          "type": 3,
+          "data": 62,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-feature",
+      "line": 33,
+      "offset": 9244,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.software.leanback",
+          "raw": "android.software.leanback",
+          "type": 3,
+          "data": 76,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "required",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x101028e"
+        }
+      ]
+    },
+    {
+      "name": "uses-feature",
+      "line": 36,
+      "offset": 9344,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.hardware.touchscreen",
+          "raw": "android.hardware.touchscreen",
+          "type": 3,
+          "data": 43,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "required",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x101028e"
+        }
+      ]
+    },
+    {
+      "name": "queries",
+      "line": 40,
+      "offset": 9444,
+      "attributes": []
+    },
+    {
+      "name": "intent",
+      "line": 41,
+      "offset": 9480,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 42,
+      "offset": 9516,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.GET_CONTENT",
+          "raw": "android.intent.action.GET_CONTENT",
+          "type": 3,
+          "data": 45,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "data",
+      "line": 44,
+      "offset": 9596,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "mimeType",
+          "value": "*/*",
+          "raw": "*/*",
+          "type": 3,
+          "data": 34,
+          "resourceId": "0x1010026"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 48,
+      "offset": 9724,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.FOREGROUND_SERVICE",
+          "raw": "android.permission.FOREGROUND_SERVICE",
+          "type": 3,
+          "data": 61,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 49,
+      "offset": 9804,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.WAKE_LOCK",
+          "raw": "android.permission.WAKE_LOCK",
+          "type": 3,
+          "data": 72,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 50,
+      "offset": 9884,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.RECEIVE_BOOT_COMPLETED",
+          "raw": "android.permission.RECEIVE_BOOT_COMPLETED",
+          "type": 3,
+          "data": 70,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 51,
+      "offset": 9964,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.POST_NOTIFICATIONS",
+          "raw": "android.permission.POST_NOTIFICATIONS",
+          "type": 3,
+          "data": 64,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 52,
+      "offset": 10044,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.ACCESS_NETWORK_STATE",
+          "raw": "android.permission.ACCESS_NETWORK_STATE",
+          "type": 3,
+          "data": 56,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 53,
+      "offset": 10124,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.ACCESS_WIFI_STATE",
+          "raw": "android.permission.ACCESS_WIFI_STATE",
+          "type": 3,
+          "data": 57,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 54,
+      "offset": 10204,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.permission.READ_MEDIA_AUDIO",
+          "raw": "android.permission.READ_MEDIA_AUDIO",
+          "type": 3,
+          "data": 67,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "permission",
+      "line": 56,
+      "offset": 10284,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "org.localsend.localsend_app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          "raw": "org.localsend.localsend_app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          "type": 3,
+          "data": 111,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "protectionLevel",
+          "value": "0x2",
+          "raw": null,
+          "type": 17,
+          "data": 2,
+          "resourceId": "0x1010009"
+        }
+      ]
+    },
+    {
+      "name": "uses-permission",
+      "line": 60,
+      "offset": 10384,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "org.localsend.localsend_app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          "raw": "org.localsend.localsend_app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          "type": 3,
+          "data": 111,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "application",
+      "line": 62,
+      "offset": 10464,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "label",
+          "value": "LocalSend",
+          "raw": "LocalSend",
+          "type": 3,
+          "data": 38,
+          "resourceId": "0x1010001"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "icon",
+          "value": "0x7f0d0000",
+          "raw": null,
+          "type": 1,
+          "data": 2131558400,
+          "resourceId": "0x1010002"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.app.Application",
+          "raw": "android.app.Application",
+          "type": 3,
+          "data": 42,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "banner",
+          "value": "0x7f070073",
+          "raw": null,
+          "type": 1,
+          "data": 2131165299,
+          "resourceId": "0x10103f2"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "extractNativeLibs",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x10104ea"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "usesCleartextTraffic",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x10104ec"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "appComponentFactory",
+          "value": "androidx.core.app.CoreComponentFactory",
+          "raw": "androidx.core.app.CoreComponentFactory",
+          "type": 3,
+          "data": 78,
+          "resourceId": "0x101057a"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "requestLegacyExternalStorage",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x1010603"
+        }
+      ]
+    },
+    {
+      "name": "activity",
+      "line": 73,
+      "offset": 10660,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "theme",
+          "value": "0x7f100112",
+          "raw": null,
+          "type": 1,
+          "data": 2131755282,
+          "resourceId": "0x1010000"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "org.localsend.localsend_app.MainActivity",
+          "raw": "org.localsend.localsend_app.MainActivity",
+          "type": 3,
+          "data": 112,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "launchMode",
+          "value": 2,
+          "raw": null,
+          "type": 16,
+          "data": 2,
+          "resourceId": "0x101001d"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "configChanges",
+          "value": "0x40003fb4",
+          "raw": null,
+          "type": 17,
+          "data": 1073758132,
+          "resourceId": "0x101001f"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "windowSoftInputMode",
+          "value": "0x10",
+          "raw": null,
+          "type": 17,
+          "data": 16,
+          "resourceId": "0x101022b"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "hardwareAccelerated",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x10102d3"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 88,
+      "offset": 10836,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "io.flutter.embedding.android.NormalTheme",
+          "raw": "io.flutter.embedding.android.NormalTheme",
+          "type": 3,
+          "data": 105,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "resource",
+          "value": "0x7f100126",
+          "raw": null,
+          "type": 1,
+          "data": 2131755302,
+          "resourceId": "0x1010025"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 92,
+      "offset": 10936,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 93,
+      "offset": 10972,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.MAIN",
+          "raw": "android.intent.action.MAIN",
+          "type": 3,
+          "data": 46,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "category",
+      "line": 95,
+      "offset": 11052,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.category.LAUNCHER",
+          "raw": "android.intent.category.LAUNCHER",
+          "type": 3,
+          "data": 52,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "category",
+      "line": 98,
+      "offset": 11132,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.category.LEANBACK_LAUNCHER",
+          "raw": "android.intent.category.LEANBACK_LAUNCHER",
+          "type": 3,
+          "data": 53,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 102,
+      "offset": 11236,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 103,
+      "offset": 11272,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.SEND",
+          "raw": "android.intent.action.SEND",
+          "type": 3,
+          "data": 49,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "category",
+      "line": 105,
+      "offset": 11352,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.category.DEFAULT",
+          "raw": "android.intent.category.DEFAULT",
+          "type": 3,
+          "data": 51,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "data",
+      "line": 107,
+      "offset": 11432,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "mimeType",
+          "value": "*/*",
+          "raw": "*/*",
+          "type": 3,
+          "data": 34,
+          "resourceId": "0x1010026"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 109,
+      "offset": 11536,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 110,
+      "offset": 11572,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.SEND_MULTIPLE",
+          "raw": "android.intent.action.SEND_MULTIPLE",
+          "type": 3,
+          "data": 50,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "category",
+      "line": 112,
+      "offset": 11652,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.category.DEFAULT",
+          "raw": "android.intent.category.DEFAULT",
+          "type": 3,
+          "data": 51,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "data",
+      "line": 114,
+      "offset": 11732,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "mimeType",
+          "value": "*/*",
+          "raw": "*/*",
+          "type": 3,
+          "data": 34,
+          "resourceId": "0x1010026"
+        }
+      ]
+    },
+    {
+      "name": "service",
+      "line": 119,
+      "offset": 11860,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "label",
+          "value": "LocalSend",
+          "raw": "LocalSend",
+          "type": 3,
+          "data": 38,
+          "resourceId": "0x1010001"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "icon",
+          "value": "0x7f0d0003",
+          "raw": null,
+          "type": 1,
+          "data": 2131558403,
+          "resourceId": "0x1010002"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "org.localsend.localsend_app.QuickTileService",
+          "raw": "org.localsend.localsend_app.QuickTileService",
+          "type": 3,
+          "data": 113,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "permission",
+          "value": "android.permission.BIND_QUICK_SETTINGS_TILE",
+          "raw": "android.permission.BIND_QUICK_SETTINGS_TILE",
+          "type": 3,
+          "data": 59,
+          "resourceId": "0x1010006"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "process",
+          "value": ":quick_tile_service",
+          "raw": ":quick_tile_service",
+          "type": 3,
+          "data": 37,
+          "resourceId": "0x1010011"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 126,
+      "offset": 12016,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 127,
+      "offset": 12052,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.service.quicksettings.action.QS_TILE",
+          "raw": "android.service.quicksettings.action.QS_TILE",
+          "type": 3,
+          "data": 75,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "service",
+      "line": 135,
+      "offset": 12180,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "com.pravera.flutter_foreground_task.service.ForegroundService",
+          "raw": "com.pravera.flutter_foreground_task.service.ForegroundService",
+          "type": 3,
+          "data": 97,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "foregroundServiceType",
+          "value": "0x1",
+          "raw": null,
+          "type": 17,
+          "data": 1,
+          "resourceId": "0x1010599"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 144,
+      "offset": 12300,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "flutterEmbedding",
+          "raw": "flutterEmbedding",
+          "type": 3,
+          "data": 101,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "value",
+          "value": 2,
+          "raw": null,
+          "type": 16,
+          "data": 2,
+          "resourceId": "0x1010024"
+        }
+      ]
+    },
+    {
+      "name": "receiver",
+      "line": 148,
+      "offset": 12400,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "com.pravera.flutter_foreground_task.service.RebootReceiver",
+          "raw": "com.pravera.flutter_foreground_task.service.RebootReceiver",
+          "type": 3,
+          "data": 98,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "enabled",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x101000e"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x1010010"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 152,
+      "offset": 12496,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 153,
+      "offset": 12532,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.BOOT_COMPLETED",
+          "raw": "android.intent.action.BOOT_COMPLETED",
+          "type": 3,
+          "data": 44,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "action",
+      "line": 154,
+      "offset": 12612,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.MY_PACKAGE_REPLACED",
+          "raw": "android.intent.action.MY_PACKAGE_REPLACED",
+          "type": 3,
+          "data": 47,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "action",
+      "line": 156,
+      "offset": 12692,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.intent.action.QUICKBOOT_POWERON",
+          "raw": "android.intent.action.QUICKBOOT_POWERON",
+          "type": 3,
+          "data": 48,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "receiver",
+      "line": 159,
+      "offset": 12820,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "com.pravera.flutter_foreground_task.service.RestartReceiver",
+          "raw": "com.pravera.flutter_foreground_task.service.RestartReceiver",
+          "type": 3,
+          "data": 99,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "enabled",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x101000e"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        }
+      ]
+    },
+    {
+      "name": "provider",
+      "line": 164,
+      "offset": 12940,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "io.flutter.plugins.imagepicker.ImagePickerFileProvider",
+          "raw": "io.flutter.plugins.imagepicker.ImagePickerFileProvider",
+          "type": 3,
+          "data": 106,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "authorities",
+          "value": "org.localsend.localsend_app.flutter.image_provider",
+          "raw": "org.localsend.localsend_app.flutter.image_provider",
+          "type": 3,
+          "data": 116,
+          "resourceId": "0x1010018"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "grantUriPermissions",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x101001b"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 169,
+      "offset": 13056,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.support.FILE_PROVIDER_PATHS",
+          "raw": "android.support.FILE_PROVIDER_PATHS",
+          "type": 3,
+          "data": 77,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "resource",
+          "value": "0x7f120001",
+          "raw": null,
+          "type": 1,
+          "data": 2131886081,
+          "resourceId": "0x1010025"
+        }
+      ]
+    },
+    {
+      "name": "service",
+      "line": 173,
+      "offset": 13180,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "com.google.android.gms.metadata.ModuleDependencies",
+          "raw": "com.google.android.gms.metadata.ModuleDependencies",
+          "type": 3,
+          "data": 96,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "enabled",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x101000e"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 177,
+      "offset": 13276,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 178,
+      "offset": 13312,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "com.google.android.gms.metadata.MODULE_DEPENDENCIES",
+          "raw": "com.google.android.gms.metadata.MODULE_DEPENDENCIES",
+          "type": 3,
+          "data": 95,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 181,
+      "offset": 13416,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "photopicker_activity:0:required",
+          "raw": "photopicker_activity:0:required",
+          "type": 3,
+          "data": 119,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "value",
+          "value": "",
+          "raw": "",
+          "type": 3,
+          "data": 33,
+          "resourceId": "0x1010024"
+        }
+      ]
+    },
+    {
+      "name": "activity",
+      "line": 186,
+      "offset": 13540,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "theme",
+          "value": "0x1030007",
+          "raw": null,
+          "type": 1,
+          "data": 16973831,
+          "resourceId": "0x1010000"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "io.flutter.plugins.urllauncher.WebViewActivity",
+          "raw": "io.flutter.plugins.urllauncher.WebViewActivity",
+          "type": 3,
+          "data": 107,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        }
+      ]
+    },
+    {
+      "name": "provider",
+      "line": 191,
+      "offset": 13660,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "com.crazecoder.openfile.FileProvider",
+          "raw": "com.crazecoder.openfile.FileProvider",
+          "type": 3,
+          "data": 94,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "authorities",
+          "value": "org.localsend.localsend_app.fileProvider.com.crazecoder.openfile",
+          "raw": "org.localsend.localsend_app.fileProvider.com.crazecoder.openfile",
+          "type": 3,
+          "data": 115,
+          "resourceId": "0x1010018"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "grantUriPermissions",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x101001b"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 196,
+      "offset": 13776,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.support.FILE_PROVIDER_PATHS",
+          "raw": "android.support.FILE_PROVIDER_PATHS",
+          "type": 3,
+          "data": 77,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "resource",
+          "value": "0x7f120000",
+          "raw": null,
+          "type": 1,
+          "data": 2131886080,
+          "resourceId": "0x1010025"
+        }
+      ]
+    },
+    {
+      "name": "service",
+      "line": 201,
+      "offset": 13900,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.sharetarget.ChooserTargetServiceCompat",
+          "raw": "androidx.sharetarget.ChooserTargetServiceCompat",
+          "type": 3,
+          "data": 87,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "permission",
+          "value": "android.permission.BIND_CHOOSER_TARGET_SERVICE",
+          "raw": "android.permission.BIND_CHOOSER_TARGET_SERVICE",
+          "type": 3,
+          "data": 58,
+          "resourceId": "0x1010006"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x1010010"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 205,
+      "offset": 13996,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 206,
+      "offset": 14032,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "android.service.chooser.ChooserTargetService",
+          "raw": "android.service.chooser.ChooserTargetService",
+          "type": 3,
+          "data": 74,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "provider",
+      "line": 210,
+      "offset": 14160,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.startup.InitializationProvider",
+          "raw": "androidx.startup.InitializationProvider",
+          "type": 3,
+          "data": 89,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "authorities",
+          "value": "org.localsend.localsend_app.androidx-startup",
+          "raw": "org.localsend.localsend_app.androidx-startup",
+          "type": 3,
+          "data": 114,
+          "resourceId": "0x1010018"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 214,
+      "offset": 14256,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.emoji2.text.EmojiCompatInitializer",
+          "raw": "androidx.emoji2.text.EmojiCompatInitializer",
+          "type": 3,
+          "data": 79,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "value",
+          "value": "androidx.startup",
+          "raw": "androidx.startup",
+          "type": 3,
+          "data": 88,
+          "resourceId": "0x1010024"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 217,
+      "offset": 14356,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.lifecycle.ProcessLifecycleInitializer",
+          "raw": "androidx.lifecycle.ProcessLifecycleInitializer",
+          "type": 3,
+          "data": 80,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "value",
+          "value": "androidx.startup",
+          "raw": "androidx.startup",
+          "type": 3,
+          "data": 88,
+          "resourceId": "0x1010024"
+        }
+      ]
+    },
+    {
+      "name": "meta-data",
+      "line": 220,
+      "offset": 14456,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.profileinstaller.ProfileInstallerInitializer",
+          "raw": "androidx.profileinstaller.ProfileInstallerInitializer",
+          "type": 3,
+          "data": 82,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "value",
+          "value": "androidx.startup",
+          "raw": "androidx.startup",
+          "type": 3,
+          "data": 88,
+          "resourceId": "0x1010024"
+        }
+      ]
+    },
+    {
+      "name": "uses-library",
+      "line": 225,
+      "offset": 14580,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.window.extensions",
+          "raw": "androidx.window.extensions",
+          "type": 3,
+          "data": 90,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "required",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x101028e"
+        }
+      ]
+    },
+    {
+      "name": "uses-library",
+      "line": 228,
+      "offset": 14680,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.window.sidecar",
+          "raw": "androidx.window.sidecar",
+          "type": 3,
+          "data": 91,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "required",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x101028e"
+        }
+      ]
+    },
+    {
+      "name": "receiver",
+      "line": 232,
+      "offset": 14780,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.profileinstaller.ProfileInstallReceiver",
+          "raw": "androidx.profileinstaller.ProfileInstallReceiver",
+          "type": 3,
+          "data": 81,
+          "resourceId": "0x1010003"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "permission",
+          "value": "android.permission.DUMP",
+          "raw": "android.permission.DUMP",
+          "type": 3,
+          "data": 60,
+          "resourceId": "0x1010006"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "enabled",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x101000e"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "exported",
+          "value": true,
+          "raw": null,
+          "type": 18,
+          "data": 4294967295,
+          "resourceId": "0x1010010"
+        },
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "directBootAware",
+          "value": false,
+          "raw": null,
+          "type": 18,
+          "data": 0,
+          "resourceId": "0x1010505"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 238,
+      "offset": 14916,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 239,
+      "offset": 14952,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.profileinstaller.action.INSTALL_PROFILE",
+          "raw": "androidx.profileinstaller.action.INSTALL_PROFILE",
+          "type": 3,
+          "data": 84,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 241,
+      "offset": 15056,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 242,
+      "offset": 15092,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.profileinstaller.action.SKIP_FILE",
+          "raw": "androidx.profileinstaller.action.SKIP_FILE",
+          "type": 3,
+          "data": 86,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 244,
+      "offset": 15196,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 245,
+      "offset": 15232,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.profileinstaller.action.SAVE_PROFILE",
+          "raw": "androidx.profileinstaller.action.SAVE_PROFILE",
+          "type": 3,
+          "data": 85,
+          "resourceId": "0x1010003"
+        }
+      ]
+    },
+    {
+      "name": "intent-filter",
+      "line": 247,
+      "offset": 15336,
+      "attributes": []
+    },
+    {
+      "name": "action",
+      "line": 248,
+      "offset": 15372,
+      "attributes": [
+        {
+          "namespace": "http://schemas.android.com/apk/res/android",
+          "name": "name",
+          "value": "androidx.profileinstaller.action.BENCHMARK_OPERATION",
+          "raw": "androidx.profileinstaller.action.BENCHMARK_OPERATION",
+          "type": 3,
+          "data": 83,
+          "resourceId": "0x1010003"
+        }
+      ]
+    }
+  ]
+}
