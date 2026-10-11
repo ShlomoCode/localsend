@@ -60,11 +60,18 @@ foreach($animations in @($false,$true)) {
   [Desktop2277]::SetForegroundWindow($script:process.MainWindowHandle)|Out-Null
   Start-Sleep -Seconds 2;Screenshot "$name-initial"
   Word 'Send' "$name-initial";Screenshot "$name-send"
-  Word 'File' "$name-send"
-  & "$PSScriptRoot/windows_dialog_select.ps1" -TargetProcessId $script:process.Id -Path "$EvidenceDirectory/payload2277.txt" -Mode File | Set-Content "$EvidenceDirectory/$name-picker.json"
-  if($LASTEXITCODE -ne 0){throw 'Native picker did not select file'}
+  Word 'Text' "$name-send";Screenshot "$name-text-dialog"
+  $prompt=Import-Csv "$EvidenceDirectory/$name-text-dialog.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'message'}|Select-Object -First 1
+  if(!$prompt){throw 'Type message dialog missing'}
+  Click 500 ([int]$prompt.top+50) 'Text-input-focus'
+  [System.Windows.Forms.SendKeys]::SendWait('asdasd')
+  Screenshot "$name-text-filled";Word 'Confirm' "$name-text-filled"
   Start-Sleep -Seconds 2;Screenshot "$name-selected"
-  Word 'link' "$name-selected";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
+  $nearby=Import-Csv "$EvidenceDirectory/$name-selected.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'Nearby'}|Select-Object -First 1
+  if(!$nearby){throw 'Selected Send page missing Nearby devices'}
+  Click 537 ([int]$nearby.top+[int]$nearby.height/2) 'Send-mode-menu'
+  Start-Sleep -Milliseconds 800;Screenshot "$name-send-mode-menu"
+  Word 'link' "$name-send-mode-menu";Start-Sleep -Seconds 5;Screenshot "$name-web-share"
   # A single click on the Material back arrow, whose location is checked in retained screenshot.
   Click 28 60 'Back-single'
   foreach($delay in @(100,500,1500,5000)) {Start-Sleep -Milliseconds $delay;Screenshot "$name-after-back-$delay"}
