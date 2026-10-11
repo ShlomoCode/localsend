@@ -38,7 +38,8 @@ for condition in normal negative positive; do
   cp -a "$build_root/flathub" "$manifest_root"
   tar -C app/build/linux/x64/release/bundle -czf "$manifest_root/LocalSend.tar.gz" .
   # Retain the supported Flathub modules/permissions; change only tar input.
-  ruby -ryaml -e 'p=ARGV[0];m=YAML.load_file(p);s=m["modules"].last["sources"];s.reject!{|x|x["dest-filename"]=="LocalSend.tar.gz"};s.unshift({"type"=>"file","path"=>"LocalSend.tar.gz"});File.write(p,m.to_yaml)' "$manifest_root/org.localsend.localsend_app.yml"
+  # SDK26 CMake defaults to lib64; the supported /app prefix expects lib.
+  ruby -ryaml -e 'p=ARGV[0];m=YAML.load_file(p);s=m["modules"].last["sources"];s.reject!{|x|x["dest-filename"]=="LocalSend.tar.gz"};s.unshift({"type"=>"file","path"=>"LocalSend.tar.gz"});walk=lambda{|mods|mods.each{|x|next unless x.is_a?(Hash);if x["buildsystem"]=="cmake-ninja";(x["config-opts"]||=[])<<"-DCMAKE_INSTALL_LIBDIR=lib";end;walk.call(x["modules"]||[])}};walk.call(m["modules"]);File.write(p,m.to_yaml)' "$manifest_root/org.localsend.localsend_app.yml"
   cp "$manifest_root/org.localsend.localsend_app.yml" "$diagnostic_root/evidence/causal/manifest-$condition.yml"
   (cd "$manifest_root" && flatpak-builder --force-clean --repo="$build_root/flatpak-repo" --default-branch="$condition" "$build_root/flatpak-build" org.localsend.localsend_app.yml) > "$diagnostic_root/evidence/causal/package-$condition.txt" 2>&1
   flatpak build-bundle "$build_root/flatpak-repo" "$diagnostic_root/evidence/causal/$condition.flatpak" org.localsend.localsend_app "$condition"

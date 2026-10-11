@@ -5,7 +5,7 @@ on:
     branches: [codex/bug-513-fedora-diagnostics]
 jobs:
   fedora:
-    if: "!contains(github.event.head_commit.message, '[causal-build]')"
+    if: "!contains(github.event.head_commit.message, '[causal-build]') && !contains(github.event.head_commit.message, '[causal-ui]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     steps:
