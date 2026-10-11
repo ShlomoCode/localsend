@@ -194,6 +194,7 @@ async function gallery(desired, label) {
   if (!['0','1',0,1,true,false].includes(before)) throw new Error('Gallery switch value is not an observed boolean');
   if ((before === '1' || before === 1 || before === true) !== desired) await wd('POST', prefix() + '/element/' + id + '/click', {});
   const after = await getValue();
+  if (!['0','1',0,1,true,false].includes(after)) throw new Error('Gallery switch after-value is not an observed boolean');
   if ((after === '1' || after === 1 || after === true) !== desired) throw new Error('Gallery setting did not change');
   save(label + '-gallery.json', {desired, before, after, locator, cardName, nativeLayoutAuthority:'Original run 38179175479 settings-entry XML and image: six Receive switches, gallery fourth', selectionTiming:'Global Settings before real transfer'});
   await capture(label + '-settings-selected');
