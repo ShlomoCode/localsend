@@ -53,8 +53,10 @@ def transfer(content, phase):
     local.write_text(content)
     adb(S, "push", str(local), "/sdcard/Download/a.txt")
     click(S, "File", phase + "-sender-before-files")
-    click(S, "Show roots", phase + "-picker-before-roots")
-    click(S, "Downloads", phase + "-picker-before-downloads")
+    initial_picker = snapshot(S, phase + "-picker-initial")
+    if "a.txt" not in labels(initial_picker):
+        click(S, "Show roots", phase + "-picker-before-roots")
+        click(S, "Downloads", phase + "-picker-before-downloads")
     xml = snapshot(S, phase + "-picker-layout")
     if "List view" in labels(xml):
         click(S, "List view", phase + "-picker-before-list")
