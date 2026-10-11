@@ -1,4 +1,4 @@
-name: Build 2051 historical control
+name: Build 2051 historical URI comparison
 on:
   workflow_dispatch:
 jobs:
@@ -20,12 +20,11 @@ jobs:
           cache: true
       - name: Record immutable source and toolchain
         run: |
-          mkdir -p evidence
+          mkdir -p evidence/control evidence/uri
           git rev-parse HEAD > evidence/source-commit.txt
           flutter --version > evidence/flutter-version.txt
           sha256sum app/pubspec.lock > evidence/lockfile-sha256-before.txt
-          cp app/android/app/build.gradle evidence/original-build.gradle
-      - name: Prepare diagnostic release signing
+      - name: Prepare identical diagnostic release signing
         run: |
           keytool -genkeypair -keystore /tmp/issue2051-debug.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 30 -dname 'CN=Issue2051 Diagnostic,O=LocalSend,C=US'
           cat > app/android/key.properties <<'PROPERTIES'
@@ -34,18 +33,59 @@ jobs:
           keyAlias=androiddebugkey
           keyPassword=android
           PROPERTIES
-      - name: Build unchanged historical application
+      - name: Build unchanged historical control
         working-directory: app
         run: |
           flutter pub get --enforce-lockfile
           flutter build apk --release --target-platform android-x64
-          sha256sum pubspec.lock > ../evidence/lockfile-sha256-after.txt
-          sha256sum build/app/outputs/flutter-apk/app-release.apk > ../evidence/apk-sha256.txt
-          git diff --exit-code > ../evidence/source-diff.txt
+          cp build/app/outputs/flutter-apk/app-release.apk ../evidence/control/app-release.apk
+          sha256sum ../evidence/control/app-release.apk > ../evidence/control/apk-sha256.txt
+          sha256sum pubspec.lock > ../evidence/control/lockfile-sha256-after.txt
+          git diff --exit-code > ../evidence/control/source-diff.txt
+      - name: Preserve actual provider URI only for causal comparison
+        run: |
+          ruby <<'RUBY'
+          p='app/lib/util/native/file_saver.dart'
+          s=File.read(p)
+          edits={
+            'Future<void> saveFile({' => 'Future<String> saveFile({',
+            "      return;\n    }\n  }\n\n  final file = File(destinationPath);" => "      return safInfo.fileResult.uri.toString();\n    }\n  }\n\n  final file = File(destinationPath);",
+            "  );\n}\n\nFuture<void> _saveFile" => "  );\n  return destinationPath;\n}\n\nFuture<void> _saveFile"
+          }
+          edits.each{|a,b| raise "Expected exactly one file saver target: #{a}" unless s.scan(a).length==1; s=s.sub(a,b)}
+          File.write(p,s)
+          p='app/lib/provider/network/server/controller/receive_controller.dart'
+          s=File.read(p)
+          raise 'Expected one save call' unless s.scan('await saveFile(').length==1
+          s=s.sub('await saveFile(', 'final savedPath = await saveFile(')
+          a='path: saveToGallery ? null : destinationPath,'
+          raise 'Expected completion and history path' unless s.scan(a).length==2
+          s=s.gsub(a,'path: saveToGallery ? null : savedPath,')
+          File.write(p,s)
+          RUBY
+          git diff -- app/lib/util/native/file_saver.dart app/lib/provider/network/server/controller/receive_controller.dart > evidence/uri/uri-only.diff
+      - name: Build identical historical base with actual URI propagation
+        working-directory: app
+        run: |
+          flutter build apk --release --target-platform android-x64
+          cp build/app/outputs/flutter-apk/app-release.apk ../evidence/uri/app-release.apk
+          sha256sum ../evidence/uri/app-release.apk > ../evidence/uri/apk-sha256.txt
+          sha256sum pubspec.lock > ../evidence/uri/lockfile-sha256-after.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: issue-2051-historical-control-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            evidence/
-            app/build/app/outputs/flutter-apk/app-release.apk
+            evidence/control/
+            evidence/source-commit.txt
+            evidence/flutter-version.txt
+            evidence/lockfile-sha256-before.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-2051-historical-uri-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/uri/
+            evidence/source-commit.txt
+            evidence/flutter-version.txt
+            evidence/lockfile-sha256-before.txt

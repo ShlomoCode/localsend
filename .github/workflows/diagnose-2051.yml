@@ -15,7 +15,7 @@ on:
         description: Immutable artifact kind
         type: choice
         default: historical-control
-        options: [historical-control, current-control, current-guessed-uri]
+        options: [historical-control, historical-uri, current-control, current-guessed-uri]
 jobs:
   reproduce:
     runs-on: ubuntu-24.04
