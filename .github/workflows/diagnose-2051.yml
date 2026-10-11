@@ -18,14 +18,22 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare UI automation
+        run: |
+          npm install -g appium@3
+          appium driver install uiautomator2
       - name: Prepare release and emulators
         run: |
           export ANDROID_USER_HOME="$RUNNER_TEMP/issue2051-android"
           export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
           mkdir -p evidence "$ANDROID_AVD_HOME"
-          trap 'adb devices > evidence/adb-devices.txt; tail -100 evidence/*-emulator.log || true' EXIT
+          trap 'adb devices > evidence/adb-devices.txt; tail -n 100 evidence/*-emulator.log || true' EXIT
           curl -fL https://github.com/localsend/localsend/releases/download/v1.16.1/LocalSend-1.16.1-android-x64.apk -o /tmp/localsend.apk
-          sha256sum /tmp/localsend.apk > evidence/artifact-sha256.txt
+          curl -fL https://github.com/gsantner/markor/releases/download/v2.16.1/net.gsantner.markor-v163-2.16.1-flavorDefault-release.apk -o /tmp/markor.apk
+          sha256sum /tmp/localsend.apk /tmp/markor.apk > evidence/artifact-sha256.txt
           sudo chmod 666 /dev/kvm
           sdkmanager "platform-tools" "emulator" "system-images;android-30;google_apis;x86_64"
           echo no | avdmanager create avd -n receiver -k "system-images;android-30;google_apis;x86_64" --force
@@ -44,6 +52,9 @@ jobs:
             adb -s "$serial" shell pm grant org.localsend.localsend_app android.permission.WRITE_EXTERNAL_STORAGE || true
             adb -s "$serial" shell monkey -p org.localsend.localsend_app 1
           done
+          adb -s emulator-5554 install /tmp/markor.apk
+          appium --port 4723 > evidence/appium.log 2>&1 &
+          sleep 5
           python3 support/diagnostics/2051/scenario.py
       - uses: actions/upload-artifact@v4
         if: always()
