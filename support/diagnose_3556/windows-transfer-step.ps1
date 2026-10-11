@@ -2,7 +2,7 @@
 param(
  [string]$BrowserStackLocalPath='C:/tmp/bs-local-bin/BrowserStackLocal.exe',
  [string]$EvidenceDirectory,
- [string]$BaselineUrl='https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-android.apk',
+ [string]$BaselineUrl='https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-android-arm64v8.apk',
  [string]$BaselineApkPath
 )
 $ErrorActionPreference='Stop'
