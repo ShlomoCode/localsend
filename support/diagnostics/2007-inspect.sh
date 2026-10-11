@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 export NO_AT_BRIDGE=0
+export LIBGL_ALWAYS_SOFTWARE=1
 gsettings set org.gnome.desktop.interface toolkit-accessibility true
 openbox > evidence/openbox.log 2>&1 &
 desktop_app=$(find released -type f -name localsend_app | head -n1)
