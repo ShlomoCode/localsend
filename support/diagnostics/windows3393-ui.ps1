@@ -1,4 +1,4 @@
-param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot')
+param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @'
@@ -10,6 +10,9 @@ public static class W3393 {
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h,IntPtr dc,uint flags);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+ [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
+ [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr ChildWindowFromPointEx(IntPtr h,Point p,uint flags);
  [DllImport("user32.dll")] public static extern int MapWindowPoints(IntPtr from,IntPtr to,ref Point p,uint count);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
@@ -54,14 +57,41 @@ $appPid=0u;$viewPid=0u
 if($appPid -ne $viewPid){throw 'Input target belongs to another process'}
 $targetClass=[System.Text.StringBuilder]::new(256)
 [void][W3393]::GetClassName($view,$targetClass,256)
+$focusEvidence=$null
+$focusFailed=$false
 if($Action -eq 'click'){
- [void][W3393]::SetForegroundWindow($window)
+ $beforeForeground=[W3393]::GetForegroundWindow()
+ $beforePid=0u
+ $foregroundThread=[W3393]::GetWindowThreadProcessId($beforeForeground,[ref]$beforePid)
+ $appThread=[W3393]::GetWindowThreadProcessId($window,[ref]$appPid)
+ $currentThread=[W3393]::GetCurrentThreadId()
+ $attachedThreads=@()
+ if($RequireForeground){
+  foreach($thread in (@($foregroundThread,$appThread)|Select-Object -Unique)){
+   if($thread -ne 0 -and $thread -ne $currentThread){
+    $attached=[W3393]::AttachThreadInput($currentThread,$thread,$true)
+    if($attached){$attachedThreads+=$thread}
+   }
+  }
+ }
+ try{
+  $foregroundResult=[W3393]::SetForegroundWindow($window)
+  $previousFocus=if($RequireForeground){[W3393]::SetFocus($view)}else{[IntPtr]::Zero}
+  $clickForeground=[W3393]::GetForegroundWindow()
+  $clickPid=0u;[void][W3393]::GetWindowThreadProcessId($clickForeground,[ref]$clickPid)
+  $focusFailed=$RequireForeground -and ($clickPid -ne $appPid -or $clickForeground -ne $window)
+  $focusEvidence=@{required=[bool]$RequireForeground;beforeHwnd=$beforeForeground.ToInt64();beforePid=$beforePid;attachedThreads=$attachedThreads;setForegroundResult=$foregroundResult;previousFocus=$previousFocus.ToInt64();beforeClickHwnd=$clickForeground.ToInt64();beforeClickPid=$clickPid;verified=(-not $focusFailed)}
+ }finally{
+  foreach($thread in $attachedThreads){[void][W3393]::AttachThreadInput($currentThread,$thread,$false)}
+ }
+ if(-not $focusFailed){
  $packed=[IntPtr](($point.Y -shl 16) -bor ($point.X -band 0xffff))
  if(-not [W3393]::PostMessage($view,0x200,[IntPtr]::Zero,$packed)){throw 'Mouse move failed'}
  if(-not [W3393]::PostMessage($view,0x201,[IntPtr]1,$packed)){throw 'Mouse down failed'}
  Start-Sleep -Milliseconds 80
  if(-not [W3393]::PostMessage($view,0x202,[IntPtr]::Zero,$packed)){throw 'Mouse up failed'}
  Start-Sleep -Milliseconds 800
+ }
 }
 $rect=New-Object W3393+Rect
 [void][W3393]::GetWindowRect($window,[ref]$rect)
@@ -75,4 +105,5 @@ $elements=$element.FindAll([System.Windows.Automation.TreeScope]::Descendants,[S
 @($elements|ForEach-Object{@{name=$_.Current.Name;role=$_.Current.ControlType.ProgrammaticName}})|ConvertTo-Json -Depth 4|Set-Content "evidence/$Label-ui.json"
 $foreground=[W3393]::GetForegroundWindow()
 $foregroundPid=0u;[void][W3393]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)
-@{action=$Action;x=$X;y=$Y;targetX=$point.X;targetY=$point.Y;targetClass=$targetClass.ToString();appPid=$appPid;targetPid=$viewPid;utc=[DateTime]::UtcNow.ToString('o');window=$window.ToInt64();view=$view.ToInt64();foregroundHwnd=$foreground.ToInt64();foregroundPid=$foregroundPid;ownedWindows=[W3393]::OwnedWindows($appPid)}|ConvertTo-Json -Depth 6|Set-Content "evidence/$Label-action.json"
+@{action=$Action;x=$X;y=$Y;targetX=$point.X;targetY=$point.Y;targetClass=$targetClass.ToString();appPid=$appPid;targetPid=$viewPid;utc=[DateTime]::UtcNow.ToString('o');window=$window.ToInt64();view=$view.ToInt64();focus=$focusEvidence;foregroundHwnd=$foreground.ToInt64();foregroundPid=$foregroundPid;ownedWindows=[W3393]::OwnedWindows($appPid)}|ConvertTo-Json -Depth 6|Set-Content "evidence/$Label-action.json"
+if($focusFailed){throw 'Original LocalSend foreground could not be established; File click was not sent'}
