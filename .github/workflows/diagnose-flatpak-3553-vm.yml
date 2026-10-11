@@ -237,10 +237,21 @@ jobs:
           set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
           timeout 60 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /etc/os-release; flatpak --version; flatpak info org.localsend.localsend_app; dpkg-query -W; find ~/.cache/fontconfig ~/.var/app/org.localsend.localsend_app -type f -printf "%p %s\n" 2>/dev/null || true' > evidence/vm/pre-upgrade-packages.txt
-          timeout 2400 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/upgrade.log 2>&1 <<'GUEST'
+          timeout 1200 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/upgrade-prerequisite.log 2>&1 <<'GUEST'
           set -e
           sudo env DEBIAN_FRONTEND=noninteractive apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold full-upgrade
+          GUEST
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo systemctl reboot' >/dev/null 2>&1 || true
+          ready=0
+          for i in $(seq 1 90); do
+            sleep 10
+            if timeout 8 ssh "${ssh_opts[@]}" probe@127.0.0.1 'test ! -f /var/run/reboot-required && systemctl is-active --quiet gdm3 && test -S /run/user/$(id -u)/wayland-0' >/dev/null 2>&1; then ready=1; break; fi
+          done
+          echo "UPGRADE_PREREQUISITE_READY=$ready" | tee evidence/vm/upgrade-prerequisite-result.txt
+          test "$ready" = 1
+          timeout 2400 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/upgrade.log 2>&1 <<'GUEST'
+          set -e
           sudo sed -i 's/^Prompt=.*/Prompt=lts/' /etc/update-manager/release-upgrades
           sudo env DEBIAN_FRONTEND=noninteractive do-release-upgrade -f DistUpgradeViewNonInteractive
           GUEST
