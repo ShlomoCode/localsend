@@ -1717,12 +1717,13 @@ packages:
     source: hosted
     version: "2.1.6"
   tray_manager:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: tray_manager
-      sha256: "1a659b08baa6e9b91ef8ce16eda37740de398be1c4cf322b8a1ddfef25c68c5a"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/tray_manager"
+      ref: "59985e2aeee26676b3ab64cb042fb92baf3dd98c"
+      resolved-ref: "59985e2aeee26676b3ab64cb042fb92baf3dd98c"
+      url: "https://github.com/ShlomoCode/tray_manager.git"
+    source: git
     version: "0.5.3"
   type_plus:
     dependency: transitive
