@@ -2,9 +2,6 @@ name: Inspect Flatpak runtime history for 3553
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['codex/diagnose-flatpak-3553']
-    paths: ['.github/workflows/diagnose-flatpak-3553-runtime-history.yml']
 
 jobs:
   runtime-history:
