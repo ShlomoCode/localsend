@@ -28,7 +28,11 @@ export default async function({session,wd,senderPort,transportStatus}) {
  const destinationUri='content://com.android.externalstorage.documents/tree/primary%3ADocuments';
  const appTarget=label=>({using:'xpath',value:`//*[@package="${appPackage}" and @content-desc="${label}" and @clickable="true"]`});
  const destinationTarget={using:'xpath',value:`//*[@package="${appPackage}" and contains(@content-desc,"${destinationUri}")]`};
- const editTarget={using:'xpath',value:'(//*[@package="org.localsend.localsend_app" and starts-with(@content-desc,"Save to folder")]/android.widget.Button[not(@content-desc) and @clickable="true"])[1]'},documentRow={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents"]/ancestor::*[@clickable="true"][1]'},folderTarget=exactNativeButton({packageName:pickerPackage,resourceId:'android:id/button1',text:'Use this folder'});
+ // The released Android app groups Destination and media options under one parent.
+ // Index 0 is the pencil in the observed native tree; reject ambiguous identities.
+ const destinationParent='//*[@package="org.localsend.localsend_app" and @class="android.widget.Button" and starts-with(@content-desc,"Destination") and contains(@content-desc,"/storage/emulated/0/Download")]';
+ const pencilChild='android.widget.Button[@package="org.localsend.localsend_app" and @index="0" and not(@content-desc) and @clickable="true" and @enabled="true"]';
+ const editTarget={using:'xpath',value:`${destinationParent}[count(${destinationParent})=1 and count(${pencilChild})=1]/${pencilChild}`},documentRow={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents"]/ancestor::*[@clickable="true"][1]'},folderTarget=exactNativeButton({packageName:pickerPackage,resourceId:'android:id/button1',text:'Use this folder'});
  async function ready(label,target,options={}) {return await waitForNativeControl({wd,prefix,label,...target,...options});}
  async function clickElement(element,label){
   const record={started:new Date().toISOString(),elementId:element['element-6066-11e4-a52e-4f735466cecf'],readiness:element.readiness};
