@@ -10,7 +10,7 @@ on:
         description: Source dependency condition
         default: normal
         type: choice
-        options: [normal, negative, positive]
+        options: [normal, negative, positive, hosted]
   push:
     branches: [codex/bug-513-fedora-diagnostics]
     paths: [.github/workflows/diagnose-513-causal-ui.yml]
@@ -30,14 +30,18 @@ jobs:
           SOURCE_CONDITION: ${{ inputs.condition || 'normal' }}
           SOURCE_BUILD_RUN: ${{ inputs.source_run || '38163717100' }}
         run: |
-          gh run download "$SOURCE_BUILD_RUN" --repo ShlomoCode/localsend --name "issue513-causal-source-packages-$SOURCE_BUILD_RUN" --dir source-packages
+          artifact="issue513-causal-source-packages-$SOURCE_BUILD_RUN"
+          if [[ "$SOURCE_CONDITION" == hosted ]]; then artifact="issue513-hosted-source-$SOURCE_BUILD_RUN"; fi
+          gh run download "$SOURCE_BUILD_RUN" --repo ShlomoCode/localsend --name "$artifact" --dir source-packages
           mkdir -p evidence/vm/source-provenance
-          cp source-packages/isolated-portal.patch source-packages/sdk.txt source-packages/package-sha256.txt "source-packages/manifest-$SOURCE_CONDITION.yml" "source-packages/lock-$SOURCE_CONDITION.yaml" "source-packages/source-diff-$SOURCE_CONDITION.patch" evidence/vm/source-provenance/
+          cp source-packages/sdk.txt source-packages/package-sha256.txt "source-packages/manifest-$SOURCE_CONDITION.yml" "source-packages/lock-$SOURCE_CONDITION.yaml" "source-packages/source-diff-$SOURCE_CONDITION.patch" evidence/vm/source-provenance/
+          if test -f source-packages/isolated-portal.patch; then cp source-packages/isolated-portal.patch evidence/vm/source-provenance/; fi
+          if test -f source-packages/production-head.txt; then cp source-packages/production-head.txt source-packages/production.patch evidence/vm/source-provenance/; fi
           if test -f "source-packages/native-provenance-$SOURCE_CONDITION.txt"; then cp "source-packages/native-provenance-$SOURCE_CONDITION.txt" "source-packages/native-strings-$SOURCE_CONDITION.txt" evidence/vm/source-provenance/; fi
           printf 'SOURCE_BUILD_RUN=%s\nSOURCE_CONDITION=%s\n' "$SOURCE_BUILD_RUN" "$SOURCE_CONDITION" > evidence/vm/source-provenance/selection.txt
           sha256sum "source-packages/$SOURCE_CONDITION.flatpak" > evidence/vm/source-provenance/package-loaded-sha256.txt
           echo "SOURCE_CONDITION=$SOURCE_CONDITION" >> "$GITHUB_ENV"
-          if [[ "$SOURCE_CONDITION" == positive ]]; then echo 'SOURCE_DROP_SEND=1' >> "$GITHUB_ENV"; fi
+          if [[ "$SOURCE_CONDITION" == positive || "$SOURCE_CONDITION" == hosted ]]; then echo 'SOURCE_DROP_SEND=1' >> "$GITHUB_ENV"; fi
       - name: Prepare Fedora 38 guest
         run: |
           set -euo pipefail

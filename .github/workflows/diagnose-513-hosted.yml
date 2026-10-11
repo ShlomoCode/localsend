@@ -38,6 +38,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev flatpak flatpak-builder ruby
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/setup-java@v4
+        if: env.HOSTED_PHASE == 'validate'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        if: env.HOSTED_PHASE == 'validate'
       - name: Resolve or build the hosted candidate without overrides
         run: bash support/diagnostics/513-hosted.sh
       - uses: actions/upload-artifact@v4

@@ -19,6 +19,21 @@ git diff --exit-code
 (cd app && fvm flutter analyze) > "$diagnostic_root/evidence/hosted/analyze.txt" 2>&1
 (cd app && fvm flutter test) > "$diagnostic_root/evidence/hosted/tests-app.txt" 2>&1
 (cd packages/localsend_isolates && fvm flutter test) > "$diagnostic_root/evidence/hosted/tests-isolates.txt" 2>&1
+(cd app && fvm flutter build apk --debug --target-platform android-arm64) > "$diagnostic_root/evidence/hosted/build-android.txt" 2>&1
+# Compile the published plugin's shared Dart code on web independently of the
+# application's native-only Rust layer. This does not claim LocalSend web support.
+fvm flutter create --platforms web "$build_root/drop_web_probe" > "$diagnostic_root/evidence/hosted/web-create.txt" 2>&1
+(cd "$build_root/drop_web_probe" && fvm use 3.41.9 --skip-pub-get && fvm flutter pub add desktop_drop:0.8.4) > "$diagnostic_root/evidence/hosted/web-pub-get.txt" 2>&1
+cat > "$build_root/drop_web_probe/lib/main.dart" <<'DART'
+import 'package:flutter/material.dart';
+import 'package:desktop_drop/desktop_drop.dart';
+void main() => runApp(MaterialApp(home: DropTarget(
+  onDragDone: (event) { for (final file in event.files) { debugPrint(file.path); } },
+  child: const SizedBox(width: 200, height: 200),
+)));
+DART
+(cd "$build_root/drop_web_probe" && fvm flutter build web) > "$diagnostic_root/evidence/hosted/build-web-plugin.txt" 2>&1
+cp "$build_root/drop_web_probe/pubspec.lock" "$diagnostic_root/evidence/hosted/lock-web-probe.yaml"
 (cd app && fvm flutter build linux --release) > "$diagnostic_root/evidence/hosted/build-hosted.txt" 2>&1
 plugin_source=$(realpath app/linux/flutter/ephemeral/.plugin_symlinks/desktop_drop)
 printf 'checkout=%s\nplugin_source=%s\n' "$PWD" "$plugin_source" > "$diagnostic_root/evidence/hosted/native-provenance-hosted.txt"
