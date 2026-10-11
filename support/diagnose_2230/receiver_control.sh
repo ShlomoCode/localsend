@@ -56,7 +56,7 @@ approval_crop_ocr() {
   # Options is a rendered semantic anchor above the approval button row.
   # Crop geometry only limits OCR; button clicks still require recognized text.
   local anchor crop_x crop_y crop_w=440 crop_h=90 scale=3
-  local processed="$base-approval-crop"
+  local processed threshold previous_tsv="$control_tsv"
   anchor=$(awk -F '\t' 'NR>1 && $1==5 && $11>=50 && tolower($12)=="options" {n++;x=$7+$9/2;y=$8+$10} END{if(n==1)printf "%d %d",x,y;else exit 1}' "$base.tsv") || return 0
   read -r crop_x crop_y <<< "$anchor"
   crop_x=$((crop_x-220)); crop_y=$((crop_y+15))
@@ -64,19 +64,30 @@ approval_crop_ocr() {
     event ocr_crop_rejected "Options anchor would exceed screenshot bounds"
     return 0
   fi
-  printf 'source_png\tcrop_x\tcrop_y\tcrop_width\tcrop_height\tscale\n%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$base.png" "$crop_x" "$crop_y" "$crop_w" "$crop_h" "$scale" > "$processed.transform.tsv"
-  event ocr_fallback "$processed.png using Options anchor"
-  if timeout 5 ffmpeg -nostdin -y -loglevel error -i "$base.png" \
-    -vf "format=gray,lut=y='if(gt(val,180),0,255)',crop=$crop_w:$crop_h:$crop_x:$crop_y,scale=iw*$scale:ih*$scale:flags=lanczos" \
-    -frames:v 1 "$processed.png" > "$processed.preprocess.log" 2>&1 && \
-    timeout 5 tesseract "$processed.png" "$processed" --psm 6 \
-      -c tessedit_do_invert=0 tsv txt > "$processed.ocr.log" 2>&1; then
-    awk -F '\t' -v OFS='\t' -v x="$crop_x" -v y="$crop_y" -v scale="$scale" \
-      'NR==1{print;next} NF>=12{$7=$7/scale+x;$8=$8/scale+y;$9=$9/scale;$10=$10/scale;print}' \
-      "$processed.tsv" > "$processed.screen.tsv"
-    control_tsv="$processed.screen.tsv"
-  fi
+  # Isolate near-white label pixels from the original RGB crop. Unlike the
+  # full-frame threshold, this removes both the colored pills and pale page.
+  for threshold in 250 252; do
+    (( $(mono) < wait_deadline )) || break
+    processed="$base-approval-crop-t$threshold-psm7"
+    printf 'source_png\tcrop_x\tcrop_y\tcrop_width\tcrop_height\tscale\tthreshold\tpsm\n%s\t%s\t%s\t%s\t%s\t%s\t%s\t7\n' \
+      "$base.png" "$crop_x" "$crop_y" "$crop_w" "$crop_h" "$scale" "$threshold" > "$processed.transform.tsv"
+    event ocr_fallback "$processed.png using Options anchor"
+    if timeout 5 ffmpeg -nostdin -y -loglevel error -i "$base.png" \
+      -vf "crop=$crop_w:$crop_h:$crop_x:$crop_y,scale=iw*$scale:ih*$scale:flags=lanczos,format=gray,lut=y='if(gt(val,$threshold),0,255)'" \
+      -frames:v 1 "$processed.png" > "$processed.preprocess.log" 2>&1 && \
+      timeout 5 tesseract "$processed.png" "$processed" --psm 7 \
+        -c tessedit_do_invert=0 tsv txt > "$processed.ocr.log" 2>&1; then
+      awk -F '\t' -v OFS='\t' -v x="$crop_x" -v y="$crop_y" -v scale="$scale" \
+        'NR==1{print;next} NF>=12{$7=$7/scale+x;$8=$8/scale+y;$9=$9/scale;$10=$10/scale;print}' \
+        "$processed.tsv" > "$processed.screen.tsv"
+      control_tsv="$processed.screen.tsv"
+      if coords Accept >/dev/null && coords Decline >/dev/null; then
+        event ocr_variant_selected "$control_tsv"
+        return 0
+      fi
+    fi
+    control_tsv="$previous_tsv"
+  done
 }
 has() { grep -Eiq "$1" "$base.txt"; }
 click_word() {
