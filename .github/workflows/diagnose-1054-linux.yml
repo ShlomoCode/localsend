@@ -37,7 +37,7 @@ jobs:
       - name: Install ordinary Linux desktop runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr imagemagick iproute2 dbus-x11 libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0t64 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 jq
+          sudo apt-get install -y xvfb x11-utils openbox xdotool scrot tesseract-ocr imagemagick iproute2 dbus-x11 libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0t64 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 jq
       - name: Run initial, edited and reselected ordinary transfers twice
         run: bash support/diagnostics/1054-linux.sh
       - name: Restore evidence access
