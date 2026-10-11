@@ -214,17 +214,32 @@ function visibleFavoriteFields(xml){
    Number(bounds[3])>Number(bounds[1])&&Number(bounds[4])>Number(bounds[2]);
  });
 }
+let keyboardObservation=0;
+function favoriteEditorPresent(xml){
+ const names=labels(xml);return names.includes('Add to favorites')&&names.includes('Confirm');
+}
 async function hideFavoriteKeyboard(stage){
+ const evidenceStage=stage+'-'+(++keyboardObservation);
+ const shown=await wd('GET',base()+'/appium/device/is_keyboard_shown');
+ assert.equal(typeof shown,'boolean','Keyboard visibility must be observable before hiding it');
+ report.actions.push({utc:new Date().toISOString(),label:'Observed native keyboard visibility',stage,shown});
+ if(!shown)return;
+ const before=await source();assert(favoriteEditorPresent(before),'Favorite editor absent before observed keyboard hide');
+ await snap('favorite-keyboard-shown-'+evidenceStage,before);
  try{await wd('POST',base()+'/appium/device/hide_keyboard',{});}catch(error){
   const observed=await source();
-  await snap('favorite-hide-keyboard-error-'+stage,observed);
+  await snap('favorite-hide-keyboard-error-'+evidenceStage,observed);
   const keyboardAbsent=/keyboard.*(?:not.*(?:shown|open|present|visible)|already.*hidden)|no .*keyboard/i.test(error.message);
   if(!keyboardAbsent||visibleFavoriteFields(observed).length!==3)throw Error('Keyboard hide failed without an absent-keyboard message and three visible favorite fields: '+redact(error.message));
   report.actions.push({utc:new Date().toISOString(),label:'Keyboard hide error tolerated after observing three visible fields',stage,error:redact(error.message)});
  }
+ const after=await snap('favorite-keyboard-hidden-'+evidenceStage);
+ assert(favoriteEditorPresent(after),'Favorite editor disappeared after keyboard hide; no field input is permitted');
 }
 async function addFavorite(){
  await click('Favorites');await snap('favorites-before-add');await click('Add');
+ const editor=await waitFor(favoriteEditorPresent,30000,'Favorite Add did not expose Add to favorites and Confirm');
+ await snap('favorite-edit-before-keyboard-action',editor);
  // v1.18.2 auto-focuses IP. The keyboard can collapse all dialog fields in landscape.
  // Hide it before waiting for fields, including when the preceding app rotated the device.
  await hideFavoriteKeyboard('initial');
@@ -232,6 +247,7 @@ async function addFavorite(){
  let xml;const fieldDeadline=Date.now()+30000;
  do{
   xml=await source();if(visibleFavoriteFields(xml).length===3)break;
+  assert(favoriteEditorPresent(xml),'Favorite editor disappeared while exposing fields');
   await hideFavoriteKeyboard('waiting-for-visible-fields');await sleep(500);
  }while(Date.now()<fieldDeadline);
  assert.equal(visibleFavoriteFields(xml).length,3,'Favorite dialog must expose exactly three visible EditTexts');
@@ -245,10 +261,12 @@ async function addFavorite(){
  assert(fields.every(f=>f.rect.width>0&&f.rect.height>0),'Favorite fields must be visible');
  const values=['issue3556-cloud-receiver','127.0.0.1','53318'];
  for(let i=0;i<fields.length;i++){
+  assert.equal(await wd('GET',base()+'/element/'+fields[i].id+'/displayed'),true,'Favorite field is no longer displayed before input');
   await wd('POST',base()+'/element/'+fields[i].id+'/clear',{});
   await wd('POST',base()+'/element/'+fields[i].id+'/value',{text:values[i],value:[...values[i]]});
   fields[i].observedText=await wd('GET',base()+'/element/'+fields[i].id+'/text');
   assert.equal(fields[i].observedText,values[i],'Favorite field did not retain the intended value');
+  await snap('favorite-field-'+i+'-filled');
  }
  save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i],observedText:f.observedText})));
  await snap('favorite-edit-filled');

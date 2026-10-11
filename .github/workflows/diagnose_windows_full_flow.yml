@@ -46,12 +46,12 @@ jobs:
   windows-transfer-control:
     if: inputs.scenario == 'windows-transfer-control'
     runs-on: windows-2022
-    timeout-minutes: 65
+    timeout-minutes: 45
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue3556-${{ github.run_id }}
-      SHARE_AFTER_CONTROL: '1'
+      SHARE_AFTER_CONTROL: '0'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
