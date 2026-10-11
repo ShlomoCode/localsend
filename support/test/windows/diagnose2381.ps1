@@ -44,7 +44,13 @@ function Screenshot([string]$name) {
  $scaled.Save("$EvidenceDirectory/$name-ocr.png",[System.Drawing.Imaging.ImageFormat]::Png)
  $sg.Dispose(); $scaled.Dispose(); $bmp.Dispose()
 
+ # Tesseract emits benign clipping warnings for content at a scroll viewport edge.
+ $previousPreference=$ErrorActionPreference
+ $ErrorActionPreference="Continue"
  & "C:/Program Files/Tesseract-OCR/tesseract.exe" $EvidenceDirectory/$name-ocr.png "$EvidenceDirectory/$name" -l eng --psm 11 tsv 2> "$EvidenceDirectory/$name-ocr-error.txt"
+ $ocrExit=$LASTEXITCODE
+ $ErrorActionPreference=$previousPreference
+ if ($ocrExit -ne 0) {throw "OCR failed for $name with exit $ocrExit"}
  Import-Csv "$EvidenceDirectory/$name.tsv" -Delimiter "`t" | Where-Object {$_.text} | Select-Object left,top,width,height,text | Format-Table | Out-String | Write-Host
 }
 function Click([int]$x,[int]$y) {
@@ -183,6 +189,15 @@ Start-Sleep -Seconds 8
 Screenshot "nearby-after-add"
 Click 576 212
 Screenshot "favorites-after-scan"
+$stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-after-scan.json"
+# The two Edit pencil centers were verified on the actual two-row Favorites dialog.
+foreach ($edit in @(@{alias="Home LAN";y=358},@{alias="NetBird LAN";y=414})) {
+ Click 588 $edit.y
+ Screenshot "edit-$($edit.alias.Replace(' ','-'))"
+ # Record this dialog first; its text field geometry must be verified before editing.
+ throw "Edit dialog checkpoint: retain exact UI geometry before customAlias scenario"
+}
 Word "Cancel" "favorites-after-scan"
 Click 103 245
 Screenshot "settings-top"
