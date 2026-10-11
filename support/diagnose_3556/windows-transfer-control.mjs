@@ -356,7 +356,7 @@ try{
  do{
   const xml=await source(),now=Date.now(),names=labels(xml);
   const anr=/isn.t responding|not responding/i.test(names.join('\n'));
-  const finished=names.some(v=>v==='Finished'||v.startsWith('Finished\n'))&&!names.some(v=>v.includes('Finished with error'));
+  const finished=names.some(v=>v==='Finished'||v==='100, Finished'||v.startsWith('Finished\n'))&&!names.some(v=>v.includes('Finished with error'));
   await snap('transfer-'+String(report.observations.length).padStart(3,'0'),xml);
   if(finished)androidFinished=true;
   const result=receiverResult();

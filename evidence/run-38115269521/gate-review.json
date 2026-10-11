@@ -1,0 +1,22 @@
+{
+  "run": 38115269521,
+  "commit": "ed91b5ef5d4288cfab15995ecc9150c372bc1a33",
+  "rawWorkflowConclusion": "failure",
+  "rawControllerStatus": "incomplete",
+  "reviewedAppControl": "passed",
+  "reason": "Exact successful accessibility label is 100, Finished; original checker accepted only Finished or Finished newline. Raw artifacts remain unchanged.",
+  "bytes": 1048576,
+  "sha256": "1b183b42ac6ff37ddc32072876cb998b28c4517988ba1adc07e18e1cd5bf85a1",
+  "sendUtc": "2026-10-11T05:38:19.967Z",
+  "nativeWindowsAcceptUtc": "2026-10-11T05:38:25.5029863Z",
+  "windowsVerifiedUtc": "2026-10-11T05:38:27.5860808Z",
+  "receiverExit": 0,
+  "androidProof": ["issue3556-windows-transfer-evidence/windows-transfer/transfer-001.xml", "issue3556-windows-transfer-evidence/windows-transfer/transfer-001.png"],
+  "androidSourceRequestStartedUtc": "2026-10-11T05:38:26.764Z",
+  "androidSourceRequestCompletedUtc": "2026-10-11T05:38:26.988Z",
+  "androidScreenshotCompletedUtc": "2026-10-11T05:38:27.321Z",
+  "helperProof": {"peer":"android-5", "exception":"IOException", "message":"shutdown failed: ENOTCONN (Transport endpoint is not connected)", "activeBefore":["android-4","android-5","android-6"], "activeAfter":["android-4","android-6"], "log":"device-logs-redacted.log", "lines":[501,503,536]},
+  "limitations": ["Device log and Actions clocks are separate.", "1 MiB does not establish sustained large-transfer throughput.", "Windows Server 2022 and relay differ from reporter Win10 Pro/shared LAN.", "Post-blur Port field is clipped in PNG; focused Port screenshot, registration and actual routed transfer establish applied route."],
+  "reportedAnrReproduced": false,
+  "substantiveLargeSelectionConditions": 2
+}
