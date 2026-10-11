@@ -62,6 +62,47 @@ def screen(side, stage):
     return words, timing
 
 
+def dialog_screen(stage, count):
+    # Keep the full, unmodified screenshot and its ordinary OCR first. PSM 11
+    # found the title in run 38114096632 but missed the smaller dialog labels.
+    words, timing = screen("guest", stage)
+    titles = [word for word in words if word["text"].strip() == "Enter"]
+    for title in titles:
+        line = [word for word in words if abs(word["top"] - title["top"]) <= 12
+                and word["text"].strip() in ("Enter", "file", "name")]
+        if {word["text"].strip() for word in line} != {"Enter", "file", "name"}:
+            continue
+        # Anchor to observed title pixels, not X11 client Y (which disagreed
+        # with PNG origin). Include Original, text field and action buttons.
+        left = max(0, min(word["left"] for word in line) - 32)
+        top = max(0, min(word["top"] for word in line) - 35)
+        title_right = max(word["left"] + word["width"] for word in line)
+        width = title_right - min(word["left"] for word in line) + 170 + (25 if count == 5000 else 0)
+        height = 250
+        crop = OUT / (stage + "-dialog-crop.png")
+        enlarged = OUT / (stage + "-dialog-ocr.png")
+        execute(["convert", str(OUT / (stage + ".png")), "-crop", f"{width}x{height}+{left}+{top}",
+                 "+repage", str(crop)])
+        execute(["convert", str(crop), "-resize", "300%", str(enlarged)])
+        text = execute(["tesseract", str(enlarged), "stdout", "--psm", "6", "tsv"])
+        (OUT / (stage + "-dialog.tsv")).write_text(text)
+        roi = {"left": left, "top": top, "width": width, "height": height, "scale": 3,
+               "psm": 6, "anchor": line, "coordinates": "original full-frame absolute pixels"}
+        (OUT / (stage + "-dialog-roi.json")).write_text(json.dumps(roi, indent=2))
+        foreground = list(csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE))
+        for word in foreground:
+            # Preserve the existing harmless handling of missing TSV text.
+            word["text"] = word.get("text") or ""
+            word["left"] = int(word["left"]) // 3 + left
+            word["top"] = int(word["top"]) // 3 + top
+            for key in ("width", "height"):
+                word[key] = int(word[key]) // 3
+        return foreground, timing
+    # No title means no proven dialog crop. Retain the full frame as discovery
+    # evidence and let the same bounded predicate wait for its appearance.
+    return [], timing
+
+
 def locate(side, label, stage, deadline=20):
     end = time.monotonic() + deadline
     index = 0
@@ -162,13 +203,17 @@ def visibly_scrolled(observed, expected):
                for name in observed.keys() & expected.keys())
 
 
-def observe_probe(predicate, stage, deadline=45):
+def observe_probe(predicate, stage, deadline=45, dialog_count=None):
     started = time.monotonic()
     end = started + deadline
     previous = None
     index = 0
     while time.monotonic() < end:
-        words, timing = screen("guest", stage + "-" + str(index))
+        frame_stage = stage + "-" + str(index)
+        if dialog_count is None:
+            words, timing = screen("guest", frame_stage)
+        else:
+            words, timing = dialog_screen(frame_stage, dialog_count)
         index += 1
         if predicate(words):
             return words, {"first_matching_capture": timing, "last_nonmatching_capture": previous,
@@ -265,7 +310,7 @@ def options_interaction_probes(count, case, window):
         dialog_words, dialog = observe_probe(
             lambda frame: {"Enter", "file", "name", "Cancel", "Original:"}.issubset(
                 {word["text"].strip() for word in frame}) and original in filename_rows(frame),
-            case + "-editor-open", 45)
+            case + "-editor-open", 45, dialog_count=count)
         probes["editor_open"] = {"classification": "file-name-dialog-observed",
                                  **reaction_timing(opened, dialog, host_started)}
         screen("guest", case + "-editor-textfield-before")
@@ -277,7 +322,7 @@ def options_interaction_probes(count, case, window):
         draft_words, draft = observe_probe(
             lambda frame: any(word["text"].strip() == "Probe2414.txt" for word in frame)
             and any(word["text"].strip() == "Cancel" for word in frame),
-            case + "-editor-draft", 45)
+            case + "-editor-draft", 45, dialog_count=count)
         probes["draft_input"] = {"classification": "draft-visible-in-dialog", "select_all": draft_input,
                                  **reaction_timing(typed, draft, host_started)}
         cancel = next(word for word in draft_words if word["text"].strip() == "Cancel")
