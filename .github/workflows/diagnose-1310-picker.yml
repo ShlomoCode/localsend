@@ -21,6 +21,10 @@ on:
         type: choice
         default: xfce-extracted
         options: [xfce-extracted, gnome-fuse]
+      link_kind:
+        type: choice
+        default: relative
+        options: [relative, absolute, parent, chain]
 concurrency:
   group: issue402-diagnostic
   cancel-in-progress: false
@@ -40,7 +44,7 @@ jobs:
         if: inputs.sender_runtime != 'gnome-fuse'
         run: |
           docker run -d --name issue402-receiver --network issue402-net -e ROLE=receiver -v "$PWD/evidence/cloud:/evidence" issue402-desktop
-          docker run -d --name issue402-sender --network issue402-net -e ROLE=sender -e CAPTURE_PICKER=${{ inputs.capture_picker }} -e SELECTION_MODE=${{ inputs.selection_mode || 'path' }} -v "$PWD/evidence/cloud:/evidence" issue402-desktop
+          docker run -d --name issue402-sender --network issue402-net -e ROLE=sender -e LINK_KIND=${{ inputs.link_kind || 'relative' }} -e CAPTURE_PICKER=${{ inputs.capture_picker }} -e SELECTION_MODE=${{ inputs.selection_mode || 'path' }} -v "$PWD/evidence/cloud:/evidence" issue402-desktop
           result=0
           for name in issue402-sender issue402-receiver; do
             status=$(timeout 600 docker wait "$name") || status=124
@@ -56,6 +60,7 @@ jobs:
           test '${{ inputs.picker_backend }}' = zenity
           test '${{ inputs.selection_mode }}' = path
           test '${{ inputs.capture_picker }}' = false
+          test '${{ inputs.link_kind }}' = relative
           bash support/diagnostics/402-gnome-vm.sh > evidence/cloud/gnome-host.log 2>&1 &
           vm_pid=$!
           while [ ! -e evidence/cloud/gnome-ready ]; do

@@ -165,8 +165,23 @@ else:
     fixture.mkdir()
     payload = b'LocalSend issue 402 ordinary owned file\n' * 32
     (fixture / 'whatever.txt').write_bytes(payload)
-    (fixture / 'another.txt').symlink_to('whatever.txt')
-    log('fixture', link=os.readlink(fixture / 'another.txt'), size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
+    link_kind = os.environ.get('LINK_KIND', 'relative')
+    if link_kind == 'absolute':
+        target = str(fixture / 'whatever.txt')
+    elif link_kind == 'parent':
+        sibling = fixture.parent / 'target'
+        sibling.mkdir()
+        (sibling / 'whatever.txt').write_bytes(payload)
+        target = '../target/whatever.txt'
+    elif link_kind == 'chain':
+        (fixture / 'intermediate.txt').symlink_to('whatever.txt')
+        target = 'intermediate.txt'
+    elif link_kind == 'relative':
+        target = 'whatever.txt'
+    else:
+        raise RuntimeError('Unsupported fixture link kind: ' + link_kind)
+    (fixture / 'another.txt').symlink_to(target)
+    log('fixture', link_kind=link_kind, link=os.readlink(fixture / 'another.txt'), size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
     deadline = time.monotonic() + 90
     while not (evidence / 'receiver/ready').exists():
         if time.monotonic() > deadline:
