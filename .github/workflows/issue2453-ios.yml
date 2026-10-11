@@ -2,6 +2,12 @@ name: Issue 2453 historical iOS admission
 
 on:
   workflow_dispatch:
+    inputs:
+      renderer:
+        description: Diagnostic renderer, unchanged source and historical Flutter
+        type: choice
+        options: [impeller, skia]
+        default: impeller
   push:
     branches: [codex/issue2453-investigation]
     paths: [.github/workflows/issue2453-ios.yml]
@@ -35,6 +41,7 @@ jobs:
           mkdir -p "$out/locks-before"
           git rev-parse HEAD > "$out/source-commit.txt"
           git status --porcelain > "$out/source-status-before.txt"
+          printf '%s\n' '${{ inputs.renderer }}' > "$out/renderer.txt"
           cp .fvmrc app/pubspec.lock app/ios/Podfile.lock "$out/locks-before/"
           shasum -a 256 "$out/locks-before/"* > "$out/locks-before.sha256"
           sw_vers > "$out/runner.txt"
@@ -71,7 +78,9 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.pub-cache/bin:$PATH"
-          fvm flutter build ios --release --no-codesign 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
+          args=()
+          if [[ '${{ inputs.renderer }}' == skia ]]; then args+=(--no-enable-impeller); fi
+          fvm flutter build ios --release --no-codesign "${args[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
 
       - name: Package the normal device artifact
         working-directory: source
