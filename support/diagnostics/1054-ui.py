@@ -201,12 +201,17 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
         if errors:
             row = errors[0]
             click((row["left"] + row["width"] + 20, row["top"] + row["height"] // 2))
+            time.sleep(1)
             detail_rows = screen(stage + "-receiver-error-details")
             result["receiver_error_detail_words"] = [row["text"] for row in detail_rows if row["text"]]
             closes = [row for row in detail_rows if row["text"].lower() == "close"]
             if closes:
                 row = closes[0]
                 click((row["left"] + row["width"] // 2, row["top"] + row["height"] // 2))
+            else:
+                # Inspected ordinary error-dialog Close center under the
+                # normalized client geometry; avoid clicking behind the modal.
+                click((666, 416))
     focus(swin)
     result["sender_status_words"] = [row["text"] for row in screen(stage + "-sender-outcome") if row["text"]]
     RESULTS.append(result)
@@ -218,7 +223,15 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
         shutil.move(str(entry), str(archive / entry.name))
     focus(rwin)
     click(locate("Done", stage + "-receiver-done", 15))
+    locate("Receiver", stage + "-receiver-home", 15)
     focus(swin)
+    if not result["content_valid"]:
+        # In multiple mode a failed target opens its retained session. Close
+        # that ordinary session through Done before attempting a new transfer.
+        click(locate("Receiver", stage + "-sender-failed-target", 15))
+        locate("Finished", stage + "-sender-failed-session", 15)
+        screen(stage + "-sender-failed-session-before-close")
+        click(locate("Done", stage + "-sender-failed-session-done", 15))
     # Multiple mode normally stays on send tab. If a session page is present,
     # Done returns normally; do not clear selection between first two sends.
     words = screen(stage + "-sender-return")
