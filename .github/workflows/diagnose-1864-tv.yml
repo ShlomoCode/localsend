@@ -1,0 +1,55 @@
+name: Diagnose issue 1864 Android TV
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue-1864-tv
+  cancel-in-progress: false
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: Prepare genuine TV 10 image and avdslim
+        shell: bash
+        run: |
+          mkdir -p evidence-cloud
+          sdkmanager 'platform-tools' 'emulator' 'system-images;android-29;android-tv;x86'
+          echo no | avdmanager create avd --name issue1864-tv29 --package 'system-images;android-29;android-tv;x86' --device 'tv_1080p'
+          cp "$HOME/.android/avd/issue1864-tv29.avd/config.ini" evidence-cloud/avd-default.ini
+          curl -fsSL https://github.com/kdbhalala/avdslim/releases/download/v1.0.15/avdslim_v1.0.15_linux_amd64.tar.gz -o /tmp/avdslim.tar.gz
+          tar -xzf /tmp/avdslim.tar.gz -C /tmp
+          sudo install /tmp/avdslim /usr/local/bin/avdslim
+          avdslim help > evidence-cloud/avdslim-help.txt
+          avdslim enable dpad issue1864-tv29
+          cp "$HOME/.android/avd/issue1864-tv29.avd/config.ini" evidence-cloud/avd-dpad.ini
+          sudo chmod 666 /dev/kvm
+          avdslim start issue1864-tv29 --headless --no-slim --no-lowram > evidence-cloud/emulator-launch.log 2>&1
+          adb wait-for-device
+          for i in $(seq 1 120); do [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break; sleep 2; done
+          adb shell getprop > evidence-cloud/getprop.txt
+          adb shell settings list system > evidence-cloud/system-settings.txt
+          adb shell settings list secure > evidence-cloud/secure-settings.txt
+          adb shell dumpsys input > evidence-cloud/input-default.txt
+      - name: Install exact legitimate original release and capture readiness
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
+          sha256sum evidence-cloud/original-1.15.4.apk > evidence-cloud/apk-sha256.txt
+          unzip -Z1 evidence-cloud/original-1.15.4.apk | grep '^lib/' > evidence-cloud/apk-libraries.txt
+          adb install -r evidence-cloud/original-1.15.4.apk 2>&1 | tee evidence-cloud/install.log
+          adb shell am start -n org.localsend.localsend_app/.MainActivity 2>&1 | tee evidence-cloud/launch.log
+          sleep 5
+          adb shell uiautomator dump /sdcard/ui.xml
+          adb pull /sdcard/ui.xml evidence-cloud/initial.xml
+          adb exec-out screencap -p > evidence-cloud/initial.png
+          adb shell dumpsys activity activities > evidence-cloud/activity.txt
+          adb logcat -d > evidence-cloud/logcat.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue1864-tv29-initial
+          path: evidence-cloud
