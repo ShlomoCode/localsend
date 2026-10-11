@@ -38,6 +38,17 @@ function ClickWord($Ocr,[string]$Text) {
   if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($w.Hwnd),[int]($w.Left+$p.x+$p.width/2),[int]($w.Top+$p.y+$p.height/2))) { throw 'Application click failed.' }
   Start-Sleep -Milliseconds 600
 }
+function ClickIpAddressTab($Ocr) {
+  $address=@($Ocr.words | Where-Object text -CEQ 'Address')
+  $ip=@($Ocr.words | Where-Object text -CEQ 'IP' | Where-Object {
+    $p=$_
+    @($address | Where-Object { [Math]::Abs($_.y-$p.y) -lt 5 -and $_.x -gt $p.x -and $_.x -lt $p.x+60 }).Count -eq 1
+  })
+  if($ip.Count -ne 1) { throw 'No unique rendered IP Address tab; no click.' }
+  $w=$Ocr.window; $p=$ip[0]
+  if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($w.Hwnd),[int]($w.Left+$p.x+$p.width/2),[int]($w.Top+$p.y+$p.height/2))) { throw 'IP Address tab click failed.' }
+  Start-Sleep -Milliseconds 600
+}
 function SelectFile([string]$Path) {
   $ocr=Snapshot 'select-send'
   ClickWord $ocr 'Send'
@@ -72,11 +83,12 @@ function SendToReceiver([string]$Ip) {
   [void][ReceiverNative]::ClickScreen([IntPtr]::new($hover.window.Hwnd),$hover.window.Left+$manualX,$hover.window.Top+$manualY)
   Start-Sleep -Milliseconds 600
   $dialog=Snapshot 'address-dialog'
-  ClickWord $dialog 'IP'
+  ClickIpAddressTab $dialog
   [Windows.Forms.Clipboard]::SetText($Ip)
   [Windows.Forms.SendKeys]::SendWait('^a')
   [Windows.Forms.SendKeys]::SendWait('^v')
-  [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+  $confirmation=Snapshot 'address-filled'
+  ClickWord $confirmation 'Confirm'
   Start-Sleep -Seconds 1
   [void](Snapshot 'after-send')
 }
