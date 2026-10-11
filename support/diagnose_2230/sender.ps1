@@ -49,6 +49,17 @@ function ClickIpAddressTab($Ocr) {
   if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($w.Hwnd),[int]($w.Left+$p.x+$p.width/2),[int]($w.Top+$p.y+$p.height/2))) { throw 'IP Address tab click failed.' }
   Start-Sleep -Milliseconds 600
 }
+function ClickTerminalDone($Ocr) {
+  $advanced=@($Ocr.words | Where-Object text -CEQ 'Advanced')
+  $done=@($Ocr.words | Where-Object text -CEQ 'Done' | Where-Object {
+    $p=$_
+    @($advanced | Where-Object { [Math]::Abs($_.y-$p.y) -lt 12 -and $_.x -lt $p.x }).Count -eq 1
+  })
+  if($done.Count -ne 1) { throw 'No unique terminal Done beside Advanced.' }
+  $p=$done[0]; $w=$Ocr.window
+  if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($w.Hwnd),[int]($w.Left+$p.x+$p.width/2),[int]($w.Top+$p.y+$p.height/2))) { throw 'Terminal Done click failed.' }
+  Start-Sleep -Milliseconds 600
+}
 function SelectFile([string]$Path) {
   $ocr=Snapshot 'select-send'
   ClickWord $ocr 'Send'
@@ -129,14 +140,21 @@ try {
     # Arm the actual receiver UI before performing the real sender action.
     $guestArgs=@('-d','Ubuntu-24.04','-u','tester','--','bash',"$linuxRoot/support/diagnose_2230/receiver_control.sh","$linuxRoot/evidence/2230",$case.id,$case.bytes,$case.sha256)
     $receiver=Start-Process wsl.exe -ArgumentList $guestArgs -PassThru -NoNewWindow
+    # Keep the native handle while the process runs so PowerShell can read its exit code.
+    $receiverHandle=$receiver.Handle
     SelectFile $case.path
     SendToReceiver $ip
     if(-not $receiver.WaitForExit(330000)) { $receiver.Kill(); throw 'Receiver UI/control deadline expired.' }
     [void](Snapshot ($case.id+'-terminal'))
-    if($case.id -eq 'ascii-control' -and $receiver.ExitCode -ne 0) { throw 'ASCII actual app control failed; boundary cases are not admitted.' }
-    if($receiver.ExitCode -ne 0) { throw 'Boundary case requires investigation of retained receiver evidence before more input.' }
+    $receiver.Refresh()
+    $receiver.ExitCode | Set-Content (Join-Path $evidence ('controller-exit-'+$case.id+'.txt'))
+    $resultPath=Join-Path $evidence ('cases/'+$case.id+'/receiver/result.env')
+    if(-not (Test-Path $resultPath)) { throw 'Receiver did not retain a completed result.' }
+    $result=Get-Content $resultPath
+    $verified=($result -contains 'status=finished_and_hash_verified') -and ($result -contains 'accepted=1') -and ($result -contains 'finished=1') -and ($result -contains 'hash_match=1') -and ($result -contains 'recovery=home_rendered') -and ($result -contains 'video_validation_ok=1')
+    if(-not $verified) { throw 'Actual app case lacks complete receiver evidence; inspect result before further input.' }
     $ocr=Snapshot 'return-home'
-    ClickWord $ocr 'Done'
+    ClickTerminalDone $ocr
   }
 } catch {
   $_.Exception.ToString() | Set-Content (Join-Path $evidence 'sender-error.txt')
