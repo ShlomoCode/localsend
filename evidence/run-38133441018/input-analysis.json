@@ -1,0 +1,217 @@
+{
+  "run_id": "38133441018",
+  "scope": "Read-only retained frame/input/source analysis; no application execution or heuristic changes.",
+  "clock": "Guest monotonic; scrot started/completed bound capture time, not isolated paint time.",
+  "cases": [
+    {
+      "count": 5,
+      "type_input_jsonl": "checkpoint/vm/checkpoint-guest/files-5-input.jsonl",
+      "type_argv": [
+        "xdotool",
+        "type",
+        "--clearmodifiers",
+        "--delay",
+        "40",
+        "Probe2414.txt"
+      ],
+      "type_guest_monotonic": {
+        "started": 102.390193234,
+        "completed": 102.677768904
+      },
+      "type_process_duration_seconds": 0.2875756700000096,
+      "frames": [
+        {
+          "index": 0,
+          "png": "checkpoint/files-5-editor-draft-0.png",
+          "timing": "checkpoint/files-5-editor-draft-0-timing.json",
+          "absolute_words": "checkpoint/files-5-editor-draft-0-dialog-absolute-words.json",
+          "capture_guest_monotonic": {
+            "started": 102.97101926,
+            "completed": 103.022455507
+          },
+          "since_type_start": {
+            "start": 0.5808260260000111,
+            "end": 0.6322622730000091
+          },
+          "since_type_exit": {
+            "start": 0.2932503560000015,
+            "end": 0.34468660299999954
+          },
+          "visually_observed": "Probe2414.txt",
+          "field_band_ocr": "Probe2414.txt|"
+        },
+        {
+          "index": 1,
+          "png": "checkpoint/files-5-editor-draft-1.png",
+          "timing": "checkpoint/files-5-editor-draft-1-timing.json",
+          "absolute_words": "checkpoint/files-5-editor-draft-1-dialog-absolute-words.json",
+          "capture_guest_monotonic": {
+            "started": 106.048801487,
+            "completed": 106.108708969
+          },
+          "since_type_start": {
+            "start": 3.6586082530000112,
+            "end": 3.718515735000011
+          },
+          "since_type_exit": {
+            "start": 3.3710325830000016,
+            "end": 3.4309400650000015
+          },
+          "visually_observed": "Probe2414.txt",
+          "field_band_ocr": "Probe2414.txt|"
+        },
+        {
+          "index": 2,
+          "png": "checkpoint/files-5-editor-draft-2.png",
+          "timing": "checkpoint/files-5-editor-draft-2-timing.json",
+          "absolute_words": "checkpoint/files-5-editor-draft-2-dialog-absolute-words.json",
+          "capture_guest_monotonic": {
+            "started": 109.173224901,
+            "completed": 109.228085691
+          },
+          "since_type_start": {
+            "start": 6.783031667000003,
+            "end": 6.8378924570000095
+          },
+          "since_type_exit": {
+            "start": 6.495455996999993,
+            "end": 6.550316787
+          },
+          "visually_observed": "Probe2414.txt",
+          "field_band_ocr": "Probe2414.txt|"
+        },
+        {
+          "index": 3,
+          "png": "checkpoint/files-5-editor-draft-3.png",
+          "timing": "checkpoint/files-5-editor-draft-3-timing.json",
+          "absolute_words": "checkpoint/files-5-editor-draft-3-dialog-absolute-words.json",
+          "capture_guest_monotonic": {
+            "started": 112.324303043,
+            "completed": 112.376367222
+          },
+          "since_type_start": {
+            "start": 9.934109809000006,
+            "end": 9.986173988000004
+          },
+          "since_type_exit": {
+            "start": 9.646534138999996,
+            "end": 9.698598317999995
+          },
+          "visually_observed": "Probe2414.txt",
+          "field_band_ocr": "Probe2414.txt"
+        }
+      ],
+      "first_complete_visual_frame": 0,
+      "ocr_first_matching_frame": 3,
+      "first_complete_visual_upper_bound_after_type_start": 0.6322622730000091,
+      "first_complete_visual_upper_bound_after_type_exit": 0.34468660299999954
+    },
+    {
+      "count": 5000,
+      "type_input_jsonl": "checkpoint/vm/checkpoint-guest/files-5000-input.jsonl",
+      "type_argv": [
+        "xdotool",
+        "type",
+        "--clearmodifiers",
+        "--delay",
+        "40",
+        "Probe2414.txt"
+      ],
+      "type_guest_monotonic": {
+        "started": 184.5633592,
+        "completed": 184.836730531
+      },
+      "type_process_duration_seconds": 0.2733713309999928,
+      "frames": [
+        {
+          "index": 0,
+          "png": "checkpoint/files-5000-editor-draft-0.png",
+          "timing": "checkpoint/files-5000-editor-draft-0-timing.json",
+          "absolute_words": "checkpoint/files-5000-editor-draft-0-dialog-absolute-words.json",
+          "capture_guest_monotonic": {
+            "started": 185.187918722,
+            "completed": 185.249120485
+          },
+          "since_type_start": {
+            "start": 0.6245595219999984,
+            "end": 0.6857612849999839
+          },
+          "since_type_exit": {
+            "start": 0.35118819100000565,
+            "end": 0.4123899539999911
+          },
+          "visually_observed": "P with caret",
+          "field_band_ocr": "No reliable field OCR; zero-confidence garbage"
+        },
+        {
+          "index": 1,
+          "png": "checkpoint/files-5000-editor-draft-1.png",
+          "timing": "checkpoint/files-5000-editor-draft-1-timing.json",
+          "absolute_words": "checkpoint/files-5000-editor-draft-1-dialog-absolute-words.json",
+          "capture_guest_monotonic": {
+            "started": 189.132536345,
+            "completed": 189.19380304
+          },
+          "since_type_start": {
+            "start": 4.569177144999998,
+            "end": 4.630443839999998
+          },
+          "since_type_exit": {
+            "start": 4.295805814000005,
+            "end": 4.357072509000005
+          },
+          "visually_observed": "Probe2414.txt",
+          "field_band_ocr": "Probe2414.txt"
+        }
+      ],
+      "first_complete_visual_frame": 1,
+      "ocr_first_matching_frame": 1,
+      "first_complete_visual_upper_bound_after_type_start": 4.630443839999998,
+      "first_complete_visual_upper_bound_after_type_exit": 4.357072509000005
+    }
+  ],
+  "conclusions": [
+    "The five-file control visibly contains the entire draft in its first retained frame; its 9.986-second OCR match is not text-entry completion latency.",
+    "The 5000-file first draft frame visibly contains only P after xdotool type has exited. This is a real partial rendered state, not merely OCR missing a complete string.",
+    "xdotool process completion does not establish that the application has processed/painted all injected X11 input. The evidence is consistent with asynchronous delivery, queued UI processing or delayed rendering.",
+    "The second 5000-file frame bounds eventual complete draft visibility by 4.630444 seconds after type start. The entire 4.630444 seconds cannot be assigned either to application work or to OCR.",
+    "No per-character X-event times, controller callbacks or intermediate frames exist. Average/per-character latency and the source of the delay remain unmeasured."
+  ],
+  "source_findings": {
+    "release": "v1.17.0",
+    "dialog": "app/lib/widget/dialogs/file_name_input_dialog.dart",
+    "details": [
+      "initState assigns the initial name to TextEditingController.",
+      "TextFormField has autofocus:true and onChanged:(value)=>_validate(value.trim()).",
+      "_validate checks nonempty text and isValidFilename(input, os: Platform.operatingSystem) for each change.",
+      "For valid text with no existing error, _validate does not call dialog setState. It calls setState when reporting an invalid/empty value or clearing a prior error.",
+      "The dialog source has no per-character iteration over the selected-file collection.",
+      "Receive Options awaits showDialog; it calls selectedReceivingFilesProvider.rename only if the returned result is non-null. Cancel returns null; ordinary typing does not invoke that rename call."
+    ],
+    "validation_dependency": {
+      "package": "legalize",
+      "version": "1.2.2",
+      "lock_and_cached_package_hash": "bc3068aa4f14588575c8b5ba2a9e608c242dad325e7f7c56fedd68adba33526a",
+      "source_path": "/Users/shlomo/.pub-cache/hosted/pub.dev/legalize-1.2.2/lib/src/legalize_base.dart",
+      "linux_checks": ["nonempty length <=255", "no slash", "no null character", "not dot or dot-dot"],
+      "selected_file_traversal": false,
+      "evidence_level": "Read-only source inspection; not callbacks observed in release process."
+    },
+    "limits": [
+      "Flutter TextFormField/controller/engine processing and dependency validation costs are not instrumented.",
+      "The eager underlying Options list can remain a competing hypothesis; this source inspection does not demonstrate that it causes the observed partial draft."
+    ]
+  },
+  "follow_up_observations_needed": [
+    "Record high-rate screenshots/video during typing without serial OCR delaying sampling, together with the existing same-clock input bounds.",
+    "Record individual synthetic X input event emission/receipt timing or a controlled ordinary single-character input to separate dispatch from application processing/rendering.",
+    "Repeat the five-file and 5000-file interaction under identical settings to distinguish one observed delayed state from a repeatable workload effect."
+  ],
+  "partial_to_complete_bound_5000": {
+    "lower_since_type_start": 0.6245595219999984,
+    "upper_since_type_start": 4.630443839999998,
+    "lower_since_type_exit": 0.35118819100000565,
+    "upper_since_type_exit": 4.357072509000005,
+    "qualification": "Conservative bounds assuming normal progression from partial to full text: the partial snapshot's exact instant lies within frame 0 capture interval. The lower bound uses capture start, not capture end. There are no intermediate captured frames."
+  }
+}
