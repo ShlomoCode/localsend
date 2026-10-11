@@ -121,20 +121,31 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    let absenceError;
    let absent;
    const absenceObservations=[];
+   let firstToastObservedUtc;
    const deletionDeadline=Date.now()+10000;
    do {
-    absent=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
-     if(!String(error).includes('No such file or directory'))throw error;
-     absenceError=String(error);
-     return null;
-    });
-    absenceObservations.push({utc:new Date().toISOString(),pathExists:absent!==null});
-    writeFileSync('evidence/deletion-path-observations.json',JSON.stringify({deleteUtc,observations:absenceObservations,absenceError},null,2));
+    let pathObservedUtc;
+    const [pathValue,sourceObservation]=await Promise.all([
+     wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
+      if(!String(error).includes('No such file or directory'))throw error;
+      absenceError=String(error);
+      return null;
+     }).then(value=>{pathObservedUtc=new Date().toISOString();return value;}),
+     wd('GET',prefix+'/source').then(source=>({source,utc:new Date().toISOString()})),
+    ]);
+    absent=pathValue;
+    const toastVisible=sourceObservation.source.includes('1 file deleted');
+    if(toastVisible&&!firstToastObservedUtc)firstToastObservedUtc=sourceObservation.utc;
+    const sourceFile=`evidence/android-delete-observation-${absenceObservations.length}.xml`;
+    writeFileSync(sourceFile,sourceObservation.source);
+    absenceObservations.push({pathObservedUtc,pathExists:absent!==null,sourceObservedUtc:sourceObservation.utc,toastVisible,sourceFile});
+    writeFileSync('evidence/deletion-path-observations.json',JSON.stringify({deleteUtc,firstToastObservedUtc,observations:absenceObservations,absenceError},null,2));
     if(absent===null)break;
     await new Promise(r=>setTimeout(r,100));
    } while(Date.now()<deletionDeadline);
    assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
-   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,pathAbsenceUtc:new Date().toISOString(),absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
+   const pathAbsenceUtc=absenceObservations.at(-1).pathObservedUtc;
+   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,pathAbsenceUtc,firstToastObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    const done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'});
    await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
