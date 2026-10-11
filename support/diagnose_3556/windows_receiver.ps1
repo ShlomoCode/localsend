@@ -4,11 +4,13 @@ param(
  [ValidateRange(30,7200)][int]$TimeoutSeconds=1800,
  [ValidateRange(10,120)][int]$ReadinessSeconds=60,
  [long]$ExpectedBytes=1048576,
+ [string]$ExpectedName,
  [ValidatePattern('^([0-9a-fA-F]{64})?$')][string]$ExpectedSha256='bf63d8a95fcc2e64619813aae35fdcbe871fdd9264caa3f365eb3aed0f679129',
  [string]$VerificationDeadlineUtc,
  [string]$SenderCompletionFile,
  [string]$SendStartedFile,
  [string]$ExpectedHashFile,
+ [string]$VerificationStartedFile,
  [ValidateRange(30,900)][int]$HashTimeoutSeconds=900,
  [ValidateRange(4,120)][int]$ImageLimit=60,
  [ValidateRange(1,300)][int]$UiObservationLimit=150,
@@ -21,9 +23,17 @@ $OutputDirectory=[IO.Path]::GetFullPath($OutputDirectory)
 if (-not $StopFile) { $StopFile=Join-Path $OutputDirectory 'stop' }
 $large=$ExpectedBytes -eq 16000000000L
 $boundedDiagnostic=$large -or $env:LARGE_TRANSFER_DIAGNOSTIC -eq '1'
+if($boundedDiagnostic -and -not $ExpectedName) { throw 'Diagnostic completion gate requires ExpectedName to bind both completion observations to this fixture.' }
 if (-not $SenderCompletionFile) { $SenderCompletionFile=Join-Path $OutputDirectory 'sender-completed.json' }
 if (-not $SendStartedFile) { $SendStartedFile=Join-Path $OutputDirectory 'send-started.json' }
 if (-not $ExpectedHashFile) { $ExpectedHashFile=Join-Path $OutputDirectory 'expected-sha256.json' }
+if (-not $VerificationStartedFile) { $VerificationStartedFile=Join-Path $OutputDirectory 'verification-started.json' }
+$receiverCompletedFile=Join-Path $OutputDirectory 'receiver-completed.json'
+if($boundedDiagnostic) {
+ foreach($marker in @($SendStartedFile,$SenderCompletionFile,$VerificationStartedFile,$receiverCompletedFile,$ExpectedHashFile)) {
+  if(Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+ }
+}
 $verificationDeadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 if ($VerificationDeadlineUtc) {
  $parentDeadline=[DateTime]::Parse($VerificationDeadlineUtc,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
@@ -44,8 +54,8 @@ $report=[ordered]@{
  runner=$env:RUNNER_NAME; runnerImage=$env:ImageOS; runnerImageVersion=$env:ImageVersion
  os=$null; osArchitecture=[Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
  session=$env:SESSIONNAME; archive=$null; executable=$null; processId=$null
- endpoint='https://127.0.0.1:53317'; destination=$null; expectedBytes=$ExpectedBytes; expectedSha256=$ExpectedSha256.ToLowerInvariant()
- verificationDeadlineUtc=$verificationDeadline.ToString('o'); hashWorkers=@(); senderCompletion=$null; receiverCompletion=$null
+ endpoint='https://127.0.0.1:53317'; destination=$null; expectedBytes=$ExpectedBytes; expectedName=$ExpectedName; expectedSha256=$ExpectedSha256.ToLowerInvariant()
+ verificationDeadlineUtc=$verificationDeadline.ToString('o'); hashWorkers=@(); senderCompletion=$null; receiverCompletion=$null; verificationStart=$null
  imageLimit=$ImageLimit; imageCount=0; terminalImageReserve=[Math]::Min(10,$ImageLimit-2); uiObservationLimit=$UiObservationLimit; uiObservationCount=0; terminalObservationReserve=4; uiWorkers=@()
  snapshots=@(); actions=@(); savedFiles=@(); errors=@()
 }
@@ -485,7 +495,7 @@ try {
    }
   }
   if(-not $accepted -and $sendStarted -and [DateTime]::UtcNow -ge $nextUiProbe) {
-   if($large) { $nextUiProbe=[DateTime]::UtcNow.AddSeconds(40) }
+   if($boundedDiagnostic) { $nextUiProbe=[DateTime]::UtcNow.AddSeconds(40) }
    if($large -and $acceptProbes -ge 5) { throw 'No observed Accept after five bounded post-Send UI probes.' }
    $acceptProbes++
    $report.destination.capacityBeforeAccept=Get-DestinationCapacity $destination
@@ -494,10 +504,10 @@ try {
    if($accepted) { $report.stage='waiting-for-saved-file'; Write-JsonFile $resultPath $report }
   }
   if($accepted) {
-   $completionAllowed=-not $large
-   if($large -and (Test-Path $SenderCompletionFile)) {
+   $completionAllowed=-not $boundedDiagnostic
+   if($boundedDiagnostic -and (Test-Path $SenderCompletionFile)) {
     $completion=Get-Content -LiteralPath $SenderCompletionFile -Raw | ConvertFrom-Json
-    if($completion.completed -eq $true -and $completion.utc -and $completion.evidence) {
+    if($completion.completed -eq $true -and $completion.utc -and $completion.evidence -and $completion.bytes -eq $ExpectedBytes -and $completion.name -ceq $ExpectedName) {
      $completedUtc=[DateTime]::Parse($completion.utc).ToUniversalTime()
      if($completedUtc -ge [DateTime]::Parse($report.startedUtc).ToUniversalTime() -and $completedUtc -le [DateTime]::UtcNow) {
       $report.senderCompletion=$completion; $completionAllowed=$true
@@ -509,15 +519,35 @@ try {
     if($expected.bytes -ne $ExpectedBytes -or $expected.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Android post-completion hash metadata is invalid.' }
     $ExpectedSha256=$expected.sha256.ToLowerInvariant(); $report.expectedSha256=$ExpectedSha256
    }
-   if($large -and $completionAllowed -and -not $report.receiverCompletion -and [DateTime]::UtcNow -ge $nextUiProbe) {
+   if($boundedDiagnostic -and $completionAllowed -and -not $report.receiverCompletion -and [DateTime]::UtcNow -ge $nextUiProbe) {
     if($completionProbes -ge 4) { throw 'No observed Finished and Done after four bounded post-completion UI probes.' }
     $completionProbes++
     $nextUiProbe=[DateTime]::UtcNow.AddSeconds(40)
     [void](Invoke-ReceiverCompletion)
+    if($report.receiverCompletion) {
+     $completedFiles=@(Get-ChildItem $destination -File -Recurse | Where-Object { $_.FullName -notin $beforePaths -and $_.Name -ceq $ExpectedName -and $_.Length -eq $ExpectedBytes })
+     if($completedFiles.Count -ne 1) { throw 'Windows Finished/Done did not identify exactly one newly saved fixture with the expected name and size.' }
+     $report.receiverCompletion.savedPath=$completedFiles[0].FullName
+     Write-JsonFile $receiverCompletedFile @{completed=$true;utc=$report.receiverCompletion.utc;evidence=$report.receiverCompletion.screenshot;bytes=$ExpectedBytes;name=$ExpectedName;observation=$report.receiverCompletion}
+     $report.stage='waiting-for-verification-start'
+    }
     Write-JsonFile $resultPath $report
    }
-   if($completionAllowed -and (-not $large -or $report.receiverCompletion)) {
-   foreach($file in @(Get-ChildItem $destination -File -Recurse | Where-Object { $_.FullName -notin $beforePaths -and $_.Length -eq $ExpectedBytes })) {
+   $verificationAllowed=-not $boundedDiagnostic
+   if($boundedDiagnostic -and $completionAllowed -and $report.receiverCompletion -and (Test-Path $VerificationStartedFile)) {
+    $verification=Get-Content -LiteralPath $VerificationStartedFile -Raw | ConvertFrom-Json
+    if($verification.started -eq $true -and $verification.utc -and $verification.deadlineUtc -and $verification.bytes -eq $ExpectedBytes -and $verification.name -ceq $ExpectedName) {
+     $verificationUtc=[DateTime]::Parse($verification.utc).ToUniversalTime()
+     $verificationBound=[DateTime]::Parse($verification.deadlineUtc).ToUniversalTime()
+     if($verificationUtc -ge [DateTime]::Parse($report.receiverCompletion.utc).ToUniversalTime() -and $verificationUtc -ge [DateTime]::Parse($report.senderCompletion.utc).ToUniversalTime() -and $verificationUtc -le [DateTime]::UtcNow) {
+      if($verificationBound -le [DateTime]::UtcNow) { throw 'Parent verification-start deadline has already expired.' }
+      if($verificationBound -lt $verificationDeadline) { $verificationDeadline=$verificationBound; $deadline=$verificationBound; $report.verificationDeadlineUtc=$verificationBound.ToString('o') }
+      $report.verificationStart=$verification; $verificationAllowed=$true
+     }
+    }
+   }
+   if($completionAllowed -and $verificationAllowed -and (-not $boundedDiagnostic -or $report.receiverCompletion)) {
+   foreach($file in @(Get-ChildItem $destination -File -Recurse | Where-Object { $_.FullName -notin $beforePaths -and $_.Length -eq $ExpectedBytes -and (-not $ExpectedName -or $_.Name -ceq $ExpectedName) })) {
     $beforeHash=Get-Item -LiteralPath $file.FullName
     Start-Sleep -Milliseconds 750
     $stable=Get-Item -LiteralPath $file.FullName

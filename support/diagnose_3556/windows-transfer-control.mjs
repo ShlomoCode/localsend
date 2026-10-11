@@ -174,7 +174,7 @@ async function startReceiver(fixture){
  const stdout=createWriteStream(path.join(windowsOutput,'receiver.stdout.txt'));
  const stderr=createWriteStream(path.join(windowsOutput,'receiver.stderr.txt'));receiverLogs=[stdout,stderr];
  receiver=spawn('pwsh',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(here,'windows_receiver.ps1'),
-  '-OutputDirectory',windowsOutput,'-TimeoutSeconds',String(timeoutSeconds),'-ExpectedBytes',String(fixture.bytes),'-ExpectedSha256',fixture.sha256||'',
+  '-OutputDirectory',windowsOutput,'-TimeoutSeconds',String(timeoutSeconds),'-ExpectedBytes',String(fixture.bytes),'-ExpectedName',fixture.name,'-ExpectedSha256',fixture.sha256||'',
   ...(largeDiagnostic?['-ImageLimit',String(windowsImagesRemaining),'-UiObservationLimit',String(windowsObservationsRemaining)]:[]),
   ...(largeDiagnostic&&fixture.bytes===16000000000?['-VerificationDeadlineUtc',new Date(sessionStart+105*minute).toISOString()]:[])],
   {windowsHide:true,stdio:['ignore','pipe','pipe']});
@@ -438,11 +438,11 @@ try{
   await click(r.status().transport==='coalesced'?'Relay from LocalSend (coalesced large)':'Relay from LocalSend (large)');
   report.largeHelperState=await waitHelperState({ready:true,mode:r.status().transport,previousInstance:(report.fallbackHelperState||report.initialHelperState).instance,name:'fresh-ready'});
   assert.equal(report.largeHelperState.peerAbsoluteMs,90*minute,'Large helper peer limit must be observed at 90 minutes');
-  report.status='preparing';report.observations=[];report.sendUtc=null;report.verifiedUtc=null;report.elapsedSendToVerifiedMs=null;report.uploadStateAtAndroidFinished=null;
+  report.status='preparing';report.observations=[];report.sendUtc=null;report.verifiedUtc=null;report.elapsedSendToVerifiedMs=null;report.uploadStateAtAndroidFinished=null;report.verificationStarted=null;report.windowsCompletion=null;report.verificationDeadlineUtc=null;report.lateHash=null;report.uploadStateAtVerifiedSave=null;report.verificationObservationLagMs=null;report.transport=null;report.realTransferHelper=null;report.transferDeadlineUtc=null;
   windowsOutput=windowsRoot;mkdirSync(windowsOutput,{recursive:true});
   receiver=null;receiverExit=null;for(const log of receiverLogs)log.end();receiverLogs=[];
   // Keep moderate evidence; each receiver owns distinct destination and coordination markers.
-  for(const file of ['ready.json','results.json','stop','sender-completed.json','expected-sha256.json','send-started.json'])if(existsSync(path.join(windowsOutput,file)))unlinkSync(path.join(windowsOutput,file));
+  for(const file of ['ready.json','results.json','stop','sender-completed.json','expected-sha256.json','send-started.json','receiver-completed.json','verification-started.json'])if(existsSync(path.join(windowsOutput,file)))unlinkSync(path.join(windowsOutput,file));
   await activate('org.localsend.fixture3556');await checkLargeStorage('Refresh capacity',2*passBytes+reserveBytes,'before-stage');
  }
  await snap('fixture-before');await click(largePass?'Stage 16GB video':controlBytes===1048576?'Stage small video':'Stage 64MiB video');
@@ -498,8 +498,8 @@ try{
  await touch(favoriteRect,'Select registered issue3556-cloud-receiver favorite');
  if(largePass)phaseDeadline=Math.min(sendStart+90*minute,sessionStart+100*minute);
  await snap('send-first-frame');
- let end=largePass?phaseDeadline:sendStart+600000;let androidFinished=false,verifiedAt=null,waits=0,lastImage=0;
- const preservePeerDeadline=()=>{if(!largePass||androidFinished)return;const expiry=Date.parse(r.status().earliestPeerExpiryUtc);if(Number.isFinite(expiry)){end=Math.min(end,expiry-5*minute);phaseDeadline=end;}report.transferDeadlineUtc=new Date(end).toISOString();};preservePeerDeadline();
+ let end=largePass?phaseDeadline:sendStart+600000;let androidFinished=false,transferCompleted=false,verifiedAt=null,waits=0,lastImage=0;
+ const preservePeerDeadline=()=>{if(!largePass||transferCompleted)return;const expiry=Date.parse(r.status().earliestPeerExpiryUtc);if(Number.isFinite(expiry)){end=Math.min(end,expiry-5*minute);phaseDeadline=end;}report.transferDeadlineUtc=new Date(end).toISOString();};preservePeerDeadline();
  do{
   preservePeerDeadline();observationCount++;
   const observationStarted=Date.now();const xml=await source(end),now=Date.now(),names=labels(xml);
@@ -510,16 +510,31 @@ try{
   const frame='transfer-'+String(report.observations.length).padStart(3,'0');
   if(!largeDiagnostic||now-lastImage>=6*minute||anr||finished||names.some(v=>v.includes('Finished with error'))){await snap(frame,xml);lastImage=now;}else save(frame+'.xml',xml);
   if(finished){androidFinished=true;report.uploadStateAtAndroidFinished??={utc:new Date(now).toISOString(),transport:r.status()};}
-  if(largePass&&finished&&!report.lateHash){
-   await snap('android-finished',xml);writeFileSync(path.join(output,'android-finished.xml'),xml);writeFileSync(path.join(windowsOutput,'sender-completed.json'),JSON.stringify({completed:true,utc:new Date().toISOString(),evidence:'android-finished.xml'}));
-   phaseDeadline=sessionStart+105*minute;report.verificationDeadlineUtc=new Date(phaseDeadline).toISOString();
-   await activate('org.localsend.fixture3556');await click('Hash owned fixture after completion');
-   const hashed=await waitFor(s=>{const t=labels(s).join('\n');if(t.includes('HASH_FAILED'))throw Error('Late fixture hash failed');return t.includes('HASH_READY uri=');},15*minute,'Late Android hash did not finish before verification deadline',true);
-   const detail=labels(hashed).find(t=>t.includes('HASH_READY uri='));
-   const hash=detail.match(/sha256=([a-f0-9]{64})/)?.[1],hashBytes=Number(detail.match(/bytes=(\d+)/)?.[1]);assert(hash&&hashBytes===bytes&&detail.match(/HASH_READY uri=([^\n]+)/)?.[1]===uri,'Late hash fixture identity mismatch');
-   sha256=hash;report.fixture.sha256=hash;report.lateHash={utc:new Date().toISOString(),bytes:hashBytes,sha256:hash};
-   writeFileSync(path.join(windowsOutput,'expected-sha256.json'),JSON.stringify({sha256:hash,bytes:hashBytes}));
-   await snap('hash-ready',hashed);await activate('org.localsend.localsend_app');end=sessionStart+105*minute;
+  if(finished&&!existsSync(path.join(windowsOutput,'sender-completed.json'))){
+   assert(now<=end,'Android Finished was first observed after transfer deadline');
+   await snap('android-finished',xml);
+   writeFileSync(path.join(windowsOutput,'sender-completed.json'),JSON.stringify({completed:true,utc:new Date(now).toISOString(),evidence:artifactName('android-finished.xml'),bytes,name,uri}));
+  }
+  const completionPath=path.join(windowsOutput,'receiver-completed.json');let windowsCompletion=null;
+  if(existsSync(completionPath)){try{windowsCompletion=JSON.parse(readFileSync(completionPath,'utf8'));}catch{throw Error('Malformed Windows completion receipt');}}
+  if(largeDiagnostic&&androidFinished&&windowsCompletion&&!report.verificationStarted){
+   preservePeerDeadline();const gateNow=Date.now(),completedAt=Date.parse(windowsCompletion.utc);
+   assert(windowsCompletion.completed===true&&windowsCompletion.bytes===bytes&&windowsCompletion.name===name,'Windows completion receipt fixture identity mismatch');
+   assert(Number.isFinite(completedAt)&&completedAt>=sendStart&&completedAt<=end&&completedAt<=gateNow&&gateNow<=end,'Both actual completion receipts must be observed within transfer deadline');
+   report.windowsCompletion=windowsCompletion;report.transferDeadlineUtc=new Date(end).toISOString();transferCompleted=true;
+   if(largePass){phaseDeadline=sessionStart+105*minute;end=phaseDeadline;}
+   report.verificationDeadlineUtc=new Date(Math.min(end,phaseDeadline)).toISOString();
+   report.verificationStarted={started:true,utc:new Date(gateNow).toISOString(),deadlineUtc:report.verificationDeadlineUtc,bytes,name,uri};
+   writeFileSync(path.join(windowsOutput,'verification-started.json'),JSON.stringify(report.verificationStarted));
+   if(largePass){
+    await activate('org.localsend.fixture3556');await click('Hash owned fixture after completion');
+    const hashed=await waitFor(s=>{const t=labels(s).join('\n');if(t.includes('HASH_FAILED'))throw Error('Late fixture hash failed');return t.includes('HASH_READY uri=');},15*minute,'Late Android hash did not finish before verification deadline',true);
+    const detail=labels(hashed).find(t=>t.includes('HASH_READY uri='));
+    const hash=detail.match(/sha256=([a-f0-9]{64})/)?.[1],hashBytes=Number(detail.match(/bytes=(\d+)/)?.[1]);assert(hash&&hashBytes===bytes&&detail.match(/HASH_READY uri=([^\n]+)/)?.[1]===uri,'Late hash fixture identity mismatch');
+    sha256=hash;report.fixture.sha256=hash;report.lateHash={utc:new Date().toISOString(),bytes:hashBytes,sha256:hash};
+    writeFileSync(path.join(windowsOutput,'expected-sha256.json'),JSON.stringify({sha256:hash,bytes:hashBytes,name,uri}));
+    await snap('hash-ready',hashed);await activate('org.localsend.localsend_app');
+   }
   }
   const result=receiverResult();
   if(result?.status==='saved-file-verified'&&!verifiedAt){
@@ -540,7 +555,7 @@ try{
   }
   if(anr){waits++;await ui('textMatches("(?i)wait")');}
   if(receiverExit&&receiverExit.code!==0)throw Error('Windows receiver failed; inspect results and both UI states');
-  if(androidFinished&&verifiedAt){
+  if((largeDiagnostic?transferCompleted:androidFinished)&&verifiedAt){
    const saved=result.savedFiles.find(f=>f.bytes===bytes&&f.sha256.toLowerCase()===sha256);
    assert(saved,'Windows result does not contain the actual fixture bytes/hash');assert(result.actions.some(a=>a.name==='Accept'),'Windows real Accept action missing');
    await Promise.race([receiverDone,sleep(5000)]);
