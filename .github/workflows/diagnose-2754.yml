@@ -1,0 +1,15 @@
+name: Diagnose 2754 Cinnamon Text focus
+on:
+  workflow_dispatch:
+jobs:
+  cinnamon-vm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash support/diagnostics/2754-vm.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-cinnamon-evidence
+          path: evidence/cloud/
