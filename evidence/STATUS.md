@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: Short-text control, 105,000 ASCII characters without line breaks, 105,000 characters with LF line breaks, and 105 KiB passed on Galaxy S23 / Android 13. Run 38110353448 establishes a short control on Xiaomi Redmi Note 11 / Android 11. The reported Android freeze has not been reproduced. No production patch exists.
+Status: Short-text control, 105,000 ASCII characters without line breaks, 105,000 characters with LF line breaks, and 105 KiB passed on Galaxy S23 / Android 13. Xiaomi short control 38110353448 failed during Favorites discovery; 38111742971 repeats it with Windows error details and MIUI/build diagnostics. The reported Android freeze has not been reproduced. No production patch exists.
 
 ## Report and evidence boundary
 
@@ -61,3 +61,7 @@ Run 38109163891 on unchanged c3bc4478 passed the 105,000-character LF fixture on
 Run 38109605530 on unchanged c3bc4478 passed 107,520 ASCII characters (105 KiB), without LF/CR, on Galaxy S23. Source and clipboard readback have SHA-256 `0dbb926773683d012337417d054047989fa9eed6319736bec4e26931ccf1da56`; UTF-16 is 215,040 bytes. Inspected preview and after-Copy screenshots confirm visible preview and return to Receive. The first preview source response took 333 ms. Run 38110353448 uses diagnostic 721bfc80 and the same original applications for a short-text Xiaomi Note 11 / Android 11 control. Its MIUI version is unknown.
 
 Supplementary memory snapshots are available despite rejected `dumpsys activity` commands. Multiline PSS is 277,208→308,309 KiB and RSS is 380,084→412,696 KiB, before/preview. ASCII PSS is 256,023→311,900 KiB. These are snapshots in separate non-failing sessions, not peak memory or ANR measurements; they do not establish a cause.
+
+Xiaomi short run 38110353448 / 721bfc80 passed all four socket controls and the pending-poll handoff (14,385 ms). The original Android app remains on Receive; inspected before/receiver screenshots show different positions of its animated logo, while Windows Favorites shows Error. No preview appeared and no text transfer was completed. Relay metrics show 2,542 bytes returned after the controls, with two additional connections closing. Retained device logs show target-connected/eof for those connections and continued relay polling, without a 409, connection-refused message, or ANR. This is a discovery/readiness failure, not the reported long-text freeze, and does not count as a substantive application experiment.
+
+Run 38111742971 / 9eccc165 repeats the same 44-byte fixture, original applications, and Xiaomi device. It adds MIUI/build property diagnostics and a Windows error-details screenshot after failure; transport, timeouts, and product behavior are unchanged. Exact error text is needed before choosing a readiness correction.
