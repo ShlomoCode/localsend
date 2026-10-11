@@ -1,1 +1,1 @@
-{"round":7,"actions":[{"kind":"click","x":906,"y":345},{"kind":"wait","seconds":5},{"kind":"capture"}]}
+{"round":8,"actions":[{"kind":"click","x":415,"y":407},{"kind":"wait","seconds":3},{"kind":"click","x":421,"y":363},{"kind":"wait","seconds":3},{"kind":"sample"}]}
