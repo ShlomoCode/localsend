@@ -60,6 +60,11 @@ def journal(state, label):
     read_error = None
     try:
         data = subprocess.check_output(['sudo', 'journalctl', '-k', '--no-pager', '-o', 'short-monotonic'], text=True, timeout=25)
+        # journalctl exits zero for an empty journal too. That cannot qualify
+        # an absence-of-OOM observation, so require retained kernel entries.
+        if not re.search(r'^\[\s*\d+\.\d+\]', data, re.M):
+            read_succeeded = False
+            read_error = 'Kernel journal contains no timestamped entries'
     except Exception as error:
         data = str(error)
         read_succeeded = False
