@@ -12,6 +12,7 @@ if (-not $env:ANDROID_HOME -or -not (Test-Path "$env:ANDROID_HOME/cmdline-tools/
 if ($LASTEXITCODE -ne 0) { throw 'Android SDK preparation failed' }
 @{endpoint='http://bs-local.com:8080';token=$env:RELAY_TOKEN} | ConvertTo-Json -Compress | Set-Content "$output/assets/config.json"
 $source = @(Get-ChildItem support/cloud_transport/android -Filter '*.java' | ForEach-Object FullName)
+Copy-Item support/cloud_transport/android/GalleryImportDiagnostic.java evidence/GalleryImportDiagnostic.java
 & javac -source 8 -target 8 -classpath "$env:ANDROID_HOME/platforms/android-35/android.jar" -d "$output/classes" @source
 if ($LASTEXITCODE -ne 0) { throw 'javac failed' }
 $classes = @(Get-ChildItem "$output/classes/org/localsend/cloudtransport" -Filter '*.class' | ForEach-Object FullName)

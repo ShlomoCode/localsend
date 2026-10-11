@@ -92,6 +92,20 @@ export default async function({session,wd,senderPort,transportStatus}){
   await capture(label+'-files-details');
   await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
  }
+ async function galleryImportDiagnostic(filename){
+  await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.cloudtransport'});
+  const input=await waitForNativeControl({wd,prefix,label:'causal-input',using:'accessibility id',value:'Metadata filename'});
+  await wd('POST',prefix+'/element/'+input['element-6066-11e4-a52e-4f735466cecf']+'/value',{text:filename});
+  await click('Run gallery import diagnostic');
+  const output=await waitForNativeControl({wd,prefix,label:'causal-output',using:'xpath',value:'//*[@package="org.localsend.cloudtransport" and starts-with(@content-desc,"Gallery import diagnostic: ")]',requireClickable:false,timeoutMs:30000});
+  const value=await wd('GET',prefix+'/element/'+output['element-6066-11e4-a52e-4f735466cecf']+'/attribute/content-desc');
+  const diagnostic=JSON.parse(value.slice('Gallery import diagnostic: '.length));
+  writeFileSync('evidence/gallery-import-diagnostic.json',JSON.stringify(diagnostic,null,2));
+  await capture('gallery-import-diagnostic');
+  if(diagnostic.error)throw new Error('Native gallery component diagnostic failed: '+diagnostic.error);
+  if(diagnostic.cases?.length!==3||diagnostic.cases.some(entry=>entry.error))throw new Error('Native gallery comparison did not observe every component case');
+  return diagnostic;
+ }
  try{
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-desktop.ps1']);
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel',process.env.DIAGNOSTIC_RUNNER_LABEL||'windows-11-arm','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName',`issue2311-${process.env.GITHUB_RUN_ID}-control.txt`,'-DiagnosticPeerPort',String(senderPort)]);
@@ -142,5 +156,6 @@ export default async function({session,wd,senderPort,transportStatus}){
    finally{await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});}
    await click('Done');
   }
+  await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
 }
