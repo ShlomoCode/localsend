@@ -1,0 +1,77 @@
+name: Diagnostic cloud transport
+on:
+  workflow_dispatch:
+    inputs:
+      mobile:
+        type: boolean
+        default: false
+      baseline_app:
+        type: string
+        default: bs://d5703b8a4cb6bc74c349f36d8f2ed3c3b9a28441
+      device:
+        type: string
+        default: Vivo Y21
+      os:
+        type: string
+        default: '11.0'
+jobs:
+  control-and-helper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      BS_LOCAL_ID: cloudtransport-${{ github.run_id }}
+      BASELINE_APP: ${{ inputs.baseline_app }}
+      BS_DEVICE: ${{ inputs.device }}
+      BS_OS: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Byte exact transport controls
+        run: node support/cloud_transport/control.mjs
+      - name: Generate single run relay capability
+        if: inputs.mobile
+        run: |
+          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+      - name: Build diagnostic helper without LocalSend changes
+        run: bash support/cloud_transport/build-helper.sh
+      - name: Configure BrowserStack Local on runner
+        if: inputs.mobile
+        run: |
+          npm install --prefix /tmp/bs-local browserstack-local --no-audit --no-fund >/dev/null
+          node support/cloud_transport/local.mjs > /tmp/bs-local.log 2>&1 &
+          for attempt in $(seq 1 30); do test -f /tmp/helper/local-ready && break; sleep 2; done
+          test -f /tmp/helper/local-ready
+      - name: Upload single run helper
+        if: inputs.mobile
+        run: |
+          curl --fail --silent --show-error -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" https://api-cloud.browserstack.com/app-automate/upload -F file=@/tmp/helper/cloud-transport-helper.apk -o /tmp/helper/upload.json
+          node --input-type=module -e 'import fs from "node:fs";const app=JSON.parse(fs.readFileSync("/tmp/helper/upload.json")).app_url;if(!app)throw new Error("Helper upload failed");fs.appendFileSync(process.env.GITHUB_ENV,"HELPER_APP="+app+"\n");'
+      - name: Physical Android transport controls
+        if: inputs.mobile
+        run: node support/cloud_transport/mobile-control.mjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: cloud-transport-control
+          path: |
+            control-results.json
+            mobile-control-results.json
+            mobile-control-final-status.json
+            localsend-source.xml
+            helper-failure-source.xml
+            helper-failure.png
+            mobile-control-error.txt
+      - uses: actions/upload-artifact@v6
+        if: '!inputs.mobile'
+        with:
+          name: cloud-transport-helper-placeholder
+          path: /tmp/helper/cloud-transport-helper.apk
