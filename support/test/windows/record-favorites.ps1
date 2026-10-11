@@ -72,7 +72,7 @@ function Screenshot([string]$name) {
  $matrix.Matrix20=0.114; $matrix.Matrix21=0.114; $matrix.Matrix22=0.114
  $attributes=New-Object System.Drawing.Imaging.ImageAttributes
  $attributes.SetColorMatrix($matrix)
- $attributes.SetThreshold(0.85)
+ $attributes.SetThreshold(0.75)
  $rect=New-Object System.Drawing.Rectangle -ArgumentList 0,0,1984,1440
  $sg.DrawImage($bmp,$rect,0,0,992,720,[System.Drawing.GraphicsUnit]::Pixel,$attributes)
  $scaled.Save("$EvidenceDirectory/$name-ocr.png",[System.Drawing.Imaging.ImageFormat]::Png)
@@ -171,7 +171,7 @@ function FavoritePencil([string]$snap,[int]$rowY) {
  $bmp=[System.Drawing.Bitmap]::FromFile("$EvidenceDirectory/$snap.png")
  $rightmost=0
  for($y=$rowY-10;$y -le $rowY+10;$y++) {
-  for($x=540;$x -lt 700;$x++) {
+  for($x=540;$x -lt 620;$x++) {
    $pixel=$bmp.GetPixel($x,$y)
    if($pixel.R -lt 70 -and $pixel.G -lt 85 -and $pixel.B -lt 85) {$rightmost=[Math]::Max($rightmost,$x)}
   }
@@ -240,6 +240,9 @@ function Pencil([string]$snapshot,[string]$name) {
  if(!$row) {throw "Favorite $name missing in $snapshot"}
  FavoritePencil $snapshot (([int]$row.top+[int]$row.height/2)/2+10)
 }
+function RequireText([string]$snapshot,[string]$word) {
+ if(!(Import-Csv "$EvidenceDirectory/$snapshot.tsv" -Delimiter "`t" | Where-Object {$_.text -eq $word})) {throw "Input verification failed: $word not visible in $snapshot"}
+}
 try {
  Chapter 'Actual Windows app and real LocalSend peer - empty favorites'
  Snap 'home'
@@ -254,6 +257,8 @@ try {
  Field 'Address' 'add' '127.0.0.1'
  Field 'Port' 'add' '53317'
  Snap 'add-filled'
+ RequireText 'add-filled' '127.0.0.1'
+ RequireText 'add-filled' '53317'
  PrimaryButton 'add-filled'
  Start-Sleep -Seconds 2
  Snap 'added'
@@ -297,6 +302,7 @@ try {
  Field 'Address' 'failed-add' '127.0.0.1'
  Field 'Port' 'failed-add' '1'
  Snap 'failed-add-filled'
+ RequireText 'failed-add-filled' '1'
  PrimaryButton 'failed-add-filled'
  Start-Sleep -Seconds 2
  Snap 'failed-add-error'
@@ -309,6 +315,7 @@ try {
  Snap 'add-recovery'
  Field 'Port' 'add-recovery' '53317'
  Snap 'add-recovery-filled'
+ RequireText 'add-recovery-filled' '53317'
  PrimaryButton 'add-recovery-filled'
  Start-Sleep -Seconds 2
  AssertCount 1
