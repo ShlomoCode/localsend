@@ -172,4 +172,4 @@ if [[ ${ISSUE1054_INSTALL_GUEST:-0} == 1 ]]; then
 fi
 # Keep tiny evidence rather than uploading or redistributing installation media.
 rm "$ISO"
-stage 'official-iso-verified; Windows installation/activation and actual-app workflow remain unexecuted'
+stage 'official-media-verification-finished; no app-to-app transfer executed'
