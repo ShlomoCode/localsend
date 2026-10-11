@@ -36,13 +36,12 @@ cp /mnt/historical.flatpak /home/mint/
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
-# Give the normal user Flatpak installation real ext4 storage instead of the
+# Give the normal system Flatpak installation real ext4 storage instead of the
 # live ISO's small RAM overlay. App code, permissions, HOME and session stay stock.
 mkfs.ext4 -F -L FLATPAK /dev/vda
-mkdir -p /home/mint/.local/share/flatpak
-mount /dev/vda /home/mint/.local/share/flatpak
-chown mint:mint /home/mint/.local/share/flatpak
-df -Th / /home/mint/.local/share/flatpak > /home/mint/evidence/installation-storage.txt
+mkdir -p /var/lib/flatpak
+mount /dev/vda /var/lib/flatpak
+df -Th / /var/lib/flatpak > /home/mint/evidence/installation-storage.txt
 cp -a /etc/apt /home/mint/evidence/apt-before
 for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
   test -f "$source" || continue

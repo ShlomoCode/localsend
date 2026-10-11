@@ -11,6 +11,17 @@ capture_window() {
 click_word() {
   local wid=$1 label=$2 name=$3 count point
   capture_window "$wid" "$name"
+  if [[ "$label" == Done ]]; then
+    # The file row also says Done. Identify the observed bottom action only.
+    [[ $(identify -format '%wx%h' "evidence/$name.png") == 1000x700 ]]
+    convert "evidence/$name.png" -crop 52x24+910+650 -resize 400% -negate "evidence/$name-label.png"
+    tesseract "evidence/$name-label.png" "evidence/$name-label" --psm 7 >/dev/null 2>&1
+    [[ $(tr -d '[:space:]' < "evidence/$name-label.txt") == Done ]] || return 1
+    printf '%s window=%s click=935,661 exact-bottom-action=Done\n' "$(date --iso-8601=ns)" "$wid" >> evidence/input-timings.txt
+    xdotool mousemove --window "$wid" 935 661 click 1
+    sleep 2
+    return
+  fi
   count=$(awk -F '\t' -v text="$label" '$12==text && $11>=30 {n++} END {print n+0}' "evidence/$name.tsv")
   if [[ "$count" == 0 && "$label" == Accept ]]; then
     # Full-window OCR misses the actual white Accept label in the retained
@@ -52,7 +63,7 @@ restart_receiver() {
   local label=$1
   flatpak kill org.localsend.localsend_app
   sleep 2
-  flatpak run --user org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
+  flatpak run --system org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
   sleep 8
   receiver_pid=$(pgrep -u mint -n -x localsend_app || pgrep -u mint -n -x localsend)
   receiver_wid=''
@@ -71,6 +82,10 @@ send_and_approve() {
   click_word "$sender_wid" "$alias_word" "$label-peer-selection"
   sleep 3
   capture_window "$receiver_wid" "$label-receive-pending"
+  actual_destination=$(awk '/Destination Directory: / {sub(/^.*Destination Directory: /,""); path=$0} END {print path}' evidence/receiver.log)
+  [[ "$actual_destination" == /* ]]
+  printf '%s\n' "$actual_destination" > "evidence/$label-actual-destination.txt"
+  sudo cat "/proc/$receiver_pid/mountinfo" > "evidence/$label-receiver-mountinfo.txt"
   ffmpeg -nostdin -y -f x11grab -video_size "$(xdpyinfo | sed -n 's/.*dimensions:[[:space:]]*\([0-9]*x[0-9]*\).*/\1/p')" -framerate 15 -i "$DISPLAY" -t 10 -c:v libx264 -pix_fmt yuv420p "evidence/$label-accept.mp4" > "evidence/$label-recording.log" 2>&1 &
   record_pid=$!
   sleep 1
@@ -83,6 +98,9 @@ send_and_approve() {
   { sudo stat -Lc '%d:%i %s %n' "/proc/$receiver_pid/root/home/mint/Downloads" /home/mint/Downloads;
     sudo find "/proc/$receiver_pid/root/home/mint/Downloads" /home/mint/Downloads -maxdepth 2 -name "$filename" -exec sha256sum {} \; -exec stat -Lc '%d:%i %s %n' {} \;;
   } > "evidence/$label-destination-while-alive.txt" 2>&1 || true
+  { sudo stat -Lc '%d:%i %s %n' "/proc/$receiver_pid/root$actual_destination" "$actual_destination";
+    sudo find "/proc/$receiver_pid/root$actual_destination" "$actual_destination" -maxdepth 2 -name "$filename" -exec sha256sum {} \; -exec stat -Lc '%d:%i %s %n' {} \;;
+  } > "evidence/$label-actual-destination-while-alive.txt" 2>&1 || true
 }
 restart_sender() {
   sudo pkill -u sender -x localsend_app || true
@@ -99,13 +117,33 @@ restart_sender() {
   xdotool windowsize "$sender_wid" 1000 700
 }
 observe_history() {
-  local label=$1
+  local label=$1 history_filename=$2
   jq 'with_entries(select(.key|test("alias|destination|receive_history|quick_save")))' "$prefs" > "evidence/$label-receiver-settings.json"
   capture_window "$receiver_wid" "$label-home"
+  assert_receive_home "$label-home"
   # Observed history icon in the original1.11.1 1000x700 receiver.
   xdotool mousemove --window "$receiver_wid" 920 40 click 1
   sleep 2
   capture_window "$receiver_wid" "$label-history"
+  require_ocr_word "$label-history" History
+  require_ocr_word "$label-history" "$history_filename"
   xdotool key --clearmodifiers Escape
   sleep 1
+  capture_window "$receiver_wid" "$label-history-return"
+  assert_receive_home "$label-history-return"
+}
+require_ocr_word() {
+  local name=$1 word=$2
+  awk -F '\t' -v word="$word" '$12==word && $11>=20 {found=1} END {exit !found}' "evidence/$name.tsv"
+}
+assert_receive_home() {
+  local name=$1
+  require_ocr_word "$name" Receive
+  require_ocr_word "$name" "$receiver_alias_word"
+  require_ocr_word "$name" Quick
+  require_ocr_word "$name" Off
+  if awk -F '\t' '$12=="Finished" || $12=="History" {found=1} END {exit !found}' "evidence/$name.tsv"; then
+    printf 'HARNESS_EXPECTED_RECEIVE_HOME %s\n' "$name" >> evidence/harness-errors.txt
+    return 1
+  fi
 }

@@ -7,15 +7,15 @@ desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
 tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
 { uname -a; cat /etc/os-release; cinnamon --version; flatpak --version; } > evidence/desktop-identity.txt
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user --noninteractive -y flathub org.freedesktop.Platform/x86_64/22.08
-flatpak install --user --noninteractive -y ./historical.flatpak
-flatpak info --user org.localsend.localsend_app > evidence/app-identity.txt
-flatpak info --user --show-metadata org.localsend.localsend_app > evidence/app-metadata.txt
+sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+sudo flatpak install --system --noninteractive -y flathub org.freedesktop.Platform/x86_64/22.08
+sudo flatpak install --system --noninteractive -y ./historical.flatpak
+flatpak info --system org.localsend.localsend_app > evidence/app-identity.txt
+flatpak info --system --show-metadata org.localsend.localsend_app > evidence/app-metadata.txt
 flatpak override --user --show org.localsend.localsend_app > evidence/initial-overrides.txt
-flatpak remote-info --user --log flathub org.localsend.localsend_app > evidence/official-deployment-history.txt
+flatpak remote-info --system --log flathub org.localsend.localsend_app > evidence/official-deployment-history.txt
 mkdir -p "$HOME/Downloads"
-flatpak run --user org.localsend.localsend_app > evidence/receiver.log 2>&1 &
+flatpak run --system org.localsend.localsend_app > evidence/receiver.log 2>&1 &
 sleep 10
 receiver_wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1)
 xdotool windowmove "$receiver_wid" 0 0
@@ -50,7 +50,7 @@ sudo sha256sum /home/sender/Downloads/733-control.txt > evidence/source-sha256.t
 # Start the receiver again with the real peer interface already present.
 flatpak kill org.localsend.localsend_app
 sleep 2
-flatpak run --user org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
+flatpak run --system org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
 sleep 8
 receiver_wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1)
 xdotool windowmove "$receiver_wid" 0 0
@@ -97,7 +97,7 @@ sudo cmp /home/sender/Downloads/733-control.txt /home/mint/Downloads/733-control
 sudo sha256sum /home/mint/Downloads/733-control.txt > evidence/normal-host-sha256.txt
 echo ACTUAL_TWO_APP_NORMAL_DOWNLOADS_HASH_PASS > evidence/result.txt
 click_word "$receiver_wid" Done normal-receiver-done
-observe_history normal
+observe_history normal 733-control.txt
 # Same live receiver first: a supported override changes future launches;
 # observe its actual currently mounted destination without assuming effect.
 sudo flatpak override --nofilesystem=xdg-download org.localsend.localsend_app
@@ -112,7 +112,7 @@ send_and_approve 733-live-denial.txt live-revocation "$receiver_alias_word"
 sudo cmp /home/sender/Downloads/733-live-denial.txt /home/mint/Downloads/733-live-denial.txt
 echo LIVE_RECEIVER_EXISTING_MOUNT_CONTROL_PASS >> evidence/result.txt
 click_word "$receiver_wid" Done live-revocation-receiver-done
-observe_history live-revocation
+observe_history live-revocation 733-live-denial.txt
 for repetition in 1 2 3; do
   label="revoked-$repetition"
   filename="733-revoked-$repetition.txt"
@@ -120,22 +120,29 @@ for repetition in 1 2 3; do
   sudo chown sender:sender "/home/sender/Downloads/$filename"
   test ! -e "/home/mint/Downloads/$filename"
   restart_receiver "$label"
+  # The exact reported system override must remove the effective grant in
+  # this fresh ordinary system installation before calling it a denied trial.
+  effective_filesystems=$(sed -n 's/^filesystems=//p' "evidence/$label-process-flatpak-info.txt")
+  if printf '%s\n' "$effective_filesystems" | grep -Eq '(^|;)xdg-download(:[^;]*)?(;|$)'; then
+    printf '%s HARNESS_PERMISSION_STILL_GRANTED\n' "$label" >> evidence/result.txt
+    exit 1
+  fi
   restart_sender
   select_fixture "$filename" "$label"
   send_and_approve "$filename" "$label" "$receiver_alias_word"
   click_word "$receiver_wid" Done "$label-receiver-done"
-  observe_history "$label"
-  sudo find /home/mint /run/user -name "$filename" -exec sha256sum {} \; > "evidence/$label-host-search-while-alive.txt" 2>&1
+  observe_history "$label" "$filename"
+  sudo find /home/mint /run/user -name "$filename" -exec sha256sum {} \; > "evidence/$label-host-search-while-alive.txt" 2>&1 || printf '%s HOST_SEARCH_INCOMPLETE_SEE_RETAINED_ERRORS\n' "$label" >> evidence/result.txt
   flatpak kill org.localsend.localsend_app
   sleep 2
-  sudo find /home/mint /run/user -name "$filename" -exec sha256sum {} \; > "evidence/$label-host-search-after-exit.txt" 2>&1
+  sudo find /home/mint /run/user -name "$filename" -exec sha256sum {} \; > "evidence/$label-host-search-after-exit.txt" 2>&1 || printf '%s HOST_SEARCH_INCOMPLETE_SEE_RETAINED_ERRORS\n' "$label" >> evidence/result.txt
   if [[ -e "/home/mint/Downloads/$filename" ]]; then
     echo "$label HOST_FILE_PRESENT_REVIEW_UI_AND_HASH" >> evidence/result.txt
   else
     echo "$label HOST_FILE_ABSENT_REVIEW_ACTUAL_UI_PRIVATE_FILE_AND_HISTORY" >> evidence/result.txt
   fi
   # The next receiver restart helper handles an already stopped instance.
-  flatpak run --user org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
+  flatpak run --system org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
   sleep 8
   receiver_wid=$(xdotool search --onlyvisible --name '^LocalSend$' | grep -v "^$sender_wid$" | head -n 1)
 done
