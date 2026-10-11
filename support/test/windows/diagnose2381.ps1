@@ -326,14 +326,29 @@ Screenshot "native-file-picker-filled"
 Click 464 473
 Start-Sleep -Seconds 3
 Screenshot "sender-file-selected"
-if($currentView) {Click 600 400} else {Word "#2" "sender-file-selected"}
+$connectionsBefore=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+$connectionsBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/first-transfer-sockets-before.json"
+if($currentView) {Word "My" "sender-file-selected"} else {Word "#2" "sender-file-selected"}
 Start-Sleep -Seconds 3
 Screenshot "sender-transfer-requested"
-Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess | ConvertTo-Json | Set-Content "$EvidenceDirectory/home-transfer-sockets.json"
+$connectionsAfter=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+$connectionsAfter | ConvertTo-Json | Set-Content "$EvidenceDirectory/first-transfer-sockets-after.json"
+@($connectionsAfter | Where-Object {$connectionsBefore.LocalPort -notcontains $_.LocalPort}) | ConvertTo-Json | Set-Content "$EvidenceDirectory/first-transfer-new-sockets.json"
 [Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
 Start-Sleep -Seconds 2
 Screenshot "receiver-transfer-request"
-throw "Receiver Accept checkpoint: verify actual request before saving"
+# Actual request Accept measured at x511-621/y682-720 in run 38106622251.
+Click 566 702
+Start-Sleep -Seconds 5
+Screenshot "receiver-transfer-completed"
+$originalHash=(Get-FileHash $fixture -Algorithm SHA256).Hash
+$saved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash}})
+$saved | ConvertTo-Json | Set-Content "$EvidenceDirectory/first-transfer-saved-files.json"
+if(@($saved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length}).Count -ne 1) {throw "Real UI receive did not save exactly one matching fixture"}
+[Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+Start-Sleep -Seconds 2
+Screenshot "sender-transfer-completed"
+throw "Completed transfer checkpoint: inspect Close/Finish before second route"
 
 
 foreach ($name in @("sender","receiver")) {
