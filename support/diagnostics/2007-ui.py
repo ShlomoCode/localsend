@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
+from PIL import Image
 
 out = Path('evidence')
 
@@ -14,9 +15,18 @@ def run(*args):
 def screen(name):
     path = out / (name + '.png')
     run('scrot', str(path))
-    tsv = run('tesseract', str(path), 'stdout', '--psm', '11', 'tsv')
+    # Preserve the original evidence screenshot. Enlarge a separate OCR input
+    # so 13 px desktop labels are recognized, then map bounds back to pixels.
+    ocr_path = out / (name + '-ocr.png')
+    source = Image.open(path)
+    source.resize((source.width * 3, source.height * 3), Image.Resampling.LANCZOS).save(ocr_path)
+    tsv = run('tesseract', str(ocr_path), 'stdout', '--psm', '11', 'tsv')
     (out / (name + '.tsv')).write_text(tsv)
-    return list(csv.DictReader(io.StringIO(tsv), delimiter='\t'))
+    words = list(csv.DictReader(io.StringIO(tsv), delimiter='\t'))
+    for word in words:
+        for key in ['left', 'top', 'width', 'height']:
+            word[key] = str(int(word[key]) // 3)
+    return words
 
 def text(name, stage, scroll=False):
     for attempt in range(12 if scroll else 1):
