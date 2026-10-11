@@ -184,7 +184,7 @@ jobs:
           done
           test "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round"
           cp /tmp/localsend-vm/command.json "$target/command.json"
-          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          ssh_opts=(-n -i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
           export DISPLAY=:99
           qemu_window=$(xdotool search --onlyvisible --name QEMU | head -1)
           xdotool windowfocus "$qemu_window"
@@ -206,7 +206,8 @@ jobs:
               calculator) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' ;;
               stop-app) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pkill -x localsend || true; pkill -x localsend_app || true' ;;
               sample) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u +%FT%T.%N; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then getconf CLK_TCK; cat "/proc/$pid/task/$pid/stat"; sleep 5; date -u +%FT%T.%N; cat "/proc/$pid/task/$pid/stat"; ps -T -p "$pid" -o pid,tid,stat,pcpu,wchan:32,comm; fi' > "$target/sample-$(date +%s).txt" ;;
-              stack) timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then sudo gdb -q -batch -p "$pid" -ex "thread apply all bt 16"; fi' > "$target/backtrace.txt" 2>&1 || true ;;
+              stack) timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); date -u +%FT%T.%N; if [ -n "$pid" ]; then cat "/proc/$pid/stat"; sudo timeout 30 gdb -q -batch -ex "set sysroot /proc/$pid/root" -ex "file /proc/$pid/root/app/bin/localsend" -p "$pid" -ex "thread apply all bt 40"; fi; date -u +%FT%T.%N' > "$target/backtrace.txt" 2>&1 || true ;;
+              probe) timeout 90 ssh "${ssh_opts[@]}" probe@127.0.0.1 "$(jq -r .value <<< "$action")" > "$target/probe-$action_index.txt" 2>&1 || true ;;
               finish) touch evidence/vm/finished ;;
               *) echo "Unsupported action=$kind"; exit 1 ;;
             esac
@@ -465,6 +466,246 @@ jobs:
         with:
           name: gnome-zoom-3161-round-24
           path: evidence/vm/round-24/
+      - name: Live UI round 25
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 25
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-25
+          path: evidence/vm/round-25/
+      - name: Live UI round 26
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 26
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-26
+          path: evidence/vm/round-26/
+      - name: Live UI round 27
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 27
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-27
+          path: evidence/vm/round-27/
+      - name: Live UI round 28
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 28
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-28
+          path: evidence/vm/round-28/
+      - name: Live UI round 29
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 29
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-29
+          path: evidence/vm/round-29/
+      - name: Live UI round 30
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 30
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-30
+          path: evidence/vm/round-30/
+      - name: Live UI round 31
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 31
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-31
+          path: evidence/vm/round-31/
+      - name: Live UI round 32
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 32
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-32
+          path: evidence/vm/round-32/
+      - name: Live UI round 33
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 33
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-33
+          path: evidence/vm/round-33/
+      - name: Live UI round 34
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 34
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-34
+          path: evidence/vm/round-34/
+      - name: Live UI round 35
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 35
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-35
+          path: evidence/vm/round-35/
+      - name: Live UI round 36
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 36
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-36
+          path: evidence/vm/round-36/
+      - name: Live UI round 37
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 37
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-37
+          path: evidence/vm/round-37/
+      - name: Live UI round 38
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 38
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-38
+          path: evidence/vm/round-38/
+      - name: Live UI round 39
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 39
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-39
+          path: evidence/vm/round-39/
+      - name: Live UI round 40
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 40
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-40
+          path: evidence/vm/round-40/
+      - name: Live UI round 41
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 41
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-41
+          path: evidence/vm/round-41/
+      - name: Live UI round 42
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 42
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-42
+          path: evidence/vm/round-42/
+      - name: Live UI round 43
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 43
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-43
+          path: evidence/vm/round-43/
+      - name: Live UI round 44
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 44
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-44
+          path: evidence/vm/round-44/
+      - name: Live UI round 45
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 45
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-45
+          path: evidence/vm/round-45/
+      - name: Live UI round 46
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 46
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-46
+          path: evidence/vm/round-46/
+      - name: Live UI round 47
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 47
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-47
+          path: evidence/vm/round-47/
+      - name: Live UI round 48
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 48
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-48
+          path: evidence/vm/round-48/
       - name: Collect session diagnostics and identities
         if: always()
         run: |
