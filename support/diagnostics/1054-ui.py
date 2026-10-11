@@ -35,9 +35,18 @@ def screen(stage, roi=None, psm=11):
         command += ["-crop", f"{width}x{height}+{x}+{y}", "+repage"]
     command += ["-resize", "300%", str(image)]
     run(*command)
-    text = run("tesseract", str(image), "stdout", "--psm", str(psm), "tsv")
-    (OUT / (stage + ".tsv")).write_text(text)
-    rows = list(csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE))
+    rows = []
+    # Sparse OCR skips light text on filled Material buttons. Preserve both
+    # contrast passes against the same screenshot instead of guessing clicks.
+    for contrast in ("normal", "inverted"):
+        ocr_image = image
+        if contrast == "inverted":
+            ocr_image = OUT / (stage + "-ocr-inverted.png")
+            run("convert", str(image), "-negate", str(ocr_image))
+        text = run("tesseract", str(ocr_image), "stdout", "--psm", str(psm), "tsv")
+        suffix = "" if contrast == "normal" else "-inverted"
+        (OUT / (stage + suffix + ".tsv")).write_text(text)
+        rows.extend(csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE))
     for row in rows:
         row["text"] = row.get("text") or ""
         for key in ("left", "top", "width", "height"):
