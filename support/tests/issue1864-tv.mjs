@@ -92,7 +92,9 @@ async function waitForAppWindow() {
       && !block.split('\n')[0].includes('EXITING')
       && block.includes('Surface: shown=true') && block.includes('mDrawState=HAS_DRAWN'));
     fs.writeFileSync(`${out}/launch-readiness-${attempt}-window.txt`,window);
-    log({type:'readiness',action:'app-window',attempt,ready,pid:adb('shell','pidof','org.localsend.localsend_app').trim()});
+    let pid='';
+    try { pid=adb('shell','pidof','org.localsend.localsend_app').trim(); } catch {}
+    log({type:'readiness',action:'app-window',attempt,ready,pid});
     if (ready) { await snapshot('launch-ready'); return; }
     await pause(2000);
   }
