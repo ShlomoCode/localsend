@@ -1,13 +1,29 @@
 name: Diagnose 2754 Cinnamon Text focus
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        default: mint
+        options: [mint, ubuntu-cinnamon]
 jobs:
   cinnamon-vm:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
-      - run: bash support/diagnostics/2754-vm.sh
+      - name: Run ordinary Cinnamon graphical VM
+        env:
+          PROBE_ENVIRONMENT: ${{ inputs.environment || 'mint' }}
+        run: |
+          if [ "$PROBE_ENVIRONMENT" = mint ]; then
+            bash support/diagnostics/2754-mint-vm.sh
+          else
+            bash support/diagnostics/2754-vm.sh
+          fi
+      - name: Preserve readable evidence on every outcome
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" evidence/cloud && chmod -R a+rX evidence/cloud
       - uses: actions/upload-artifact@v4
         if: always()
         with:
