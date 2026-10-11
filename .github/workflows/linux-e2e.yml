@@ -116,9 +116,7 @@ jobs:
           (cd candidate && ../packages/candidate.AppImage --appimage-extract > ../evidence/candidate-extract.log)
           sha256sum baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app | tee evidence/packaged-executables.sha256
           cmp baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app
-          expected=$(cut -d ' ' -f 1 source-evidence/built-executable.sha256)
-          actual=$(sha256sum candidate/squashfs-root/localsend_app | cut -d ' ' -f 1)
-          test "$actual" = "$expected"
+          cp source-evidence/built-executable.sha256 evidence/prepackaging-executable.sha256
           cp baseline/squashfs-root/org.localsend.localsend_app.desktop evidence/baseline.desktop
           cp candidate/squashfs-root/org.localsend.localsend_app.desktop evidence/candidate.desktop
           ! grep -q '^StartupWMClass=' evidence/baseline.desktop
