@@ -29,7 +29,7 @@ public final class RelayService extends Service {
       endpoint=config.getString("endpoint");token=config.getString("token");
       if(targetPort==53319)startControl();
       while(running){JSONArray batch=new JSONArray(request("GET","/pull",null));for(int i=0;i<batch.length();i++)handle(batch.getJSONObject(i));}
-    }catch(Exception e){Log.e("CloudTransport","Relay stopped: "+e.getClass().getSimpleName());stopSelf();}},"relay-pull").start();
+    }catch(Exception e){Log.e("CloudTransport","Relay stopped: "+e.getClass().getSimpleName()+" "+e.getMessage());stopSelf();}},"relay-pull").start();
     return START_NOT_STICKY;
   }
   private void startControl()throws Exception{

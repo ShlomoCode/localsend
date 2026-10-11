@@ -6,7 +6,8 @@ import {relay} from './relay.mjs';
 
 const token=process.env.RELAY_TOKEN;
 const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
-const r=relay({token});await r.start();let session;
+const senderPort=Number(process.env.TRANSPORT_SENDER_PORT||53318);
+const r=relay({token,tcpPort:senderPort});await r.start();let session;
 async function wd(method,path,body) {
  const res=await fetch('https://hub-cloud.browserstack.com/wd/hub'+path,{method,headers:{authorization:auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(120000)});
  const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'').slice(0,600);for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message);}return json.value;
@@ -26,7 +27,7 @@ try {
  await new Promise(ok=>setTimeout(ok,2500));
  for(const size of [0,1,65537,8*1024*1024]){
   const data=randomBytes(size),expected=createHash('sha256').update(data).digest('hex');
-  const s=net.connect({host:'127.0.0.1',port:53318,allowHalfOpen:true});s.setTimeout(180000,()=>s.destroy(new Error('Physical relay timeout')));s.end(data);
+  const s=net.connect({host:'127.0.0.1',port:senderPort,allowHalfOpen:true});s.setTimeout(180000,()=>s.destroy(new Error('Physical relay timeout')));s.end(data);
   const chunks=[];for await(const d of s)chunks.push(d);const reply=JSON.parse(Buffer.concat(chunks));
   assert.equal(reply.count,size);assert.equal(reply.sha256,expected);results.push({bytes:size,byteExact:true,replyAfterHalfClose:true});console.log('Physical control passed '+size+' bytes');
  }
@@ -36,6 +37,7 @@ try {
  await new Promise(ok=>setTimeout(ok,4000));
  const source=await wd('GET',`/session/${session}/source`);writeFileSync('localsend-source.xml',source);
  console.log('Original LocalSend activated; relay target switched to localhost53317');
+ if(process.env.SCENARIO_MODULE){const {pathToFileURL}=await import('node:url');const scenario=await import(pathToFileURL(process.env.SCENARIO_MODULE));await scenario.default({session,wd,senderHost:'127.0.0.1',senderPort,transportStatus:r.status});}
  const hold=Number(process.env.TRANSPORT_HOLD_SECONDS||0);
  if(hold){console.log('Transport integration window started');for(let i=0;i<hold;i+=20){await new Promise(ok=>setTimeout(ok,Math.min(20,hold-i)*1000));await wd('GET',`/session/${session}/source`);}}
 } catch(error) {
