@@ -5,10 +5,15 @@ on:
       source_comparison:
         type: boolean
         default: false
+      package_run_id:
+        type: string
+        default: ''
 permissions:
   contents: read
+  actions: read
 jobs:
   fedora-gnome:
+    if: inputs.package_run_id == ''
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     steps:
@@ -89,3 +94,41 @@ jobs:
         with:
           name: source-appimages-2433
           path: packages-2433/
+  verify-packages:
+    if: inputs.package_run_id != ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect the two actual packaged artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RUN_ID: ${{ inputs.package_run_id }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils libfuse2
+          gh run download "$PACKAGE_RUN_ID" --repo "$GITHUB_REPOSITORY" -n source-appimages-2433 -D packages
+          gh run download "$PACKAGE_RUN_ID" --repo "$GITHUB_REPOSITORY" -n fedora-gnome-2433-evidence -D source-evidence
+          mkdir baseline candidate evidence
+          chmod +x packages/*.AppImage
+          (cd baseline && ../packages/baseline.AppImage --appimage-extract > ../evidence/baseline-extract.log)
+          (cd candidate && ../packages/candidate.AppImage --appimage-extract > ../evidence/candidate-extract.log)
+          sha256sum baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app | tee evidence/packaged-executables.sha256
+          cmp baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app
+          expected=$(cut -d ' ' -f 1 source-evidence/built-executable.sha256)
+          actual=$(sha256sum candidate/squashfs-root/localsend_app | cut -d ' ' -f 1)
+          test "$actual" = "$expected"
+          cp baseline/squashfs-root/org.localsend.localsend_app.desktop evidence/baseline.desktop
+          cp candidate/squashfs-root/org.localsend.localsend_app.desktop evidence/candidate.desktop
+          ! grep -q '^StartupWMClass=' evidence/baseline.desktop
+          grep -qx 'StartupWMClass=org.localsend.localsend_app' evidence/candidate.desktop
+          diff -u evidence/baseline.desktop evidence/candidate.desktop > evidence/desktop.diff || test "$?" = 1
+          desktop-file-validate evidence/baseline.desktop
+          desktop-file-validate evidence/candidate.desktop
+          printf 'Identical exact-source executable; generated candidate desktop class validated.\n' > evidence/verdict.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packaged-metadata-2433
+          path: evidence/
