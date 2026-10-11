@@ -1,5 +1,8 @@
 name: Build controlled 2890 comparison
 on:
+  push:
+    branches: [codex/diagnose-2890]
+    paths: [.github/workflows/build-2890-compare.yml]
   workflow_dispatch:
 jobs:
   build:
