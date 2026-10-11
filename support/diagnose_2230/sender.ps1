@@ -77,6 +77,70 @@ function SelectFile([string]$Path) {
   $ocr=Snapshot 'selected-file'
   if($ocr.text -notmatch 'Files.*1') { throw 'Actual file selection did not show one selected file.' }
 }
+function CloseSenderTerminal {
+  for($attempt=0;$attempt -lt 5;$attempt++) {
+    $ocr=Snapshot ('sender-recovery-'+$currentCase+'-'+$attempt)
+    if($ocr.text -match 'Selection' -and $ocr.text -match 'Nearby' -and $ocr.text -notmatch 'Enter address') { return }
+    $continue=@($ocr.words | Where-Object text -CEQ 'Continue')
+    if($continue.Count -eq 1) {
+      $cancel=@($ocr.words | Where-Object text -CEQ 'Cancel' | Where-Object { $_.x -gt $continue[0].x -and [Math]::Abs($_.y-$continue[0].y) -lt 15 })
+      if($cancel.Count -ne 1) { throw 'No unique rendered affirmative Cancel beside Continue.' }
+      $p=$cancel[0]; $w=$ocr.window
+      if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($w.Hwnd),[int]($w.Left+$p.x+$p.width/2),[int]($w.Top+$p.y+$p.height/2))) { throw 'Cancel confirmation click failed.' }
+    } elseif(@($ocr.words | Where-Object text -CEQ 'Advanced').Count -eq 1) {
+      if(@($ocr.words | Where-Object text -CEQ 'Done').Count -gt 0) { ClickTerminalDone $ocr }
+      else { ClickWord $ocr 'Cancel' }
+    } elseif(@($ocr.words | Where-Object text -CEQ 'Close').Count -eq 1) { ClickWord $ocr 'Close' }
+    else { throw 'Sender terminal state has no verified recovery control.' }
+    Start-Sleep -Milliseconds 600
+  }
+  throw 'Sender did not visibly return home through GUI recovery.'
+}
+function EnsureSenderSelectionEmpty {
+  $ocr=Snapshot ('selection-tab-'+$currentCase)
+  ClickWord $ocr 'Send'
+  $ocr=Snapshot ('selection-before-'+$currentCase)
+  if($ocr.text -match '\bFiles\s*:?\s*\d') {
+    $selection=@($ocr.words | Where-Object text -CEQ 'Selection')
+    if($selection.Count -ne 1) { throw 'No unique rendered Selection row for clearing retained files.' }
+    $clear=@($ocr.words | Where-Object { $_.text -cmatch '^[xX×]$' -and $_.x -gt $selection[0].x -and [Math]::Abs($_.y-$selection[0].y) -lt 18 })
+    if($clear.Count -ne 1) { throw 'No unique rendered selection-row X; no speculative clearing click.' }
+    $p=$clear[0]; $w=$ocr.window
+    if(-not [ReceiverNative]::ClickScreen([IntPtr]::new($w.Hwnd),[int]($w.Left+$p.x+$p.width/2),[int]($w.Top+$p.y+$p.height/2))) { throw 'Selection clearing click failed.' }
+    Start-Sleep -Milliseconds 600
+    $ocr=Snapshot ('selection-cleared-'+$currentCase)
+  }
+  if($ocr.text -match '\bFiles\s*:?\s*\d' -or @($ocr.words | Where-Object text -CEQ 'File').Count -ne 1 -or @($ocr.words | Where-Object text -CEQ 'Folder').Count -ne 1) { throw 'Empty sender selection was not visibly verified.' }
+}
+function InvokeAppCase($Case) {
+  $script:currentCase=$Case.id
+  if($app.HasExited -or $app.StartTime.Ticks -ne $senderStartTicks) { throw 'Original Windows sender process changed.' }
+  EnsureSenderSelectionEmpty
+  if($script:lastCompletedCase) {
+    & wsl -d Ubuntu-24.04 -u tester -- bash -lc "mkdir -p /home/tester/2230-saved/$script:lastCompletedCase; find /home/tester/*/Books -maxdepth 1 -type f -exec mv -t /home/tester/2230-saved/$script:lastCompletedCase -- {} +" | Out-Host
+    if($LASTEXITCODE -ne 0) { throw 'Could not preserve preceding saved or partial files.' }
+  }
+  $guestArgs=@('-d','Ubuntu-24.04','-u','tester','--','bash',"$linuxRoot/support/diagnose_2230/receiver_control.sh","$linuxRoot/evidence/2230",$Case.id,$Case.bytes,$Case.sha256)
+  $script:receiver=Start-Process wsl.exe -ArgumentList $guestArgs -PassThru -NoNewWindow
+  $receiverHandle=$receiver.Handle
+  [void](SelectFile $Case.path)
+  [void](SendToReceiver $ip)
+  if(-not $receiver.WaitForExit(330000)) { throw 'Receiver UI/control deadline expired; bounded cleanup required.' }
+  [void](Snapshot ($Case.id+'-terminal'))
+  $receiver.Refresh()
+  $receiver.ExitCode | Set-Content (Join-Path $evidence ('controller-exit-'+$Case.id+'.txt'))
+  $resultPath=Join-Path $evidence ('cases/'+$Case.id+'/receiver/result.env')
+  if(-not (Test-Path $resultPath)) { throw 'Receiver did not retain a completed result.' }
+  $result=Get-Content $resultPath
+  $admitted=($result -contains 'accepted=1') -and ($result -contains 'recovery=home_rendered') -and ($result -contains 'video_validation_ok=1') -and ($result -contains ('app_pid='+$linuxAppPid))
+  $verified=$admitted -and ($result -contains 'status=finished_and_hash_verified') -and ($result -contains 'finished=1') -and ($result -contains 'hash_match=1') -and ($receiver.ExitCode -eq 0)
+  $boundaryFailure=$admitted -and (($result -contains 'status=explicit_error') -or ($result -contains 'status=deadline_without_finished')) -and ($receiver.ExitCode -ne 0)
+  if(-not $verified -and -not $boundaryFailure) { throw 'Case lacks real acceptance, intact evidence, same receiver process, or GUI recovery; no further input.' }
+  [ordered]@{caseId=$Case.id;verified=$verified;acceptedBoundaryFailure=$boundaryFailure;windowsPid=$app.Id;linuxPid=$linuxAppPid;receiverResult=$result} | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $evidence ('case-outcome-'+$Case.id+'.json'))
+  CloseSenderTerminal
+  $script:lastCompletedCase=$Case.id
+  return [pscustomobject]@{verified=$verified;acceptedBoundaryFailure=$boundaryFailure}
+}
 function SendToReceiver([string]$Ip) {
   $ocr=Snapshot 'target-page'
   $device=@($ocr.words | Where-Object text -CEQ 'Ubuntu2230')
@@ -117,6 +181,7 @@ function SendToReceiver([string]$Ip) {
 try {
   $exe=(Get-Content (Join-Path $evidence 'windows-executable.txt') -Raw).Trim()
   $app=Start-Process $exe -PassThru
+  $senderStartTicks=$app.StartTime.Ticks
   Start-Sleep -Seconds 5
   [void](Snapshot 'startup')
   Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json | Set-Content (Join-Path $evidence 'windows-listeners.json')
@@ -131,30 +196,26 @@ try {
   $ip=(& wsl -d Ubuntu-24.04 -u tester -- bash -lc "hostname -I | cut -d' ' -f1").Trim()
   if($ip -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'No valid WSL receiver IPv4 address.' }
   $ip | Set-Content (Join-Path $evidence 'target-ip.txt')
-  $manifest=Get-Content C:/2230/manifest.json -Raw | ConvertFrom-Json
-  foreach($case in $manifest) {
-    $currentCase=$case.id
-    # Preserve prior verified files, then restore the same empty Books destination.
-    & wsl -d Ubuntu-24.04 -u tester -- bash -lc "mkdir -p /home/tester/2230-verified/$($case.id); find /home/tester/*/Books -maxdepth 1 -type f -exec mv -t /home/tester/2230-verified/$($case.id) -- {} +"
-    if($LASTEXITCODE -ne 0) { throw 'Could not preserve preceding received files.' }
-    # Arm the actual receiver UI before performing the real sender action.
-    $guestArgs=@('-d','Ubuntu-24.04','-u','tester','--','bash',"$linuxRoot/support/diagnose_2230/receiver_control.sh","$linuxRoot/evidence/2230",$case.id,$case.bytes,$case.sha256)
-    $receiver=Start-Process wsl.exe -ArgumentList $guestArgs -PassThru -NoNewWindow
-    # Keep the native handle while the process runs so PowerShell can read its exit code.
-    $receiverHandle=$receiver.Handle
-    SelectFile $case.path
-    SendToReceiver $ip
-    if(-not $receiver.WaitForExit(330000)) { $receiver.Kill(); throw 'Receiver UI/control deadline expired.' }
-    [void](Snapshot ($case.id+'-terminal'))
-    $receiver.Refresh()
-    $receiver.ExitCode | Set-Content (Join-Path $evidence ('controller-exit-'+$case.id+'.txt'))
-    $resultPath=Join-Path $evidence ('cases/'+$case.id+'/receiver/result.env')
-    if(-not (Test-Path $resultPath)) { throw 'Receiver did not retain a completed result.' }
-    $result=Get-Content $resultPath
-    $verified=($result -contains 'status=finished_and_hash_verified') -and ($result -contains 'accepted=1') -and ($result -contains 'finished=1') -and ($result -contains 'hash_match=1') -and ($result -contains 'recovery=home_rendered') -and ($result -contains 'video_validation_ok=1')
-    if(-not $verified) { throw 'Actual app case lacks complete receiver evidence; inspect result before further input.' }
-    $ocr=Snapshot 'return-home'
-    ClickTerminalDone $ocr
+  $manifest=Get-Content C:/2230/manifest.json -Raw -Encoding UTF8 | ConvertFrom-Json
+  $pidLine=@(Get-Content (Join-Path $evidence 'receiver/session.env') | Where-Object { $_ -match '^APP_PID=\d+$' })
+  if($pidLine.Count -ne 1) { throw 'No unique original Linux app PID.' }
+  $linuxAppPid=$pidLine[0].Substring(8)
+  $script:lastCompletedCase=$null
+  $ascii=@($manifest | Where-Object id -CEQ 'ascii-control')
+  if($ascii.Count -ne 1) { throw 'No unique ASCII control fixture.' }
+  $queue=@(foreach($item in $manifest) {
+    if($item.id -eq 'booklike-304') {
+      foreach($repeat in 1,2) { [pscustomobject]@{id=('booklike-304-r'+$repeat);path=$item.path;bytes=$item.bytes;sha256=$item.sha256} }
+    } else { $item }
+  })
+  foreach($case in $queue) {
+    $outcome=InvokeAppCase $case
+    if($case.id -eq 'ascii-control' -and -not $outcome.verified) { throw 'ASCII actual app control failed; boundary cases are not admitted.' }
+    if($outcome.acceptedBoundaryFailure) {
+      $retry=[pscustomobject]@{id=('ascii-recovery-'+$case.id);path=$ascii[0].path;bytes=$ascii[0].bytes;sha256=$ascii[0].sha256}
+      $recovery=InvokeAppCase $retry
+      if(-not $recovery.verified) { throw 'Same-process ASCII recovery did not complete; no additional boundary input.' }
+    }
   }
 } catch {
   $_.Exception.ToString() | Set-Content (Join-Path $evidence 'sender-error.txt')

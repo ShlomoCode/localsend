@@ -4,12 +4,18 @@ param([string]$FixtureRoot = 'C:\2230')
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $FixtureRoot | Out-Null
 $cjk = [char]0x5B57
+$topics = '中华传统文化大百科套装五十册中国历史哲学文学艺术民俗典籍书画建筑医学礼仪宗教考古地理人物故事'
+$title = $topics
+while ($title.Length -lt 98) { $title += $topics }
+$bookName = '0288. ' + $title.Substring(0,98) + '.txt'
+if ([Text.Encoding]::UTF8.GetByteCount($bookName) -ne 304) { throw 'Synthetic book filename must be exactly 304 UTF-8 bytes.' }
 $cases = @(
   @{ id = 'ascii-control'; name = 'ordinary-control.txt' },
   @{ id = 'utf8-254'; name = (($cjk.ToString() * 83) + 'a.txt') },
   @{ id = 'utf8-255'; name = (($cjk.ToString() * 83) + 'aa.txt') },
   @{ id = 'utf8-256'; name = (($cjk.ToString() * 83) + 'aaa.txt') },
-  @{ id = 'utf8-304'; name = (($cjk.ToString() * 100) + '.txt') }
+  @{ id = 'utf8-304'; name = (($cjk.ToString() * 100) + '.txt') },
+  @{ id = 'booklike-304'; name = $bookName }
 )
 $payloadBytes = 10276045
 $chunk = New-Object byte[] 65536
