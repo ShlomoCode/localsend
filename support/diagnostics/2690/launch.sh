@@ -29,7 +29,11 @@ if [[ -x /tmp/gtk-control ]]; then
 fi
 for iteration in 1 2 3; do
   set +e
-  "$artifact" > /evidence/launch/$phase-$iteration.log 2>&1 &
+  if [[ ${TRACE_LOADER:-0} == 1 ]]; then
+    LD_DEBUG=libs,versions LD_DEBUG_OUTPUT=/evidence/launch/loader-$phase-$iteration "$artifact" > /evidence/launch/$phase-$iteration.log 2>&1 &
+  else
+    "$artifact" > /evidence/launch/$phase-$iteration.log 2>&1 &
+  fi
   app_pid=$!
   sleep 10
   if kill -0 "$app_pid" 2>/dev/null; then
@@ -47,7 +51,9 @@ for iteration in 1 2 3; do
   set -e
   printf '%s\t%s\t%s\t%s\n' "$phase" "$iteration" "$app_status" "$window_status" >> /evidence/launch/results.tsv
   cat /evidence/launch/$phase-$iteration.log
-  if [[ $phase == baseline* ]]; then
+  if [[ $phase == observe-* ]]; then
+    : # Record unchanged controls without assuming their old-host outcome.
+  elif [[ $phase == baseline* ]]; then
     grep -Fq "$expected_missing: cannot open shared object file" /evidence/launch/$phase-$iteration.log
   else
     test "$app_status" = running

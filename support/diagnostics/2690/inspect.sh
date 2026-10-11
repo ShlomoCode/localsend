@@ -31,3 +31,6 @@ bash support/diagnostics/2690/package.sh
 docker pull gentoo/stage3:latest
 docker image inspect gentoo/stage3:latest > evidence/cloud/gentoo-image.json
 docker run --privileged --name issue2690-gentoo -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" gentoo/stage3:latest bash /diagnostic/gentoo.sh
+docker pull ubuntu:20.04
+docker image inspect ubuntu:20.04 > evidence/cloud/old-libc-image.json
+docker run --privileged --name issue2690-old-libc -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" ubuntu:20.04 bash /diagnostic/old-libc.sh > evidence/cloud/old-libc.log 2>&1

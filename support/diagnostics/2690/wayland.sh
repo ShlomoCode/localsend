@@ -8,7 +8,7 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 dwm > /evidence/launch/dwm-wayland.log 2>&1 &
 wm_pid=$!
-weston --backend=x11 --renderer=gl --socket=wayland-2690 --idle-time=0 --width=1200 --height=700 > /evidence/launch/weston.log 2>&1 &
+weston --backend=x11 --renderer=gl --socket=wayland-2690 --idle-time=0 --width=1800 --height=1000 > /evidence/launch/weston.log 2>&1 &
 compositor_pid=$!
 trap 'kill "$compositor_pid" "$wm_pid" 2>/dev/null || true' EXIT
 for i in {1..30}; do
@@ -25,7 +25,10 @@ run_window() {
   (
     while kill -0 "$process_pid" 2>/dev/null; do
       if [[ -r /proc/$process_pid/maps ]]; then
-        cat /proc/$process_pid/maps > /evidence/launch/maps-$label.txt
+        cat /proc/$process_pid/maps > /evidence/launch/maps-$label.tmp
+        if [[ -s /evidence/launch/maps-$label.tmp ]]; then
+          mv /evidence/launch/maps-$label.tmp /evidence/launch/maps-$label.txt
+        fi
       fi
       sleep 0.1
     done
@@ -51,6 +54,7 @@ run_window original /evidence/original.AppImage
 run_window current /evidence/current.AppImage
 run_window repacked-baseline /evidence/repacked-baseline.AppImage
 run_window candidate /evidence/repacked-candidate.AppImage
+run_window new-client /evidence/repacked-new-client.AppImage
 run_window cursor-egl /evidence/repacked-cursor-egl.AppImage
 run_window client-only /evidence/repacked-client-only.AppImage
 run_window cursor-only /evidence/repacked-cursor-only.AppImage
