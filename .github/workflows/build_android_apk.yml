@@ -1,6 +1,15 @@
 name: Diagnose issue 1864 Android TV
 on:
   workflow_dispatch:
+    inputs:
+      image:
+        description: Genuine image; supplementary Android 10 x64 or TV 16 x64
+        type: choice
+        options:
+          - system-images;android-29;google_apis;x86_64
+          - system-images;android-36;android-tv;x86_64
+          - system-images;android-29;android-tv;x86
+        default: system-images;android-29;google_apis;x86_64
 permissions:
   contents: read
 concurrency:
@@ -19,8 +28,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p evidence-cloud
-          sdkmanager 'platform-tools' 'emulator' 'system-images;android-29;android-tv;x86'
-          echo no | avdmanager create avd --name issue1864-tv29 --package 'system-images;android-29;android-tv;x86' --device 'tv_1080p'
+          echo '${{ inputs.image }}' > evidence-cloud/system-image.txt
+          sdkmanager 'platform-tools' 'emulator' '${{ inputs.image }}'
+          echo no | avdmanager create avd --name issue1864-tv29 --package '${{ inputs.image }}' --device 'tv_1080p'
           avdmanager list avd > evidence-cloud/avd-list.txt
           ISSUE_AVD_DIR="$(avdmanager list avd | sed -n 's/^ *Path: //p' | head -1)"
           cp "$ISSUE_AVD_DIR/config.ini" evidence-cloud/avd-default.ini
@@ -34,8 +44,8 @@ jobs:
           avdslim enable dpad issue1864-tv29
           cp "$ISSUE_AVD_DIR/config.ini" evidence-cloud/avd-dpad.ini
           sudo chmod 666 /dev/kvm
-          avdslim start issue1864-tv29 --headless --no-slim --no-lowram > evidence-cloud/emulator-launch.log 2>&1
-          adb wait-for-device
+          timeout 180 avdslim start issue1864-tv29 --headless --no-slim --no-lowram > evidence-cloud/emulator-launch.log 2>&1
+          timeout 180 adb wait-for-device
           for i in $(seq 1 120); do [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break; sleep 2; done
           adb shell getprop > evidence-cloud/getprop.txt
           adb shell settings list system > evidence-cloud/system-settings.txt
@@ -55,6 +65,20 @@ jobs:
           adb exec-out screencap -p > evidence-cloud/initial.png
           adb shell dumpsys activity activities > evidence-cloud/activity.txt
           adb logcat -d > evidence-cloud/logcat.txt
+      - name: Seed ordinary photos and capture real Media route
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick
+          mkdir -p /tmp/issue1864-photos
+          for color in red green blue yellow purple orange; do convert -size 640x480 xc:$color /tmp/issue1864-photos/$color.jpg; done
+          adb shell mkdir -p /sdcard/Pictures/issue1864
+          adb push /tmp/issue1864-photos/. /sdcard/Pictures/issue1864/
+          for color in red green blue yellow purple orange; do adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/issue1864/$color.jpg; done
+          sleep 3
+          adb shell content query --uri content://media/external/images/media --projection _id:_display_name > evidence-cloud/seeded-mediastore.txt
+          for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_MEDIA_IMAGES READ_MEDIA_VIDEO; do adb shell pm grant org.localsend.localsend_app android.permission.$permission 2>&1 | tee -a evidence-cloud/permission-grants.txt || true; done
+          node support/tests/issue1864-tv.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
