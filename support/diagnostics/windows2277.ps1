@@ -1,4 +1,4 @@
-param([string]$Executable,[string]$EvidenceDirectory,[int]$Repeat=1)
+param([string]$Executable,[string]$EvidenceDirectory,[int]$Repeat=1,[string]$TextPayload='123456')
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -76,7 +76,8 @@ foreach($case in $cases) {
   $prompt=Import-Csv "$EvidenceDirectory/$name-text-dialog.tsv" -Delimiter "`t"|Where-Object{$_.text -eq 'message'}|Select-Object -First 1
   if(!$prompt){throw 'Type message dialog missing'}
   Click 500 ([int]$prompt.top+50) 'Text-input-focus'
-  [System.Windows.Forms.SendKeys]::SendWait('asdasd')
+  $script:actions+=@{utc=[DateTime]::UtcNow.ToString('o');action='Type-text';text=$TextPayload;foreground=[Desktop2277]::GetForegroundWindow().ToInt64()}
+  [System.Windows.Forms.SendKeys]::SendWait($TextPayload)
   Screenshot "$name-text-filled"
   # Confirm bounds x531-616/y434-470 verified in the first retained text-dialog screenshot.
   Click 574 452 'Confirm-text';Start-Sleep -Milliseconds 800
