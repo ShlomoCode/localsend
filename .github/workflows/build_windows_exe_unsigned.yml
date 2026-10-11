@@ -9,6 +9,10 @@ on:
         type: choice
         options: [short, ascii105000, multiline105000, ascii105kib, unbroken105000, manylines105000, cjk105000, emoji105000]
         default: short
+      receiver_interaction:
+        type: choice
+        options: [none, scroll, select]
+        default: none
       device:
         type: choice
         options: [Samsung Galaxy S23, Xiaomi Redmi Note 11]
@@ -56,6 +60,7 @@ jobs:
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2830.mjs
       CLIPBOARD_CASES: ${{ inputs.clipboard_case }}
       DISCOVERY_TIMEOUT_MS: ${{ inputs.discovery_timeout }}
+      RECEIVER_INTERACTION: ${{ inputs.receiver_interaction }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

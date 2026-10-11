@@ -1,6 +1,6 @@
 # Issue 2830: evidence summary
 
-The reported Android freeze is not reproduced yet. Original LocalSend 1.17.0 applications complete four fixtures on Galaxy S23 / Android 13, plus short, ASCII105000, and multiline105000 on Xiaomi Redmi Note 11 / Android 11. No production fix or PR is justified by these results.
+The reported Android freeze is not reproduced yet. Original LocalSend 1.17.0 applications complete four fixtures on Galaxy S23 / Android 13, plus short, ASCII105000, and multiline105000 on Xiaomi Redmi Note 11 / Android 11. Unbroken105000 also passes on Xiaomi. No production fix or PR is justified by these results.
 
 The observed flow is Windows Send → Clipboard → Favorites → target, then Android message preview. Copy is supplementary responsiveness and full-content verification; the report does not require scrolling, selection, or Copy to trigger the freeze. Android Quick Save is Off in inspected screenshots.
 
@@ -13,6 +13,7 @@ The observed flow is Windows Send → Clipboard → Favorites → target, then A
 | 38111742971 | Short ASCII on Xiaomi | 44 | 88 | 0 | Preview, Copy, exact readback passed |
 | 38113374423 | 105000 ASCII on Xiaomi, timeout 10000 ms | 105000 | 210000 | 0 | Preview, Copy, exact readback passed |
 | 38113967487 | 105000 with LF on Xiaomi, timeout 10000 ms | 105000 | 210000 | 1640 | Preview, Copy, exact readback passed |
+| 38115650086 | Unbroken105000 on Xiaomi, timeout 10000 ms | 105000 | 210000 | 0 | Preview, Copy, exact readback passed |
 
 Each source/readback pair has an identical SHA-256:
 
@@ -45,3 +46,7 @@ The report specifies Dell Inspiron 3501 / Windows 11 Pro and Xiaomi Redmi Note 1
 Run 38110353448 failed its short Xiaomi control at Windows Favorites discovery. Android remained on Receive; socket controls passed and relay connections returned data. Same-fixture repeat 38111742971 / 9eccc165 passed with no timeout change, proving the actual Xiaomi short control. Run 38112230754 then failed before ASCII105000 transfer; its Windows error screenshot explicitly shows `RhttpTimeoutException` for `/api/localsend/v1/info`. These discovery failures do not exercise long-text reception and are excluded from substantive experiments.
 
 Run 38112860787 / 8ef99127 changes only the supported Windows discovery-timeout setting from its default 500 to 10000 ms; the fresh short control passed with exact content and responsive Copy. Sender settings fixture confirms 10000. This accommodates the cloud relay's latency; upload-client timeout and original applications are unchanged. This repeat is excluded from the substantive count. Run 38113374423 passed ASCII105000 under matching settings, with the same full-content SHA as the Galaxy fixture and inspected responsive Copy. Run 38113967487 changes only content to the LF fixture. MIUI/build property commands were explicitly unsupported, so MIUI remains unknown. Varied legitimate 105K content will further distinguish text-shape conditions. Any matching product failure requires an identical repeat before a causal experiment or product change.
+
+Unbroken source/readback SHA-256 is `19d2eb39f3714bc4270a1e9aba5f85fb732af570947a65354a5dcc7e2949ab4b`; source has no spaces/LF/CR. Review path: `xiaomi-unbroken-10s-38115650086/issue2830-physical-control/evidence/`. CJK run 38116279930 is pending.
+
+CJK105000 run 38116279930 / 4c0100f9 displayed Preview and returned to Receive after Copy. The complete decoded preview XML equals all source content (105000 scalars / 315000 UTF8 bytes, SHA-256 `3da506076ee6bc84232952084c34db61f1b633c10dc48498bfa9ab2161db3bd4`). Appium clipboard retrieval timed out after 20000 ms; workflow failed at that supplemental gate, so clipboard success is not claimed. Review path: `xiaomi-cjk-10s-38116279930/issue2830-physical-control/evidence/`, including `cjk105000-preview-verification.json`. Identical repeat 38117578456 is pending.

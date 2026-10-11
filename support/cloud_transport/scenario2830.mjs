@@ -42,12 +42,43 @@ export default async function({session,wd,senderPort,transportStatus}) {
    if(name==="short"&&!source.includes(expected))throw new Error("Short control preview differs from Windows clipboard");
    await diagnostic(`${name}-processes`,"dumpsys activity -p org.localsend.localsend_app processes");
    await diagnostic(`${name}-memory`,"dumpsys meminfo org.localsend.localsend_app");
-   await click("Copy");await pause(800);const after=await snapshot(`${name}-after-copy`);
+   const interaction=process.env.RECEIVER_INTERACTION||"none";
+   if(interaction!=="none"){
+    const scrollNode=source.match(/<android.widget.ScrollView[^>]*>/)?.[0];
+    const bounds=scrollNode?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    if(!bounds)throw new Error("Receiver text ScrollView bounds unavailable for requested interaction");
+    const [,left,top,right,bottom]=bounds.map(Number), x=Math.round((left+right)/2);
+    const yStart=bottom-30,yEnd=top+30;
+    const actions=[{type:"pointerMove",duration:0,x,y:interaction==="scroll"?yStart:Math.round((top+bottom)/2)},{type:"pointerDown",button:0}];
+    if(interaction==="scroll")actions.push({type:"pointerMove",duration:600,x,y:yEnd});
+    else if(interaction==="select")actions.push({type:"pause",duration:1200});
+    else throw new Error("Unsupported receiver interaction "+interaction);
+    actions.push({type:"pointerUp",button:0});
+    event("receiver-gesture",{name,interaction,bounds:[left,top,right,bottom],actions});
+    await wd("POST",`/session/${session}/actions`,{actions:[{type:"pointer",id:"receiver-touch",parameters:{pointerType:"touch"},actions}]});
+    await pause(800);await snapshot(`${name}-after-${interaction}`);
+    if(interaction==="select"){
+     const dismiss=[{type:"pointerMove",duration:0,x,y:top-120},{type:"pointerDown",button:0},{type:"pointerUp",button:0}];
+     event("receiver-selection-dismiss",{name,x,y:top-120});
+     await wd("POST",`/session/${session}/actions`,{actions:[{type:"pointer",id:"receiver-touch",parameters:{pointerType:"touch"},actions:dismiss}]});
+     await snapshot(`${name}-selection-dismissed`);
+    }
+   }
+   if(interaction==="none")await click("Copy");
+   else {
+    const copyNode=source.match(/<android.widget.Button[^>]*content-desc="Copy"[^>]*>/)?.[0];
+    const b=copyNode?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    if(!b)throw new Error("Original message Copy button bounds unavailable");
+    const [,left,top,right,bottom]=b.map(Number),x=Math.round((left+right)/2),y=Math.round((top+bottom)/2);
+    event("receiver-main-copy",{name,x,y});
+    await wd("POST",`/session/${session}/actions`,{actions:[{type:"pointer",id:"receiver-touch",parameters:{pointerType:"touch"},actions:[{type:"pointerMove",duration:0,x,y},{type:"pointerDown",button:0},{type:"pointerUp",button:0}]}]});
+   }
+   await pause(800);const after=await snapshot(`${name}-after-copy`);
    if(after.includes("Copy")&&after.includes("Close"))throw new Error(`${name}: receiver Copy did not dismiss the text page`);
    let copied=null;try{copied=await wd("POST",`/session/${session}/appium/device/get_clipboard`,{contentType:"plaintext"});writeFileSync(`evidence/${name}-clipboard.txt`,Buffer.from(copied,"base64"));}catch(e){writeFileSync(`evidence/${name}-clipboard-unavailable.txt`,String(e));}
    if(copied===null)throw new Error(`${name}: received clipboard content could not be verified`);
    if(Buffer.from(copied,"base64").toString()!==expected)throw new Error(`${name}: received clipboard content differs`);
-   results.push({name,previewVisible:true,copyResponsive:true,sourceMatches:name==="short"?true:null,clipboardVerified:copied!==null});
+   results.push({name,receiverInteraction:interaction,previewVisible:true,copyResponsive:true,sourceMatches:name==="short"?true:null,clipboardVerified:copied!==null});
    if(name!==cases.at(-1))throw new Error("Additional cases require verified Windows selection reset; initial run intentionally stops after short control");
   }
  } finally {writeFileSync("evidence/scenario-results.json",JSON.stringify({results,transport:transportStatus()},null,2));}
