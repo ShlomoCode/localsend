@@ -19,6 +19,12 @@ on:
         type: choice
         options: ['virtio', 'virgl']
 
+      probe_group:
+        description: Full controls or focused early-startup discriminators
+        default: full
+        type: choice
+        options: ['full', 'startup']
+
 jobs:
   full-session:
     runs-on: ubuntu-26.04
@@ -407,6 +413,8 @@ jobs:
           fi
 
       - name: Compare valid session and renderer interventions
+        env:
+          PROBE_GROUP: ${{ inputs.probe_group || 'full' }}
         run: |
           set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
@@ -417,7 +425,9 @@ jobs:
           /home/probe/flatpak-identities
           flatpak run --command=sh org.localsend.localsend_app -c 'command -v localsend; ls -l /app/bin /app/localsend_app; env | sort'
           GUEST
-          for mode in baseline fresh software zink x11 isolated-network software-engine adwaita adwaita-dark; do
+          modes=(baseline fresh software zink x11 isolated-network software-engine adwaita adwaita-dark)
+          if [ "$PROBE_GROUP" = startup ]; then modes=(baseline engine-software no-at-bridge im-simple); fi
+          for mode in "${modes[@]}"; do
             label="matrix-$mode"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode $label" <<'GUEST'
           set -eu
@@ -447,6 +457,9 @@ jobs:
             isolated-network) args+=(--unshare=network) ;;
             adwaita) args+=(--env=GTK_THEME=Adwaita) ;;
             adwaita-dark) args+=(--env=GTK_THEME=Adwaita:dark) ;;
+            engine-software) args+=(--env=FLUTTER_LINUX_RENDERER=software) ;;
+            no-at-bridge) args+=(--env=NO_AT_BRIDGE=1) ;;
+            im-simple) args+=(--env=GTK_IM_MODULE=gtk-im-context-simple) ;;
           esac
           if [ "$mode" = software-engine ]; then
             nohup flatpak run org.localsend.localsend_app --enable-software-rendering > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
@@ -468,6 +481,8 @@ jobs:
           if [ -n "$app_pid" ]; then
             ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm
             cat "/proc/$app_pid/maps"
+            printf 'STARTUP_OVERRIDE_ENV\n'
+            tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(FLUTTER_LINUX_RENDERER|NO_AT_BRIDGE|GTK_IM_MODULE|GTK_THEME|GDK_BACKEND)=' || true
             sudo nsenter -t "$app_pid" -n ss -lntup | grep 53317 || true
             printf 'MAIN_TASK_SAMPLE_HZ=%s\n' "$(getconf CLK_TCK)"
             date +%s.%N
