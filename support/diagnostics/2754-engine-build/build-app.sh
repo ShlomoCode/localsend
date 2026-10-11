@@ -81,7 +81,11 @@ git diff --binary HEAD -- > "$output/provenance/app-source.patch"
 git diff --exit-code HEAD --
 git status --porcelain=v1 > "$output/provenance/app-source-status.txt"
 cp app/linux/flutter/ephemeral/generated_config.cmake "$output/provenance/generated_config.cmake"
-grep -F "$release" "$output/provenance/generated_config.cmake"
+# Flutter's CMake environment preserves source root and variant separately;
+# its supported resolver joins them as <src>/out/<variant>.
+for config_value in "FLUTTER_ENGINE=$local_engine/engine/src" "LOCAL_ENGINE=host_release" "LOCAL_ENGINE_HOST=host_release"; do
+  [[ $(grep -Fxc "  \"$config_value\"" "$output/provenance/generated_config.cmake") == 1 ]]
+done
 bundle="$app_source/app/build/linux/x64/release/bundle"
 [[ -x "$bundle/localsend_app" && -f "$bundle/lib/libapp.so" && -f "$bundle/lib/librust_lib_localsend_app.so" ]]
 engine_hash=$(sha256sum "$bundle/lib/libflutter_linux_gtk.so" | awk '{print $1}')
