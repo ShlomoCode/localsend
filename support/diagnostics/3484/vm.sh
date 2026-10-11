@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
 set -euxo pipefail
-mkdir -p evidence/cloud /home/runner/tray3484 /tmp/tray3484
+mkdir -p evidence/cloud /home/runner/tray3484 /tmp/tray3484/input
 collect_evidence() {
   host_status=$?
   trap - EXIT
   set +e
   printf '%s\n' "$host_status" > evidence/cloud/host-original-exit-status.txt
   collection_status=1
+  collection_method=scp
+  if [ -s evidence/cloud/session-trace.log ]; then collection_status=0; collection_method=9p; fi
   if declare -p ssh_opts >/dev/null 2>&1; then
     timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo journalctl -b --no-pager' > evidence/cloud/guest-journal.log 2>&1
-    timeout 60 scp -r -i /tmp/tray3484/key -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 probe@127.0.0.1:/work/evidence/cloud/. evidence/cloud/ > evidence/cloud/collection.log 2>&1
-    collection_status=$?
+    if [ "$collection_status" != 0 ]; then
+      mkdir -p /tmp/tray3484/collected
+      timeout 60 scp -r -i /tmp/tray3484/key -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 probe@127.0.0.1:/work/evidence/cloud/. /tmp/tray3484/collected/ > evidence/cloud/collection.log 2>&1
+      collection_status=$?
+      if [ "$collection_status" = 0 ]; then cp -a /tmp/tray3484/collected/. evidence/cloud/; collection_status=$?; fi
+    fi
+  fi
+  printf '%s\n' "$collection_method" > evidence/cloud/collection-method.txt
+  if [ "$host_status" = 0 ]; then
+    for required_file in session.done release/capture-manifest.json current-base/capture-manifest.json; do
+      if [ ! -s "evidence/cloud/$required_file" ]; then collection_status=1; fi
+    done
   fi
   printf '%s\n' "$collection_status" > evidence/cloud/collection-status.txt
   if [ "$host_status" = 0 ] && [ "$collection_status" != 0 ]; then host_status=1; fi
@@ -55,6 +67,8 @@ sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 6144 \
   -drive file=/home/runner/tray3484/arch.qcow2,if=virtio,format=qcow2 \
   -drive file=/home/runner/tray3484/seed.iso,media=cdrom,readonly=on \
   -device virtio-vga -display none -usb -device usb-tablet \
+  -virtfs local,path="$PWD/evidence/cloud",mount_tag=evidence3484,security_model=passthrough \
+  -virtfs local,path=/tmp/tray3484/input,mount_tag=input3484,security_model=passthrough \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 \
   -monitor unix:/tmp/tray3484/monitor,server,nowait -qmp unix:/tmp/tray3484/qmp,server,nowait -serial file:evidence/cloud/serial.log -daemonize
 ssh_opts=(-i /tmp/tray3484/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/tray3484/known_hosts -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
@@ -63,25 +77,47 @@ for i in $(seq 1 90); do
   sleep 5
 done
 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo mkdir -p /work/support/diagnostics/3484 /work/evidence/cloud; sudo chown -R probe:probe /work'
+ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo bash -s' <<'MOUNTS'
+set -euxo pipefail
+mkdir -p /work/input
+mount -t 9p -o trans=virtio,version=9p2000.L,cache=none evidence3484 /work/evidence/cloud
+mount -t 9p -o trans=virtio,version=9p2000.L,cache=none input3484 /work/input
+test "$(findmnt -n -o FSTYPE --mountpoint /work/evidence/cloud)" = 9p
+test "$(findmnt -n -o SOURCE --mountpoint /work/evidence/cloud)" = evidence3484
+test "$(findmnt -n -o FSTYPE --mountpoint /work/input)" = 9p
+test "$(findmnt -n -o SOURCE --mountpoint /work/input)" = input3484
+printf 'evidence3484 /work/evidence/cloud 9p trans=virtio,version=9p2000.L,cache=none,msize=262144 0 0\ninput3484 /work/input 9p trans=virtio,version=9p2000.L,cache=none,msize=262144 0 0\n' >> /etc/fstab
+printf 'guest-evidence-share\n' > /work/evidence/cloud/share-guest-sentinel.txt
+printf 'guest-input-share\n' > /work/input/share-guest-sentinel.txt
+MOUNTS
+grep -qx guest-evidence-share evidence/cloud/share-guest-sentinel.txt
+grep -qx guest-input-share /tmp/tray3484/input/share-guest-sentinel.txt
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no support/diagnostics/3484/guest.sh support/diagnostics/3484/wayland-session.sh probe@127.0.0.1:/work/support/diagnostics/3484/
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no /tmp/tray3484/baseline/source-bundle.tar.gz probe@127.0.0.1:/work/source-bundle.tar.gz
 ssh "${ssh_opts[@]}" probe@127.0.0.1 "sudo bash /work/support/diagnostics/3484/guest.sh '${ARCH_DATE:-latest}'" > evidence/cloud/provision.log 2>&1
+guest_uid=$(ssh "${ssh_opts[@]}" probe@127.0.0.1 'id -u investigator')
+printf 'runner-uid=%s\nrunner-gid=%s\nguest-investigator-uid=%s\n' "$(id -u)" "$(id -g)" "$guest_uid" > evidence/cloud/share-user-identity.txt
+ssh "${ssh_opts[@]}" probe@127.0.0.1 'id investigator; sudo -u investigator bash -e -c "printf guest-user-evidence > /work/evidence/cloud/share-user-sentinel.txt; printf guest-user-input > /work/input/share-user-sentinel.txt"' >> evidence/cloud/share-user-identity.txt
+grep -qx guest-user-evidence evidence/cloud/share-user-sentinel.txt
+grep -qx guest-user-input /tmp/tray3484/input/share-user-sentinel.txt
+printf 'host-input-share\n' > /tmp/tray3484/input/share-host-sentinel.txt
+ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo -u investigator grep -qx host-input-share /work/input/share-host-sentinel.txt'
+test "$guest_uid" = "$(id -u)"
 boot_id_before=$(timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')
 printf '%s\n' "$boot_id_before" > evidence/cloud/boot-id-before.txt
 timeout 10 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo reboot' || true
 boot_ready=0
 for i in $(seq 1 60); do
-  boot_id_after=$(timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' || true)
+  boot_id_after=$(cat evidence/cloud/boot-id-after.txt 2>/dev/null || true)
   if [[ "$boot_id_after" =~ ^[0-9a-f-]{36}$ ]] && [ "$boot_id_after" != "$boot_id_before" ]; then boot_ready=1; break; fi
   sleep 1
 done
-printf '%s\n' "$boot_id_after" > evidence/cloud/boot-id-after.txt
 test "$boot_ready" = 1
 ready=0
 last_seq=0
 scenario_deadline=$((SECONDS + 900))
 while [ "$SECONDS" -lt "$scenario_deadline" ]; do
-  request=$(timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /work/input/request 2>/dev/null || true' || true)
+  request=$(cat /tmp/tray3484/input/request 2>/dev/null || true)
   if [[ "$request" =~ ^([0-9]+)\ ([0-9]+)\ ([0-9]+)$ ]]; then
     event_seq=${BASH_REMATCH[1]}
     pointer_x=${BASH_REMATCH[2]}
@@ -92,13 +128,13 @@ while [ "$SECONDS" -lt "$scenario_deadline" ]; do
       printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","id":"pointer-%s","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":%s}},{"type":"abs","data":{"axis":"y","value":%s}}]}}\n' "$event_seq" "$abs_x" "$abs_y" | timeout 5 sudo socat -t 1 - UNIX-CONNECT:/tmp/tray3484/qmp > /tmp/tray3484/qmp-response.jsonl
       cat /tmp/tray3484/qmp-response.jsonl >> evidence/cloud/input-qmp.log
       jq -s -e --arg event "pointer-$event_seq" 'any(.[]; .id == $event and has("return") and (has("error") | not))' /tmp/tray3484/qmp-response.jsonl > /dev/null
-      timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 "printf '%s\\n' '$event_seq' > /work/input/ack"
+      printf '%s\n' "$event_seq" > /tmp/tray3484/input/ack
       printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$event_seq" "$pointer_x" "$pointer_y" >> evidence/cloud/input-events.tsv
       last_seq=$event_seq
     fi
   fi
-  if timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'test -f /work/evidence/cloud/session.done'; then ready=1; break; fi
+  if [ -f evidence/cloud/session.done ]; then ready=1; break; fi
   sleep 1
 done
 test "$ready" = 1
-test "$(ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /work/evidence/cloud/session.done')" = 0
+test "$(cat evidence/cloud/session.done)" = 0

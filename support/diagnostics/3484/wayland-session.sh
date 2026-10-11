@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuxo pipefail
 out=/work/evidence/cloud
-exec > >(tee "$out/session-trace.log") 2>&1
 trap 'failure_status=$?; printf "status=%s line=%s command=%s\n" "$failure_status" "$LINENO" "$BASH_COMMAND" >> "$out/session-errors.txt"' ERR
 trap 'printf "%s\n" "$?" > "$out/session.done"' EXIT
+exec > >(tee "$out/session-trace.log") 2>&1
+cat /proc/sys/kernel/random/boot_id > "$out/boot-id-after.txt"
+sudo systemctl status sshd --no-pager > "$out/guest-sshd-status.txt" 2>&1 || true
+sudo journalctl -u sshd -b --no-pager > "$out/guest-sshd-journal.txt" 2>&1 || true
 event_seq=0
 move_pointer() {
   event_seq=$(cat /work/input/ack 2>/dev/null || printf '0')

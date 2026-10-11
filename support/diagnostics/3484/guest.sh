@@ -68,6 +68,8 @@ mkdir /opt/current-base
 tar -xf /work/source-bundle.tar.gz -C /opt/current-base
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'GETTY'
+[Unit]
+RequiresMountsFor=/work/evidence/cloud /work/input
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin investigator --noclear %I $TERM
