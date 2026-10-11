@@ -97,23 +97,8 @@ for version in 1.14.0 1.18.2; do
   sleep 7
   snapshot "$version-after-file"
   wait "$video"
-  # Exercise a real choice through the native dialog, then retain the app's
-  # selected-file state. Merely seeing a dialog is a narrower control.
-  mkdir -p payload
-  printf 'Issue 1310 real file selection control\n' > payload/control.txt
-  sha256sum payload/control.txt >> evidence/payload-sha256.txt
-  if grep -Eiq '"(Open File|Select.*file|Choose.*file)"' "evidence/$version-after-file-windows.txt"; then
-  xdotool key ctrl+l
-  xdotool type --clearmodifiers --delay 30 "$(pwd)/payload/control.txt"
-  xdotool key Return
-  sleep 2
-  snapshot "$version-file-selected"
-  if ! awk -F '\t' '$12=="control.txt"{found=1}END{exit !found}' "evidence/$version-file-selected.tsv"; then
-    xdotool key Return
-    sleep 2
-    snapshot "$version-file-selected-confirmed"
-  fi
-  fi
+  # Retain Folder and Text controls before selecting a file: selection changes
+  # the app's initial chooser buttons into its normal Add selection menu.
   xdotool key Escape
   sleep 2
   click_label "$version-before-folder" Folder
@@ -136,6 +121,22 @@ for version in 1.14.0 1.18.2; do
   if test "$file_dialog" = 0; then
     printf 'File native dialog absent; inspect same-case controls and raw screenshots.\n' > "evidence/$version-file-assertion-failed.txt"
     exit 1
+  fi
+  mkdir -p payload
+  printf 'Issue 1310 real file selection control\n' > payload/control.txt
+  sha256sum payload/control.txt >> evidence/payload-sha256.txt
+  click_label "$version-before-file-choice" File
+  xdotool key ctrl+l
+  xdotool type --clearmodifiers --delay 30 "$(pwd)/payload/control.txt"
+  xdotool key Return
+  sleep 2
+  snapshot "$version-file-selected"
+  # Some GTK versions first resolve the entered location before activating
+  # Open. Accept only when a native chooser remains visibly open.
+  if grep -Eiq '"(Open File|Select.*file|Choose.*file)"' "evidence/$version-file-selected-windows.txt"; then
+    xdotool key Return
+    sleep 2
+    snapshot "$version-file-selected-confirmed"
   fi
   if test "${TRANSFER_CONTROL:-0}" = 1 && { test "$version" = 1.14.0 || test "$package_format" = flatpak; }; then
     snapshot "$version-transfer-before"
