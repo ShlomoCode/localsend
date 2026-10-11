@@ -3,6 +3,7 @@ import {spawn} from 'node:child_process';
 import {existsSync,writeFileSync,readFileSync,createWriteStream} from 'node:fs';
 import net from 'node:net';
 import {createHash} from 'node:crypto';
+import {waitForNativeControl} from './native-readiness.mjs';
 
 export default async function({session,wd,senderHost,senderPort,transportStatus}) {
  const prefix=`/session/${session}`;
@@ -17,39 +18,20 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   writeFileSync(`evidence/android-${stage}.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
  }
  async function returnedApproval(stage){
-  const deadline=Date.now()+10000;
-  let element;
-  let attempt=0;
-  do{
-   element=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Accept'}).catch(error=>{
-    if(!String(error).includes('no such element'))throw error;
-    return null;
-   });
-   if(element){await snapshot(stage+'-approval-ready');return element;}
-   writeFileSync(`evidence/android-${stage}-returning-${attempt++}.xml`,await wd('GET',prefix+'/source'));
-   await new Promise(r=>setTimeout(r,200));
-  }while(Date.now()<deadline);
-  assert(element,'Actual receive approval did not return after native folder selection');
+  const element=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Accept',label:stage+'-returned-approval'});
+  await snapshot(stage+'-approval-ready');
+  return element;
  }
  async function chooseSafDocuments(stage){
   if(!safDocuments)return;
+  let controlIndex=0;
   async function click(using,value){
-   let element;
-   const deadline=Date.now()+10000;
-   do{
-    element=await wd('POST',prefix+'/element',{using,value}).catch(error=>{
-     if(!String(error).includes('no such element'))throw error;
-     return null;
-    });
-    if(element)break;
-    await new Promise(r=>setTimeout(r,200));
-   }while(Date.now()<deadline);
-   assert(element,'Actual SAF control did not render: '+value);
+   const element=await waitForNativeControl({wd,prefix,using,value,label:stage+'-saf-control-'+controlIndex++});
    await wd('POST',prefix+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   }
   await click('accessibility id','Options');
   await snapshot(stage+'-options');
-  await click('xpath','(//android.widget.Button[not(@content-desc) and @clickable="true"])[1]');
+  await click('xpath','//*[@content-desc="Save to folder"]/following-sibling::android.widget.Button[1]');
   let nativeSource;
   const pickerDeadline=Date.now()+10000;
   let pickerAttempt=0;
@@ -60,7 +42,33 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,200));
   }while(Date.now()<pickerDeadline);
   assert(/com\.(google\.)?android\.documentsui/.test(nativeSource),'Real native SAF picker not observed');
-  await click('xpath','//*[@text="Documents"]');
+  // The observed resend activity lacked a directory-selection footer. Record the
+  // actual activity/intent and allow one Back/reopen from the verified Options
+  // page; never treat an ordinary Documents browser as directory selection.
+  for(let launch=0;launch<2;launch++){
+   const activity=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'dumpsys activity activities'}}),args:[]});
+   writeFileSync('evidence/'+stage+'-native-activity-'+launch+'.json',JSON.stringify(activity,null,2));
+   if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource))break;
+   const footerDeadline=Date.now()+3000;
+   do{
+    nativeSource=await wd('GET',prefix+'/source');
+    writeFileSync('evidence/'+stage+'-native-footer-'+launch+'.xml',nativeSource);
+    if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource))break;
+    await new Promise(r=>setTimeout(r,200));
+   }while(Date.now()<footerDeadline);
+   // The Android 11 storage root can show a disabled selection footer.
+   // Presence proves selection mode; enabled state is checked in Documents.
+   if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource))break;
+   if(launch===1)throw new Error('Actual native directory-selection footer absent after one verified reopen');
+   await wd('POST',prefix+'/back',{});
+   await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Save to folder',label:stage+'-options-after-native-back'});
+   await click('xpath','//*[@content-desc="Save to folder"]/following-sibling::android.widget.Button[1]');
+   await waitForNativeControl({wd,prefix,using:'id',value:'com.google.android.documentsui:id/toolbar',label:stage+'-reopened-native-picker'});
+   nativeSource=await wd('GET',prefix+'/source');
+  }
+  if(!nativeSource.includes('resource-id="com.google.android.documentsui:id/breadcrumb_text" text="Documents"')&&!/text="Documents"[^>]*resource-id="com.google.android.documentsui:id/breadcrumb_text"/.test(nativeSource)){
+   await click('xpath','//*[@text="Documents" and @resource-id!="com.google.android.documentsui:id/breadcrumb_text"]');
+  }
   await snapshot(stage+'-native-documents');
   await click('xpath','//*[@text="Use this folder" or @text="USE THIS FOLDER"]');
   await snapshot(stage+'-native-permission');
@@ -209,36 +217,32 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
      await snapshot('files-after-permission');
     }
    }
-   const downloads=await wd('POST',prefix+'/element',{using:'xpath',value:safDocuments?'//*[@text="Documents & other"]':'//*[@text="Downloads"]'});
+   const downloads=await waitForNativeControl({wd,prefix,using:'xpath',value:safDocuments?'//*[@text="Documents & other"]':'//*[@text="Downloads"]',label:'file-manager-category'});
    await wd('POST',prefix+'/element/'+downloads['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    await new Promise(r=>setTimeout(r,2000));
    await snapshot('files-downloads');
-   const file=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="A.txt"]'});
+   const file=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="A.txt"]',label:'file-manager-saved-A'});
    const rect=await wd('GET',prefix+'/element/'+file['element-6066-11e4-a52e-4f735466cecf']+'/rect');
    await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
    await new Promise(r=>setTimeout(r,1000));
    await snapshot('files-A-selected');
    let remove;
    if(requestedDeletionAction==='trash'){
-    const options=await wd('POST',prefix+'/element',{using:'accessibility id',value:'More options'});
+    const options=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'More options',label:'file-manager-more-options'});
     await wd('POST',prefix+'/element/'+options['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
     await snapshot('files-delete-options');
-    remove=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="Move to trash" or @text="Move to Trash" or @content-desc="Move to trash" or @content-desc="Move to Trash"]'}).catch(error=>{
-     if(!String(error).includes('no such element'))throw error;
-     return null;
-    });
+    remove=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Move to trash" or @text="Move to Trash" or @content-desc="Move to trash" or @content-desc="Move to Trash"]',label:'file-manager-trash-action',optional:true});
     writeFileSync('evidence/trash-capability.json',JSON.stringify({app:'Google Files',actualNativeOptionsInspected:true,trashActionObserved:remove!==null,source:'android-files-delete-options.xml',screenshot:'android-files-delete-options.png',deletionAttempted:false},null,2));
     assert(remove,'Actual Google Files More options does not expose Move to trash; no trash deletion or resend trial occurred');
    }else{
-    remove=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Delete'});
+    remove=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Delete',label:'file-manager-delete-action'});
    }
    await wd('POST',prefix+'/element/'+remove['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   await new Promise(r=>setTimeout(r,1000));
+   const confirm=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash")]',label:'file-manager-deletion-confirmation'});
    await snapshot('files-delete-dialog');
    const deleteSource=readFileSync('evidence/android-files-delete-dialog.xml','utf8');
    const deletionMode=/trash/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
    assert.equal(deletionMode,requestedDeletionAction,'Native confirmation does not match the requested deletion action; do not substitute another deletion mode');
-   const confirm=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash")]'});
    await waitFile('evidence/resend-address-ready',90000);
    const deleteUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+confirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
