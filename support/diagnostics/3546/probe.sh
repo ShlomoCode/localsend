@@ -10,6 +10,9 @@ mkdir -p /run/dbus
 dbus-daemon --system --fork || true
 startplasma-x11 > evidence/plasma.log 2>&1 &
 sleep 30
+plasma-apply-lookandfeel -a org.kde.breezedark.desktop
+sleep 3
+kquitapp6 plasma-welcome || true
 qdbus_bin=$(command -v qdbus6 || command -v qdbus || echo /usr/lib/qt6/bin/qdbus)
 "$qdbus_bin" org.kde.plasmashell /PlasmaShell > evidence/plasma-dbus.txt
 "$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels(); for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){print(ws[j].id+":"+ws[j].type);}}' > evidence/widgets.txt || true

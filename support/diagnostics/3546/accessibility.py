@@ -57,6 +57,8 @@ def click(node):
 def snapshot(name):
     Path(f"evidence/{name}.json").write_text(json.dumps(describe(pyatspi.Registry.getDesktop(0)), indent=2))
     subprocess.run(["import", "-window", "root", f"evidence/{name}.png"], check=True)
+    stacking = subprocess.run(["xprop", "-root", "_NET_ACTIVE_WINDOW", "_NET_CLIENT_LIST_STACKING"], capture_output=True, text=True)
+    Path(f"evidence/{name}-stacking.txt").write_text(stacking.stdout + stacking.stderr)
     config = Path.home() / ".config/plasma-org.kde.plasma.desktop-appletsrc"
     Path(f"evidence/{name}-plasma-config.txt").write_text(config.read_text())
 
@@ -66,7 +68,10 @@ def registered_item(pid):
         response = subprocess.check_output(["busctl", "--user", "get-property", "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems"], text=True)
         for item in shlex.split(response)[2:]:
             service, path = item.split("/", 1)
-            owner = subprocess.check_output(["busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixProcessID", "s", service], text=True)
+            try:
+                owner = subprocess.check_output(["busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixProcessID", "s", service], text=True)
+            except subprocess.CalledProcessError:
+                continue
             if int(owner.split()[1]) == pid:
                 value = subprocess.check_output(["busctl", "--user", "get-property", service, "/" + path, "org.kde.StatusNotifierItem", "Id"], text=True)
                 return {"pid": pid, "address": item, "id": shlex.split(value)[1]}
@@ -112,20 +117,26 @@ def prepare_hide(stage):
 
 
 def quit_via_menu(pid, stage):
-    click(find("Show hidden icons", "button"))
-    button = find("org.localsend.localsend_app", "button")
-    bounds = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-    subprocess.run(["xdotool", "mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2), "click", "3"], check=True)
-    time.sleep(1)
-    snapshot(stage + "-quit-menu")
-    click(find("Quit LocalSend"))
+    # Ctrl+Q is LocalSend's supported Linux Quit shortcut in the original release.
+    subprocess.run(["xdotool", "search", "--name", "^LocalSend$", "windowactivate", "--sync"], check=True)
+    time.sleep(.5)
+    snapshot(stage + "-quit-shortcut-before")
+    active = subprocess.check_output(["xdotool", "getwindowfocus", "getwindowname"], text=True).strip()
+    assert active == "LocalSend", f"Quit shortcut focus is {active!r}"
+    subprocess.run(["xdotool", "key", "ctrl+q"], check=True)
     for _ in range(40):
+        try:
+            exited, _ = os.waitpid(pid, os.WNOHANG)
+            if exited == pid:
+                return
+        except ChildProcessError:
+            pass
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
             return
         time.sleep(.25)
-    raise RuntimeError("Quit LocalSend did not stop the application")
+    raise RuntimeError("LocalSend's Ctrl+Q Quit shortcut did not stop the application")
 
 
 snapshot("accessibility")
@@ -160,6 +171,7 @@ try:
             subprocess.run(["xdotool", "search", "--name", "^LocalSend$", "windowminimize"], check=True)
             snapshot(stage + "-restarted-panel")
             outcomes.append({"before": before, "after": after, "preference_lost": panel_item() is not None})
+            Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
         Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
         assert all(case["preference_lost"] for case in outcomes), "Baseline did not reproduce in both restart cycles"
 except Exception:
