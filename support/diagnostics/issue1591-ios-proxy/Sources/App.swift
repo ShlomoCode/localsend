@@ -2,38 +2,73 @@ import UIKit
 import Network
 
 struct RelayEvent: Codable {
+    let seq: Int
+    let id: String
+    let kind: String
+    var data: String? = nil
+}
+
+private struct RelayPush: Encodable {
     let id: String
     let kind: String
     var data: String? = nil
     var origin: String? = nil
 }
 
+private struct RelayAcknowledgment: Encodable {
+    let seq: Int
+}
+
+private struct PeerHealth: Encodable {
+    let id: String
+    let ready: Bool
+    let toLocalSendBytes: Int
+    let fromLocalSendBytes: Int
+    let inputEOF: Bool
+    let outputEOF: Bool
+}
+
+private struct ProxyHealth: Encodable {
+    let pid: Int32
+    let elapsedSeconds: Double
+    let generation: String
+    let applicationState: String
+    let budgetState: String
+    let remainingBudgetSeconds: Double?
+    let running: Bool
+    let peers: [PeerHealth]
+}
+
 @MainActor
 final class ByteProxy {
+    @MainActor
     private final class Peer {
         let connection = NWConnection(host: "127.0.0.1", port: 53317, using: .tcp)
         var sent = 0
         var received = 0
         var inputEOF = false
         var outputEOF = false
+        var ready = false
     }
     private let queue = DispatchQueue(label: "issue1591.byteproxy")
     private var peers: [String: Peer] = [:]
     private var session: URLSession?
     private var pollTask: Task<Void, Never>?
+    private var healthTask: Task<Void, Never>?
     private var timer: Timer?
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var started = ProcessInfo.processInfo.systemUptime
     private var baseURL: URL?
     private var token = ""
     private var generation = UUID()
+    private var lastAcknowledgedSequence = 0
     private(set) var running = false
     var logLine: ((String) -> Void)?
 
     func log(_ event: String) {
         let elapsed = ProcessInfo.processInfo.systemUptime - started
         let budget = UIApplication.shared.backgroundTimeRemaining
-        let remaining = budget > 86400 ? "unbounded-foreground" : String(format: "%.3f", budget)
+        let remaining = budget == .greatestFiniteMagnitude ? "foreground-unbounded" : String(format: "%.3f", budget)
         let line = String(format: "elapsed=%.3f", elapsed) + " remaining=" + remaining + " " + event
         NSLog("%@", line)
         logLine?(line)
@@ -49,6 +84,7 @@ final class ByteProxy {
         }
         started = ProcessInfo.processInfo.systemUptime
         generation = UUID()
+        lastAcknowledgedSequence = 0
         self.baseURL = url
         self.token = token
         running = true
@@ -74,6 +110,7 @@ final class ByteProxy {
             Task { @MainActor in self?.log("budget-sample") }
         }
         pollTask = Task { [weak self] in await self?.poll() }
+        healthTask = Task { [weak self] in await self?.reportHealth() }
     }
 
     func stop(reason: String) {
@@ -84,6 +121,8 @@ final class ByteProxy {
         timer = nil
         pollTask?.cancel()
         pollTask = nil
+        healthTask?.cancel()
+        healthTask = nil
         for (id, peer) in peers {
             log("closed id=\(id) toLocalSend=\(peer.sent) fromLocalSend=\(peer.received)")
             peer.connection.cancel()
@@ -99,14 +138,15 @@ final class ByteProxy {
         log("stopped")
     }
 
-    private func request(path: String, event: RelayEvent? = nil) async throws -> Data {
+    private func request(path: String, event: RelayPush? = nil, body: Data? = nil) async throws -> Data {
         guard running, let session, let baseURL else { throw CancellationError() }
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        if let event {
+        if event != nil || body != nil {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(event)
+            if let event { request.httpBody = try JSONEncoder().encode(event) }
+            else { request.httpBody = body }
         }
         let (data, response) = try await session.data(for: request)
         guard running, session === self.session else { throw CancellationError() }
@@ -116,6 +156,47 @@ final class ByteProxy {
         return data
     }
 
+    private func reportHealth() async {
+        let run = generation
+        do {
+            while running && generation == run && !Task.isCancelled {
+                let budget = UIApplication.shared.backgroundTimeRemaining
+                let finiteBudget = budget.isFinite && budget != .greatestFiniteMagnitude
+                let state: String
+                switch UIApplication.shared.applicationState {
+                case .active: state = "active"
+                case .inactive: state = "inactive"
+                case .background: state = "background"
+                @unknown default: state = "unknown"
+                }
+                let sample = ProxyHealth(
+                    pid: ProcessInfo.processInfo.processIdentifier,
+                    elapsedSeconds: ProcessInfo.processInfo.systemUptime - started,
+                    generation: run.uuidString,
+                    applicationState: state,
+                    budgetState: finiteBudget ? "finite" : "foreground-unbounded",
+                    remainingBudgetSeconds: finiteBudget ? max(0, budget) : nil,
+                    running: running,
+                    peers: peers.keys.sorted().compactMap { id in
+                        guard let peer = peers[id] else { return nil }
+                        return PeerHealth(id: id, ready: peer.ready, toLocalSendBytes: peer.sent,
+                                          fromLocalSendBytes: peer.received, inputEOF: peer.inputEOF,
+                                          outputEOF: peer.outputEOF)
+                    }
+                )
+                _ = try await request(path: "health", body: JSONEncoder().encode(sample))
+                log("health-posted peers=\(sample.peers.count)")
+                // One request at a time. A slow response reduces sample frequency.
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        } catch {
+            if running && generation == run {
+                logError(error, event: "relay-health-failed")
+                stop(reason: "relay-health-failed")
+            }
+        }
+    }
+
     private func poll() async {
         let run = generation
         do {
@@ -123,9 +204,20 @@ final class ByteProxy {
                 let data = try await request(path: "pull")
                 let events = try JSONDecoder().decode([RelayEvent].self, from: data)
                 log("poll events=\(events.count)")
+                var previousSequence = lastAcknowledgedSequence
                 for event in events {
-                    guard running else { return }
+                    guard event.seq > previousSequence else { throw ProxyFailure.protocolViolation }
+                    previousSequence = event.seq
+                }
+                for event in events {
+                    guard running && generation == run else { return }
                     try await consume(event)
+                }
+                if let last = events.last {
+                    guard running && generation == run else { return }
+                    _ = try await request(path: "ack", body: JSONEncoder().encode(RelayAcknowledgment(seq: last.seq)))
+                    lastAcknowledgedSequence = last.seq
+                    log("batch-acknowledged seq=\(last.seq) events=\(events.count)")
                 }
             }
         } catch {
@@ -144,6 +236,7 @@ final class ByteProxy {
                     guard let self, let peer, self.peers[event.id] === peer else { return }
                     switch state {
                     case .ready:
+                        peer.ready = true
                         self.log("loopback-ready id=\(event.id)")
                         self.receive(id: event.id, peer: peer)
                     case .failed(let error):
@@ -197,13 +290,13 @@ final class ByteProxy {
                 guard let self, let peer, self.running, self.peers[id] === peer else { return }
                 do {
                     if let data, !data.isEmpty {
-                        _ = try await self.request(path: "push", event: RelayEvent(id: id, kind: "data", data: data.base64EncodedString()))
+                        _ = try await self.request(path: "push", event: RelayPush(id: id, kind: "data", data: data.base64EncodedString()))
                         peer.received += data.count
                         self.log("fromLocalSend id=\(id) bytes=\(data.count) total=\(peer.received)")
                     }
                     if let error { await self.failPeer(id: id, peer: peer, error: error); return }
                     if complete {
-                        _ = try await self.request(path: "push", event: RelayEvent(id: id, kind: "eof"))
+                        _ = try await self.request(path: "push", event: RelayPush(id: id, kind: "eof"))
                         peer.outputEOF = true
                         self.log("local-eof id=\(id)")
                         self.finishIfComplete(id: id, peer: peer)
@@ -222,7 +315,7 @@ final class ByteProxy {
         let run = generation
         logError(error, event: "loopback-failed id=" + id)
         close(id: id, peer: peer, reason: "loopback-failed")
-        do { _ = try await request(path: "push", event: RelayEvent(id: id, kind: "error", origin: "ios-loopback")) }
+        do { _ = try await request(path: "push", event: RelayPush(id: id, kind: "error", origin: "ios-loopback")) }
         catch { if running && generation == run { logError(error, event: "error-notification-failed"); stop(reason: "error-notification-failed") } }
     }
 

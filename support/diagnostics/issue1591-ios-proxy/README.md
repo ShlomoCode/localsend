@@ -16,7 +16,7 @@ Use the retained `android-relay.mjs` Node relay with a private random bearer tok
 
 1. Open the helper and fill **Relay origin** and **Relay token**. Their accessibility identifiers are `relayURL` and `relayToken`.
 2. Select **Start proxy** (`startProxy`) while the helper is in the foreground.
-3. Confirm `started` appears in the log and the relay reports a pending `/pull` request.
+3. Confirm `started` and `health-posted` appear in the log, the relay retains the initial `/health` sample, and a `/pull` request is pending.
 4. Switch to LocalSend using the normal device interaction. Record the helper background transition and remaining budget in the device log.
 5. In the real Windows app, select the files and send to the relay TCP endpoint. Perform the real approval and save actions in LocalSend on the iPad.
 6. Preserve the device log and relay status/trace. Verify the received file separately against the source. If the helper expires or stops, stop the sender and relay, record a transport failure, and repeat with a fresh helper start.
@@ -26,11 +26,17 @@ Official app launch arguments can prefill the same fields: `--relay-url ORIGIN -
 
 ## Transport and logs
 
-The helper long-polls `GET /pull` and consumes ordered events `{id, kind, data?}`. `open` creates one plain TCP connection; `data` decodes base64 and forwards those bytes; `eof` closes only the sender direction; `close` or `error` cancels that connection. Returned bytes are base64 encoded in `POST /push` events with `kind: data`, followed by `eof` or `error`. Both EOF directions complete the connection. Each local read waits for the corresponding POST response before requesting another read, limiting pending device-to-relay data.
+The helper long-polls `GET /pull` and consumes ordered events `{seq, id, kind, data?}`. Each sequence number must increase within the batch and exceed the last acknowledged sequence in the current helper generation. `open` creates one plain TCP connection; `data` decodes base64 and forwards those bytes; `eof` closes only the sender direction; `close` or `error` cancels that connection. After every event in a nonempty batch has completed, the helper sends `POST /ack` with `{seq: LAST_SEQUENCE}`. The relay retains the batch until that exact final sequence is acknowledged. The helper waits for local send completion callbacks before acknowledging a batch; this establishes local socket acceptance, not application save completion.
 
-Relay failures stop the helper rather than retry an ambiguous POST and duplicate bytes. The existing relay dequeues pull events without acknowledgments, so a disconnected poll can lose events. Treat a failed poll as a failed trial. Stopping or background expiry immediately cancels local connections and requests; the controller must stop the relay to close its remote sender sockets. No claim is made that an expiry callback can complete network cleanup before iOS suspends the process.
+Returned bytes are base64 encoded in `POST /push` events with `kind: data`, followed by `eof` or `error`. Both EOF directions complete the connection. Each local read waits for the corresponding POST response before requesting another read, limiting pending device-to-relay data.
+
+Relay failures stop the helper rather than retry an ambiguous POST and duplicate bytes. A failed poll or acknowledgment invalidates the trial; the helper does not retry a partially consumed batch or an ambiguous acknowledgment. Stopping or background expiry immediately cancels local connections and requests; the controller must stop the relay to close its remote sender sockets. No claim is made that an expiry callback can complete network cleanup before iOS suspends the process.
 
 `NSLog` and the `proxyLog` UI emit elapsed monotonic seconds, `backgroundTimeRemaining`, lifecycle transitions, expiration, connection IDs, and byte counts. Error logs use only NSError domain/code. The UI retains a bounded suffix; collect the device log for the full record. A surviving TLS handshake or equal transport byte counts alone does not prove that LocalSend saved the file.
+
+The helper also sends authenticated `POST /health` samples through the same ephemeral URLSession. The first sample follows Start; later samples occur about once a second while running. Each request finishes before the next sample, so slow responses reduce frequency without accumulating requests. A health request failure stops the helper and invalidates the transport trial.
+
+Each JSON sample contains `pid`, `elapsedSeconds` (monotonic), `generation` (one UUID per Start), `applicationState`, `budgetState`, `remainingBudgetSeconds` (present only for a finite budget), `running`, and `peers`. Each peer summary contains `id`, `ready`, `toLocalSendBytes`, `fromLocalSendBytes`, `inputEOF`, and `outputEOF`. `budgetState` is `finite` or `foreground-unbounded`; the latter represents the foreground sentinel rather than a duration guarantee. The controller must retain server receive timestamps and show samples with a finite budget through the actual LocalSend Accept/save interval. The payload contains no token, relay URL, or forwarded bytes. No terminal health POST is promised during background expiry.
 
 ## Validation boundary
 
