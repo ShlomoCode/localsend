@@ -5,10 +5,12 @@ export XDG_RUNTIME_DIR="${RUNNER_TEMP}/runtime-3546"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 dbus-update-activation-environment --all
-startplasma-x11 > evidence/plasma.log 2>&1 &
+openbox > evidence/wm.log 2>&1 &
+plasmashell --no-respawn > evidence/plasma.log 2>&1 &
 sleep 30
 qdbus_bin=$(command -v qdbus6 || command -v qdbus || echo /usr/lib/qt6/bin/qdbus)
-"$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels(); for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){print(ws[j].id+":"+ws[j].type);}}' > evidence/widgets.txt
+"$qdbus_bin" org.kde.plasmashell /PlasmaShell > evidence/plasma-dbus.txt
+"$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels(); for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){print(ws[j].id+":"+ws[j].type);}}' > evidence/widgets.txt || true
 find release -maxdepth 3 -type f > evidence/release-files.txt
 app=$(find "$PWD/release" -name localsend_app -type f | head -1)
 cd "$(dirname "$app")"
