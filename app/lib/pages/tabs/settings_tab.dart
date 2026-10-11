@@ -368,23 +368,14 @@ class SettingsTab extends StatelessWidget {
                   child: TextFieldWithActions(
                     name: t.settingsTab.network.alias,
                     controller: vm.aliasController,
-                    onChanged: (s) async {
+                    onSubmitted: (s) async {
                       await ref.notifier(settingsProvider).setAlias(s);
                     },
-                    actions: [
+                    actionsBuilder: (setDraft) => [
                       Tooltip(
                         message: t.settingsTab.network.generateRandomAlias,
                         child: IconButton(
-                          onPressed: () async {
-                            // Generates random alias
-                            final newAlias = generateRandomAlias();
-
-                            // Update the TextField with the new alias
-                            vm.aliasController.text = newAlias;
-
-                            // Persist the new alias using the settingsProvider
-                            await ref.notifier(settingsProvider).setAlias(newAlias);
-                          },
+                          onPressed: () => setDraft(generateRandomAlias()),
                           icon: const Icon(Icons.casino),
                         ),
                       ),
@@ -397,8 +388,7 @@ class SettingsTab extends StatelessWidget {
                               return;
                             }
 
-                            vm.aliasController.text = newAlias;
-                            await ref.notifier(settingsProvider).setAlias(newAlias);
+                            setDraft(newAlias);
                           },
                           icon: const Icon(Icons.desktop_windows_rounded),
                         ),

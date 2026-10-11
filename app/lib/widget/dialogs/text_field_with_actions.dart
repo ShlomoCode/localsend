@@ -8,14 +8,14 @@ import 'package:routerino/routerino.dart';
 class TextFieldWithActions extends StatefulWidget {
   final String name;
   final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-  final List<Widget> actions;
+  final ValueChanged<String> onSubmitted;
+  final List<Widget> Function(ValueChanged<String> setDraft) actionsBuilder;
 
   const TextFieldWithActions({
     required this.name,
     required this.controller,
-    required this.onChanged,
-    required this.actions,
+    required this.onSubmitted,
+    required this.actionsBuilder,
   });
 
   @override
@@ -32,42 +32,19 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
         foregroundColor: Theme.of(context).colorScheme.onSurface,
       ),
       onPressed: () async {
-        await showDialog(
+        final result = await showDialog<String>(
           context: context,
-          builder: (context) {
-            return AlertDialog(
-              title: Text(widget.name),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Display actions inside the dialog
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: widget.actions,
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: widget.controller,
-                    textAlign: TextAlign.center,
-                    onChanged: widget.onChanged,
-                    autofocus: true,
-                    onFieldSubmitted: (_) => context.pop(),
-                  ),
-                ],
-              ),
-              actions: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                  ),
-                  onPressed: () => context.pop(),
-                  child: Text(t.general.confirm),
-                ),
-              ],
-            );
-          },
+          builder: (_) => _TextFieldWithActionsDialog(
+            name: widget.name,
+            initialValue: widget.controller.text,
+            actionsBuilder: widget.actionsBuilder,
+          ),
         );
+        if (result == null || !mounted) {
+          return;
+        }
+        setState(() => widget.controller.text = result);
+        widget.onSubmitted(result);
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
@@ -77,6 +54,76 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
           overflow: TextOverflow.ellipsis,
         ),
       ),
+    );
+  }
+}
+
+class _TextFieldWithActionsDialog extends StatefulWidget {
+  final String name;
+  final String initialValue;
+  final List<Widget> Function(ValueChanged<String> setDraft) actionsBuilder;
+
+  const _TextFieldWithActionsDialog({
+    required this.name,
+    required this.initialValue,
+    required this.actionsBuilder,
+  });
+
+  @override
+  State<_TextFieldWithActionsDialog> createState() => _TextFieldWithActionsDialogState();
+}
+
+class _TextFieldWithActionsDialogState extends State<_TextFieldWithActionsDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _setDraft(String value) {
+    if (mounted) {
+      _controller.text = value;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.name),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: widget.actionsBuilder(_setDraft),
+          ),
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: _controller,
+            textAlign: TextAlign.center,
+            autofocus: true,
+            onFieldSubmitted: (value) => context.pop(value),
+          ),
+        ],
+      ),
+      actions: [
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          ),
+          onPressed: () => context.pop(_controller.text),
+          child: Text(t.general.confirm),
+        ),
+      ],
     );
   }
 }
