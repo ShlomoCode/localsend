@@ -9,9 +9,9 @@ on:
         description: Existing cloud Android 11 device, without replacing system apps
       release:
         type: choice
-        options: ['1.16.1', '1.17.0']
+        options: ['1.16.1', '1.17.0', 'current-c1ce']
         default: '1.16.1'
-        description: Official historical release at both endpoints
+        description: Official historical release or exact unmodified current build at both endpoints
       scenario:
         type: choice
         options: [unchanged, changed, renamed, provider-probe]
@@ -40,9 +40,9 @@ jobs:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue2007-${{ github.run_id }}
-      BASELINE_APP: ${{ inputs.release == '1.17.0' && 'bs://59b2370a166b5e36a4c948c50f22b70255046822' || 'bs://e0759f0fb2caac2dc8df57e2555514289dd2e043' }}
-      BASELINE_LINUX_SHA256: ${{ inputs.release == '1.17.0' && '6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81' || '4082de313cc4f2cb123415aa8ed23146930c871b5d6bc14653e47375af46d332' }}
-      BASELINE_ANDROID_SHA256: ${{ inputs.release == '1.17.0' && '2c7f5fd4872da25115bb8e5e62f92de94dda47b0f249ff387ac667b13871dc3e' || 'f575c642d1c9ee37475bf0d30e138d2672e0857216addaebc327041339aeb064' }}
+      BASELINE_APP: ${{ inputs.release == 'current-c1ce' && 'bs://8a977c82af1e28db47132169c3e2cf0db7c13dc0' || inputs.release == '1.17.0' && 'bs://59b2370a166b5e36a4c948c50f22b70255046822' || 'bs://e0759f0fb2caac2dc8df57e2555514289dd2e043' }}
+      BASELINE_LINUX_SHA256: ${{ inputs.release == 'current-c1ce' && '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b' || inputs.release == '1.17.0' && '6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81' || '4082de313cc4f2cb123415aa8ed23146930c871b5d6bc14653e47375af46d332' }}
+      BASELINE_ANDROID_SHA256: ${{ inputs.release == 'current-c1ce' && '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea' || inputs.release == '1.17.0' && '2c7f5fd4872da25115bb8e5e62f92de94dda47b0f249ff387ac667b13871dc3e' || 'f575c642d1c9ee37475bf0d30e138d2672e0857216addaebc327041339aeb064' }}
       ISSUE_2007_RELEASE: ${{ inputs.release || '1.16.1' }}
       BS_DEVICE: ${{ inputs.device || 'Vivo Y21' }}
       BS_OS: '11.0'
@@ -66,16 +66,31 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
+      - name: Reuse verified current Linux artifact
+        if: inputs.release == 'current-c1ce'
+        uses: actions/download-artifact@v5
+        with:
+          repository: ShlomoCode/localsend
+          run-id: 38132747719
+          name: issue2754-c1ce-flutter3419-linux-x64
+          github-token: ${{ github.token }}
+          path: current-reuse
       - name: Prepare original desktop release and supported runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr python3-pil network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
           sudo systemctl start NetworkManager
           mkdir -p evidence released
-          curl -fL "https://github.com/localsend/localsend/releases/download/v${ISSUE_2007_RELEASE}/LocalSend-${ISSUE_2007_RELEASE}-linux-x86-64.tar.gz" -o released/linux.tar.gz
+          if [ "$ISSUE_2007_RELEASE" = current-c1ce ]; then
+            test "$(cat current-reuse/provenance/source-sha.txt)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+            cp current-reuse/source-bundle.tar.gz released/linux.tar.gz
+            cp -r current-reuse/provenance evidence/current-linux-provenance
+          else
+            curl -fL "https://github.com/localsend/localsend/releases/download/v${ISSUE_2007_RELEASE}/LocalSend-${ISSUE_2007_RELEASE}-linux-x86-64.tar.gz" -o released/linux.tar.gz
+          fi
           printf '%s  %s\n' "$BASELINE_LINUX_SHA256" released/linux.tar.gz | sha256sum -c -
           sha256sum released/linux.tar.gz > evidence/artifact-sha256.txt
-          printf 'official %s Android arm64 %s\n' "$ISSUE_2007_RELEASE" "$BASELINE_ANDROID_SHA256" >> evidence/artifact-sha256.txt
+          printf 'selected %s Android arm64 %s\n' "$ISSUE_2007_RELEASE" "$BASELINE_ANDROID_SHA256" >> evidence/artifact-sha256.txt
           tar xf released/linux.tar.gz -C released
       - name: Verify transparent transport control
         run: node support/cloud_transport/control.mjs
