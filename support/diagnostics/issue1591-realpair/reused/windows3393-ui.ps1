@@ -6,7 +6,7 @@ function Write-DiagnosticPhase([string]$phase){
 Write-DiagnosticPhase 'before-drawing-assembly'
 Add-Type -AssemblyName System.Drawing
 Write-DiagnosticPhase 'before-native-type-compilation'
-Add-Type @'
+if(-not ('W3393' -as [type])){Add-Type @'
 using System;using System.Text;using System.Runtime.InteropServices;
 public static class W3393 {
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
@@ -50,6 +50,7 @@ public static class W3393 {
  public struct Rect { public int L,T,R,B; }
 }
 '@
+}
 Write-DiagnosticPhase 'before-find-window'
 $window=[W3393]::FindWindow('FLUTTER_RUNNER_WIN32_WINDOW','LocalSend')
 if($window -eq [IntPtr]::Zero){throw 'No LocalSend window'}

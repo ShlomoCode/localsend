@@ -1,17 +1,11 @@
 name: iPad real app transfer diagnostic
 on:
-  push:
-    branches: [codex/issue1591-investigation]
-    paths:
-      - .github/workflows/issue1591-realpair.yml
-      - support/diagnostics/issue1591-realpair/**
   workflow_dispatch:
     inputs:
       proxy_app:
         description: Normally uploaded signed byte proxy bs:// app URL
         type: string
         required: true
-        default: bs://839561daa771f7b560f7b3c247ab0db75b3eb805
       receiver_app:
         description: Unchanged LocalSend IPA bs:// URL (current or historical release)
         type: string
@@ -46,7 +40,7 @@ jobs:
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
-      PROXY_APP: ${{ inputs.proxy_app || 'bs://839561daa771f7b560f7b3c247ab0db75b3eb805' }}
+      PROXY_APP: ${{ inputs.proxy_app }}
       RECEIVER_APP: ${{ inputs.receiver_app || 'bs://4750eafebb15101bf6a61e9d8fc6632a43b20735' }}
       RECEIVER_IDENTITY: ${{ inputs.receiver_identity || 'LocalSend 1.18.2 unchanged c1ce322fb3acf08e44f329b8b7208b8b0d91e244 normal unsigned arm64 source build run 38135768528 artifact 11701275665 IPA sha256 abe84652465ce8add78f25a50e5c3bcceeac87d4e4f084c53d73d0b21cc06c27 BrowserStack normal resign' }}
       COMPARISON: ${{ github.event_name == 'workflow_dispatch' && inputs.comparison || 'none' }}
@@ -86,7 +80,8 @@ jobs:
           Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
           Expand-Archive C:/tmp/bs-local.zip C:/tmp/bs-local-bin -Force
           Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
-          New-NetFirewallRule -Name Issue1591Local -DisplayName Issue1591Local -Direction Inbound -Program C:/tmp/bs-local-bin/BrowserStackLocal.exe -Action Allow -Profile Any | Out-Null
+          $localBinary=(Get-Item C:/tmp/bs-local-bin/BrowserStackLocal.exe).FullName
+          New-NetFirewallRule -Name Issue1591Local -DisplayName Issue1591Local -Direction Inbound -Program $localBinary -Action Allow -Profile Any | Out-Null
           New-NetFirewallRule -Name Issue1591Relay -DisplayName Issue1591Relay -Direction Inbound -Program (Get-Command node).Source -Protocol TCP -LocalPort 8080 -Action Allow -Profile Any | Out-Null
       - name: Real Windows to iPad transfer, owned session and cleanup
         shell: pwsh

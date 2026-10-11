@@ -17,9 +17,60 @@ const save = (name, value) => writeFileSync('evidence/' + name, redact(value ins
 const pause = ms => new Promise(ok => setTimeout(ok, ms));
 const appId = 'org.localsend.localsendApp', proxyId = 'org.shlomocode.diagnostics.issue1591.byteproxy';
 let session, local, r, failure, stage = 'configuration', previousFinished = false;
+let monitoredWindow, healthMonitor;
+let windowsUI, windowsReady, windowsSeq = 0;
+const windowsRequests = new Map();
+const healthMaxAgeMs = 5000;
 const results = [], cleanup = [], backgroundWindows = [];
 const eid = element => element['element-6066-11e4-a52e-4f735466cecf'];
 const prefix = () => '/session/' + session;
+
+function healthIssue(window, {background = true, afterSwitch = false, requirePeer = false} = {}) {
+  if (r.status().faults.length) return 'relay transport fault: ' + r.status().faults[0].kind;
+  const state = r.health(), sample = state.lastHealth, payload = sample?.payload;
+  if (!sample || !Number.isFinite(state.healthAgeMs) || state.healthAgeMs > healthMaxAgeMs) return 'missing or stale health';
+  if (!payload.running) return 'helper is not running';
+  if (window.generation && (payload.generation !== window.generation || payload.pid !== window.pid)) return 'helper generation or PID changed';
+  if (background) {
+    if (payload.applicationState !== 'background') return 'helper is not observed in background';
+    if (afterSwitch && Date.parse(sample.receivedUtc) < Date.parse(window.switchUtc)) return 'health sample predates switch';
+    if (payload.budgetState !== 'finite' || !Number.isFinite(payload.remainingBudgetSeconds) || payload.remainingBudgetSeconds - state.healthAgeMs / 1000 <= 0) return 'finite background budget expired or unavailable';
+  } else if (payload.applicationState !== 'active') return 'helper is not observed active before switching';
+  if (requirePeer && !r.healthSamples.some(entry => entry.payload.generation === window.generation && entry.payload.pid === window.pid && entry.payload.peers.some(peer => peer.ready && peer.toLocalSendBytes > 0 && peer.fromLocalSendBytes > 0))) return 'no ready bidirectional LocalSend peer observed';
+  return null;
+}
+async function checkpoint(window, milestone, {awaitBackground = false, requirePeer = false} = {}) {
+  if (window.healthFault) throw new Error('Transport infrastructure health failed: ' + window.healthFault.issue);
+  const invokedUtc = new Date().toISOString();
+  const foregroundState = await wd('POST', prefix() + '/execute/sync', {script:'mobile: queryAppState', args:[{bundleId:appId}]}, 10000);
+  const deadline = Date.now() + (awaitBackground ? healthMaxAgeMs : 0);
+  let issue;
+  do {
+    issue = healthIssue(window, {afterSwitch:true, requirePeer});
+    if (!issue || Date.now() >= deadline) break;
+    await pause(100);
+  } while (Date.now() <= deadline);
+  const observation = {milestone, invokedUtc, checkedUtc:new Date().toISOString(), foregroundAppId:appId, foregroundState,
+    healthMaxAgeMs, budgetInterpretation:'Latest finite allowance minus monotonic server sample age; no promised iOS task duration', health:r.health(), issue};
+  window.checkpoints.push(observation);
+  save(window.case + '-health-checkpoints.json', window);
+  save(window.case + '-health-samples.json', r.healthSamples);
+  if (foregroundState !== 4) throw new Error('Transport infrastructure: LocalSend is not observed foreground (state 4) at ' + milestone);
+  if (issue) throw new Error('Transport infrastructure at ' + milestone + ': ' + issue);
+  if (window.healthFault) throw new Error('Transport infrastructure health failed: ' + window.healthFault.issue);
+}
+function monitorHealth(window) {
+  monitoredWindow = window;
+  healthMonitor ||= setInterval(() => {
+    if (!monitoredWindow || monitoredWindow.healthFault) return;
+    const issue = healthIssue(monitoredWindow, {afterSwitch:true});
+    if (issue) {
+      monitoredWindow.healthFault = {utc:new Date().toISOString(), stage, issue, health:r.health()};
+      save(monitoredWindow.case + '-health-fault.json', monitoredWindow.healthFault);
+    }
+    save(monitoredWindow.case + '-health-samples.json', r.healthSamples);
+  }, 500);
+}
 
 async function wd(method, path, body, timeoutMs = 30000) {
   const started = Date.now(); let response, error;
@@ -64,11 +115,42 @@ async function click(label, timeout) {
 }
 async function activate(bundleId) { await wd('POST', prefix() + '/appium/device/activate_app', {appId:bundleId}); }
 async function powershell(script, args = []) {
+  if (script === 'windows3393-ui.ps1' && windowsReady) {
+    const value = name => {const index=args.indexOf(name);return index < 0 ? undefined : args[index + 1];};
+    const id = ++windowsSeq;
+    return new Promise((ok, reject) => {
+      const timer = setTimeout(() => {windowsRequests.delete(id);reject(new Error('Prewarmed Windows UI deadline exceeded'));}, 30000);
+      windowsRequests.set(id, {ok, reject, timer});
+      windowsUI.stdin.write(JSON.stringify({id,action:value('-Action'),x:Number(value('-X') || 0),y:Number(value('-Y') || 0),label:value('-Label'),
+        foreground:args.includes('-RequireForeground'),sequence:args.includes('-UseControlSequence')}) + '\n');
+    });
+  }
   const started = Date.now();
   try {
     const output = await exec('pwsh', ['-NoProfile', '-File', root + '/reused/' + script, ...args], {timeout:180000, maxBuffer:4*1024*1024});
     save(`windows-${started}.txt`, output.stdout + output.stderr);
   } catch (error) { save(`windows-${started}-error.txt`, [error.message, error.stdout, error.stderr].join('\n')); throw error; }
+}
+async function prepareWindowsUI() {
+  windowsUI = spawn('pwsh',['-NoProfile','-File',root + '/windows-ui-server.ps1']);
+  const pendingReady = new Promise((ok, reject) => {
+    const timer = setTimeout(() => reject(new Error('Windows native helper did not prewarm')), 60000);
+    const stop = error => {clearTimeout(timer);reject(error);for(const pending of windowsRequests.values()){clearTimeout(pending.timer);pending.reject(error);}windowsRequests.clear();};
+    windowsUI.on('error', stop); windowsUI.on('exit', code => stop(new Error('Owned Windows UI process exited ' + code)));
+    createInterface({input:windowsUI.stdout}).on('line', line => {
+      if (!line.startsWith('ISSUE1591_RPC:')) {appendFileSync('evidence/windows-ui-server.stdout.txt',redact(line) + '\n');return;}
+      try {
+        const result = JSON.parse(line.slice('ISSUE1591_RPC:'.length));
+        if (result.ready) {windowsReady = true;save('windows-ui-server.json',result);clearTimeout(timer);ok();return;}
+        const pending = windowsRequests.get(result.id);
+        if (!pending) return;
+        clearTimeout(pending.timer);windowsRequests.delete(result.id);
+        if (result.ok) pending.ok(result);else pending.reject(new Error(result.error));
+      } catch (error) {stop(error);}
+    });
+    createInterface({input:windowsUI.stderr}).on('line', line => appendFileSync('evidence/windows-ui-server.stderr.txt',redact(line) + '\n'));
+  });
+  await pendingReady;
 }
 async function gallery(desired, label) {
   stage = label + '-settings';
@@ -104,7 +186,7 @@ async function configureProxy(label) {
   await click('startProxy');
   const started = Date.now(), deadline = started + 20000;
   let consentedLocalNetwork = false;
-  while (!r.status().pollPending && Date.now() < deadline) {
+  while ((!r.status().pollPending || healthIssue({}, {background:false})) && Date.now() < deadline) {
     const source = await wd('GET', prefix() + '/source');
     if (!consentedLocalNetwork && /local network/i.test(source) && (await elements('accessibility id','Allow')).length === 1) {
       save(label + '-proxy-local-network-prompt.xml', source);
@@ -113,12 +195,15 @@ async function configureProxy(label) {
     }
     await pause(250);
   }
-  if (!r.status().pollPending) throw new Error('Proxy never opened an authenticated relay poll');
+  if (!r.status().pollPending || healthIssue({}, {background:false})) throw new Error('Proxy never established both an authenticated relay poll and fresh active/running health');
   save(label + '-proxy-start.xml', await wd('GET', prefix() + '/source'));
   const window = {case:label, proxyStartedUtc:new Date(started).toISOString(), switchUtc:new Date().toISOString(),
-    expiryAuthority:'Swift NSLog backgroundTimeRemaining/lifecycle/expiry records in device-logs.txt', consentedLocalNetwork, statusBeforeSwitch:r.status()};
+    expiryAuthority:'Authenticated live health plus Swift lifecycle/expiry device logs', consentedLocalNetwork,
+    generation:r.health().lastHealth.payload.generation, pid:r.health().lastHealth.payload.pid, checkpoints:[], statusBeforeSwitch:r.status()};
   backgroundWindows.push(window);
-  await activate(appId); return window;
+  await activate(appId);
+  await checkpoint(window, 'after-app-switch', {awaitBackground:true}); monitorHealth(window);
+  return window;
 }
 async function transfer({label, extension, desired, verifyDocuments}) {
   const filename = `issue1591-${process.env.GITHUB_RUN_ID}-${label}.${extension}`;
@@ -135,28 +220,37 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   await powershell('windows2311-context.ps1', ['-Case',label, '-FixturePath',resolve('evidence/' + filename), '-SelectOnly', ...(previousFinished ? ['-CompletePrevious'] : [])]);
   const window = await configureProxy(label);
   stage = label + '-windows-send';
+  await checkpoint(window, 'before-windows-send');
   await powershell('windows3393-ui.ps1', ['-Action','click','-X','246','-Y','266','-Label',label+'-favorites','-RequireForeground','-UseControlSequence']);
   await powershell('windows3393-ui.ps1', ['-Action','click','-X','145','-Y','225','-Label',label+'-send','-RequireForeground','-UseControlSequence']);
+  window.senderSendUtc = new Date().toISOString(); await checkpoint(window, 'after-windows-send');
   stage = label + '-receiver-approval';
   await capture(label + '-pending');
-  await click('Accept', 12000); await capture(label + '-accepted');
+  await unique('accessibility id', 'Accept', 12000);
+  await checkpoint(window, 'before-Accept', {requirePeer:true});
+  window.acceptInvokedUtc = new Date().toISOString(); await click('Accept', 1000);
+  window.acceptReturnedUtc = new Date().toISOString(); await checkpoint(window, 'after-Accept', {requirePeer:true});
+  await capture(label + '-accepted');
   stage = label + '-receiver-save';
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
+    if (window.healthFault) throw new Error('Transport infrastructure while waiting for save: ' + window.healthFault.issue);
     const xml = await wd('GET', prefix() + '/source'); save(label + '-latest.xml', xml);
     // Only consent to a prompt that explicitly requests adding photos. Never
     // request read/write library access or dismiss a broader permission prompt.
     if (/Allow Full Access|Select Photos|access your photo library/i.test(xml)) throw new Error('Broader Photos access prompt is outside the add-only scenario');
     if (/add(?: to)? (?:your )?photos/i.test(xml) && (await elements('accessibility id', 'Allow Access')).length === 1) await click('Allow Access');
     if ((await elements('accessibility id', 'Done')).length === 1) break;
-    if (/500|Internal Server Error/.test(xml)) {
+    if (/(?:name|label|value)="[^"\n]*(?:HTTP(?: status)?[: ]+500|Internal Server Error)[^"\n]*"/i.test(xml)) {
+      await checkpoint(window, 'observed-error-health', {requirePeer:true});
       await capture(label + '-reported-error');
       results.push({case:label, stage, source:identity, outcome:'observed-500', transport:r.status()});
       throw new Error('Observed HTTP 500 in real receiver transfer; retain exact source and device log to classify');
     }
     await pause(250);
   }
-  await unique('accessibility id', 'Done', 1000); await capture(label + '-completed');
+  await unique('accessibility id', 'Done', 1000);
+  await checkpoint(window, 'receiver-save-completion', {requirePeer:true}); await capture(label + '-completed');
   await powershell('windows3393-ui.ps1', ['-Action','snapshot','-Label',label+'-sender-end']);
   save(label + '-sender-status.json', {authority:'Original Windows sender-end screenshot and native HWND/PID records; review image for Finished, per-file result and error details', autoTextStatus:'not exposed by this reused Flutter HWND backend'});
   const completeSource = await wd('GET', prefix() + '/source');
@@ -164,12 +258,15 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   save(label + '-completion-status.json', {filename, doneVisible:true, finishedLabelObserved:/(?:name|label)="Finished"/.test(completeSource), fileObserved:completeSource.includes(filename), observedSuccess});
   if (!observedSuccess) throw new Error('Done appeared without an observed successful Finished/file result; inspect both endpoints');
   window.completedUtc = new Date().toISOString(); window.transport = r.status();
-  const result = {case:label, source:identity, gallery:desired, outcome:'real-app-completed', transport:r.status(), byteExact:false};
+  const result = {case:label, source:identity, gallery:desired, outcome:'receiver-completed-sender-review-required',
+    senderVerified:false, transport:r.status(), byteExact:false, evidenceAdmission:'Requires parent raw sender image/PID review and original device logs before both-endpoint success'};
   results.push(result);
   if (verifyDocuments) {
     stage = label + '-saved-file-verification';
     const path = `@${appId}:documents/${filename}`;
+    await checkpoint(window, 'before-documents-pull', {requirePeer:true});
     const encoded = await wd('POST', prefix() + '/appium/device/pull_file', {path});
+    await checkpoint(window, 'after-documents-pull', {requirePeer:true});
     const saved = Buffer.from(encoded, 'base64');
     writeFileSync('evidence/' + label + '-saved.' + extension, saved);
     const hash = createHash('sha256').update(saved).digest('hex');
@@ -179,6 +276,8 @@ async function transfer({label, extension, desired, verifyDocuments}) {
     result.verificationLimit = 'Gallery completion is UI evidence only. Documents pull cannot establish Photos library bytes; no read/write Photos authorization was granted.';
   }
   save('scenario-results.json', {results, backgroundWindows});
+  await checkpoint(window, 'verified-case-end', {requirePeer:true});
+  monitoredWindow = null;
   await click('Done'); previousFinished = true;
   await activate(proxyId); await click('stopProxy');
   save(label + '-proxy-after-stop.xml', await wd('GET', prefix() + '/source'));
@@ -195,7 +294,7 @@ async function collectMetadata() {
     const detail = (await response.json()).automation_session;
     save('browserstack-session.json', detail);
     for (const [key, file] of [['device_logs_url','device-logs.txt'], ['appium_logs_url','appium-logs.txt'], ['video_url','original-browserstack-video.mp4']]) {
-      if (!detail[key]) { save(file + '-error.txt', 'Session metadata omitted ' + key); continue; }
+      if (!detail[key]) { save(file + '-error.txt', 'Session metadata omitted ' + key); failure ||= 'Required original evidence omitted: ' + key; continue; }
       const url = new URL(detail[key]);
       if (url.protocol !== 'https:' || !(url.hostname === 'browserstack.com' || url.hostname.endsWith('.browserstack.com'))) throw new Error('Unexpected BrowserStack evidence host');
       let log;
@@ -204,11 +303,15 @@ async function collectMetadata() {
         if (log.status !== 404) break;
         await log.text(); await pause(5000);
       }
-      if (!log.ok) { save(file + '-error.txt', 'Evidence HTTP ' + log.status); continue; }
+      if (!log.ok) { save(file + '-error.txt', 'Evidence HTTP ' + log.status); failure ||= 'Required original evidence HTTP ' + log.status + ': ' + key; continue; }
       if (key === 'video_url') writeFileSync('evidence/' + file, Buffer.from(await log.arrayBuffer()));
-      else save(file, await log.text());
+      else {
+        const raw = await log.text();save(file, raw);
+        if (!raw.trim()) failure ||= 'Required original evidence is empty: ' + key;
+        if (key === 'device_logs_url' && (!raw.includes('loopback-ready') || !raw.includes('did-enter-background'))) failure ||= 'Device logs omitted helper loopback/lifecycle proof';
+      }
     }
-  } catch (error) { save('metadata-error.txt', error); }
+  } catch (error) { save('metadata-error.txt', error); failure ||= 'Required original BrowserStack evidence retrieval failed'; }
 }
 try {
   for (const name of ['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','PROXY_APP','RECEIVER_APP','RECEIVER_IDENTITY','BS_LOCAL_ID']) if (!process.env[name]) throw new Error('Missing required input ' + name);
@@ -218,6 +321,7 @@ try {
   stage = 'windows-startup';
   await powershell('windows2311-desktop.ps1');
   await powershell('windows_release_ui_probe.ps1', ['-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-2022','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName','startup-control.txt','-DiagnosticPeerPort','53318','-InitializeOnly']);
+  await prepareWindowsUI();
   stage = 'browserstack-local';
   local = spawn('C:/tmp/bs-local-bin/BrowserStackLocal.exe', ['--key',process.env.BROWSERSTACK_ACCESS_KEY,'--local-identifier',process.env.BS_LOCAL_ID,'--force-local','--only-automate'], {windowsHide:true});
   let output = '', localError;
@@ -268,6 +372,8 @@ try {
     await powershell('windows3393-ui.ps1', ['-Action','click','-X','127','-Y','258','-Label','sender-failure-error-detail','-RequireForeground','-UseControlSequence']).catch(error => save('sender-error-detail-capture-error.txt', error));
   }
 } finally {
+  monitoredWindow = null; if (healthMonitor) clearInterval(healthMonitor);
+  if (r) save('final-helper-health-samples.json', r.healthSamples);
   save('scenario-results.json', {results, backgroundWindows, failure, lastStage:stage, transport:r?.status()});
   if (session) {
     stage = 'owned-session-cleanup';
@@ -281,6 +387,11 @@ try {
     try { if (local.exitCode === null) await exec('taskkill',['/PID',String(local.pid),'/T','/F']); cleanup.push({operation:'owned Local process tree stop',ok:true}); }
     catch (error) { cleanup.push({operation:'owned Local stop',ok:false,error:redact(error)}); failure ||= 'Owned Local cleanup failed'; }
   }
+  if (windowsUI && windowsUI.exitCode === null) {
+    try {await exec('taskkill',['/PID',String(windowsUI.pid),'/T','/F']);cleanup.push({operation:'owned prewarmed Windows UI process stop',ok:true});}
+    catch(error){cleanup.push({operation:'owned Windows UI stop',ok:false,error:redact(error)});failure ||= 'Owned Windows UI cleanup failed';}
+  }
   save('cleanup.json', cleanup);
+  save('evidence-admission.json', {failure, senderVerified:false, admission:'Requires parent inspection of both endpoint results, exact saved bytes, native health/lifecycle and original video/logs. A successful controller exit alone does not establish app-to-app success.'});
 }
 if (failure) { console.error(failure); process.exitCode = 1; }
