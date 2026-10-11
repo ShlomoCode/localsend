@@ -27,10 +27,17 @@ def snapshot(serial, name):
 
 def click(serial, label, name):
     xml = snapshot(serial, name)
-    for n in ET.fromstring(xml).iter():
+    tree = ET.fromstring(xml)
+    parents = {child: parent for parent in tree.iter() for child in parent}
+    for n in tree.iter():
         values = [n.get("text", ""), n.get("content-desc", "")]
         if any(v == label or v.startswith(label + "\n") for v in values):
-            a,b,c,d = map(int, re.findall(r"\d+", n.get("bounds")))
+            target = n
+            while target.get("clickable") != "true" and target in parents:
+                target = parents[target]
+            if target.get("clickable") != "true":
+                target = n
+            a,b,c,d = map(int, re.findall(r"\d+", target.get("bounds")))
             adb(serial, "shell", "input", "tap", str((a+c)//2), str((b+d)//2))
             time.sleep(2)
             return
