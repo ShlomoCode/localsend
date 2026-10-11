@@ -6,7 +6,7 @@ on:
         description: 'Run native source gates before any new VM experiment'
         type: choice
         default: vm
-        options: [vm, native]
+        options: [vm, native, engine]
       environment:
         type: choice
         default: mint
@@ -242,3 +242,202 @@ jobs:
         with:
           name: issue2754-cinnamon-evidence
           path: evidence/cloud/
+
+  engine-source-build:
+    if: inputs.stage == 'engine'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    env:
+      # Explicitly authorized disposable SDK paths only; the script enforces fork/runner guards.
+      PROBE_RECLAIM_RUNNER_SDKS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize engine evidence
+        run: |
+          mkdir -p evidence/engine/build evidence/engine/bootstrap
+          git rev-parse HEAD > evidence/engine/diagnostic-head.txt || true
+      - name: Measure resources and bootstrap the exact engine on this runner
+        id: bootstrap
+        run: |
+          set +e
+          bash support/diagnostics/2754-engine-build/bootstrap.sh evidence/engine/bootstrap
+          status=$?
+          printf '%s\n' "$status" > evidence/engine/bootstrap-exit-code.txt
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" = 3 ]; then
+            echo '::error::Engine resource gate failed (exit 3); engine compilation did not run. See bootstrap/resource-gate.txt and resources.txt.'
+          fi
+          exit "$status"
+      - name: Build control and B with the official native B gate sequentially
+        id: engine
+        # This step shares the physical runner and exact source checkout with bootstrap.
+        # The script bounds all compilation to 180 minutes and Ninja to -j2/-l2.
+        run: bash support/diagnostics/2754-engine-build/build-engines.sh evidence/engine/build
+      - name: Preserve engine stage evidence on every outcome
+        if: always()
+        run: |
+          mkdir -p evidence/engine
+          git rev-parse HEAD > evidence/engine/diagnostic-head.txt || true
+          dpkg-query -W > evidence/engine/packages.tsv
+          uname -a > evidence/engine/uname.txt
+          cp /etc/os-release evidence/engine/os-release.txt
+          free -m > evidence/engine/final-memory.txt
+          df -Pk "$RUNNER_TEMP" "$GITHUB_WORKSPACE" > evidence/engine/final-disk.txt
+      - name: Collect compact engine logs and provenance
+        if: always()
+        run: |
+          mkdir -p /tmp/issue2754-engine-compact
+          rsync -a --include='*/' --include='*.log' --include='*.json' --include='*.txt' \
+            --include='*.xml' --include='*.tsv' --include='*.sha256' --include='*SHA256SUMS' \
+            --include='*.patch' --include='*.gclient' --include='args.gn' --exclude='*' \
+            evidence/engine/ /tmp/issue2754-engine-compact/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-engine-build-evidence-compact
+          path: /tmp/issue2754-engine-compact/
+          compression-level: 9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # Whole stage directory, including partial variant artifacts, retained after failure.
+          name: issue2754-engine-build-evidence-full
+          path: evidence/engine/
+          if-no-files-found: warn
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # Transport the whole directory: TAR, SHA256, and bootstrap-linked provenance.
+          name: issue2754-engine-control-linux-x64
+          path: evidence/engine/build/control/
+          if-no-files-found: warn
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-engine-B-linux-x64
+          path: evidence/engine/build/B/
+          if-no-files-found: warn
+          compression-level: 0
+
+  engine-app-control:
+    if: inputs.stage == 'engine'
+    needs: engine-source-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PROBE_VARIANT: control
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize control app evidence
+        run: mkdir -p evidence/engine-app-control
+      - name: Download the complete control engine artifact from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-engine-control-linux-x64
+          path: ${{ runner.temp }}/issue2754-control-engine-artifact
+      - name: Install native app build dependencies
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tee evidence/engine-app-control/apt-update.log
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev jq binutils file \
+            2>&1 | tee evidence/engine-app-control/apt-install.log
+          command -v rustup
+      - name: Build exact c1ce with the source-built control engine
+        run: |
+          bash support/diagnostics/2754-engine-build/build-app.sh \
+            "$RUNNER_TEMP/issue2754-control-engine-artifact" evidence/engine-app-control/bundle
+      - name: Collect compact control app evidence
+        if: always()
+        run: |
+          mkdir -p evidence/engine-app-control /tmp/issue2754-engine-app-control-compact
+          git rev-parse HEAD > evidence/engine-app-control/diagnostic-head.txt || true
+          rsync -a --include='*/' --include='*.log' --include='*.json' --include='*.txt' \
+            --include='*.xml' --include='*.tsv' --include='*.sha256' --include='*SHA256SUMS' \
+            --include='*.patch' --include='*.gclient' --include='*.cmake' --include='args.gn' --exclude='*' \
+            evidence/engine-app-control/ /tmp/issue2754-engine-app-control-compact/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-engine-control-evidence-compact
+          path: /tmp/issue2754-engine-app-control-compact/
+          compression-level: 9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-engine-control-evidence-full
+          path: evidence/engine-app-control/
+          if-no-files-found: warn
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-engine-control-linux-x64
+          path: evidence/engine-app-control/bundle/
+          if-no-files-found: warn
+          compression-level: 0
+
+  engine-app-B:
+    if: inputs.stage == 'engine'
+    # B can start only after both the engine job and control app job succeed.
+    needs: [engine-source-build, engine-app-control]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PROBE_VARIANT: B
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize B app evidence
+        run: mkdir -p evidence/engine-app-B
+      - name: Download the complete B engine artifact from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-engine-B-linux-x64
+          path: ${{ runner.temp }}/issue2754-B-engine-artifact
+      - name: Install native app build dependencies
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tee evidence/engine-app-B/apt-update.log
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev jq binutils file \
+            2>&1 | tee evidence/engine-app-B/apt-install.log
+          command -v rustup
+      - name: Build exact c1ce with the source-built B engine
+        run: |
+          bash support/diagnostics/2754-engine-build/build-app.sh \
+            "$RUNNER_TEMP/issue2754-B-engine-artifact" evidence/engine-app-B/bundle
+      - name: Collect compact B app evidence
+        if: always()
+        run: |
+          mkdir -p evidence/engine-app-B /tmp/issue2754-engine-app-B-compact
+          git rev-parse HEAD > evidence/engine-app-B/diagnostic-head.txt || true
+          rsync -a --include='*/' --include='*.log' --include='*.json' --include='*.txt' \
+            --include='*.xml' --include='*.tsv' --include='*.sha256' --include='*SHA256SUMS' \
+            --include='*.patch' --include='*.gclient' --include='*.cmake' --include='args.gn' --exclude='*' \
+            evidence/engine-app-B/ /tmp/issue2754-engine-app-B-compact/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-engine-B-evidence-compact
+          path: /tmp/issue2754-engine-app-B-compact/
+          compression-level: 9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-engine-B-evidence-full
+          path: evidence/engine-app-B/
+          if-no-files-found: warn
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-c1ce-engine-B-linux-x64
+          path: evidence/engine-app-B/bundle/
+          if-no-files-found: warn
+          compression-level: 0
