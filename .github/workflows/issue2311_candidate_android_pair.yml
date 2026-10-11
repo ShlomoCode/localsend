@@ -1,0 +1,87 @@
+name: Issue 2311 immutable gallery candidate pair
+
+on:
+  workflow_call:
+    inputs:
+      candidate_stage:
+        type: string
+        required: true
+      candidate_ref:
+        type: string
+        required: true
+      gal_ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# The registered caller serializes historical, current and candidate jobs.
+jobs:
+  candidate_pair:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate immutable inputs
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          GAL_REF: ${{ inputs.gal_ref }}
+          CANDIDATE_STAGE: ${{ inputs.candidate_stage }}
+        run: |
+          [[ "$CANDIDATE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GAL_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_STAGE" == resolve-lock || "$CANDIDATE_STAGE" == build-pair ]]
+      - uses: actions/checkout@v6
+        with:
+          path: diagnostics
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: ShlomoCode/localsend
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: baseline
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: ShlomoCode/localsend
+          ref: ${{ inputs.candidate_ref }}
+          fetch-depth: 0
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: ShlomoCode/gal
+          ref: ${{ inputs.gal_ref }}
+          fetch-depth: 0
+          path: gal-reviewed
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+      - name: Install pinned FVM and source SDKs
+        run: |
+          dart pub global activate fvm 3.2.1
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+          "$HOME/.pub-cache/bin/fvm" install 3.41.9
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add --toolchain 1.97.1 aarch64-linux-android
+      - name: Resolve locks or build immutable pair
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          GAL_REF: ${{ inputs.gal_ref }}
+          CANDIDATE_STAGE: ${{ inputs.candidate_stage }}
+          RUSTUP_TOOLCHAIN: '1.97.1'
+        run: bash diagnostics/support/diagnostics/issue2311-build-candidate-pair.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/issue2311-candidate-evidence"
+      - name: Upload source, checks, locks and APK evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: issue2311-candidate-${{ inputs.candidate_stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: issue2311-candidate-evidence/
+          if-no-files-found: error
+          retention-days: 30

@@ -5,11 +5,23 @@ on:
     inputs:
       source_family:
         type: choice
-        options: [historical, current]
+        options: [historical, current, candidate]
         default: historical
       build_tagged:
         type: boolean
         default: true
+      candidate_stage:
+        type: choice
+        options: [resolve-lock, build-pair]
+        default: resolve-lock
+      candidate_ref:
+        description: Full immutable LocalSend candidate commit
+        type: string
+        default: ''
+      gal_ref:
+        description: Full immutable ShlomoCode/gal candidate commit
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -20,7 +32,7 @@ concurrency:
 
 jobs:
   source_boundary:
-    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && inputs.source_family != 'current'
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && inputs.source_family == 'historical'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -75,4 +87,12 @@ jobs:
     uses: ./.github/workflows/issue2311_current_android_boundary.yml
     with:
       build_tagged: ${{ inputs.build_tagged }}
+    secrets: inherit
+  candidate_pair:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && inputs.source_family == 'candidate'
+    uses: ./.github/workflows/issue2311_candidate_android_pair.yml
+    with:
+      candidate_stage: ${{ inputs.candidate_stage }}
+      candidate_ref: ${{ inputs.candidate_ref }}
+      gal_ref: ${{ inputs.gal_ref }}
     secrets: inherit
