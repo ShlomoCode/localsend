@@ -10,6 +10,11 @@ on:
           - system-images;android-36;android-tv;x86_64
           - system-images;android-29;android-tv;x86
         default: system-images;android-29;google_apis;x86_64
+      mouse:
+        description: Diagnostic mouse injection backend
+        type: choice
+        options: [adb, w3c-native]
+        default: adb
 permissions:
   contents: read
 concurrency:
@@ -67,6 +72,8 @@ jobs:
           adb pull /sdcard/ui.xml evidence-cloud/initial.xml || true
       - name: Seed ordinary photos and capture real Media route
         shell: bash
+        env:
+          ISSUE1864_MOUSE: ${{ inputs.mouse }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y imagemagick tesseract-ocr

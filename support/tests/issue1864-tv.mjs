@@ -34,6 +34,27 @@ function ocr(name) {
   });
   return fs.readFileSync(path,'utf8');
 }
+async function mouseTap(x,y,label) {
+  const backend=process.env.ISSUE1864_MOUSE ?? 'adb';
+  log({type:'mouse',action:'tap',label,x,y,backend});
+  if(backend==='adb') { adb('shell','input','mouse','tap',String(x),String(y)); return; }
+  // Appium's public driver may rewrite pointerType to touch. Address the
+  // existing UiAutomator2 native executor, which preserves TOOL_TYPE_MOUSE,
+  // SOURCE_MOUSE and button0 -> BUTTON_PRIMARY. No accessibility click.
+  const matches=[...fs.readFileSync(`${out}/appium.log`,'utf8').matchAll(/http:\/\/127\.0\.0\.1:8200\/session\/([a-f\d-]+)\/source/g)];
+  const ids=[...new Set(matches.map(m=>m[1]))];
+  if(ids.length!==1) throw new Error('Existing native input session is absent or ambiguous');
+  const request={actions:[{type:'pointer',id:'diagnostic-mouse',parameters:{pointerType:'mouse'},actions:[
+    {type:'pointerMove',duration:0,origin:'viewport',x,y},{type:'pointerDown',button:0},
+    {type:'pause',duration:100},{type:'pointerUp',button:0},
+  ]}]};
+  const result=await fetch(`http://127.0.0.1:8200/session/${ids[0]}/actions`,{
+    method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),
+  });
+  const body=await result.json();
+  fs.appendFileSync(`${out}/native-mouse-actions.jsonl`,JSON.stringify({time:Date.now(),x,y,label,request,status:result.status,body})+'\n');
+  if(!result.ok || body.value?.error) throw new Error('Native mouse executor rejected the action');
+}
 function nodes(xml) {
   return [...xml.matchAll(/<[\w.$-]+\s+([^>]+)>?/g)].map(m => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a => [a[1], a[2]])));
 }
@@ -50,8 +71,7 @@ async function mouseNode(label, name) {
     bounds = [Number(word[6]), Number(word[7]), Number(word[6]) + Number(word[8]), Number(word[7]) + Number(word[9])];
   }
   const x = Math.round((bounds[0] + bounds[2]) / 2), y = Math.round((bounds[1] + bounds[3]) / 2);
-  log({ type: 'mouse', action: 'tap', label, x, y });
-  adb('shell', 'input', 'mouse', 'tap', String(x), String(y));
+  await mouseTap(x,y,label);
   await pause(1200);
 }
 async function remote(key) {
@@ -117,8 +137,7 @@ else {
 const width = bounds[2] - bounds[0];
 const x = Math.round(bounds[2] - width / 4), y = Math.round(bounds[1] + width / 4);
 async function mousePhoto() {
-  log({ type: 'mouse', action: 'tap', target: 'photo-1-selection-indicator', x, y });
-  adb('shell', 'input', 'mouse', 'tap', String(x), String(y));
+  await mouseTap(x,y,'photo-selection-indicator');
   await pause(900);
 }
 await record('mouse-photo-control', mousePhoto);
