@@ -20,6 +20,10 @@ Get-FileHash $exe.FullName|ConvertTo-Json|Set-Content "$EvidenceDirectory/locals
 New-NetFirewallRule -DisplayName 'Bug2380 disposable LocalSend' -Direction Inbound -Program $exe.FullName -Action Allow -Profile Any|Out-Null
 $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
 Start-Sleep -Seconds 15
+Get-Process wsl -ErrorAction SilentlyContinue|Stop-Process -Force
+[System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
+$app.Refresh();[Desktop2861]::SetForegroundWindow($app.MainWindowHandle)|Out-Null
+Start-Sleep -Seconds 2
 Snapshot 'control-no-powertoys' $app
 Stop-Process -Id $app.Id -Force
 $roots=@("$env:LOCALAPPDATA/PowerToys","$env:ProgramFiles/PowerToys","${env:ProgramFiles(x86)}/PowerToys")
@@ -41,4 +45,53 @@ Get-ChildItem $ptSettings -Recurse -File -Filter '*.json'|Where-Object{$_.Name -
 $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
 Start-Sleep -Seconds 15;Snapshot 'powertoys-default-localsend' $app
 Stop-Process -Id $app.Id -Force
+Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
+$rootFile="$ptSettings/settings.json";$rootConfig=Get-Content $rootFile -Raw|ConvertFrom-Json
+foreach($property in $rootConfig.enabled.PSObject.Properties){$property.Value=($property.Name -eq 'FancyZones')}
+$rootConfig|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 $rootFile
+$fzFile="$ptSettings/FancyZones/settings.json";$fzConfig=Get-Content $fzFile -Raw|ConvertFrom-Json
+foreach($key in @('fancyzones_appLastZone_moveWindows','fancyzones_overrideSnapHotkeys','fancyzones_shiftDrag')){
+ $fzConfig.properties|Add-Member -MemberType NoteProperty -Name $key -Value @{value=$true} -Force
+}
+$fzConfig|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 $fzFile
+Copy-Item $fzFile "$EvidenceDirectory/restore-config.json"
+$power=Start-Process $pt.FullName -PassThru;Start-Sleep -Seconds 10
+Get-Process '*PowerToys*'|Select-Object Name,Id,Path|ConvertTo-Json|Set-Content "$EvidenceDirectory/zone-processes.json"
+if(!(Get-Process PowerToys.FancyZones -ErrorAction SilentlyContinue)){throw 'FancyZones module not running'}
+Add-Type @"
+using System;using System.Runtime.InteropServices;
+public static class Input2380 {
+ [DllImport("user32.dll")] public static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
+}
+"@
+function RealZoneKey {
+ [Input2380]::keybd_event(0x5b,0,0,[UIntPtr]::Zero);[Input2380]::keybd_event(0x25,0,0,[UIntPtr]::Zero)
+ [Input2380]::keybd_event(0x25,0,2,[UIntPtr]::Zero);[Input2380]::keybd_event(0x5b,0,2,[UIntPtr]::Zero)
+}
+$app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;Start-Sleep -Seconds 15
+$app.Refresh();[Desktop2861]::SetForegroundWindow($app.MainWindowHandle)|Out-Null
+Start-Sleep -Seconds 1;Snapshot 'restore-enabled-before-zone' $app
+if([Desktop2861]::GetForegroundWindow() -ne $app.MainWindowHandle){throw 'LocalSend not foreground before actual zone key'}
+RealZoneKey;Start-Sleep -Seconds 3;Snapshot 'actual-win-left-zone' $app
+$history="$ptSettings/FancyZones/app-zone-history.json"
+if(!(Test-Path $history)){throw 'No actual FancyZones history recorded'}
+Copy-Item $history "$EvidenceDirectory/actual-zone-history.json"
+$historyData=Get-Content $history -Raw|ConvertFrom-Json
+if(!($historyData.'app-zone-history'|Where-Object{$_.'app-path' -ieq $exe.FullName})){throw 'LocalSend not found in genuine zone history'}
+Get-ChildItem "$ptSettings/FancyZones" -File -Filter '*layouts.json'|Copy-Item -Destination $EvidenceDirectory
+Stop-Process -Id $app.Id -Force
+foreach($iteration in 1..3){
+ $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
+ Start-Sleep -Seconds 1;Snapshot "zone-relaunch-$iteration-1s" $app
+ Start-Sleep -Seconds 9;Snapshot "zone-relaunch-$iteration-10s" $app
+ $app.Refresh();[Desktop2861]::SetForegroundWindow($app.MainWindowHandle)|Out-Null
+ # Real mouse corner resize in the same process; this is a causal diagnostic after retaining startup evidence.
+ $window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle).Current.BoundingRectangle
+ [Desktop2861]::SetCursorPos([int]$window.Right-2,[int]$window.Bottom-2)|Out-Null
+ [Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
+ for($step=1;$step -le 10;$step++){[Desktop2861]::SetCursorPos([int]$window.Right-2-$step*5,[int]$window.Bottom-2-$step*3)|Out-Null;Start-Sleep -Milliseconds 30}
+ [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+ Start-Sleep -Seconds 2;Snapshot "zone-relaunch-$iteration-same-pid-user-resize" $app
+ Stop-Process -Id $app.Id -Force
+}
 Stop-Transcript

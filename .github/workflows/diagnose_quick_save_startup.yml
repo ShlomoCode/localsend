@@ -10,8 +10,8 @@ jobs:
       - name: Install official ARM PowerToys and untouched historical LocalSend
         shell: pwsh
         run: |
-          Invoke-WebRequest https://github.com/microsoft/PowerToys/releases/download/v0.100.2/PowerToysUserSetup-0.100.2-arm64.exe -OutFile "$env:RUNNER_TEMP/PowerToys.exe"
-          $install = Start-Process "$env:RUNNER_TEMP/PowerToys.exe" -ArgumentList '/install','/quiet','/norestart',"/log $env:RUNNER_TEMP/powertoys-install.log" -Wait -PassThru
+          Invoke-WebRequest https://github.com/microsoft/PowerToys/releases/download/v0.100.2/PowerToysUserSetup-0.100.2-arm64.exe -OutFile "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe"
+          $install = Start-Process "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe" -ArgumentList '/install','/quiet','/norestart',"/log $env:RUNNER_TEMP/powertoys-install.log" -Wait -PassThru
           "Installer exit $($install.ExitCode)"
           if ($install.ExitCode -notin @(0,3010)) { throw 'PowerToys installation failed' }
           Start-Sleep -Seconds 150
