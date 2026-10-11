@@ -1,0 +1,45 @@
+name: Diagnose favorite edit confirmation
+on:
+  workflow_dispatch:
+concurrency:
+  group: issue1840-favorite-confirm
+  cancel-in-progress: false
+jobs:
+  replay:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue2754-c1ce-flutter3419-linux-x64
+          run-id: 38132747719
+          github-token: ${{ github.token }}
+          path: /tmp/current1840
+      - name: Prepare ordinary X11 desktop and historical release
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr dbus-x11 libgtk-3-0 libayatana-appindicator3-1 ffmpeg
+          mkdir -p /tmp/evidence1840 /tmp/release1840 /tmp/current1840/app
+          curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o /tmp/release1840/release.tar.gz
+          tar -xzf /tmp/release1840/release.tar.gz -C /tmp/release1840
+          echo '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  /tmp/current1840/source-bundle.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/current1840/source-bundle.tar.gz -C /tmp/current1840/app
+          cp -r /tmp/current1840/provenance /tmp/evidence1840/current-provenance
+          sha256sum /tmp/release1840/release.tar.gz /tmp/current1840/source-bundle.tar.gz > /tmp/evidence1840/artifact-hashes.txt
+          uname -a > /tmp/evidence1840/environment.txt
+          cat /etc/os-release >> /tmp/evidence1840/environment.txt
+          dpkg-query -W > /tmp/evidence1840/packages.tsv
+          echo "$ImageOS $ImageVersion $GITHUB_SHA $GITHUB_RUN_ID" >> /tmp/evidence1840/environment.txt
+      - name: Replay through actual application UI
+        run: |
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox >/tmp/evidence1840/openbox.log 2>&1 & python3 support/diagnostics/1840-ui.py'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence1840
+          path: /tmp/evidence1840
+          if-no-files-found: error
