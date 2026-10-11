@@ -181,7 +181,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const installedPackages=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'pm list packages'}}),args:[]}).catch(error=>({error:String(error)}));
  writeFileSync('evidence/installed-packages.json',JSON.stringify({method:'Read-only BrowserStack adbShell pm list packages',result:installedPackages},null,2));
  const environmentProbes=[];
- for(const command of ['getprop ro.build.fingerprint','getprop ro.build.version.security_patch','dumpsys package '+fileManagerPackage]){
+ for(const command of ['getprop ro.bootimage.build.fingerprint','getprop ro.build.version.release','getprop ro.system.build.version.sdk','dumpsys package '+fileManagerPackage]){
   const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({error:String(error)}));
   environmentProbes.push({command,result});
  }
