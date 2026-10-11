@@ -1,6 +1,6 @@
 # Issue 2830: evidence summary
 
-The reported Android freeze is not reproduced yet. Original LocalSend 1.17.0 applications complete four fixtures on Galaxy S23 / Android 13, plus short, ASCII105000, and multiline105000 on Xiaomi Redmi Note 11 / Android 11. Unbroken105000 also passes on Xiaomi. No production fix or PR is justified by these results.
+The reported Android freeze is not reproduced in nine completed long-text conditions so far. Two additional short controls are excluded from that count. Selection is active. The parent has accepted four conditions; remaining raw evidence awaits parent review (see REVIEW_MATRIX.md). Original LocalSend 1.17.0 applications complete four fixtures on Galaxy S23 / Android 13, plus short, ASCII105000, and multiline105000 on Xiaomi Redmi Note 11 / Android 11. Unbroken105000 also passes on Xiaomi. No production fix or PR is justified by these results.
 
 The observed flow is Windows Send → Clipboard → Favorites → target, then Android message preview. Copy is supplementary responsiveness and full-content verification; the report does not require scrolling, selection, or Copy to trigger the freeze. Android Quick Save is Off in inspected screenshots.
 
@@ -14,6 +14,9 @@ The observed flow is Windows Send → Clipboard → Favorites → target, then A
 | 38113374423 | 105000 ASCII on Xiaomi, timeout 10000 ms | 105000 | 210000 | 0 | Preview, Copy, exact readback passed |
 | 38113967487 | 105000 with LF on Xiaomi, timeout 10000 ms | 105000 | 210000 | 1640 | Preview, Copy, exact readback passed |
 | 38115650086 | Unbroken105000 on Xiaomi, timeout 10000 ms | 105000 | 210000 | 0 | Preview, Copy, exact readback passed |
+| 38116279930 | CJK105000 on Xiaomi | 315000 | 210000 | 0 | Preview and responsive Copy; complete preview XML equals source; clipboard tool timeout |
+| 38119855958 | Emoji105000 on Xiaomi | 420000 | 420000 | 0 | Preview and responsive Copy; complete decoded preview XML equals source; clipboard tool timeout |
+| 38123089865 | Unbroken105000 + receiver scroll on Xiaomi | 105000 | 210000 | 0 | Scrolled content visibly shifts; Copy and exact readback passed |
 
 Each source/readback pair has an identical SHA-256:
 
@@ -41,7 +44,7 @@ Transport controls of 0, 1, 65537, and 8388608 bytes also passed. Earlier HWND, 
 
 ## Remaining boundary
 
-The report specifies Dell Inspiron 3501 / Windows 11 Pro and Xiaomi Redmi Note 10 Pro / MIUI 14 / Android 13. The Windows runner is ARM running the original x64 release under emulation; the receiver is Galaxy S23. Exact Dell/native x64 and original Xiaomi/MIUI remain uncovered. Version 1.17.0 is inferred from the issue date; fixture content, K unit, line count, and acceptance setting were unspecified. The sole issue comment adds no reproduction detail.
+The report specifies Dell Inspiron 3501 / Windows 11 Pro and Xiaomi Redmi Note 10 Pro / MIUI 14 / Android 13. The Windows runner is ARM running the original x64 release under emulation; receivers are Galaxy S23 / Android 13 and Redmi Note 11 / Android 11; the latter MIUI version is unknown. Exact Dell/native x64 and original Xiaomi/MIUI remain uncovered. Version 1.17.0 is inferred from the issue date; fixture content, K unit, line count, and acceptance setting were unspecified. The sole issue comment adds no reproduction detail.
 
 Run 38110353448 failed its short Xiaomi control at Windows Favorites discovery. Android remained on Receive; socket controls passed and relay connections returned data. Same-fixture repeat 38111742971 / 9eccc165 passed with no timeout change, proving the actual Xiaomi short control. Run 38112230754 then failed before ASCII105000 transfer; its Windows error screenshot explicitly shows `RhttpTimeoutException` for `/api/localsend/v1/info`. These discovery failures do not exercise long-text reception and are excluded from substantive experiments.
 

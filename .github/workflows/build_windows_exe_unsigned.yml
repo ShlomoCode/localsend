@@ -9,6 +9,9 @@ on:
         type: choice
         options: [short, ascii105000, multiline105000, ascii105kib, unbroken105000, manylines105000, cjk105000, emoji105000]
         default: short
+      firmware_only:
+        type: boolean
+        default: false
       receiver_interaction:
         type: choice
         options: [none, scroll, select]
@@ -57,7 +60,7 @@ jobs:
       BASELINE_APP: bs://574bec77a4f5e69c930410dd76792eac94625a15
       BS_DEVICE: ${{ inputs.device }}
       BS_OS: ${{ inputs.device == 'Xiaomi Redmi Note 11' && '11.0' || '13.0' }}
-      SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2830.mjs
+      SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/${{ inputs.firmware_only && 'scenario2830-firmware.mjs' || 'scenario2830.mjs' }}
       CLIPBOARD_CASES: ${{ inputs.clipboard_case }}
       DISCOVERY_TIMEOUT_MS: ${{ inputs.discovery_timeout }}
       RECEIVER_INTERACTION: ${{ inputs.receiver_interaction }}

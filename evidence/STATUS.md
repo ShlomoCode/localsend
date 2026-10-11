@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: Four fixtures passed on Galaxy S23 / Android 13. Xiaomi short, ASCII105000, and multiline105000 passed with discovery timeout 10000 ms. Unbroken105000 also passed. CJK105000 now runs under unchanged Xiaomi conditions. The reported Android freeze has not been reproduced. No production patch exists.
+Status: Four fixtures passed on Galaxy S23 / Android 13. Xiaomi short, ASCII105000, and multiline105000 passed with discovery timeout 10000 ms. Unbroken105000 also passed. CJK/emoji previews contain the full source and Copy returns to Receive, while Appium clipboard reads time out. Supplementary scroll passes; long-press selection run 38124266718 is active. The reported Android freeze has not been reproduced. No production patch exists.
 
 ## Report and evidence boundary
 
@@ -16,7 +16,7 @@ The reporter uses Dell Inspiron 3501, Windows 11 Pro, and Xiaomi Redmi Note 10 P
 
 ## Environment gaps
 
-- One owned job/session at a time is allowed for this issue; no job/session is active after the multiline result.
+- One owned job/session at a time is allowed for this issue; long-press selection run 38124266718 is the only owned active run/session.
 - The shared transport and actual short-text app-to-app control have passed.
 - Windows 11 runner is ARM with original x64 release under emulation. Dell hardware and native x64 remain different.
 - Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 is the next comparison; its MIUI version is unknown. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
