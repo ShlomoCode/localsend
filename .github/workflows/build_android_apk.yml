@@ -2,6 +2,14 @@ name: Issue 2311 Android source boundary diagnostics
 
 on:
   workflow_dispatch:
+    inputs:
+      source_family:
+        type: choice
+        options: [historical, current]
+        default: historical
+      build_tagged:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -12,7 +20,7 @@ concurrency:
 
 jobs:
   source_boundary:
-    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && inputs.source_family != 'current'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -62,3 +70,9 @@ jobs:
           path: issue2311-build-evidence/
           if-no-files-found: error
           retention-days: 30
+  current_boundary:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && inputs.source_family == 'current'
+    uses: ./.github/workflows/issue2311_current_android_boundary.yml
+    with:
+      build_tagged: ${{ inputs.build_tagged }}
+    secrets: inherit

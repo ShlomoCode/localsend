@@ -7,13 +7,16 @@ on:
         description: Also build the APK with gallery boundary observations
         type: boolean
         default: true
+  workflow_call:
+    inputs:
+      build_tagged:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: issue2311-android-source-build
-  cancel-in-progress: false
+# The registered build_android_apk caller serializes current and historical jobs.
 
 jobs:
   current_boundary:
