@@ -74,6 +74,12 @@ pathlib.Path('/home/probe/Downloads').mkdir(exist_ok=True)
 log('start', role=role)
 if role == 'receiver':
     app = start()
+    for preferences in pathlib.Path('/home/probe').rglob('shared_preferences.json'):
+        values = json.loads(preferences.read_text())
+        alias = values.get('flutter.ls_alias', values.get('ls_alias'))
+        if alias:
+            (out / 'alias.txt').write_text(alias)
+            log('receiver-alias', alias=alias, preferences=str(preferences))
     (out / 'ready').touch()
     deadline = time.monotonic() + 500
     iteration = 0
@@ -119,7 +125,9 @@ else:
             rows = snapshot(case + '-selection')
             log('selection', case=case, visible_text=' '.join(r['text'] for r in rows if r['text']))
             # The receiver advertises its random alias; the device card includes Linux.
-            if not click('Linux', case + '-device', optional=True):
+            alias_path = pathlib.Path('/evidence/receiver/alias.txt')
+            device_label = alias_path.read_text().split()[-1] if alias_path.exists() else 'Linux'
+            if not click(device_label, case + '-device', optional=True):
                 log('harness-blocker', case=case, reason='Receiver device card not located; preserve actual screen before fallback')
                 raise RuntimeError('Device discovery/card location needs inspection')
             time.sleep(30)
