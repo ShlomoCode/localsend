@@ -66,6 +66,11 @@ await pause(2500);
 await snapshot('native-control-before');
 await record('native-dpad-control', async () => { await remote(20); await remote(20); });
 await snapshot('native-control-after');
+// TV Settings is a side-panel overlay; launching another Activity leaves it visible.
+// Close only the Settings control started by this diagnostic on this fresh runner.
+await remote(4);
+adb('shell', 'am', 'force-stop', 'com.android.tv.settings');
+adb('shell', 'am', 'force-stop', 'com.android.settings');
 adb('shell', 'am', 'force-stop', 'org.localsend.localsend_app');
 adb('shell', 'am', 'start', '-n', 'org.localsend.localsend_app/.MainActivity');
 await pause(2500);
