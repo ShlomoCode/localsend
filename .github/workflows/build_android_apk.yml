@@ -177,7 +177,7 @@ jobs:
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
           curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
           if [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ]; then
-            ISSUE1864_APK=source-baseline node support/tests/issue1864-tv.mjs
+            ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-baseline node support/tests/issue1864-tv.mjs
             kill "$ISSUE_APPIUM_PID"
             wait "$ISSUE_APPIUM_PID" || true
             mkdir -p evidence-cloud/source-baseline
@@ -190,7 +190,7 @@ jobs:
             appium --port 4723 --log evidence-cloud/appium.log &
             for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
             curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
-            ISSUE1864_APK=source-focus node support/tests/issue1864-tv.mjs
+            ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-focus node support/tests/issue1864-tv.mjs
             mkdir -p evidence-cloud/source-focus
             find evidence-cloud -maxdepth 1 -type f ! -name '*.apk' ! -name 'source-pair*' -exec mv {} evidence-cloud/source-focus/ \;
             node support/tests/issue1864-pair.mjs

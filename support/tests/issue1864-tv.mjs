@@ -141,8 +141,25 @@ async function record(name, action) {
     catch(error) { log({type:'recording',action:'stop-error',name,status:error.status,message:error.message}); }
     const exit=await finished;
     log({type:'recording',action:'process-exit',name,...exit});
-    try { adb('pull', path, `${out}/${name}.mp4`); }
-    catch(error) { captureError=error; log({type:'recording',action:'pull-error',name,status:error.status,message:error.message}); }
+    // A completed recording survives a transient ADB transport loss. Retry only
+    // reading this exact file; never repeat the actions that produced it.
+    for(let attempt=1;attempt<=3;attempt++) {
+      try {
+        if(attempt>1) {
+          await pause(1000);
+          if(adb('get-state').trim()!=='device') throw new Error('ADB is not online');
+          adb('shell','test','-s',path);
+        }
+        adb('pull', path, `${out}/${name}.mp4`);
+        captureError=undefined;
+        log({type:'recording',action:'pull-success',name,attempt});
+        break;
+      } catch(error) {
+        captureError=error;
+        log({type:'recording',action:'pull-error',name,attempt,status:error.status,message:error.message,
+          stdout:error.stdout?.toString(),stderr:error.stderr?.toString()});
+      }
+    }
     log({type:'recording',action:'end',name,actionFailed:!!actionError,captureFailed:!!captureError});
   }
   if(actionError) throw actionError;
@@ -233,24 +250,29 @@ async function freshEntry(name) {
   await pause(3000);
   return snapshot(`${name}-initial`);
 }
-await freshEntry('no-input');
-for(let index=1;index<=4;index++) {
-  await pause(850); await snapshot(`no-input-step-${index}`);
+// The causal pair uses only its required controls and exact short/fresh inputs.
+// Extended and keyboard observations remain available in the diagnostic phase.
+const pairedCore=process.env.ISSUE1864_PHASE==='paired-core';
+if(!pairedCore) {
+  await freshEntry('no-input');
+  for(let index=1;index<=4;index++) {
+    await pause(850); await snapshot(`no-input-step-${index}`);
+  }
+  await freshEntry('extended-arrows');
+  await record('extended-arrows',async()=>{
+    for(const [index,key] of [20,20,20,20,20,20,22,22,21,19,23].entries()) {
+      await remote(key); await snapshot(`extended-arrows-key-${index+1}-${key}`);
+    }
+  });
+  await freshEntry('keyboard-control');
+  await record('keyboard-control',async()=>{
+    for(const [index,key] of [61,61,66].entries()) {
+      log({type:'keyboard',action:'keyevent',key});
+      adb('shell','input','keyboard','keyevent',String(key));
+      await pause(650); await snapshot(`keyboard-control-key-${index+1}-${key}`);
+    }
+  });
 }
-await freshEntry('extended-arrows');
-await record('extended-arrows',async()=>{
-  for(const [index,key] of [20,20,20,20,20,20,22,22,21,19,23].entries()) {
-    await remote(key); await snapshot(`extended-arrows-key-${index+1}-${key}`);
-  }
-});
-await freshEntry('keyboard-control');
-await record('keyboard-control',async()=>{
-  for(const [index,key] of [61,61,66].entries()) {
-    log({type:'keyboard',action:'keyevent',key});
-    adb('shell','input','keyboard','keyevent',String(key));
-    await pause(650); await snapshot(`keyboard-control-key-${index+1}-${key}`);
-  }
-});
 function cyanFocusPixels(name) {
   const rgb=execFileSync('convert',[`${out}/${name}.png`,'-depth','8','rgb:-'],{maxBuffer:20000000});
   let count=0;
@@ -266,6 +288,8 @@ const visualAssertions={
 fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
   mouseSelected: true,
   apkTarget:process.env.ISSUE1864_APK ?? 'original',
+  phase:pairedCore ? 'paired-core' : 'full-diagnostic',
+  supplementaryScenarios:pairedCore ? 'not requested in paired-core; retained in previous diagnostic runs' : 'no-input, extended-arrows, keyboard-control',
   visualAssertions,
   selectedPhotosAfterDpad: nodes(after).filter(n => /Image\d+,/.test(n['content-desc'] ?? '') && n.selected === 'true'),
   focusedNodesAfterDpad: nodes(after).filter(n => n.focused === 'true'),
