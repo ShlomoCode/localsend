@@ -1,0 +1,21 @@
+name: Diagnose Linux tray hover 3484
+on:
+  workflow_dispatch:
+jobs:
+  arch-tray:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Arch package and real Quickshell hover
+        run: |
+          mkdir -p evidence/cloud
+          docker pull archlinux:base
+          docker image inspect archlinux:base > evidence/cloud/container-identity.json
+          docker run --name tray3484 --shm-size=1g -v "$PWD:/work" -w /work archlinux:base bash support/diagnostics/3484/arch.sh
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tray3484-${{ github.run_id }}
+          path: evidence/cloud
