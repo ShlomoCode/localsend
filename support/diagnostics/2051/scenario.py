@@ -139,10 +139,6 @@ try:
     if result["viewer_has_B"]:
         adb(R, "shell", "input", "keyevent", "4")
         time.sleep(2)
-        other = open_actual(displayed, "B-open-html", viewer="HTML Viewer")
-        (ROOT / "other-viewer-result.json").write_text(json.dumps({"viewer": "HTML Viewer", "has_A": "ISSUE2051_CONTENT_A" in other, "has_B": "ISSUE2051_CONTENT_B" in other}, indent=2))
-        adb(R, "shell", "input", "keyevent", "4")
-        time.sleep(2)
         click(R, "Done", "B-before-history-done")
         home = snapshot(R, "B-before-history")
         buttons = [n for n in ET.fromstring(home).iter() if n.get("class") == "android.widget.Button"]
@@ -152,7 +148,12 @@ try:
         print("INPUT_HISTORY_ICON", buttons[0].get("bounds"), flush=True)
         touch(R, (a+c)//2, (b+d)//2)
         history = snapshot(R, "B-history")
-        click(R, "Show menu", "B-history-before-menu")
+history = snapshot(R, "B-history-before-menu")
+        entry = next(n for n in ET.fromstring(history).iter() if n.get("content-desc", "").startswith("a.txt\n"))
+        a,b,c,d = map(int, re.findall(r"\d+", entry.get("bounds")))
+        # Screenshot confirms overflow icon at x281 inside the first entry; anchor to its captured right bound.
+        print("INPUT_HISTORY_MENU", {"entry": entry.get("bounds"), "x": c-24, "y": (b+d)//2}, flush=True)
+        touch(R, c-24, (b+d)//2)
         snapshot(R, "B-history-menu")
         historical = open_actual("Open file", "B-history-open")
         (ROOT / "history-result.json").write_text(json.dumps({"has_A": "ISSUE2051_CONTENT_A" in historical, "has_B": "ISSUE2051_CONTENT_B" in historical}, indent=2))
