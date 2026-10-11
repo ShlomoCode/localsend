@@ -259,9 +259,18 @@ def run_case(count):
         locate_host('Recent',case+'-picker-ready',15)
         chooser=desktop('host','xdotool','search','--onlyvisible','--name','Choose Directory')['output'].split()[-1]
         focus('host',chooser)
-        click('host',locate_host('Home',case+'-home'))
-        time.sleep(2)
-        click('host',locate_host(fixture.name,case+'-folder-row'))
+        if SOURCE_PAIR:
+            # GTK rendered the exact directory correctly, but full-frame OCR
+            # confused 5 with S. Use the native location field with the exact
+            # fixture path; approval counts and saved hashes qualify selection.
+            desktop('host','xdotool','key','ctrl+l')
+            desktop('host','xdotool','type','--clearmodifiers','--',str(fixture))
+            desktop('host','xdotool','key','Return')
+            time.sleep(2)
+        else:
+            click('host',locate_host('Home',case+'-home'))
+            time.sleep(2)
+            click('host',locate_host(fixture.name,case+'-folder-row'))
         capture('host',case+'-folder-selected')
         click('host',locate_host('Open',case+'-picker-open'))
         time.sleep(2)
