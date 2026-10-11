@@ -20,8 +20,15 @@ function Screenshot([string]$name) {
  $g.CopyFromScreen(0,0,0,0,$bmp.Size)
  $path = "$EvidenceDirectory/$name.png"
  $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
- $g.Dispose(); $bmp.Dispose()
- & "C:/Program Files/Tesseract-OCR/tesseract.exe" $path "$EvidenceDirectory/$name" -l eng --psm 11 tsv 2> "$EvidenceDirectory/$name-ocr-error.txt"
+ $g.Dispose()
+ $scaled = New-Object System.Drawing.Bitmap(1984,1440)
+ $sg = [System.Drawing.Graphics]::FromImage($scaled)
+ $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+ $sg.DrawImage($bmp,0,0,1984,1440)
+ $scaled.Save("$EvidenceDirectory/$name-ocr.png",[System.Drawing.Imaging.ImageFormat]::Png)
+ $sg.Dispose(); $scaled.Dispose(); $bmp.Dispose()
+
+ & "C:/Program Files/Tesseract-OCR/tesseract.exe" $EvidenceDirectory/$name-ocr.png "$EvidenceDirectory/$name" -l eng --psm 11 tsv 2> "$EvidenceDirectory/$name-ocr-error.txt"
  Import-Csv "$EvidenceDirectory/$name.tsv" -Delimiter "`t" | Where-Object {$_.text} | Select-Object left,top,width,height,text | Format-Table | Out-String | Write-Host
 }
 function Click([int]$x,[int]$y) {
@@ -34,7 +41,7 @@ function Word([string]$word,[string]$snap) {
  $rows = Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"
  $row = $rows | Where-Object { $_.text -eq $word } | Select-Object -First 1
  if (-not $row) { throw "OCR word $word missing from $snap" }
- Click ([int]$row.left + [int]$row.width/2) ([int]$row.top + [int]$row.height/2)
+ Click (([int]$row.left + [int]$row.width/2)/2) (([int]$row.top + [int]$row.height/2)/2)
 }
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
 $nic = Get-NetIPInterface -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -match "Loopback"} | Select-Object -First 1
@@ -68,7 +75,7 @@ Click 576 212
 Screenshot "favorites-empty"
 foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205";alias="NetBird LAN"})) {
  $snapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-empty"} else {"favorites-first"}
- Word "Add" $snapshot
+ if ($snapshot -eq "favorites-empty") { Click 578 438 } else { Word "Add" $snapshot }
  Screenshot "add-$($favorite.ip)"
  [System.Windows.Forms.SendKeys]::SendWait($favorite.ip)
  [System.Windows.Forms.SendKeys]::SendWait("{TAB}^a53317+{TAB}+{TAB}^a")
