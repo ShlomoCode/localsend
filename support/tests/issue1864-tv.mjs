@@ -210,8 +210,9 @@ await record('keyboard-control',async()=>{
 });
 fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
   mouseSelected: true,
+  apkTarget:process.env.ISSUE1864_APK ?? 'original',
   selectedPhotosAfterDpad: nodes(after).filter(n => /Image\d+,/.test(n['content-desc'] ?? '') && n.selected === 'true'),
   focusedNodesAfterDpad: nodes(after).filter(n => n.focused === 'true'),
-  boundary: 'Original 1.15.4 APK, supplementary compatible emulator; not physical Sony Android TV 10',
+  boundary: 'Exact diagnostic APK, supplementary compatible emulator; not physical Sony Android TV 10',
 }, null, 2));
 await fetch(`http://127.0.0.1:4723/session/${session}`, { method: 'DELETE' });

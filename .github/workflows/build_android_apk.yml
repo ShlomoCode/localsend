@@ -15,8 +15,14 @@ on:
         type: choice
         options: [adb, w3c-native]
         default: adb
+      apk:
+        description: Original release or exact existing c1ce current artifact; no build
+        type: choice
+        options: [original, current-c1ce]
+        default: original
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: issue-1864-tv
   cancel-in-progress: false
@@ -56,13 +62,28 @@ jobs:
           adb shell settings list system > evidence-cloud/system-settings.txt
           adb shell settings list secure > evidence-cloud/secure-settings.txt
           adb shell dumpsys input > evidence-cloud/input-default.txt
-      - name: Install exact legitimate original release and capture readiness
+      - name: Install exact diagnostic APK and capture readiness
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
-          sha256sum evidence-cloud/original-1.15.4.apk > evidence-cloud/apk-sha256.txt
-          unzip -Z1 evidence-cloud/original-1.15.4.apk | grep '^lib/' > evidence-cloud/apk-libraries.txt
-          adb install -r evidence-cloud/original-1.15.4.apk 2>&1 | tee evidence-cloud/install.log
+          echo '${{ inputs.apk }}' > evidence-cloud/apk-target.txt
+          if [ '${{ inputs.apk }}' = current-c1ce ]; then
+            adb shell getprop ro.product.cpu.abilist | grep arm64-v8a
+            gh run download 38107226429 --repo ShlomoCode/localsend --name issue2462-current-android --dir /tmp/issue1864-current
+            mapfile -t ISSUE_CURRENT_APKS < <(rg --files /tmp/issue1864-current | rg '/app-release.apk$')
+            [ "${#ISSUE_CURRENT_APKS[@]}" = 1 ]
+            cp "${ISSUE_CURRENT_APKS[0]}" evidence-cloud/current-c1ce.apk
+            ISSUE_DIAGNOSTIC_APK=evidence-cloud/current-c1ce.apk
+            echo '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea  evidence-cloud/current-c1ce.apk' | sha256sum -c -
+            echo 'Existing build run38107226429, artifact11691000051, workflow head6dd3184ef65cb473a717fd52dd37b9b88ae4edc4; app source c1ce322fb3acf08e44f329b8b7208b8b0d91e244; Flutter3.41.9, Dart3.11.5, Rust1.97.1; legitimate runtime ARM64 ABI/native bridge only; no new build.' > evidence-cloud/current-build-provenance.txt
+          else
+            curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
+            ISSUE_DIAGNOSTIC_APK=evidence-cloud/original-1.15.4.apk
+          fi
+          sha256sum "$ISSUE_DIAGNOSTIC_APK" > evidence-cloud/apk-sha256.txt
+          unzip -Z1 "$ISSUE_DIAGNOSTIC_APK" | grep '^lib/' > evidence-cloud/apk-libraries.txt
+          adb install -r "$ISSUE_DIAGNOSTIC_APK" 2>&1 | tee evidence-cloud/install.log
           adb shell am start -n org.localsend.localsend_app/.MainActivity 2>&1 | tee evidence-cloud/launch.log
           sleep 5
           adb exec-out screencap -p > evidence-cloud/initial.png
@@ -74,6 +95,7 @@ jobs:
         shell: bash
         env:
           ISSUE1864_MOUSE: ${{ inputs.mouse }}
+          ISSUE1864_APK: ${{ inputs.apk }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y imagemagick tesseract-ocr ffmpeg
