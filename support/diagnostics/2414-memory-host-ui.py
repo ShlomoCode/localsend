@@ -104,6 +104,10 @@ def locate_host(label, name, deadline=30):
 
 
 def guest_frame(name):
+    if name.startswith('receiver-ready'):
+        normalized = guest('normalize')
+        if not normalized['valid']:
+            raise RuntimeError('Receiver measured geometry not established')
     remote = guest('capture', name)
     local = OUT/Path(remote['path']).name
     run(SCP+['probe@127.0.0.1:'+remote['path'], str(local)], 45)
@@ -211,6 +215,9 @@ def run_case(count):
         if not guest('status')['sampler_alive']:
             raise RuntimeError('Receiver sampler did not become active')
         check_guest('receiver-ready',['Receiver2414','Receive','Send'],30)
+        result['receiver_ready_geometry']=guest('normalize')
+        if not result['receiver_ready_geometry']['valid']:
+            raise RuntimeError('Receiver geometry changed after readiness')
         guest('stage','ready')
         capture('guest','ready')
         with (OUT/(case+'-sender.log')).open('w') as log:

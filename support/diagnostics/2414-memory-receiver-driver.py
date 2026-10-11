@@ -221,7 +221,25 @@ def main():
             time.sleep(.5)
         raise RuntimeError('Receiver window readiness deadline; cause unknown')
     state = json.loads(STATE.read_text())
-    if action == 'desktop':
+    if action == 'normalize':
+        started = time.monotonic()
+        window = state['window']
+        for argv in (['xdotool', 'windowsize', window, '1000', '700'],
+                     ['xdotool', 'windowmove', window, '0', '0'],
+                     ['xdotool', 'windowactivate', '--sync', window]):
+            subprocess.run(argv, check=True, timeout=10)
+        time.sleep(.5)
+        geometry = subprocess.check_output(['xdotool', 'getwindowgeometry', '--shell', window], text=True, timeout=5)
+        fields = dict(line.split('=', 1) for line in geometry.splitlines() if '=' in line)
+        # Openbox's reported client origin includes its decoration offset;
+        # retained normalized frames report X=2,Y=40 for a frame at origin.
+        valid = (fields.get('X') in ('0', '1', '2') and fields.get('Y') in ('0', '20', '40')
+                 and fields.get('WIDTH') == '1000' and fields.get('HEIGHT') == '700')
+        report = {'geometry': geometry, 'valid': valid, 'started': started, 'completed': time.monotonic()}
+        with (OUT / f"files-{state['count']}-normalizations.jsonl").open('a') as log:
+            log.write(json.dumps(report) + '\n')
+        print(json.dumps(report))
+    elif action == 'desktop':
         argv = sys.argv[2:]
         with (OUT / f"files-{state['count']}-inputs.jsonl").open('a') as log:
             log.write(json.dumps({'guest_monotonic': time.monotonic(), 'argv': argv}) + '\n')

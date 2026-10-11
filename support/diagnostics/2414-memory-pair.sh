@@ -68,7 +68,7 @@ swap:
   size: 2147483648
   maxsize: 2147483648
 package_update: true
-packages: [xvfb, openbox, xdotool, scrot, fonts-dejavu-core, network-manager, gsettings-desktop-schemas, at-spi2-core, libayatana-appindicator3-1, libsecret-1-0, libgtk-3-0, libegl1, libgles2, libgl1-mesa-dri, libopengl0, libglx-mesa0, openssh-server, binutils, python3]
+packages: [xvfb, openbox, xdotool, x11-utils, scrot, fonts-dejavu-core, network-manager, gsettings-desktop-schemas, at-spi2-core, libayatana-appindicator3-1, libsecret-1-0, libgtk-3-0, libegl1, libgles2, libgl1-mesa-dri, libopengl0, libglx-mesa0, openssh-server, binutils, python3]
 CONFIG
 cp "$vm_root/user-data" evidence/vm/cloud-config.txt
 printf 'instance-id: issue2414-memory\nlocal-hostname: issue2414-memory-receiver\n' > "$vm_root/meta-data"
@@ -113,7 +113,7 @@ GUEST
 stage=guest-desktop
 desktop_ready=0
 for n in $(seq 1 20); do
-  if timeout 10 ssh "${opts[@]}" probe@127.0.0.1 'source /home/probe/desktop-env.sh; xdotool getdisplaygeometry' > evidence/vm/desktop-readiness.log 2>&1; then desktop_ready=1; break; fi
+  if timeout 10 ssh "${opts[@]}" probe@127.0.0.1 'source /home/probe/desktop-env.sh; xdotool getdisplaygeometry; wm=$(xprop -root _NET_SUPPORTING_WM_CHECK); printf "%s\n" "$wm"; [[ "$wm" =~ window\ id\ \#\ 0x[1-9a-fA-F][0-9a-fA-F]* ]]' > evidence/vm/desktop-readiness.log 2>&1; then desktop_ready=1; break; fi
   sleep 1
 done
 test "$desktop_ready" = 1
