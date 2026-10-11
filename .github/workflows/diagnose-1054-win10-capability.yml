@@ -1,0 +1,33 @@
+name: Diagnose 1054 Windows 10 capability
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-1054-win10-capability
+  cancel-in-progress: false
+
+jobs:
+  capability:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Measure host and guest preparation gates
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/issue1054-win10-capability
+        run: bash support/diagnostics/1054-win10-capability.sh
+      - name: Preserve every reached gate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue1054-win10-capability-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/issue1054-win10-capability/**
+            !${{ runner.temp }}/issue1054-win10-capability/**/*.iso
+          if-no-files-found: error
+          retention-days: 14
