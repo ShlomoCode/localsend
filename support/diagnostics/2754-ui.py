@@ -15,41 +15,40 @@ def snap(name):
     (out/(name+".tsv")).write_text(res.stdout)
     return list(csv.DictReader(io.StringIO(res.stdout),delimiter="\t"))
 def keyboard_switch(name):
-    snap(name)
-    geo=run("xdotool","getwindowgeometry","--shell",wid).stdout
-    vals=dict(line.split("=",1) for line in geo.splitlines() if "=" in line)
-    # The top keyboard moves the settings window. Re-read its current geometry.
-    left=int(vals["X"])+86; top=int(vals["Y"])+95
+    full_rows=snap(name)
+    # Anchor to rendered text: GTK geometry differs from the visible client origin.
+    enables=[r for r in full_rows if r["text"].lower()=="enable"]
+    if not enables: raise RuntimeError("Supported settings Enable label not located")
+    anchor=min(enables,key=lambda r:int(r["top"]))
+    left=int(anchor["left"])-29; top=int(anchor["top"])-8
     crop=out/(name+"-rows.png")
-    run("scrot","--autoselect",f"{left},{top},628,220",str(crop))
+    run("scrot","--autoselect",f"{left},{top},628,65",str(crop))
     result=run("tesseract",str(crop),"stdout","--psm","11","tsv")
     (out/(name+"-rows.tsv")).write_text(result.stdout)
     rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
     hits=[r for r in rows if r["text"].lower()=="on-screen"]
     if not hits: raise RuntimeError("Supported virtual keyboard row not located in settings crop")
     r=hits[0]; y=top+int(r["top"])+int(r["height"])//2
-    x=int(vals["X"])+int(vals["WIDTH"])-150
-    log("keyboard-toggle-ui",x=x,y=y)
+    x=left+574
+    log("keyboard-toggle-ui",x=x,y=y,crop_left=left,crop_top=top)
     run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(4)
 def click_word(word,name):
     rows=snap(name)
+    hits=[r for r in rows if r["text"].lower().strip()==word.lower()]
+    if not hits: raise RuntimeError("Missing UI label "+word+" in "+name)
+    r=hits[0]; x=int(r["left"])+int(r["width"])//2; y=int(r["top"])+int(r["height"])//2
     if word.lower()=="text":
-        geo=run("xdotool","getwindowgeometry","--shell",w[-1]).stdout
-        vals=dict(line.split("=",1) for line in geo.splitlines() if "=" in line)
-        x=int(vals["X"])+int(vals["WIDTH"])//2-150
-        y=int(vals["Y"])+int(vals["HEIGHT"])//2-110
+        # The rendered picker shifts with the app when the top keyboard appears.
+        crop_x=x-273; crop_y=y+109
         crop=out/(name+"-modal-gate.png")
-        run("scrot","--autoselect",f"{x},{y},310,220",str(crop))
+        run("scrot","--autoselect",f"{crop_x},{crop_y},310,220",str(crop))
         result=run("tesseract",str(crop),"stdout","--psm","6","tsv")
         (out/(name+"-modal-gate.tsv")).write_text(result.stdout)
         modal_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
         labels={r["text"].lower().strip() for r in modal_rows}
-        log("fresh-text-gate",file=crop.name,x=x,y=y,previous_modal={"type","message"}.issubset(labels))
+        log("fresh-text-gate",file=crop.name,x=crop_x,y=crop_y,previous_modal={"type","message"}.issubset(labels))
         if {"type","message"}.issubset(labels):
             raise RuntimeError("Previous Text dialog still visible before fresh trigger: "+name)
-    hits=[r for r in rows if r["text"].lower().strip()==word.lower()]
-    if not hits: raise RuntimeError("Missing UI label "+word+" in "+name)
-    r=hits[0]; x=int(r["left"])+int(r["width"])//2; y=int(r["top"])+int(r["height"])//2
     log("click",label=word,x=x,y=y); run("xdotool","mousemove",str(x),str(y),"click","1")
 def text_case(label):
     trace=None
