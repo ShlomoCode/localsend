@@ -1,6 +1,8 @@
 name: Diagnose 513 Fedora Wayland default Flatpak
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/bug-513-fedora-diagnostics]
 jobs:
   fedora:
     runs-on: ubuntu-24.04
