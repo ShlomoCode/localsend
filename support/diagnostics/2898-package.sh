@@ -14,20 +14,27 @@ cd "$GITHUB_WORKSPACE/source/app"
 mkdir -p build/linux/x64/release/bundle
 tar -xzf /tmp/issue2754-build/source-bundle.tar.gz -C build/linux/x64/release/bundle
 find build/linux/x64/release/bundle -maxdepth 2 -type f | head -40 > "$E/bundle-file-layout.txt"
-dart pub get --enforce-lockfile > "$E/package-pub-get.log" 2>&1
-dart pub global activate flutter_distributor > "$E/distributor-install.log" 2>&1
-export PATH="$PATH:$HOME/.pub-cache/bin"
-flutter_distributor --version > "$E/distributor-version.txt"
-flutter_distributor package --help > "$E/distributor-package-help.txt"
+mkdir -p /tmp/issue2898-packager
+cat > /tmp/issue2898-packager/pubspec.yaml <<PACKAGER
+name: issue2898_packager
+environment:
+  sdk: "^3.10.0"
+dependencies:
+  flutter_app_packager: 0.6.11
+  unified_distributor: 0.2.12
+PACKAGER
+(cd /tmp/issue2898-packager && dart pub get) > "$E/packager-pub-get.log" 2>&1
+cp /tmp/issue2898-packager/pubspec.lock "$E/packager-pubspec.lock"
+git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD > "$E/packaging-source-sha.txt"
 cp linux/packaging/deb/make_config.yaml "$E/candidate-config.yaml"
 sed -i "s/^  - libayatana-appindicator3-1$/  - libappindicator3-1 | libayatana-appindicator3-1/" linux/packaging/deb/make_config.yaml
 cp linux/packaging/deb/make_config.yaml "$E/baseline-config.yaml"
-flutter_distributor package --platform linux --targets deb 2>&1 | tee "$E/current-baseline-package.log"
+dart --packages=/tmp/issue2898-packager/.dart_tool/package_config.json "$GITHUB_WORKSPACE/support/diagnostics/2898-packager.dart" 2>&1 | tee "$E/current-baseline-package.log"
 find dist -name "*.deb" -exec cp {} "$E/current-baseline.deb" \;
 test -f "$E/current-baseline.deb"
 rm -rf dist
 cp "$E/candidate-config.yaml" linux/packaging/deb/make_config.yaml
-flutter_distributor package --platform linux --targets deb 2>&1 | tee "$E/current-candidate-package.log"
+dart --packages=/tmp/issue2898-packager/.dart_tool/package_config.json "$GITHUB_WORKSPACE/support/diagnostics/2898-packager.dart" 2>&1 | tee "$E/current-candidate-package.log"
 find dist -name "*.deb" -exec cp {} "$E/current-candidate.deb" \;
 test -f "$E/current-candidate.deb"
 for variant in current-baseline current-candidate; do

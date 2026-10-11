@@ -10,8 +10,10 @@ dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n' > "$E/pr
 apt-get install -y "/work/evidence/cloud/packages/$PROBE_CASE.deb" 2>&1 | tee "$E/install.log"
 apt-get check 2>&1 | tee "$E/apt-check.log"
 dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n' > "$E/post-inventory.tsv"
-ldd /usr/share/localsend_app/localsend_app > "$E/ldd.txt" || true
-find /usr/share/localsend_app/lib -name "*.so" -exec sh -c 'echo "$1"; readelf -d "$1" | grep NEEDED' _ {} \; > "$E/plugin-needed.txt"
+exe=$(readlink -f "$(command -v localsend_app)")
+echo "$exe" > "$E/installed-executable.txt"
+ldd "$exe" > "$E/ldd.txt" || true
+find "$(dirname "$exe")/lib" -name "*.so" -exec sh -c 'echo "$1"; readelf -d "$1" | grep NEEDED' _ {} \; > "$E/plugin-needed.txt"
 useradd -m -s /bin/bash probe
 mkdir -p /tmp/issue2898-case
 chmod 777 /tmp/issue2898-case
