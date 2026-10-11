@@ -63,8 +63,12 @@ $sender = $apps.sender
 Word "Send" "sender-initial"
 Screenshot "sender-send"
 # Pause at the actual Send screen to determine the favorite toolbar location.
-Copy-Item "$EvidenceDirectory/sender-app/settings.json" "$EvidenceDirectory/sender-settings.json"
-Copy-Item "$EvidenceDirectory/receiver-app/settings.json" "$EvidenceDirectory/receiver-settings.json"
+foreach ($name in @("sender","receiver")) {
+ $stored = Get-Content "$EvidenceDirectory/$name-app/settings.json" -Raw | ConvertFrom-Json
+ $stored.PSObject.Properties.Remove("flutter.ls_security_context")
+ $stored.PSObject.Properties.Remove("flutter.ls_show_token")
+ $stored | ConvertTo-Json -Depth 10 | Set-Content "$EvidenceDirectory/$name-settings.json"
+}
 Stop-Process -Id $apps.sender.Id,$apps.receiver.Id -Force
 Remove-Item "$EvidenceDirectory/sender-app","$EvidenceDirectory/receiver-app" -Recurse -Force
 Stop-Transcript
