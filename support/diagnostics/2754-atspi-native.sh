@@ -63,7 +63,7 @@ meson compile -C "$NATIVE_WORK/build-A" socket-local-experiment 2>&1 | tee "$NAT
 NATIVE_STOCK_BUILD="$NATIVE_WORK/build-stock"
 test -f "$NATIVE_STOCK_BUILD/xml/introspection.h"
 sha256sum "$NATIVE_STOCK_BUILD/xml/introspection.h" > "$NATIVE_OUTPUT/stock-introspection-header.sha256"
-cc -std=c99 -I"$NATIVE_STOCK" -I"$NATIVE_STOCK_BUILD" -I"$NATIVE_STOCK_BUILD/xml" -I"$NATIVE_STOCK/atk-adaptor" -I"$NATIVE_STOCK/droute" \
+cc -std=c99 -I"$NATIVE_STOCK" -I"$NATIVE_STOCK_BUILD" -I"$NATIVE_STOCK_BUILD/xml" -I"$NATIVE_STOCK_BUILD/atspi" -I"$NATIVE_STOCK/atk-adaptor" -I"$NATIVE_STOCK/droute" \
   "$NATIVE_ASSETS/stock-self-query.c" \
   -L"$NATIVE_STOCK_BUILD/atk-adaptor" -L"$NATIVE_STOCK_BUILD/atspi" -L"$NATIVE_STOCK_BUILD/atk" \
   -Wl,-rpath,"$NATIVE_STOCK_BUILD/atk-adaptor" -Wl,-rpath,"$NATIVE_STOCK_BUILD/atspi" -Wl,-rpath,"$NATIVE_STOCK_BUILD/atk" \
