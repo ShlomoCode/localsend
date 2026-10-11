@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import {randomBytes,createHash} from 'node:crypto';
-import {writeFileSync} from 'node:fs';
+import {writeFileSync,appendFileSync} from 'node:fs';
 import {relay} from './relay.mjs';
 
 const token=process.env.RELAY_TOKEN;
@@ -9,7 +9,9 @@ const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.en
 const senderPort=Number(process.env.TRANSPORT_SENDER_PORT||53318);
 const r=relay({token,tcpPort:senderPort});await r.start();let session;
 async function wd(method,path,body) {
+ const start=Date.now();
  const res=await fetch('https://hub-cloud.browserstack.com/wd/hub'+path,{method,headers:{authorization:auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(120000)});
+ appendFileSync('evidence/webdriver-boundaries.jsonl',JSON.stringify({utc:new Date(start).toISOString(),elapsedMs:Date.now()-start,method,path:path.replace(/\/session\/[^/]+/,'/session/owned'),status:res.status})+'\n');
  const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'').slice(0,600);for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message);}return json.value;
 }
 async function clickText(text){
