@@ -1,6 +1,5 @@
-{ panelFix ? false, panelSize ? 24, minIconSize ? 24 }:
+{ panelFix ? false, panelSize ? 24, minIconSize ? 24, revision ? "6132ff3ee5a9509d0aeb66a01a7d662c6384289b" }:
 let
-  revision = "6132ff3ee5a9509d0aeb66a01a7d662c6384289b";
   nixpkgs = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${revision}.tar.gz";
 in
 import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
