@@ -186,10 +186,12 @@ else:
             command('xdotool', 'key', 'Return')
             time.sleep(2)
             if mode == 'row':
-                click('OK', case + '-enter-directory', optional=True)
+                if not click('OK', case + '-enter-directory', optional=True):
+                    click('Open', case + '-enter-directory-open', optional=True)
                 time.sleep(2)
                 click(filename, case + '-picker-row')
-            click('OK', case + '-confirm-picker', optional=True)
+            if not click('OK', case + '-confirm-picker', optional=True):
+                click('Open', case + '-confirm-picker-open', optional=True)
             time.sleep(5)
             rows = snapshot(case + '-selection')
             log('selection', case=case, visible_text=' '.join(r['text'] for r in rows if r['text']))
