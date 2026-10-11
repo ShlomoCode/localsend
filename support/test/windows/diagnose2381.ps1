@@ -37,9 +37,9 @@ function Word([string]$word,[string]$snap) {
  Click ([int]$row.left + [int]$row.width/2) ([int]$row.top + [int]$row.height/2)
 }
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
-$nic = Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1
+$nic = Get-NetIPInterface -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -match "Loopback"} | Select-Object -First 1
 foreach ($ip in @("10.0.20.2","100.95.193.205")) {
- New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress $ip -PrefixLength 16 -SkipAsSource $true | Out-Null
+ New-NetIPAddress -InterfaceIndex $nic.InterfaceIndex -IPAddress $ip -PrefixLength 16 -SkipAsSource $true | Out-Null
 }
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
 $apps = @{}
