@@ -50,8 +50,8 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     user_command("dconf write /org/mate/session/idle-delay 0")
     user_command("gsettings set org.mate.interface window-scaling-factor 1")
     user_command("gsettings set org.mate.interface gtk-theme BlackMATE")
-    user_command("gsettings set org.mate.panel.applet.notification-area:/org/mate/panel/objects/notification-area/prefs/ min-icon-size ${toString minIconSize}")
-    assert user_command("gsettings get org.mate.panel.applet.notification-area:/org/mate/panel/objects/notification-area/prefs/ min-icon-size").strip() == "${toString minIconSize}"
+    user_command("dconf write /org/mate/panel/objects/notification-area/prefs/min-icon-size ${toString minIconSize}")
+    assert user_command("dconf read /org/mate/panel/objects/notification-area/prefs/min-icon-size").strip() == "${toString minIconSize}"
     user_command("dconf write /org/mate/panel/toplevels/top/size ${toString panelSize}")
     user_command("dconf write /org/mate/panel/toplevels/bottom/size ${toString panelSize}")
     machine.sleep(8)
