@@ -223,7 +223,7 @@ await mouseNode('Media','fresh-open-media');
 await pause(2000);
 await snapshot('fresh-media-before-dpad');
 await replay('fresh-media-dpad-original');
-await snapshot('fresh-media-after-dpad');
+const freshAfter=await snapshot('fresh-media-after-dpad');
 async function freshEntry(name) {
   adb('shell','am','force-stop','org.localsend.localsend_app');
   adb('shell','am','start','-n','org.localsend.localsend_app/.MainActivity');
@@ -251,9 +251,22 @@ await record('keyboard-control',async()=>{
     await pause(650); await snapshot(`keyboard-control-key-${index+1}-${key}`);
   }
 });
+function cyanFocusPixels(name) {
+  const rgb=execFileSync('convert',[`${out}/${name}.png`,'-depth','8','rgb:-'],{maxBuffer:20000000});
+  let count=0;
+  for(let p=0;p<rgb.length;p+=3) if(rgb[p]<35 && rgb[p+1]>235 && rgb[p+2]>235) count++;
+  return count;
+}
+const visualAssertions={
+  shortSelectionCount:selectedCount(after,'media-after-dpad'),
+  freshSelectionCount:selectedCount(freshAfter,'fresh-media-after-dpad'),
+  shortFocusPixels:cyanFocusPixels('media-after-dpad'),
+  freshFocusPixels:cyanFocusPixels('fresh-media-after-dpad'),
+};
 fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
   mouseSelected: true,
   apkTarget:process.env.ISSUE1864_APK ?? 'original',
+  visualAssertions,
   selectedPhotosAfterDpad: nodes(after).filter(n => /Image\d+,/.test(n['content-desc'] ?? '') && n.selected === 'true'),
   focusedNodesAfterDpad: nodes(after).filter(n => n.focused === 'true'),
   boundary: 'Exact diagnostic APK, supplementary compatible emulator; not physical Sony Android TV 10',

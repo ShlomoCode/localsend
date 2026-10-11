@@ -18,7 +18,7 @@ on:
       apk:
         description: Original release or exact existing c1ce current artifact; no build
         type: choice
-        options: [original, current-c1ce]
+        options: [original, current-c1ce, source-pair]
         default: original
 permissions:
   contents: read
@@ -29,9 +29,43 @@ concurrency:
 jobs:
   baseline:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        if: inputs.apk == 'source-pair'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        if: inputs.apk == 'source-pair'
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.apk == 'source-pair'
+        with:
+          toolchain: '1.97.1'
+      - name: Build controlled source pair through normal Flutter build
+        if: inputs.apk == 'source-pair'
+        working-directory: app
+        run: |
+          mkdir -p ../evidence-cloud
+          git rev-parse HEAD > ../evidence-cloud/source-pair-head.txt
+          flutter --version > ../evidence-cloud/source-pair-flutter.txt
+          rustc --version > ../evidence-cloud/source-pair-rust.txt
+          sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/' android/app/build.gradle
+          flutter pub get
+          dart format lib/util/ui/diagnostic_asset_picker_delegate.dart lib/util/native/file_picker.dart
+          flutter analyze lib/util/ui/diagnostic_asset_picker_delegate.dart
+          git diff > ../evidence-cloud/source-pair-common-diff.patch
+          cp ../pubspec.lock ../evidence-cloud/source-pair-pubspec.lock
+          for mode in false true; do
+            if [ "$mode" = false ]; then variant=baseline; else variant=focus; fi
+            flutter build apk --release --target-platform android-arm64 --dart-define=ISSUE1864_FOCUS_PROBE=$mode
+            cp build/app/outputs/flutter-apk/app-release.apk ../evidence-cloud/source-$variant.apk
+            sha256sum ../evidence-cloud/source-$variant.apk >> ../evidence-cloud/source-pair-apk-sha256.txt
+          done
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -69,8 +103,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo '${{ inputs.apk }}' > evidence-cloud/apk-target.txt
-          if [ '${{ inputs.apk }}' = current-c1ce ]; then
+          if [ '${{ inputs.apk }}' != original ]; then
             adb shell getprop ro.product.cpu.abilist | grep arm64-v8a
+          fi
+          if [ '${{ inputs.apk }}' = current-c1ce ]; then
             gh run download 38107226429 --repo ShlomoCode/localsend --name issue2462-current-android --dir /tmp/issue1864-current
             mapfile -t ISSUE_CURRENT_APKS < <(find /tmp/issue1864-current -type f -name app-release.apk)
             [ "${#ISSUE_CURRENT_APKS[@]}" = 1 ]
@@ -78,13 +114,15 @@ jobs:
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/current-c1ce.apk
             echo '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea  evidence-cloud/current-c1ce.apk' | sha256sum -c -
             echo 'Existing build run38107226429, artifact11691000051, workflow head6dd3184ef65cb473a717fd52dd37b9b88ae4edc4; app source c1ce322fb3acf08e44f329b8b7208b8b0d91e244; Flutter3.41.9, Dart3.11.5, Rust1.97.1; legitimate runtime ARM64 ABI/native bridge only; no new build.' > evidence-cloud/current-build-provenance.txt
+          elif [ '${{ inputs.apk }}' = source-pair ]; then
+            ISSUE_DIAGNOSTIC_APK=evidence-cloud/source-baseline.apk
           else
             curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/original-1.15.4.apk
           fi
           sha256sum "$ISSUE_DIAGNOSTIC_APK" > evidence-cloud/apk-sha256.txt
           unzip -Z1 "$ISSUE_DIAGNOSTIC_APK" | grep '^lib/' > evidence-cloud/apk-libraries.txt
-          if [ '${{ inputs.apk }}' = current-c1ce ]; then
+          if [ '${{ inputs.apk }}' != original ]; then
             # This artifact has full ARM64 app libraries but x64 plugin stubs.
             # Ask PackageManager for the supported full ABI, preserving the APK.
             adb install --abi arm64-v8a -r "$ISSUE_DIAGNOSTIC_APK" 2>&1 | tee evidence-cloud/install.log
@@ -92,7 +130,7 @@ jobs:
             adb install -r "$ISSUE_DIAGNOSTIC_APK" 2>&1 | tee evidence-cloud/install.log
           fi
           adb shell dumpsys package org.localsend.localsend_app > evidence-cloud/installed-package.txt
-          if [ '${{ inputs.apk }}' = current-c1ce ]; then
+          if [ '${{ inputs.apk }}' != original ]; then
             grep 'primaryCpuAbi=arm64-v8a' evidence-cloud/installed-package.txt
           fi
           adb shell am start -n org.localsend.localsend_app/.MainActivity 2>&1 | tee evidence-cloud/launch.log
@@ -123,14 +161,39 @@ jobs:
           appium --version > evidence-cloud/appium-version.txt
           appium driver list --installed > evidence-cloud/appium-drivers.txt
           appium --port 4723 --log evidence-cloud/appium.log &
+          ISSUE_APPIUM_PID=$!
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
           curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
-          node support/tests/issue1864-tv.mjs
+          if [ '${{ inputs.apk }}' = source-pair ]; then
+            ISSUE1864_APK=source-baseline node support/tests/issue1864-tv.mjs
+            kill "$ISSUE_APPIUM_PID"
+            wait "$ISSUE_APPIUM_PID" || true
+            mkdir -p evidence-cloud/source-baseline
+            find evidence-cloud -maxdepth 1 -type f ! -name '*.apk' ! -name 'source-pair*' -exec mv {} evidence-cloud/source-baseline/ \;
+            adb install --abi arm64-v8a -r evidence-cloud/source-focus.apk
+            adb shell pm clear org.localsend.localsend_app
+            adb shell dumpsys package org.localsend.localsend_app > evidence-cloud/focus-installed-package.txt
+            grep 'primaryCpuAbi=arm64-v8a' evidence-cloud/focus-installed-package.txt
+            for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_MEDIA_IMAGES READ_MEDIA_VIDEO; do adb shell pm grant org.localsend.localsend_app android.permission.$permission 2>&1 | tee -a evidence-cloud/focus-permission-grants.txt || true; done
+            appium --port 4723 --log evidence-cloud/appium.log &
+            for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
+            curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
+            ISSUE1864_APK=source-focus node support/tests/issue1864-tv.mjs
+            mkdir -p evidence-cloud/source-focus
+            find evidence-cloud -maxdepth 1 -type f ! -name '*.apk' ! -name 'source-pair*' -exec mv {} evidence-cloud/source-focus/ \;
+            node support/tests/issue1864-pair.mjs
+          else
+            node support/tests/issue1864-tv.mjs
+          fi
       - name: Validate recordings and render logged input review aids
         if: always()
         run: |
           adb logcat -d > evidence-cloud/final-logcat.txt 2> evidence-cloud/final-logcat-stderr.txt || echo "Final optional logcat dump exited $?" > evidence-cloud/final-logcat-status.txt
           node support/tests/issue1864-video.mjs
+          if [ '${{ inputs.apk }}' = source-pair ]; then
+            ISSUE1864_VIDEO_DIR=evidence-cloud/source-baseline node support/tests/issue1864-video.mjs
+            ISSUE1864_VIDEO_DIR=evidence-cloud/source-focus node support/tests/issue1864-video.mjs
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,7 +1,7 @@
 // Derived review aids only; preserve raw cloud screenrecord files unchanged.
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
-const out='evidence-cloud';
+const out=process.env.ISSUE1864_VIDEO_DIR ?? 'evidence-cloud';
 const timingPath=`${out}/input-timings.jsonl`;
 if(!fs.existsSync(timingPath)) process.exit(0);
 const timings=fs.readFileSync(timingPath,'utf8').trim().split('\n').map(line=>JSON.parse(line));
