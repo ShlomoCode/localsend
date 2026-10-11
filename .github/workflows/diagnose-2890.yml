@@ -4,6 +4,10 @@ on:
     branches: [codex/diagnose-2890]
     paths: [support/test/windows/diagnose2890.ps1]
   workflow_dispatch:
+    inputs:
+      compare_run:
+        description: Build run with matched c1ce and existing-fix binaries
+        default: ''
 jobs:
   release:
     runs-on: windows-latest
@@ -11,17 +15,42 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Download untouched official release
+        if: ${{ inputs.compare_run == '' }}
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile $env:RUNNER_TEMP/app.zip
           Expand-Archive $env:RUNNER_TEMP/app.zip $env:RUNNER_TEMP/release
+      - uses: actions/download-artifact@v6
+        if: ${{ inputs.compare_run != '' }}
+        with:
+          name: baseline2890-c1ce
+          run-id: ${{ inputs.compare_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/baseline
+      - uses: actions/download-artifact@v6
+        if: ${{ inputs.compare_run != '' }}
+        with:
+          name: candidate2890-pr3192
+          run-id: ${{ inputs.compare_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/candidate
       - name: Install screenshot OCR
         run: choco install tesseract --no-progress -y
       - name: Run actual Windows apps
+        if: ${{ inputs.compare_run == '' }}
         shell: powershell
         run: |
           $exe=(Get-ChildItem $env:RUNNER_TEMP/release -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
           & ./support/test/windows/diagnose2890.ps1 -Executable $exe -EvidenceDirectory $env:RUNNER_TEMP/evidence2890
+      - name: Compare matched builds through actual UI
+        if: ${{ inputs.compare_run != '' }}
+        shell: powershell
+        run: |
+          foreach($stage in @('baseline','candidate')) {
+            $exe=(Get-ChildItem "$env:RUNNER_TEMP/$stage" -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
+            powershell -File ./support/test/windows/diagnose2890.ps1 -Executable $exe -EvidenceDirectory "$env:RUNNER_TEMP/evidence2890/$stage"
+            if($LASTEXITCODE -ne 0) {throw "$stage UI scenario failed"}
+          }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -29,3 +58,4 @@ jobs:
           path: |
             ${{ runner.temp }}/evidence2890
             !${{ runner.temp }}/evidence2890/*-app/**
+            !${{ runner.temp }}/evidence2890/**/*-app/**
