@@ -6,19 +6,29 @@ on:
       flutter_sdk:
         description: Diagnostic Flutter SDK for historical app source
         type: choice
-        options: ['3.24.5', '3.32.8']
+        options: ['3.24.5', '3.29.0', '3.32.8']
         default: '3.24.5'
       renderer:
         description: Diagnostic renderer, unchanged source and historical Flutter
         type: choice
         options: [impeller, skia, flutter-metal-layer]
         default: impeller
+      thread_mode:
+        description: Supported merged platform/UI thread setting on newer SDK
+        type: choice
+        options: [default, separate]
+        default: default
+      comparison_run_id:
+        description: Successful default 3.29 run supplying identical Dart and CocoaPods locks for separate control
+        type: string
+        default: ''
   push:
     branches: [codex/issue2453-investigation]
     paths: [.github/workflows/issue2453-ios.yml]
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: issue2453-ios
@@ -45,9 +55,11 @@ jobs:
           out="$GITHUB_WORKSPACE/evidence"
           mkdir -p "$out/locks-before"
           git rev-parse HEAD > "$out/source-commit.txt"
+          printf '%s\n' '${{ github.sha }}' > "$out/harness-commit.txt"
           git status --porcelain > "$out/source-status-before.txt"
           printf '%s\n' '${{ inputs.renderer }}' > "$out/renderer.txt"
           printf '%s\n' '${{ inputs.flutter_sdk }}' > "$out/selected-sdk.txt"
+          printf '%s\n' '${{ inputs.thread_mode }}' > "$out/thread-mode.txt"
           cp .fvmrc app/pubspec.lock app/ios/Podfile.lock "$out/locks-before/"
           shasum -a 256 "$out/locks-before/"* > "$out/locks-before.sha256"
           sw_vers > "$out/runner.txt"
@@ -65,6 +77,69 @@ jobs:
           cache: false
           pub-cache: false
 
+      - name: Validate paired experiment inputs
+        env:
+          COMPARISON_RUN_ID: ${{ inputs.comparison_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ inputs.flutter_sdk }}' == 3.29.0 ]]; then
+            test '${{ inputs.renderer }}' = impeller
+          fi
+          if [[ '${{ inputs.thread_mode }}' == separate ]]; then
+            test '${{ inputs.flutter_sdk }}' = 3.29.0
+            test '${{ inputs.renderer }}' = impeller
+            [[ "$COMPARISON_RUN_ID" =~ ^[0-9]+$ ]]
+          else
+            test -z "$COMPARISON_RUN_ID"
+          fi
+
+      - name: Verify successful default workflow provenance
+        if: inputs.thread_mode == 'separate'
+        uses: actions/github-script@v7
+        env:
+          COMPARISON_RUN_ID: ${{ inputs.comparison_run_id }}
+        with:
+          script: |
+            const runId = process.env.COMPARISON_RUN_ID;
+            if (!/^[0-9]+$/.test(runId)) throw new Error('Invalid comparison run ID');
+            const {data: run} = await github.rest.actions.getWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: runId});
+            if (run.status !== 'completed' || run.conclusion !== 'success' || run.event !== 'workflow_dispatch' || run.path !== '.github/workflows/issue2453-ios.yml' || run.head_sha !== context.sha) {
+              throw new Error('Comparison must be a successful dispatch of the same workflow and harness commit');
+            }
+
+      - name: Download default arm lock and toolchain evidence
+        if: inputs.thread_mode == 'separate'
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2453-ios-1.17-${{ inputs.comparison_run_id }}
+          path: comparison
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.comparison_run_id }}
+          repository: ShlomoCode/localsend
+
+      - name: Restore default arm resolved locks
+        if: inputs.thread_mode == 'separate'
+        working-directory: source
+        shell: bash
+        env:
+          COMPARISON_RUN_ID: ${{ inputs.comparison_run_id }}
+        run: |
+          set -euo pipefail
+          baseline="$GITHUB_WORKSPACE/comparison"
+          test "$(cat "$baseline/source-commit.txt")" = 7f21d1f9082a43803e05c37f021912e012145aa5
+          test "$(cat "$baseline/selected-sdk.txt")" = 3.29.0
+          test "$(cat "$baseline/renderer.txt")" = impeller
+          test "$(cat "$baseline/thread-mode.txt")" = default
+          test "$(cat "$baseline/harness-commit.txt")" = '${{ github.sha }}'
+          test -s "$baseline/ipa.sha256"
+          test -s "$baseline/final-bundle-info.plist"
+          cp "$baseline/locks-after/pubspec.lock" app/pubspec.lock
+          cp "$baseline/locks-after/Podfile.lock" app/ios/Podfile.lock
+          cmp "$baseline/xcode.txt" "$GITHUB_WORKSPACE/evidence/xcode.txt"
+          cmp "$baseline/runner.txt" "$GITHUB_WORKSPACE/evidence/runner.txt"
+          printf '%s\n' "$COMPARISON_RUN_ID" > "$GITHUB_WORKSPACE/evidence/comparison-run-id.txt"
+
       - name: Resolve original locked dependencies
         working-directory: source/app
         shell: bash
@@ -74,8 +149,10 @@ jobs:
           export PATH="$HOME/.pub-cache/bin:$PATH"
           if [[ '${{ inputs.flutter_sdk }}' != 3.24.5 ]]; then
             sed -i '' 's/3.24.5/${{ inputs.flutter_sdk }}/' ../.fvmrc
-            # Flutter3.32 SDK pins intl0.20 and path1.9.1; retain other declared app dependencies.
-            sed -i '' 's/intl: \^0.19.0/intl: ^0.20.2/' pubspec.yaml
+            # Both newer SDKs pin path1.9.1; only3.32 requires intl0.20.
+            if [[ '${{ inputs.flutter_sdk }}' == 3.32.8 ]]; then
+              sed -i '' 's/intl: \^0.19.0/intl: ^0.20.2/' pubspec.yaml
+            fi
             sed -i '' 's/path: 1.9.0/path: 1.9.1/' pubspec.yaml
             git diff -- ../.fvmrc pubspec.yaml > "$GITHUB_WORKSPACE/evidence/sdk-input.patch"
           fi
@@ -83,10 +160,44 @@ jobs:
           fvm flutter --version > "$GITHUB_WORKSPACE/evidence/flutter.txt"
           pod --version > "$GITHUB_WORKSPACE/evidence/cocoapods.txt"
           fvm flutter precache --ios
-          if [[ '${{ inputs.flutter_sdk }}' == 3.24.5 ]]; then
+          if [[ '${{ inputs.flutter_sdk }}' == 3.24.5 || '${{ inputs.thread_mode }}' == separate ]]; then
             fvm flutter pub get --enforce-lockfile 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
           else
             fvm flutter pub get 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
+          fi
+
+      - name: Verify exact SDK and protected historical dependency inputs
+        if: inputs.flutter_sdk == '3.29.0'
+        working-directory: source/app
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.pub-cache/bin:$PATH"
+          fvm flutter --version --machine > "$GITHUB_WORKSPACE/evidence/flutter-machine.json"
+          ruby -ryaml -rjson <<'RUBY'
+          out = ENV.fetch('GITHUB_WORKSPACE') + '/evidence'
+          sdk = JSON.parse(File.read(out + '/flutter-machine.json'))
+          abort 'Wrong Flutter SDK' unless sdk['frameworkVersion'] == '3.29.0' && sdk['frameworkRevision'] == '35c388afb57ef061d06a39b537336c87e0e3d1b1'
+          abort 'Wrong engine revision' unless sdk['engineRevision'] == 'f73bfc4522dd0bc87bbcdb4bb3088082755c5e87'
+          before = YAML.load_file(out + '/locks-before/pubspec.lock')['packages']
+          after = YAML.load_file('pubspec.lock')['packages']
+          protected = {'intl'=>'0.19.0','yaru'=>'5.3.2','wechat_assets_picker'=>'9.5.0','photo_manager'=>'3.6.2','open_filex'=>'4.5.0'}
+          protected.each do |name, version|
+            abort "Protected package changed: #{name}" unless after[name] == before[name] && after[name]['version'] == version
+          end
+          abort 'Wrong required path pin' unless after.fetch('path')['version'] == '1.9.1'
+          drift = (before.keys | after.keys).sort.map do |name|
+            {'package'=>name,'before'=>before[name],'after'=>after[name]} unless before[name] == after[name]
+          end.compact
+          File.write(out + '/sdk-resolution-drift.json', JSON.pretty_generate(drift))
+          File.write(out + '/protected-inputs.json', JSON.pretty_generate({'frameworkRevision'=>sdk['frameworkRevision'],'protectedPackages'=>protected,'hostedIdentityUnchanged'=>true,'requiredPath'=>'1.9.1','otherResolvedDriftRetained'=>true}))
+          RUBY
+          if [[ '${{ inputs.thread_mode }}' == separate ]]; then
+            baseline="$GITHUB_WORKSPACE/comparison"
+            cmp "$baseline/flutter-machine.json" "$GITHUB_WORKSPACE/evidence/flutter-machine.json"
+            cmp "$baseline/cocoapods.txt" "$GITHUB_WORKSPACE/evidence/cocoapods.txt"
+            cmp "$baseline/locks-after/pubspec.lock" pubspec.lock
+            cmp "$baseline/sdk-resolution-drift.json" "$GITHUB_WORKSPACE/evidence/sdk-resolution-drift.json"
           fi
 
       - name: Configure supported diagnostic renderer input
@@ -107,13 +218,27 @@ jobs:
           cp ios/Runner/Info.plist "$GITHUB_WORKSPACE/evidence/diagnostic-runner-input.plist"
           git diff -- ios/Runner/Info.plist > "$GITHUB_WORKSPACE/evidence/diagnostic-input.patch"
 
+      - name: Configure supported separate UI thread control
+        if: inputs.thread_mode == 'separate'
+        working-directory: source/app
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ inputs.flutter_sdk }}' = 3.29.0
+          test '${{ inputs.renderer }}' = impeller
+          cp ios/Runner/Info.plist "$GITHUB_WORKSPACE/evidence/thread-original-input.plist"
+          /usr/libexec/PlistBuddy -c 'Add :FLTEnableMergedPlatformUIThread bool false' ios/Runner/Info.plist
+          test "$(plutil -extract FLTEnableMergedPlatformUIThread raw ios/Runner/Info.plist)" = false
+          cp ios/Runner/Info.plist "$GITHUB_WORKSPACE/evidence/thread-diagnostic-input.plist"
+          git diff -- ios/Runner/Info.plist > "$GITHUB_WORKSPACE/evidence/thread-input.patch"
+
       - name: Build uninstrumented unsigned device app
         working-directory: source/app
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$HOME/.pub-cache/bin:$PATH"
-          fvm flutter build ios --release --no-codesign --verbose 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
+          fvm flutter build ios --release --no-codesign --no-pub --verbose 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
 
       - name: Package the normal device artifact
         working-directory: source
@@ -124,6 +249,39 @@ jobs:
           app=app/build/ios/iphoneos/Runner.app
           test -d "$app"
           test "$(lipo -archs "$app/Runner")" = arm64
+          git diff -- . ':!app/ios/Runner/Info.plist' > "$out/paired-source-diff.patch"
+          if [[ '${{ inputs.thread_mode }}' == separate ]]; then
+            baseline="$GITHUB_WORKSPACE/comparison"
+            cmp "$baseline/locks-after/pubspec.lock" app/pubspec.lock
+            cmp "$baseline/locks-after/Podfile.lock" app/ios/Podfile.lock
+            cmp "$baseline/paired-source-diff.patch" "$out/paired-source-diff.patch"
+          fi
+          if [[ '${{ inputs.flutter_sdk }}' == 3.29.0 ]]; then
+            test "$(plutil -extract CFBundleShortVersionString raw "$app/Info.plist")" = 1.17.0
+            if [[ '${{ inputs.thread_mode }}' == separate ]]; then
+              test "$(plutil -extract FLTEnableMergedPlatformUIThread raw "$app/Info.plist")" = false
+            else
+              if plutil -extract FLTEnableMergedPlatformUIThread raw "$app/Info.plist" >/dev/null 2>&1; then exit 64; fi
+            fi
+            cp "$app/Info.plist" "$out/final-bundle-info.plist"
+            cp app/ios/Runner/Info.plist "$out/final-source-info.plist"
+            if [[ '${{ inputs.thread_mode }}' == separate ]]; then
+              for kind in source bundle; do
+                plutil -convert json -o "$out/$kind-info.json" "$out/final-$kind-info.plist"
+                plutil -convert json -o "$out/baseline-$kind-info.json" "$baseline/final-$kind-info.plist"
+              done
+              ruby -rjson <<'RUBY'
+              out = ENV.fetch('GITHUB_WORKSPACE') + '/evidence'
+              %w[source bundle].each do |kind|
+                baseline = JSON.parse(File.read(out + "/baseline-#{kind}-info.json"))
+                separate = JSON.parse(File.read(out + "/#{kind}-info.json"))
+                abort "Default #{kind} contains unexpected thread key" if baseline.key?('FLTEnableMergedPlatformUIThread')
+                abort "Separate #{kind} thread key is not boolean false" unless separate.delete('FLTEnableMergedPlatformUIThread') == false
+                abort "Unexpected #{kind} plist drift" unless baseline == separate
+              end
+          RUBY
+            fi
+          fi
           mkdir -p "$out/package/Payload"
           ditto "$app" "$out/package/Payload/Runner.app"
           (cd "$out/package" && ditto -c -k --keepParent Payload ../localsend-1.17.0-unsigned-device.ipa)
