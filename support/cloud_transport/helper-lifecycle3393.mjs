@@ -15,26 +15,43 @@ export async function observeHelper({session,wd,label,transportSnapshot,expectBa
   if(typeof value!=='string')throw new Error(`Helper ${name} did not return native text`);
   writeFileSync(`${stem}-${name}.txt`,value);return value;
  }
+ async function nativeCapability(name,commands){
+  const attempts=[];record[`${name}Capability`]=attempts;
+  for(const command of commands){
+   const attempt={command,started:new Date().toISOString()};attempts.push(attempt);save();
+   try{const value=await shell(name,command);attempt.succeeded=true;save();return value;}
+   catch(error){attempt.error=String(error);save();}
+  }
+  throw new Error(`No supported native ${name} capability for ordinary-helper qualification`);
+ }
  try{
   record.transportBefore=transportSnapshot();save();
-  const processes=await shell('processes',`dumpsys activity -p ${helperPackage} processes`);
-  const services=await shell('services',`dumpsys activity services ${helperPackage}`);
+  const processes=await nativeCapability('processes',[`dumpsys activity -p ${helperPackage} processes`,'dumpsys activity processes','dumpsys activity']);
+  const services=await nativeCapability('services',[`dumpsys activity services ${helperPackage}`,'dumpsys activity services','dumpsys activity']);
   // Require the exact single service's own block, not another app's foreground flag.
   const blocks=services.split(/(?=\* ServiceRecord\{)/).filter(block=>block.startsWith('* ServiceRecord{')&&block.split('\n',1)[0].includes(serviceName));
   if(blocks.length!==1)throw new Error('Ordinary helper service identity is missing or ambiguous');
   const serviceBlock=blocks[0];
   if(!/\bisForeground=false\b/.test(serviceBlock)||/\bisForeground=true\b/.test(serviceBlock))throw new Error('Helper is foreground or native foreground state is unavailable');
   if(!/\bstartRequested=true\b/.test(serviceBlock))throw new Error('Helper service has not recorded a requested start');
-  const identity=processes.match(/\*APP\* UID (\d+) ProcessRecord\{[^\n]*? (\d+):org\.localsend\.cloudtransport\//);
+  // Generic dumpsys may describe every process. Scope flags to the exact
+  // helper record before testing state or freeze fields.
+  const processSections=[...processes.matchAll(/^  All known processes:\r?\n([\s\S]*?)(?=^  [^\s*][^\n]*:\s*$)/gm)];
+  if(processSections.length!==1)throw new Error('Native process section boundaries are missing or ambiguous');
+  const processBlocks=processSections[0][1].split(/(?=^  \*[^*\r\n]+\* UID )/m)
+   .filter(block=>/^  \*APP\* UID [^\n]*\d+:org\.localsend\.cloudtransport\//.test(block));
+  if(processBlocks.length!==1)throw new Error('Helper native process block is missing or ambiguous');
+  const processBlock=processBlocks[0];
+  const identity=processBlock.match(/\*APP\* UID (\d+) ProcessRecord\{[^\n]*? (\d+):org\.localsend\.cloudtransport\//);
   if(!identity)throw new Error('Helper native process identity is unavailable');
   const current={uid:Number(identity[1]),pid:Number(identity[2])};
   if(helperIdentity&&(helperIdentity.uid!==current.uid||helperIdentity.pid!==current.pid))throw new Error('Ordinary helper restarted; comparison is a harness failure');
   helperIdentity=current;
   if(!serviceBlock.includes(`${current.pid}:${helperPackage}/`))throw new Error('Helper service is not attached to the observed helper process');
-  const state=processes.match(/\bcurProcState=(\d+)\b/);
+  const state=processBlock.match(/\bcurProcState=(\d+)\b/);
   if(!state)throw new Error('Helper process state is unavailable');
   if(expectBackground&&Number(state[1])<=2)throw new Error('Helper still has a foreground activity during the comparison');
-  if(!/\bisFrozen=false\b/.test(processes)||/\bisFrozen=true\b/.test(processes))throw new Error('Ordinary helper is frozen or native freeze state is unavailable');
+  if(!/\bisFrozen=false\b/.test(processBlock)||/\bisFrozen=true\b/.test(processBlock))throw new Error('Ordinary helper is frozen or native freeze state is unavailable');
   record.native={...current,curProcState:Number(state[1]),isForeground:false,isFrozen:false,startRequested:true};
   // Poll renewals and peer events are retained for independent health analysis;
   // pollPending by itself is deliberately not treated as proof of health.
