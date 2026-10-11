@@ -198,15 +198,12 @@ jobs:
           print('NO_ACTION_FOR',label,flush=True)
           sys.exit(2)
           PY
-          nohup gnome-control-center accessibility > /home/probe/evidence/settings.log 2>&1 < /dev/null &
+          nohup gnome-control-center universal-access > /home/probe/evidence/settings.log 2>&1 < /dev/null &
           GUEST
           sleep 10
           /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/settings-initial.png"
           timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/settings-initial-tree.txt
           # Navigate the genuine Settings UI. The schema is only read to verify UI action outcomes.
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Seeing' > evidence/vm/seeing-action.txt
-          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/settings-seeing.png"
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/settings-seeing-tree.txt
 
       - name: Exercise real Zoom UI and tab input with controls
         run: |
@@ -240,13 +237,13 @@ jobs:
           /tmp/localsend-vm/click-text Send "$GITHUB_WORKSPACE/evidence/vm/control-off-send"
           /tmp/localsend-vm/click-text Receive "$GITHUB_WORKSPACE/evidence/vm/control-off-receive"
           # Return to Settings, activate its Zoom action, and verify the actual GNOME state.
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gnome-control-center accessibility' > evidence/vm/settings-present.log 2>&1 &
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gnome-control-center universal-access' > evidence/vm/settings-present.log 2>&1 &
           sleep 5
           timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Zoom; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-action.txt
           /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/zoom-action.png"
           # A Zoom row may open a subpage; if so, use the Zoom switch on that subpage.
           if ! tail -1 evidence/vm/zoom-action.txt | grep -q true; then
-            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Zoom; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-switch-action.txt
+            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py "Desktop Zoom"; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-switch-action.txt
           fi
           timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-confirmed.txt
           grep -q true evidence/vm/zoom-confirmed.txt
