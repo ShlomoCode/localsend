@@ -49,6 +49,7 @@ if($Action -eq 'click'){
  $packed=[IntPtr](($point.Y -shl 16) -bor ($point.X -band 0xffff))
  if(-not [W3393]::PostMessage($view,0x200,[IntPtr]::Zero,$packed)){throw 'Mouse move failed'}
  if(-not [W3393]::PostMessage($view,0x201,[IntPtr]1,$packed)){throw 'Mouse down failed'}
+ Start-Sleep -Milliseconds 80
  if(-not [W3393]::PostMessage($view,0x202,[IntPtr]::Zero,$packed)){throw 'Mouse up failed'}
  Start-Sleep -Milliseconds 800
 }

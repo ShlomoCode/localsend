@@ -46,6 +46,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
    await wd('POST',`/session/${session}/element/${allow['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
   }
   await source('control-notification-handled');await click('Done');
+  const {default:observeSettings}=await import('./settings3393.mjs');await observeSettings({session,wd});
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case','picker-calibration']);
   let pending='';for(let i=0;i<15;i++){pending=await source('calibration-pending-'+i);if(pending.includes('Accept'))break;await new Promise(resolve=>setTimeout(resolve,1000));}
   if(!pending.includes('Accept'))throw new Error('Repeat sender did not reach receiver approval');

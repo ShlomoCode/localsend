@@ -29,6 +29,8 @@ try {
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
  assert(session,'Session ID missing');writeFileSync('/tmp/helper/session-id',session);
+ await wd('POST',`/session/${session}/appium/settings`,{settings:{waitForIdleTimeout:0}});
+ writeFileSync('evidence/appium-settings.json',JSON.stringify(await wd('GET',`/session/${session}/appium/settings`),null,2));
  console.log('BrowserStack control session created for '+caps['appium:deviceName']);
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.cloudtransport'});
  await new Promise(ok=>setTimeout(ok,3000));
