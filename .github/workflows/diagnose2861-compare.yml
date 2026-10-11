@@ -1,0 +1,31 @@
+name: Compare 2861 adaptive folder target
+on:
+  workflow_dispatch:
+jobs:
+  observe:
+    runs-on: windows-11-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: baseline2890-c1ce
+          run-id: 38132668217
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/releases/baseline
+      - uses: actions/download-artifact@v6
+        with:
+          name: candidate2861
+          run-id: 38139860972
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/releases/candidate
+      - name: Matched actual Settings, system text size and narrow viewport
+        shell: powershell
+        run: ./support/diagnostics/text-size2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/compare2861 -Versions @('baseline','candidate') -Locales @('en','uk','fr','he') -InspectFolderDialog
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: compare2861
+          path: |
+            ${{ runner.temp }}/compare2861
+            !${{ runner.temp }}/compare2861/scale-*/*-app/**

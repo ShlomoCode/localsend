@@ -1,63 +1,31 @@
-name: Verify 2861 adaptive folder target
+name: Compare 2861 adaptive folder target
 on:
   workflow_dispatch:
 jobs:
-  build:
-    runs-on: windows-latest
-    timeout-minutes: 60
+  observe:
+    runs-on: windows-11-arm
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
         with:
-          ref: 8e9a13d8675237bba2b93efe456c1f202bd2d12f
-      - uses: subosito/flutter-action@v2
+          name: baseline2890-c1ce
+          run-id: 38132668217
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/releases/baseline
+      - uses: actions/download-artifact@v6
         with:
-          flutter-version: 3.41.9
-          channel: stable
-      - name: Resolve pinned workspace
-        working-directory: app
-        run: flutter pub get
-      - name: Check formatter
-        working-directory: app
-        shell: pwsh
-        run: |
-          dart format --set-exit-if-changed lib/pages/tabs/settings_tab.dart
-          $result=$LASTEXITCODE
-          New-Item -ItemType Directory -Force $env:RUNNER_TEMP/checks2861 | Out-Null
-          Copy-Item lib/pages/tabs/settings_tab.dart $env:RUNNER_TEMP/checks2861/formatted-settings_tab.dart
-          if($result -ne 0){throw 'Candidate formatting differs'}
-      - name: Analyze folder target change
-        working-directory: app
-        shell: pwsh
-        run: |
-          flutter analyze lib/pages/tabs/settings_tab.dart
-          if($LASTEXITCODE -ne 0){throw 'Candidate analysis failed'}
-      - name: Existing locale, portable settings and supported-window regressions
-        working-directory: app
-        shell: pwsh
-        run: |
-          flutter test test/unit/i18n_test.dart test/unit/util/shared_preferences/shared_preferences_portable_test.dart test/unit/provider/window_dimensions_provider_test.dart
-          if($LASTEXITCODE -ne 0){throw 'Focused checks failed'}
-      - name: Prepare required MSIX helper
-        shell: pwsh
-        run: |
-          $makepri = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin/10.*/x64/makepri.exe" | Select-Object -Last 1
-          & $makepri.FullName new /pr support/build/msix/content /cf support/build/msix/priconfig.xml /mn support/build/msix/content/AppxManifest.xml /of support/build/msix/content/resources.pri /o
-          & "C:/Program Files (x86)/Windows Kits/10/App Certification Kit/makeappx.exe" pack /o /d support/build/msix/content /nv /p app/windows/localsend_msix_helper.msix
-      - name: Build exact parent-approved candidate
-        working-directory: app
-        shell: pwsh
-        run: |
-          flutter build windows
-          if($LASTEXITCODE -ne 0){throw 'Candidate build failed'}
-          Copy-Item build/windows/x64/runner/Release $env:RUNNER_TEMP/candidate2861 -Recurse
-          git rev-parse HEAD | Set-Content $env:RUNNER_TEMP/candidate2861/source-commit.txt
-          flutter --version | Set-Content $env:RUNNER_TEMP/candidate2861/sdk.txt
+          name: candidate2861
+          run-id: 38139860972
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/releases/candidate
+      - name: Matched actual Settings, system text size and narrow viewport
+        shell: powershell
+        run: ./support/diagnostics/text-size2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/compare2861 -Versions @('baseline','candidate') -Locales @('en','uk','fr','he') -InspectFolderDialog
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: checks2861
-          path: ${{ runner.temp }}/checks2861
-      - uses: actions/upload-artifact@v6
-        with:
-          name: candidate2861
-          path: ${{ runner.temp }}/candidate2861
+          name: compare2861
+          path: |
+            ${{ runner.temp }}/compare2861
+            !${{ runner.temp }}/compare2861/scale-*/*-app/**

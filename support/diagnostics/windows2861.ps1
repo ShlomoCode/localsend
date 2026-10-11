@@ -1,4 +1,4 @@
-param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Versions=@('1.17.0','1.18.2','current'),[string[]]$Locales=@('en','uk','fr'),[int]$WindowWidth=1215)
+param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Versions=@('1.17.0','1.18.2','current'),[string[]]$Locales=@('en','uk','fr'),[int]$WindowWidth=1215,[switch]$InspectFolderDialog)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -120,6 +120,34 @@ foreach($version in $Versions) {foreach($locale in $Locales) {
    [Desktop2861]::SetCursorPos($scrollX,600)|Out-Null;[Desktop2861]::mouse_event(2048,0,0,4294967176,[UIntPtr]::Zero)
    $script:inputs+=@{action='Settings scroll down 120';step=$step;utc=[DateTime]::UtcNow.ToString('o')}
    Start-Sleep -Milliseconds 800;Capture "$name-settings-scroll-$step"
+   if($InspectFolderDialog -and $locale -eq 'en' -and (!$scale -or $scale -eq 100) -and $WindowWidth -eq 1215 -and $step -eq 3){
+    Click 930 615 'Observed English100 destination button'
+    Start-Sleep -Seconds 2;Capture "$name-folder-picker"
+    $desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-folder-picker-uia.json"
+    $longFolder="$EvidenceDirectory/Invoices and archives for multilingual destinations in October 2026"
+    New-Item -ItemType Directory -Force $longFolder|Out-Null
+    $longFolder=(Get-Item $longFolder).FullName
+    $script:inputs+=@{action='Native folder picker address navigation';path=$longFolder;utc=[DateTime]::UtcNow.ToString('o')}
+    [System.Windows.Forms.SendKeys]::SendWait('^l');[System.Windows.Forms.SendKeys]::SendWait($longFolder);[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Seconds 2
+    $pickerElements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    $pickerElements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-folder-picker-navigated-uia.json"
+    Capture "$name-folder-picker-navigated"
+    $choose=$pickerElements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -match '^(Select Folder|Choose Folder|Select)$' -and $_.Current.IsEnabled}|Select-Object -First 1
+    if(!$choose){throw 'Native folder selection button not observed'}
+    $script:inputs+=@{action='Invoke observed native folder selection button';name=$choose.Current.Name;utc=[DateTime]::UtcNow.ToString('o')}
+    ([System.Windows.Automation.InvokePattern]$choose.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    Start-Sleep -Seconds 3
+    Capture "$name-long-folder-selected"
+    Copy-Item "$appdir/settings.json" "$EvidenceDirectory/$name-long-folder-selected-profile.json"
+    $selected=Get-Content "$appdir/settings.json" -Raw|ConvertFrom-Json
+    if(!$selected.'flutter.ls_destination' -or $selected.'flutter.ls_destination'.Replace('/','\') -ne $longFolder){throw 'Native folder selection was not persisted'}
+    Click 930 640 'Reset selected destination at observed destination control region'
+    Start-Sleep -Seconds 2;Capture "$name-long-folder-reset"
+    Copy-Item "$appdir/settings.json" "$EvidenceDirectory/$name-long-folder-reset-profile.json"
+    $reset=Get-Content "$appdir/settings.json" -Raw|ConvertFrom-Json
+    if($reset.'flutter.ls_destination'){throw 'Destination reset was not persisted'}
+   }
   }
   Copy-Item "$appdir/settings.json" "$EvidenceDirectory/$name-profile.json"
  }catch{$_|Out-String|Set-Content "$EvidenceDirectory/$name-error.txt"}

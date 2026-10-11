@@ -1,4 +1,4 @@
-param([string]$ReleaseRoot,[string]$EvidenceDirectory)
+param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Versions=@('current'),[string[]]$Locales=@('en','uk','fr'),[switch]$InspectFolderDialog)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -97,8 +97,8 @@ foreach($scale in @(100,125,150)) {
  if($settings){try{([System.Windows.Automation.WindowPattern]$settings.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)).Close()}catch{[System.Windows.Forms.SendKeys]::SendWait('%{F4}')}}
  Start-Sleep -Seconds 2
  Stop-Transcript
- & "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale" -Versions @('current') -Locales @('en','uk','fr')
- if($scale -eq 125){& "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale-narrow" -Versions @('current') -Locales @('en','uk','fr') -WindowWidth 400}
+ & "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale" -Versions $Versions -Locales $Locales -InspectFolderDialog:$InspectFolderDialog
+ if($scale -eq 125){& "$PSScriptRoot/windows2861.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory "$EvidenceDirectory/scale-$scale-narrow" -Versions $Versions -Locales $Locales -WindowWidth 400}
  Start-Transcript "$EvidenceDirectory/transcript.txt" -Append
 }
 Stop-Transcript
