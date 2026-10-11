@@ -2,6 +2,7 @@
 set -euo pipefail
 export DISPLAY=:99
 export XDG_RUNTIME_DIR=/tmp/runtime-probe
+export OMP_THREAD_LIMIT=1
 mkdir -p "$XDG_RUNTIME_DIR" /evidence/"$ROLE"
 chmod 700 "$XDG_RUNTIME_DIR"
 sha256sum /home/probe/LocalSend.AppImage > /evidence/"$ROLE"/release-sha256.txt

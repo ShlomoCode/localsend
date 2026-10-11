@@ -11,6 +11,7 @@ import time
 role = os.environ['ROLE']
 out = pathlib.Path('/evidence') / role
 events = []
+app_bounds = None
 
 
 def command(*args):
@@ -34,6 +35,9 @@ def snapshot(name):
 def click(label, name, optional=False):
     rows = snapshot(name)
     hits = [r for r in rows if r['text'].strip().lower() == label.lower()]
+    if app_bounds and label in ('Send', 'File', 'Linux'):
+        left, top, width, height = app_bounds
+        hits = [r for r in hits if left <= int(r['left']) <= left + width and top <= int(r['top']) <= top + height]
     if not hits:
         if optional:
             return False
@@ -48,6 +52,7 @@ def click(label, name, optional=False):
 
 
 def start():
+    global app_bounds
     app = subprocess.Popen(['/home/probe/squashfs-root/AppRun'], stdout=open(out / ('app-' + str(len(events)) + '.log'), 'w'), stderr=subprocess.STDOUT)
     time.sleep(12)
     windows = command('xdotool', 'search', '--onlyvisible', '--name', 'LocalSend').stdout.splitlines()
@@ -57,6 +62,9 @@ def start():
     command('xdotool', 'windowactivate', '--sync', windows[-1])
     command('xdotool', 'windowsize', windows[-1], '1100', '700')
     time.sleep(2)
+    geometry = command('xdotool', 'getwindowgeometry', '--shell', windows[-1]).stdout
+    values = dict(line.split('=', 1) for line in geometry.splitlines() if '=' in line)
+    app_bounds = tuple(int(values[key]) for key in ('X', 'Y', 'WIDTH', 'HEIGHT'))
     snapshot('app-' + str(len(events)))
     log('app-start', pid=app.pid)
     return app
