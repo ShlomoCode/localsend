@@ -13,7 +13,7 @@ export async function probeInstalledProviders({wd,prefix}) {
    record.installed=await wd('POST',prefix+'/appium/device/app_installed',{appId});
    if(!record.installed)continue;
    await wd('POST',prefix+'/appium/device/activate_app',{appId});
-   const deadline=Date.now()+7000;
+   const deadline=Date.now()+20000;
    let attempt=0;
    do{
     const source=await wd('GET',prefix+'/source');
@@ -21,15 +21,16 @@ export async function probeInstalledProviders({wd,prefix}) {
     writeFileSync('evidence/'+sourceFile,source);
     const activity=await wd('GET',prefix+'/appium/device/current_activity');
     const actualPackage=await wd('GET',prefix+'/appium/device/current_package');
-    record.observations.push({utc:new Date().toISOString(),sourceFile,activity,actualPackage});
+    const sourcePackageMatched=source.includes('package="'+appId+'"');
+    record.observations.push({utc:new Date().toISOString(),sourceFile,activity,actualPackage,sourcePackageMatched});
     record.trashLabels=(source.match(/(?:text|content-desc)="[^\"]*(?:trash|Trash|recycle|Recycle|回收站|垃圾箱|最近删除)[^\"]*"/g)||[]);
-    if(source.includes('id/agree_button')){
-     const agree=await waitForNativeControl({wd,prefix,using:'id',value:'com.google.android.apps.nbu.files:id/agree_button',label:label+'-agree'});
+    if(sourcePackageMatched&&source.includes(appId+':id/agree_button')){
+     const agree=await waitForNativeControl({wd,prefix,using:'id',value:appId+':id/agree_button',label:label+'-agree'});
      await wd('POST',prefix+'/element/'+agree['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-    }else if(source.includes('permission_allow_button')){
+    }else if(appId==='com.google.android.apps.nbu.files'&&actualPackage==='com.android.permissioncontroller'&&source.includes('permission_allow_button')){
      const allow=await waitForNativeControl({wd,prefix,using:'id',value:'com.android.permissioncontroller:id/permission_allow_button',label:label+'-permission'});
      await wd('POST',prefix+'/element/'+allow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-    }else if(actualPackage===appId&&source.length>1500){
+    }else if(actualPackage===appId&&sourcePackageMatched&&!/SplashScreenActivity/.test(activity)&&((appId==='com.google.android.apps.nbu.files'&&source.includes('text="Browse"'))||(appId!=='com.google.android.apps.nbu.files'&&/(?:text|content-desc)="[^"]+"/.test(source)))){
      record.actualEntryPointObserved=true;
      record.sourceFile=sourceFile;
      break;
@@ -37,8 +38,9 @@ export async function probeInstalledProviders({wd,prefix}) {
     attempt++;
     await new Promise(resolve=>setTimeout(resolve,200));
    }while(Date.now()<deadline);
+   if(!record.actualEntryPointObserved){record.unavailable='Normal launch observed, but matching source/main page did not become ready before bounded deadline';writeFileSync('evidence/'+label+'-unavailable.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));continue;}
    writeFileSync('evidence/'+label+'-entry.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
-   const menu=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@content-desc="Show roots" or @content-desc="Open navigation drawer" or @content-desc="Menu" or @content-desc="More options"]',label:label+'-menu',timeoutMs:3000,optional:true});
+   const menu=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@content-desc="Show navigation menu" or @content-desc="Show roots" or @content-desc="Open navigation drawer" or @content-desc="Menu" or @content-desc="More options"]',label:label+'-menu',timeoutMs:3000,optional:true});
    if(menu){
     await wd('POST',prefix+'/element/'+menu['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
     // Observe the menu with fresh reads, not the entry-page snapshot.
