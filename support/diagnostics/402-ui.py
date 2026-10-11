@@ -81,12 +81,21 @@ if role == 'receiver':
             (out / 'alias.txt').write_text(alias)
             log('receiver-alias', alias=alias, preferences=str(preferences))
     (out / 'ready').touch()
+    receipts = []
+    saved_versions = {}
     deadline = time.monotonic() + 500
     iteration = 0
     while time.monotonic() < deadline and not pathlib.Path('/evidence/sender/done').exists():
         iteration += 1
         click('Accept', 'receiver-' + str(iteration), optional=True)
         click('Done', 'receiver-done-' + str(iteration), optional=True)
+        for path in pathlib.Path('/home/probe/Downloads').rglob('*'):
+            if path.is_file() and saved_versions.get(str(path)) != path.stat().st_mtime_ns:
+                data = path.read_bytes()
+                saved_versions[str(path)] = path.stat().st_mtime_ns
+                receipts.append(dict(name=path.name, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
+                (out / 'receipts.json').write_text(json.dumps(receipts, indent=2))
+                log('saved-file', **receipts[-1])
         time.sleep(2)
     files = []
     for path in pathlib.Path('/home/probe/Downloads').rglob('*'):
@@ -127,10 +136,24 @@ else:
             # The receiver advertises its random alias; the device card includes Linux.
             alias_path = pathlib.Path('/evidence/receiver/alias.txt')
             device_label = alias_path.read_text().split()[-1] if alias_path.exists() else 'Linux'
+            receipt_path = pathlib.Path('/evidence/receiver/receipts.json')
+            receipt_count = len(json.loads(receipt_path.read_text())) if receipt_path.exists() else 0
             if not click(device_label, case + '-device', optional=True):
                 log('harness-blocker', case=case, reason='Receiver device card not located; preserve actual screen before fallback')
                 raise RuntimeError('Device discovery/card location needs inspection')
-            time.sleep(30)
+            receipt_deadline = time.monotonic() + 60
+            while time.monotonic() < receipt_deadline:
+                received = json.loads(receipt_path.read_text()) if receipt_path.exists() else []
+                if len(received) > receipt_count:
+                    result = received[-1]
+                    if result['sha256'] != hashlib.sha256(payload).hexdigest() or not result['name'].startswith(filename.split('.')[0]):
+                        raise RuntimeError('Saved filename or contents differ: ' + str(result))
+                    log('verified-transfer', case=case, **result)
+                    break
+                time.sleep(2)
+            else:
+                snapshot(case + '-receipt-timeout')
+                raise RuntimeError('No actual saved-file receipt after GUI send: ' + case)
             snapshot(case + '-transfer')
             app.terminate()
             command('pkill', '-f', '/home/probe/squashfs-root/usr/bin/localsend_app')

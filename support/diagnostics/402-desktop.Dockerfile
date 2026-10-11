@@ -1,6 +1,6 @@
 FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl dbus-x11 network-manager at-spi2-core thunar fonts-dejavu xfce4-session xfwm4 xfce4-panel xfdesktop4 xvfb xdotool scrot tesseract-ocr python3 libgtk-3-0 libglu1-mesa libappindicator3-1 libayatana-appindicator3-1 libsecret-1-0 xdg-utils zenity fuse && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl dbus-x11 network-manager at-spi2-core thunar fonts-dejavu xfce4-session xfwm4 xfce4-panel xfdesktop4 xvfb xdotool scrot tesseract-ocr python3 libgtk-3-0 libglu1-mesa libappindicator3-1 libayatana-appindicator3-1 libsecret-1-0 xdg-utils xdg-user-dirs zenity fuse && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 probe
 USER probe
 WORKDIR /home/probe
