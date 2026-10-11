@@ -10,19 +10,42 @@ permissions:
   contents: read
 
 jobs:
+  prepare-mint-fonts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ISO extraction tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full squashfs-tools curl
+      - name: Extract exact Mint 22.3 font corpus
+        env:
+          OUT: ${{ github.workspace }}/mint-fonts
+        run: bash support/diagnostics/prepare-mint-fonts.sh
+      - name: Share verified font corpus and provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mint22.3-font-corpus
+          path: mint-fonts/
+          retention-days: 14
   reproduce:
+    needs: prepare-mint-fonts
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runtime: '26.08'
+          - layout: system
+            runtime: '26.08'
             app-commit: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
             runtime-commit: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
-          - runtime: '25.08'
-            app-commit: 31f3f559da9fc85ec88a82923e3d7287a873240573cbb9d6bd54bf4a26ad1ccd
-            runtime-commit: d27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf
+          - layout: user
+            runtime: '26.08'
+            app-commit: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
+            runtime-commit: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
     steps:
       - name: Check out diagnostic branch
         uses: actions/checkout@v4
@@ -34,6 +57,36 @@ jobs:
           sudo curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
           sudo apt-get update
           sudo apt-get install -y brave-keyring
+      - name: Download Mint font corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: mint22.3-font-corpus
+          path: mint-fonts
+      - name: Install exact Mint fonts on ephemeral runner
+        env:
+          FONT_LAYOUT: ${{ matrix.layout }}
+        run: |
+          mkdir -p evidence/font-corpus
+          cp mint-fonts/* evidence/font-corpus/
+          mkdir -p "$RUNNER_TEMP/original-fonts"
+          sudo mv /usr/share/fonts "$RUNNER_TEMP/original-fonts/usr-share-fonts"
+          if [[ -d /usr/local/share/fonts ]]; then
+            sudo mv /usr/local/share/fonts "$RUNNER_TEMP/original-fonts/usr-local-share-fonts"
+          fi
+          mkdir -p "$RUNNER_TEMP/mint-font-corpus"
+          tar -xzf mint-fonts/mint-fonts.tar.gz -C "$RUNNER_TEMP/mint-font-corpus"
+          sudo cp -a "$RUNNER_TEMP/mint-font-corpus/usr-share-fonts" /usr/share/fonts
+          if [[ -d "$RUNNER_TEMP/mint-font-corpus/usr-local-share-fonts" ]]; then
+            sudo cp -a "$RUNNER_TEMP/mint-font-corpus/usr-local-share-fonts" /usr/local/share/fonts
+          fi
+          sudo mkdir -p /usr/local/share/fonts
+          if [[ "$FONT_LAYOUT" == user ]]; then
+            mkdir -p "$HOME/.local/share/fonts"
+            cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "$HOME/.local/share/fonts/"
+            sha256sum "$HOME/.local/share/fonts/DejaVuSans.ttf" > evidence/user-installed-font.txt
+          fi
+          printf 'corpus=Mint22.3-Cinnamon-ISO layout=%s\n' "$FONT_LAYOUT" > evidence/font-scenario.txt
+          sudo fc-cache -f
       - name: Run reproduction harness in a D-Bus session
         shell: bash
         env:
@@ -46,7 +99,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: localsend-flatpak-font-cache-runtime-${{ matrix.runtime }}
+          name: localsend-flatpak-mint-fonts-${{ matrix.layout }}-runtime-${{ matrix.runtime }}
           path: evidence/
           if-no-files-found: warn
           retention-days: 14

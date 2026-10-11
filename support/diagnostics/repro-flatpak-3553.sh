@@ -34,6 +34,8 @@ app_cache_dir="$HOME/.var/app/org.localsend.localsend_app/cache"
 baseline="$OUT/cache-snapshots/baseline"
 mkdir -p "$cache_dir"
 fc-cache -f > "$OUT/host-fc-cache.txt" 2>&1 || true
+fc-list : file | sort > "$OUT/host-font-inventory.txt"
+fc-conflist > "$OUT/host-fontconfig-configs.txt" 2>&1 || true
 cp -a "$cache_dir" "$baseline"
 
 cache_manifest() {
@@ -269,6 +271,7 @@ sleep 2
 dbus-update-activation-environment DISPLAY
 
 flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "XDG_CACHE_HOME=%s FONTCONFIG_FILE=%s\n" "$XDG_CACHE_HOME" "$FONTCONFIG_FILE"; cat /etc/fonts/conf.d/50-flatpak.conf; ls -l /run/host/user-fonts-cache' > "$OUT/flatpak-fontconfig-host-cache.txt" 2>&1
+flatpak run --user --command=sh org.localsend.localsend_app -c 'find /run/host/user-fonts /run/host/fonts -type f 2>/dev/null | sort' > "$OUT/flatpak-host-font-inventory.txt" 2>&1 || true
 
 launch_case clean_deb "$deb_exe"
 if ! awk -F '\t' '$1=="clean_deb" && $2=="started" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
