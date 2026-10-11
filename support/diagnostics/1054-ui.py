@@ -266,10 +266,12 @@ try:
         # it through its rendered Done control before checking the home alias.
         startup = screen(role + "-startup")
         if any(row["text"].lower() == "new" for row in startup):
-            # The bounded button region is visible in retained normalized
-            # startup pixels. Single-block OCR can read its contrasting label.
-            click(locate("Done", role + "-onboarding-done", 10,
-                         roi=(685, 245, 115, 70), psm=6))
+            # This ordinary button center is established by retained startup
+            # pixels at the asserted 1000x700 geometry. OCR omits its white
+            # label even in a cropped contrast pass; gate the resulting home.
+            screen(role + "-onboarding-before-click")
+            click((740, 278))
+            screen(role + "-onboarding-after-click")
         locate(role, role + "-ready", 30)
         normalize(wid, role + "-ready-normalized")
         (OUT / (role + "-process.json")).write_text(json.dumps({"pid": pid, "exe": os.readlink(f"/proc/{pid}/exe"), "settings": settings}))
