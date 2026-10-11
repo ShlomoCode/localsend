@@ -1,6 +1,14 @@
 package org.localsend.cloudtransport;
 import android.app.*;
 import android.content.Intent;
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.LinkProperties;
+import android.net.LinkAddress;
+import android.net.wifi.WifiManager;
+import android.provider.Settings;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Base64;
@@ -23,6 +31,78 @@ public final class RelayService extends Service {
   private volatile String downlinkNativeError="",retirementReason="",retirementOutcome="not-requested";
   private volatile long downlinkFirstReadMs,downlinkClosedMs;
   private static volatile String lastDownlinkObservation="{}";
+  private static volatile Context observationContext;
+  private static final Object networkEventLock=new Object();
+  private static final java.util.ArrayDeque<String> networkEvents=new java.util.ArrayDeque<>();
+  private ConnectivityManager observedConnectivity;
+  private ConnectivityManager.NetworkCallback ownedNetworkCallback;
+  private static String observationUtc(){return java.time.Instant.now().toString();}
+  private static JSONObject describeNetwork(ConnectivityManager manager,Network network,NetworkCapabilities suppliedCapabilities,LinkProperties suppliedLinks)throws JSONException{
+    JSONObject result=new JSONObject().put("networkHandle",network.getNetworkHandle());JSONArray transports=new JSONArray(),prefixes=new JSONArray();
+    NetworkCapabilities capabilities=suppliedCapabilities!=null?suppliedCapabilities:manager.getNetworkCapabilities(network);
+    LinkProperties links=suppliedLinks!=null?suppliedLinks:manager.getLinkProperties(network);
+    if(capabilities!=null){
+      if(capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))transports.put("WIFI");
+      if(capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))transports.put("CELLULAR");
+      if(capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))transports.put("ETHERNET");
+      if(capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN))transports.put("VPN");
+    }
+    if(links!=null)for(LinkAddress address:links.getLinkAddresses()){
+      if(prefixes.length()>=16)break;
+      // Retain address family and prefix length, never the device's IP address.
+      prefixes.put(new JSONObject().put("family",address.getAddress() instanceof Inet4Address?"IPv4":"IPv6").put("prefixLength",address.getPrefixLength()));
+    }
+    return result.put("transports",transports).put("validated",capabilities==null?JSONObject.NULL:capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+      .put("interfaceName",links==null||links.getInterfaceName()==null?JSONObject.NULL:links.getInterfaceName()).put("addressPrefixes",prefixes);
+  }
+  public static JSONObject currentNetworkObservation()throws JSONException{
+    JSONObject result=new JSONObject().put("observationUtc",observationUtc()).put("elapsedRealtimeMs",SystemClock.elapsedRealtime())
+      .put("airplaneMode",JSONObject.NULL).put("wifiEnabled",JSONObject.NULL).put("activeNetwork",JSONObject.NULL);
+    JSONArray networks=new JSONArray(),errors=new JSONArray();Context context=observationContext;
+    if(context==null)errors.put("ContextUnavailable");
+    else{
+      try{result.put("airplaneMode",Settings.Global.getInt(context.getContentResolver(),Settings.Global.AIRPLANE_MODE_ON)!=0);}catch(Exception error){errors.put("airplaneMode:"+error.getClass().getSimpleName());}
+      try{WifiManager wifi=context.getSystemService(WifiManager.class);if(wifi!=null)result.put("wifiEnabled",wifi.isWifiEnabled());else errors.put("WifiManagerUnavailable");}catch(Exception error){errors.put("wifiEnabled:"+error.getClass().getSimpleName());}
+      try{
+        ConnectivityManager manager=context.getSystemService(ConnectivityManager.class);
+        if(manager==null)errors.put("ConnectivityManagerUnavailable");
+        else{
+          Network active=manager.getActiveNetwork();if(active!=null)result.put("activeNetwork",describeNetwork(manager,active,null,null));
+          for(Network network:manager.getAllNetworks()){
+            if(networks.length()>=16){errors.put("NetworkSnapshotTruncated");break;}
+            networks.put(describeNetwork(manager,network,null,null));
+          }
+        }
+      }catch(Exception error){errors.put("connectivity:"+error.getClass().getSimpleName());}
+    }
+    return result.put("networks",networks).put("errors",errors);
+  }
+  private void rememberNetworkEvent(String event,Network network,NetworkCapabilities capabilities,LinkProperties links){
+    try{
+      JSONObject entry=new JSONObject().put("event",event).put("observationUtc",observationUtc()).put("elapsedRealtimeMs",SystemClock.elapsedRealtime()).put("instance",instance);
+      try{entry.put("network",network==null?JSONObject.NULL:describeNetwork(observedConnectivity,network,capabilities,links));}
+      catch(Exception error){entry.put("network",network==null?JSONObject.NULL:new JSONObject().put("networkHandle",network.getNetworkHandle())).put("subjectError",error.getClass().getSimpleName());}
+      entry.put("observation",currentNetworkObservation());
+      synchronized(networkEventLock){if(networkEvents.size()>=128)networkEvents.removeFirst();networkEvents.addLast(entry.toString());}
+    }catch(JSONException ignored){}
+  }
+  private void startNetworkObserver(){
+    observedConnectivity=getSystemService(ConnectivityManager.class);
+    if(observedConnectivity==null){rememberNetworkEvent("observerRegistrationFailed",null,null,null);return;}
+    ConnectivityManager.NetworkCallback callback=new ConnectivityManager.NetworkCallback(){
+      public void onAvailable(Network network){rememberNetworkEvent("onAvailable",network,null,null);}
+      public void onLost(Network network){rememberNetworkEvent("onLost",network,null,null);}
+      public void onCapabilitiesChanged(Network network,NetworkCapabilities capabilities){rememberNetworkEvent("onCapabilitiesChanged",network,capabilities,null);}
+      public void onLinkPropertiesChanged(Network network,LinkProperties links){rememberNetworkEvent("onLinkPropertiesChanged",network,null,links);}
+    };
+    try{observedConnectivity.registerDefaultNetworkCallback(callback);ownedNetworkCallback=callback;rememberNetworkEvent("observerRegistered",null,null,null);}
+    catch(Exception error){rememberNetworkEvent("observerRegistrationFailed:"+error.getClass().getSimpleName(),null,null,null);}
+  }
+  private void stopNetworkObserver(){
+    ConnectivityManager.NetworkCallback callback=ownedNetworkCallback;ownedNetworkCallback=null;
+    if(callback!=null)try{observedConnectivity.unregisterNetworkCallback(callback);rememberNetworkEvent("observerUnregistered",null,null,null);}
+    catch(Exception error){rememberNetworkEvent("observerUnregisterFailed:"+error.getClass().getSimpleName(),null,null,null);}
+  }
   private long peerAbsoluteMs=15*60000;
   private final String instance=java.util.UUID.randomUUID().toString().replace("-","").substring(0,8);
   private final ConcurrentHashMap<String,HttpURLConnection> uploads=new ConcurrentHashMap<>();
@@ -38,6 +118,9 @@ public final class RelayService extends Service {
   public static JSONObject transportStatus() throws JSONException {
     RelayService service=activeService;JSONObject result=new JSONObject();
     result.put("lastDownlinkObservation",new JSONObject(lastDownlinkObservation));
+    result.put("currentNetworkObservation",currentNetworkObservation());JSONArray events=new JSONArray();
+    synchronized(networkEventLock){for(String event:networkEvents)events.put(new JSONObject(event));}
+    result.put("networkEvents",events);
     if(service==null)return result.put("servicePresent",false).put("running",false).put("ready",false).put("lifecycle","stopped");
     ServerSocket bound=service.reverse?service.listener:service.control;
     boolean listenerBound=bound!=null&&bound.isBound()&&!bound.isClosed();
@@ -66,6 +149,7 @@ public final class RelayService extends Service {
   public int onStartCommand(Intent intent,int flags,int id){
     // Android advances the start ID even when this instance ignores a duplicate start.
     ownedStartId=id;
+    observationContext=getApplicationContext();
     if(running||destroying)return START_NOT_STICKY;
     NotificationManager nm=getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel("relay","Cloud transport",NotificationManager.IMPORTANCE_LOW));
@@ -73,6 +157,7 @@ public final class RelayService extends Service {
     targetPort=intent.getBooleanExtra("control",false)?53319:53317;
     reverse=intent.getBooleanExtra("reverse",false);
     running=true;activeService=this;
+    startNetworkObserver();
     trace("service-start","-");
     pullThread=new Thread(()->{try{
       JSONObject config=new JSONObject(read(getAssets().open("config.json")));
@@ -313,6 +398,7 @@ public final class RelayService extends Service {
   }
   private static String read(InputStream in)throws Exception{try(InputStream input=in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=input.read(b))!=-1)out.write(b,0,n);return out.toString("UTF-8");}}
   public void onDestroy(){
+    stopNetworkObserver();
     trace("service-destroy","-");destroying=true;running=false;ready=false;lifecycle="stopping";
     try{if(listener!=null)listener.close();if(control!=null)control.close();}catch(Exception ignored){}
     // Cancellation/join run off the UI thread. Status remains 'stopping' until the owned pull worker is gone.

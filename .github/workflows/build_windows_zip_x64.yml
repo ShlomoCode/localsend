@@ -13,6 +13,7 @@ jobs:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue1461-${{ github.run_id }}-${{ github.run_attempt }}
+      INTERRUPTION_MODE: provider-airplane
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4

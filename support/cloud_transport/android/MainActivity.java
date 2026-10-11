@@ -268,7 +268,7 @@ public final class MainActivity extends Activity {
       return insets;
     });
     TextView text=new TextView(this);text.setMaxLines(6);text.setText("Cloud transport helper\nSeparate diagnostic app. LocalSend is unchanged.");layout.addView(text);
-    fileResult=new TextView(this);layout.addView(fileResult);
+    fileResult=new TextView(this);fileResult.setMaxLines(4);layout.addView(fileResult);
     Button hash=new Button(this);hash.setText("Verify received file");hash.setContentDescription("Verify received file");hash.setAllCaps(false);layout.addView(hash);
     hash.setOnClickListener(v->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,1461);});
     Button wifi=new Button(this);wifi.setText("Open Wi-Fi settings");wifi.setContentDescription("Open Wi-Fi settings");wifi.setAllCaps(false);layout.addView(wifi);
@@ -279,6 +279,13 @@ public final class MainActivity extends Activity {
       fileResult.setText("WIFI_SETTINGS_RESOLVED "+resolved.flattenToShortString());
       intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
       startActivity(intent);
+    });
+    Button airplane=new Button(this);airplane.setText("Open airplane mode settings");airplane.setContentDescription("Open airplane mode settings");airplane.setAllCaps(false);layout.addView(airplane);
+    airplane.setOnClickListener(v->{
+      Intent intent=new Intent(android.provider.Settings.ACTION_AIRPLANE_MODE_SETTINGS);
+      android.content.ComponentName resolved=intent.resolveActivity(getPackageManager());
+      if(resolved==null){fileResult.setText("AIRPLANE_SETTINGS_UNAVAILABLE");return;}
+      fileResult.setText("AIRPLANE_SETTINGS_RESOLVED "+resolved.flattenToShortString());intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);startActivity(intent);
     });
     Button control=new Button(this);control.setText("Start socket control");control.setContentDescription("Start socket control");control.setAllCaps(false);layout.addView(control);
     Button actual=new Button(this);actual.setText("Relay to LocalSend");actual.setContentDescription("Relay to LocalSend");actual.setAllCaps(false);layout.addView(actual);

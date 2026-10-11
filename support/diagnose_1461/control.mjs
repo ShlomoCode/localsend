@@ -15,7 +15,10 @@ const secrets=[auth,...secretKeys.map(k=>process.env[k])];
 const redact=v=>secrets.reduce((s,k)=>s.replaceAll(k,'[redacted]'),String(v));
 const save=(name,v)=>fs.writeFileSync(path.join(out,name),redact(typeof v==='string'?v:JSON.stringify(v,null,2)));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const interruptionMode=process.env.INTERRUPTION_MODE||'wifi-ui';
+assert(['wifi-ui','provider-airplane'].includes(interruptionMode),'Unknown interruption mode');
 const report={status:'preparing',startedUtc:new Date().toISOString(),issue:1461,
+ interruptionMode,
  release:'1.14.0',device:'Samsung Galaxy S23',android:'13.0',
  boundaries:['Windows Server 2022 differs from Windows 11','Galaxy S23 Android 13 differs from Redmi K40 HyperOS Android 13','Cloud relay differs from shared LAN'],
  actions:[],cases:[],cleanupErrors:[]};
@@ -106,6 +109,61 @@ async function normalWifiDisconnect({requireActivePeer=false}={}){
  await toggleWifi(false,'wifi-off',{requireActivePeer});
  report.wifiDisconnectObserved=true;
 }
+async function transportObservation(name){
+ await activate('org.localsend.cloudtransport');await tap('Show transport status',{action:true});
+ const xml=await wait(s=>labels(s).some(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n')),10000,'Native network observation missing');
+ const status=JSON.parse(labels(xml).find(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n')).slice('HELPER_TRANSPORT_STATUS\n'.length));
+ save(name+'.json',status);return status;
+}
+const wifiNetwork=n=>n?.transports?.includes('WIFI');
+function networkOff(o){return o?.airplaneMode===true&&o.wifiEnabled===false&&Array.isArray(o.networks)&&!o.networks.some(wifiNetwork)&&o.activeNetwork===null&&o.errors?.length===0;}
+function networkRestored(o){return o?.airplaneMode===false&&o.wifiEnabled===true&&wifiNetwork(o.activeNetwork)&&o.activeNetwork.validated===true&&o.activeNetwork.interfaceName&&o.activeNetwork.addressPrefixes?.length>0&&o.errors?.length===0;}
+async function providerNetwork(profile,name){
+ // This documented endpoint operates the owned device; API success is never loss evidence.
+ if(profile==='airplane-mode')report.providerNetworkMayHaveChanged=true;
+ const response=await fetch('https://api-cloud.browserstack.com/app-automate/sessions/'+session+'/update_network.json',{
+  method:'PUT',headers:{authorization:auth,'content-type':'application/json'},body:JSON.stringify({networkProfile:profile}),signal:AbortSignal.timeout(60000)});
+ const body=await response.text();save(name+'-provider.json',{utc:new Date().toISOString(),profile,status:response.status,body});
+ assert(response.ok,'Provider network profile unsupported or failed: '+response.status);
+}
+async function awaitObservedNetwork(predicate,name){
+ const end=Date.now()+45000;let status;
+ do{status=await transportObservation(name+'-latest');if(predicate(status.currentNetworkObservation))break;assert(Date.now()<end,'Actual OS network state did not satisfy '+name);await sleep(1000);}while(true);
+ await snap(name);save(name+'.json',status);return status;
+}
+async function disconnectNetwork({requireActivePeer=false}={}){
+ const before=await transportObservation('network-before-interruption');
+ assert(before.currentNetworkObservation?.wifiEnabled===true&&wifiNetwork(before.currentNetworkObservation.activeNetwork),'No actual Wi-Fi transport before interruption');
+ if(interruptionMode==='wifi-ui'){await normalWifiDisconnect({requireActivePeer});return;}
+ assert(networkRestored(before.currentNetworkObservation),'Provider airplane trial requires observed airplane off and validated Wi-Fi/interface before input');
+ if(requireActivePeer){const state=r.status();assert(state.activePeerIds.includes(report.interruptedPeer),'Large-upload peer already ended before airplane input');assert(state.peerChunks[report.interruptedPeer].fromSender.bytes<report.largeFixtureBytes*0.9,'Source may already have finished before airplane input');save('transport-immediately-before-airplane-input.json',state);}
+ await providerNetwork('airplane-mode','airplane-on');await awaitObservedNetwork(networkOff,'airplane-os-network-off');
+ await tap('Open airplane mode settings',{action:true});await snap('airplane-native-settings');
+ report.airplaneDisconnectObserved=true;
+}
+async function restoreNetwork(name){
+ if(interruptionMode==='provider-airplane'){
+  await providerNetwork('reset',name);await awaitObservedNetwork(networkRestored,name+'-os-restored');
+ }else{
+  await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Restore Wi-Fi switch unavailable');
+  if(wifiSwitches(await source())[0].checked==='false')await toggleWifi(true,name);
+  await transportObservation(name+'-native-observation');
+ }
+}
+async function selectCompatibleDevice(){
+ if(interruptionMode!=='provider-airplane')return;
+ const response=await fetch('https://api-cloud.browserstack.com/app-automate/devices.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+ assert(response.ok,'Fresh supported-device inventory unavailable');const inventory=await response.json();assert(Array.isArray(inventory),'Invalid device inventory');
+ const candidates=['Samsung Galaxy S20','Samsung Galaxy S21','Google Pixel 5','Google Pixel 4a'];
+ const matches=inventory.filter(d=>d.os?.toLowerCase()==='android'&&d.os_version==='13.0'&&d.realMobile===true&&candidates.includes(d.device));
+ save('airplane-device-inventory.json',{utc:new Date().toISOString(),source:'Authenticated /app-automate/devices.json',compatibilitySource:'https://www.browserstack.com/app-automate/capabilities',compatibilityChecked:'2026-10-11',candidates,matches,
+  excludedOriginalDevice:'Samsung Galaxy S23 is explicitly excluded from airplane-mode support',scope:'Distinct airplane-mode diagnostic; not original Wi-Fi-off reproduction'});
+ const selected=candidates.map(name=>matches.find(d=>d.device===name)).find(Boolean);
+ assert(selected,'No inventoried Android 13 device among documented airplane-compatible candidates; stop before session creation');
+ report.device=selected.device;report.android=selected.os_version;
+ report.boundaries[1]=selected.device+' Android '+selected.os_version+' differs from Redmi K40 HyperOS Android 13';
+ report.boundaries.push('Provider actual airplane-mode is a different trigger from the original Wi-Fi Settings experiment');
+}
 function successfulFileControl(value,phase){
  const result=value.result;assert.equal(result?.phase,phase,'Wrong file-control phase');
  assert.equal(result.rename?.success,true,'Ordinary control rename failed');assert.equal(result.delete?.success,true,'Ordinary control delete failed');
@@ -162,12 +220,12 @@ async function forwardControls(){
   const activeEnd=Date.now()+30000;let peer;
   do{peer=r.status().activePeerIds.find(id=>r.status().peerDownlink[id]===stream.id&&r.status().peerChunks[id]?.fromSender.bytes===65537);if(peer)break;assert(Date.now()<activeEnd,'Physical dropout socket did not progress');await sleep(100);}while(true);
   assert.equal(r.status().opened,opened+1,'Unexpected socket opened during transport loss control');
-  save('physical-dropout-before.json',r.status());await normalWifiDisconnect();
+  save('physical-dropout-before.json',r.status());await disconnectNetwork();
   const lossEnd=Date.now()+60000;let event;
-  do{event=r.status().streamHistory.find(e=>e.id===stream.id&&e.physical&&e.ownedPeers.includes(peer));if(event&&closed&&!r.status().activePeerIds.includes(peer))break;assert(Date.now()<lossEnd,'Normal Wi-Fi off did not produce a native downlink abort and native Windows peer close; no synthetic reset substituted');await sleep(250);}while(true);
+  do{event=r.status().streamHistory.find(e=>e.id===stream.id&&e.physical&&e.ownedPeers.includes(peer));if(event&&closed&&!r.status().activePeerIds.includes(peer))break;assert(Date.now()<lossEnd,'Observed OS interruption did not produce a native downlink abort and native Windows peer close; no synthetic reset substituted');await sleep(250);}while(true);
   const androidLoss=await helperLossEvidence(stream.id,'physical-dropout-helper');
   save('physical-dropout-control.json',{status:'passed',scope:'Transport loss propagation only, not LocalSend failure',streamId:stream.id,peer,event,androidLoss,closed,status:r.status()});
-  await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Physical control Wi-Fi restore unavailable');await toggleWifi(true,'physical-control-wifi-restored');
+  await restoreNetwork('physical-control-network-restored');
  }finally{physical.destroy();}
  await activate('org.localsend.cloudtransport');
  await tap('Stop helper');await wait(s=>labels(s).some(v=>v.includes('HELPER_SERVICE_STATUS')&&v.includes('"servicePresent":false')),45000,'Control helper not stopped');
@@ -195,12 +253,13 @@ async function preserveAndroidRecording(){
  throw Error('Owned BrowserStack video did not become a valid MP4; no XML/HTML substituted for recording');
 }
 try{
+ await selectCompatibleDevice();
  const capacityResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
  assert(capacityResponse.ok,'Fresh BrowserStack capacity failed');const capacity=await capacityResponse.json();save('fresh-capacity.json',capacity);
  assert(Number.isFinite(capacity.parallel_sessions_running)&&capacity.parallel_sessions_running<Math.min(5,capacity.parallel_sessions_max_allowed),'No authorized shared BrowserStack capacity');
  await r.start();
  sessionCreationAttempted=true;
- const created=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:deviceName':report.device,'appium:platformVersion':'13.0',
+ const created=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:deviceName':report.device,'appium:platformVersion':report.android,
   'appium:app':process.env.BASELINE_APP,'appium:autoGrantPermissions':true,'appium:otherApps':[process.env.RELAY_APP],
   'bstack:options':{userName:process.env.BROWSERSTACK_USERNAME,accessKey:process.env.BROWSERSTACK_ACCESS_KEY,
    projectName:'LocalSend bug sprint',buildName:'issue1461-'+process.env.GITHUB_RUN_ID,sessionName:'Original1.14 Windows source handle interruption',
@@ -227,12 +286,12 @@ try{
  const active=r.status();save('interrupted-active-transport.json',active);
  const peers=active.activePeerIds?.filter(id=>active.peerChunks[id]?.fromSender.bytes>=1048576)||[];assert.equal(peers.length,1,'Expected one observed active large-upload peer');
  report.interruptedPeer=peers[0];report.interruptedStream=active.peerDownlink[peers[0]];report.largeFixtureBytes=ready.fixtures.failed.bytes;await command('screenshot',{label:'active-immediately-before-network-off'});
- await normalWifiDisconnect({requireActivePeer:true});await command('screenshot',{label:'after-disconnect'});
+ await disconnectNetwork({requireActivePeer:true});await command('screenshot',{label:'after-disconnect'});
  const physicalEnd=Date.now()+60000;let physicalLoss;
  do{physicalLoss=r.status().streamHistory.find(e=>e.id===report.interruptedStream&&e.physical&&e.ownedPeers.includes(report.interruptedPeer));if(physicalLoss)break;assert(Date.now()<physicalEnd,'Actual transfer network loss had no native physical downlink abort; synthetic/deadline failures excluded');await sleep(250);}while(true);
  report.physicalLoss=physicalLoss;report.androidPhysicalLoss=await helperLossEvidence(report.interruptedStream,'actual-network-helper-loss');save('actual-network-loss.json',{windows:physicalLoss,android:report.androidPhysicalLoss});
- await command('record-interruption',{kind:'normal-network-interruption',evidence:'../wifi-off.png; actual Android Settings switch verified true→false'});
- await sleep(15000);const after=await command('probe',{fixture:'failed',phase:'after-terminal-error'});report.cases.push({name:'normal-wifi-disconnect',probe:after});
+ await command('record-interruption',{kind:interruptionMode==='wifi-ui'?'normal-network-interruption':'distinct-provider-airplane-interruption',evidence:interruptionMode==='wifi-ui'?'../wifi-off.png; actual Android Settings switch verified true→false':'../airplane-os-network-off.json; actual airplane on, Wi-Fi off, no active interface; same-generation physical native closure'});
+ await sleep(15000);const after=await command('probe',{fixture:'failed',phase:'after-terminal-error'});report.cases.push({name:interruptionMode,probe:after});
  const details=await command('error-details');report.errorDetails=details;
  const errorText=details.result?.ocr?.text+' '+((details.result?.uia?.tree||[]).map(n=>n.name).join(' '));assert(/DioException|SocketException|connection|network/i.test(errorText),'Actual error details lack a network-failure observation');
  await command('click',{label:'Close'});
@@ -241,15 +300,16 @@ try{
  report.status='observations-complete';report.reproduced=null;report.verdict='Await independent inspection of terminal error, physical interruption provenance and source-owner handle evidence';
 }catch(error){report.status='incomplete';report.error=redact(error.stack||error);process.exitCode=1;if(session){try{await snap('failure');}catch(e){report.snapshotError=redact(e.message);}}}
 finally{
- deadline=Date.now()+180000;
+ deadline=Date.now()+300000;
  if(!session&&sessionCreationAttempted){try{
   const get=async suffix=>{const response=await fetch('https://api-cloud.browserstack.com/app-automate/'+suffix,{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});assert(response.ok,'Owned startup lookup '+response.status);return response.json();};
   const builds=(await get('builds.json')).map(x=>x.automation_build).filter(x=>x.name==='issue1461-'+process.env.GITHUB_RUN_ID);assert(builds.length<=1,'Ambiguous owned build');
   if(builds.length){const sessions=(await get('builds/'+builds[0].hashed_id+'/sessions.json')).map(x=>x.automation_session);assert(sessions.length<=1,'Ambiguous owned session');if(sessions[0]?.status==='running')session=sessions[0].hashed_id;save('startup-session-lookup.json',sessions.map(x=>({id:x.hashed_id,status:x.status})));}
  }catch(e){report.cleanupErrors.push(redact(e.message));}}
  if(child&&!childExit){try{await command('stop');}catch{child.kill();}}
+ if(session){try{await transportObservation('finally-before-network-restore');}catch(e){report.cleanupErrors.push('Final passive network observation: '+redact(e.message));}}
  // Restore only this owned device's Wi-Fi before session cleanup when the normal switch was changed.
- if(session&&report.wifiSwitchMayHaveChanged){try{await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Restore Wi-Fi switch unavailable');if(wifiSwitches(await source())[0].checked==='false')await toggleWifi(true,'wifi-restored');}catch(e){report.cleanupErrors.push(redact(e.message));}}
+ if(session&&(report.wifiSwitchMayHaveChanged||report.providerNetworkMayHaveChanged)){try{await restoreNetwork('finally-network-restored');}catch(e){report.cleanupErrors.push(redact(e.message));}}
  if(session){try{await wd('DELETE',base());await preserveAndroidRecording();}catch(e){report.cleanupErrors.push(redact(e.message));}}
  try{await r.stop();}catch(e){report.cleanupErrors.push(redact(e.message));}
  save('relay-trace.json',r.trace);save('relay-status.json',r.status());report.finishedUtc=new Date().toISOString();save('results.json',report);
