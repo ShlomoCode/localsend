@@ -233,5 +233,23 @@ foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";w
  Start-Sleep -Seconds 1
  Screenshot "$($size.name)-after-edge-drag"
 }
+$lastRows=Import-Csv "$EvidenceDirectory/larger-after-edge-drag.tsv" -Delimiter "`t"
+$lastPeer=$lastRows | Where-Object {$_.text -eq "Peer12"} | Select-Object -First 1
+@{lastRowVisible=($null -ne $lastPeer);lastRowOcr=$lastPeer;input="six wheel notches, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
+if($lastPeer) {
+ FavoritePencil "larger-after-edge-drag" (([int]$lastPeer.top + [int]$lastPeer.height/2)/2 + 10)
+ Screenshot "last-row-edit"
+ Word "Cancel" "last-row-edit"
+ Screenshot "last-row-edit-cancelled"
+}
+Screenshot "long-list-before-cancel"
+Word "Cancel" "long-list-before-cancel"
+Screenshot "long-list-cancel-result"
+Click 576 212
+Screenshot "long-list-reopened"
+PrimaryButton "long-list-reopened"
+Screenshot "add-after-long-list"
+Word "Cancel" "add-after-long-list"
+Screenshot "add-after-long-list-cancel-result"
 foreach($p in $apps.Values) {Stop-Process -Id $p.Id -Force}
 Stop-Transcript

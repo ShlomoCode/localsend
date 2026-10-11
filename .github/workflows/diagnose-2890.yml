@@ -1,8 +1,5 @@
 name: Diagnose 2890 Favorites scrolling
 on:
-  push:
-    branches: [codex/diagnose-2890]
-    paths: [support/test/windows/diagnose2890.ps1]
   workflow_dispatch:
     inputs:
       compare_run:
