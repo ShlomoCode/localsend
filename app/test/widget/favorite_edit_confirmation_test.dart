@@ -90,7 +90,10 @@ Widget _testApp(MockPersistenceService persistence) {
                 child: const Text('Edit favorite'),
               ),
               TextButton(
-                onPressed: () => showDialog<void>(context: context, builder: (_) => const AlertDialog(title: Text('Keep open'))),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => const AlertDialog(title: Text('Keep open')),
+                ),
                 child: const Text('Other dialog'),
               ),
             ],
