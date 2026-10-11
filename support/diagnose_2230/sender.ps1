@@ -95,9 +95,8 @@ function SendToReceiver([string]$Ip) {
   Start-Sleep -Milliseconds 500
   [ReceiverNative]::FocusState([IntPtr]::new($mode.window.Hwnd)) | Set-Content (Join-Path $evidence ('focus-'+$currentCase+'.txt'))
   if(-not [ReceiverNative]::HasKeyboardFocus([IntPtr]::new($mode.window.Hwnd))) { throw 'Original app does not own keyboard focus; no paste.' }
-  [Windows.Forms.Clipboard]::SetText($Ip)
-  [Windows.Forms.SendKeys]::SendWait('^a')
-  [Windows.Forms.SendKeys]::SendWait('^v')
+  [ReceiverNative]::TypeIpv4($Ip)
+  Start-Sleep -Milliseconds 500
   $confirmation=Snapshot 'address-filled'
   if($confirmation.text -notmatch [regex]::Escape($Ip)) { throw 'Receiver IP was not visibly entered; no Confirm or Send.' }
   ClickWord $confirmation 'Confirm'

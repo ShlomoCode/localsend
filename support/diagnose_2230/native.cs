@@ -22,6 +22,17 @@ public static class ReceiverNative {
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] private static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] private static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
+ [DllImport("user32.dll")] private static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
+ public static void TypeIpv4(string address) {
+  foreach(char c in address) if(c!='.' && (c<'0'||c>'9')) throw new ArgumentException("Not an IPv4 literal");
+  keybd_event(0x11,0,0,UIntPtr.Zero); keybd_event(0x41,0,0,UIntPtr.Zero);
+  keybd_event(0x41,0,2,UIntPtr.Zero); keybd_event(0x11,0,2,UIntPtr.Zero);
+  foreach(char c in address) {
+   byte key=c=='.' ? (byte)0xBE : (byte)c;
+   keybd_event(key,0,0,UIntPtr.Zero); keybd_event(key,0,2,UIntPtr.Zero);
+   System.Threading.Thread.Sleep(40);
+  }
+ }
  [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread,ref GUITHREADINFO info);
  public static string FocusState(IntPtr app) {
   uint owner,focusedOwner; uint thread=GetWindowThreadProcessId(app,out owner);
