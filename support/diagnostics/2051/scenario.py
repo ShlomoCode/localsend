@@ -116,7 +116,7 @@ def transfer(content, phase):
     time.sleep(5)
     xml = snapshot(R, phase + "-receiver-complete")
     snapshot(S, phase + "-sender-complete")
-    if "100%, Finished" not in xml:
+    if not any(value in ["100%, Finished", "100, Finished"] for value in labels(xml)):
         raise RuntimeError("Receiver did not finish")
     files = adb(R, "shell", "find", "/sdcard/Download", "-type", "f").strip().splitlines()
     saved = []
