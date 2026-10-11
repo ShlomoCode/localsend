@@ -206,24 +206,32 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await wd('POST',prefix+'/appium/device/press_keycode',{keycode:3});
   await new Promise(r=>setTimeout(r,1500));
   await snapshot('file-manager-home');
-  const manager=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="File Manager" or @content-desc="File Manager" or @text="Files" or @content-desc="Files"]'}).catch(()=>null);
+  const manager=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="File Manager" or @content-desc="File Manager" or @text="Files" or @content-desc="Files"]',label:'home-file-manager-entry',optional:true});
   if(manager){
    await wd('POST',prefix+'/element/'+manager['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   await new Promise(r=>setTimeout(r,1500));
-   await snapshot('file-manager-open');
-   const managerSource=readFileSync('evidence/android-file-manager-open.xml','utf8');
-   if(managerSource.includes('id/agree_button')){
-    const agree=await wd('POST',prefix+'/element',{using:'id',value:'com.google.android.apps.nbu.files:id/agree_button'});
-    await wd('POST',prefix+'/element/'+agree['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-    await new Promise(r=>setTimeout(r,1500));
-    await snapshot('files-after-continue');
-    if(readFileSync('evidence/android-files-after-continue.xml','utf8').includes('permission_allow_button')){
-     const allow=await wd('POST',prefix+'/element',{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'});
+   writeFileSync('evidence/file-manager-launch.json',JSON.stringify({method:'Observed native Files launcher control',package:'com.google.android.apps.nbu.files'},null,2));
+  }else{
+   assert(fileManagerInventory.some(app=>app.appId==='com.google.android.apps.nbu.files'&&app.installed===true),'No observed Files control or confirmed installed Google Files app');
+   await wd('POST',prefix+'/appium/device/activate_app',{appId:'com.google.android.apps.nbu.files'});
+   writeFileSync('evidence/file-manager-launch.json',JSON.stringify({method:'Normal Appium activateApp for confirmed installed Google Files; launcher accessibility control unavailable',package:'com.google.android.apps.nbu.files'},null,2));
+  }
+  {
+   const onboardingDeadline=Date.now()+10000;
+   let onboardingAttempt=0;
+   do{
+    await snapshot('file-manager-open-'+onboardingAttempt++);
+    const managerSource=readFileSync('evidence/android-file-manager-open-'+(onboardingAttempt-1)+'.xml','utf8');
+    if(managerSource.includes('id/agree_button')){
+     const agree=await waitForNativeControl({wd,prefix,using:'id',value:'com.google.android.apps.nbu.files:id/agree_button',label:'files-onboarding-continue'});
+     await wd('POST',prefix+'/element/'+agree['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+    }else if(managerSource.includes('permission_allow_button')){
+     const allow=await waitForNativeControl({wd,prefix,using:'id',value:'com.android.permissioncontroller:id/permission_allow_button',label:'files-onboarding-permission'});
      await wd('POST',prefix+'/element/'+allow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-     await new Promise(r=>setTimeout(r,1500));
-     await snapshot('files-after-permission');
+    }else if(managerSource.includes(safDocuments?'text="Documents &amp; other"':'text="Downloads"')){
+     break;
     }
-   }
+    await new Promise(r=>setTimeout(r,200));
+   }while(Date.now()<onboardingDeadline);
    const downloads=await waitForNativeControl({wd,prefix,using:'xpath',value:safDocuments?'//*[@text="Documents & other"]':'//*[@text="Downloads"]',label:'file-manager-category'});
    await wd('POST',prefix+'/element/'+downloads['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    await new Promise(r=>setTimeout(r,2000));
