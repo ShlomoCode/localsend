@@ -20,7 +20,9 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
   }
   throw new Error(`${caseName}: preflight picker did not return to original Options/default Download`);
  }
- for(const dwellMs of [2000,10000]) {
+ const longDwellMs=Number(process.env.PICKER_LONG_DWELL_MS||10000);
+ if(![10000,20000,30000].includes(longDwellMs))throw new Error('Unsupported diagnostic long dwell');
+ for(const dwellMs of [2000,longDwellMs]) {
   const caseName=`picker-${dwellMs/1000}s`,fileName=`issue3393-${process.env.GITHUB_RUN_ID}-${caseName}.txt`;
   await clickElement(await completedReady(`${caseName}-previous-completion`),`${caseName}-previous-done`);
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case',caseName]);

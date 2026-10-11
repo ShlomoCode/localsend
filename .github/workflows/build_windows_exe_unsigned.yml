@@ -6,6 +6,14 @@ on:
         type: choice
         options: [software-emulator, windows11-sender-ui, physical-control]
         default: software-emulator
+      bs_device:
+        type: choice
+        options: [Google Pixel 9, OnePlus 13R, Samsung Galaxy S25]
+        default: Google Pixel 9
+      picker_dwell_ms:
+        type: choice
+        options: ['10000', '20000', '30000']
+        default: '10000'
 permissions:
   contents: read
 jobs:
@@ -81,7 +89,8 @@ jobs:
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue3393-${{ github.run_id }}
       BASELINE_APP: bs://3dfcafa474a5db80bb8dde70a68c0087b21b27d3
-      BS_DEVICE: Google Pixel 9
+      BS_DEVICE: ${{ inputs.bs_device || 'Google Pixel 9' }}
+      PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
       BS_OS: '15.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario3393.mjs
     steps:
