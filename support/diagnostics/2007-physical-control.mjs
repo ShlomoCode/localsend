@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 export default async function({session,wd,senderHost,senderPort,transportStatus}) {
  const prefix=`/session/${session}`;
  const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
+ const windows=process.platform==='win32';
  await wd('POST',prefix+'/appium/settings',{settings:{waitForIdleTimeout:0}});
  async function snapshot(stage){
   writeFileSync(`evidence/android-${stage}.xml`,await wd('GET',prefix+'/source'));
@@ -54,10 +55,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  });
  assert.equal(beforeNumbered,null,'Baseline A-2.txt already exists; numbered-path observation would be ambiguous');
  writeFileSync('evidence/baseline-path-absence.json',JSON.stringify({path:'/sdcard/Download/A.txt',absent:true,utc:new Date().toISOString()},null,2));
- const desktop=spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
+ const desktop=windows?spawn('pwsh',['-NoProfile','-File','support/diagnostics/2007-windows-sender.ps1'],{env:{...process.env,TRANSPORT_SENDER_PORT:String(senderPort)}}):spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
  let proxy;
  try {
+  if(!windows){
   await waitFile('evidence/desktop-stopped',120000);
   proxy=net.createServer({allowHalfOpen:true},client=>{
    const remote=net.connect({host:senderHost,port:senderPort,allowHalfOpen:true});
@@ -66,7 +68,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   });
   await new Promise((resolve,reject)=>{proxy.once('error',reject);proxy.listen(53317,'127.0.0.1',resolve);});
   writeFileSync('evidence/transport-ready','transparent TCP forwarding only\n');
-  await waitFile('evidence/transfer-requested',90000);
+  }
+  await waitFile('evidence/transfer-requested',windows?240000:90000);
   let accept;
   for(let i=0;i<20;i++){
    await snapshot('request-'+i);
@@ -88,12 +91,12 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,3500));
    await snapshot('after-storage-permission');
   }
-  const expected=readFileSync('/tmp/issue-2007/A.txt');
+  const expected=readFileSync(windows?'evidence/A.txt':'/tmp/issue-2007/A.txt');
   const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'});
   const actual=Buffer.from(encoded,'base64');
   writeFileSync('evidence/android-saved-A.txt',actual);
   assert.deepEqual(actual,expected,'Saved Android file differs from selected desktop file');
-  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:'Vivo Y21',os:'Android 11',release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:'/sdcard/Download/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
+  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:'Vivo Y21',os:'Android 11',release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:'/sdcard/Download/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
   if(deletionTiming!=='absence'){
@@ -228,7 +231,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(saved)writeFileSync('evidence/android-resaved-'+resendInput.name,saved);
    writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name==='A.txt',fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
    writeFileSync('evidence/resend-completed','Resend outcome observed; inspect byteExact and endpoint evidence\n');
-   await new Promise(r=>desktop.once('exit',r));
+   if(desktop.exitCode===null)await new Promise(r=>desktop.once('exit',r));
    assert.equal(desktop.exitCode,0,'Desktop resend observation did not complete');
    if(saved&&!numberedByteExact)assert(byteExact,'Resaved file differs from selected original file');
   }

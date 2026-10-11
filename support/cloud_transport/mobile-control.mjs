@@ -21,7 +21,7 @@ try {
  const caps={platformName:'Android','appium:deviceName':process.env.BS_DEVICE||'Vivo Y21','appium:platformVersion':process.env.BS_OS||'11.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend issue 2007',buildName:'issue-2007-'+process.env.GITHUB_RUN_ID,sessionName:'issue-2007-original-app-control',debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
- assert(session,'Session ID missing');writeFileSync('/tmp/helper/session-id',session);
+ assert(session,'Session ID missing');writeFileSync(process.platform==='win32'?'C:/tmp/helper/session-id':'/tmp/helper/session-id',session);
  console.log('BrowserStack control session created for '+caps['appium:deviceName']);
  await new Promise(ok=>setTimeout(ok,3000));await clickText('Start socket control');
  await new Promise(ok=>setTimeout(ok,2500));
