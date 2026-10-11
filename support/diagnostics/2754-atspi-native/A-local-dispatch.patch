@@ -332,10 +332,10 @@ index 4caf5d92..e82f742a 100644
 +  suite: 'socket-local-experiment', timeout: 60)
 diff --git a/tests/at-spi2-atk/socket-local-experiment.c b/tests/at-spi2-atk/socket-local-experiment.c
 new file mode 100644
-index 00000000..b5e72025
+index 00000000..2ac831b0
 --- /dev/null
 +++ b/tests/at-spi2-atk/socket-local-experiment.c
-@@ -0,0 +1,457 @@
+@@ -0,0 +1,489 @@
 +/* Experimental regression tests, to be built/run only in the cloud guest.
 + * Include the production implementation so static forwarding vfuncs and
 + * Embedded binding are exercised directly, with the real SpiRegister. */
@@ -528,20 +528,52 @@ index 00000000..b5e72025
 +}
 +
 +static void
++assert_native_contract (Fixture *f, const gchar *phase, AtkCoordType coord,
++                        gint expected_x, gint expected_y, gint expected_w, gint expected_h)
++{
++  gint x, y, w, h, native_x, native_y, native_w, native_h;
++  atk_component_get_extents (ATK_COMPONENT (f->socket), &native_x, &native_y, &native_w, &native_h, coord);
++  g_test_message ("native socket phase=%s method=extents coord=%d x=%d y=%d w=%d h=%d",
++                  phase, coord, native_x, native_y, native_w, native_h);
++  g_assert_cmpint (native_x, ==, expected_x); g_assert_cmpint (native_y, ==, expected_y);
++  g_assert_cmpint (native_w, ==, expected_w); g_assert_cmpint (native_h, ==, expected_h);
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, coord);
++  g_assert_cmpint (x, ==, native_x); g_assert_cmpint (y, ==, native_y);
++  g_assert_cmpint (w, ==, native_w); g_assert_cmpint (h, ==, native_h);
++
++  /* ATK's default position/size methods call the socket's extents method,
++   * not the parent's distinct position/size methods. Use the public native
++   * socket as the method-specific oracle, with fixed geometry expectations. */
++  atk_component_get_position (ATK_COMPONENT (f->socket), &native_x, &native_y, coord);
++  g_test_message ("native socket phase=%s method=position coord=%d x=%d y=%d", phase, coord, native_x, native_y);
++  g_assert_cmpint (native_x, ==, expected_x); g_assert_cmpint (native_y, ==, expected_y);
++  atk_component_get_position (ATK_COMPONENT (f->plug), &x, &y, coord);
++  g_assert_cmpint (x, ==, native_x); g_assert_cmpint (y, ==, native_y);
++
++  atk_component_get_size (ATK_COMPONENT (f->socket), &native_w, &native_h);
++  g_test_message ("native socket phase=%s method=size w=%d h=%d", phase, native_w, native_h);
++  g_assert_cmpint (native_w, ==, expected_w); g_assert_cmpint (native_h, ==, expected_h);
++  atk_component_get_size (ATK_COMPONENT (f->plug), &w, &h);
++  g_assert_cmpint (w, ==, native_w); g_assert_cmpint (h, ==, native_h);
++}
++
++static void
 +base_contract (Fixture *f, gconstpointer unused)
 +{
-+  gint x, y, w, h;
 +  AtkObject *host = g_object_new (probe_socket_get_type (), NULL);
 +  (void) unused;
-+  assert_failed (f); /* Missing Flutter-style parent is not a zero origin. */
++  assert_native_contract (f, "no-parent", ATK_XY_SCREEN, -1, -1, -1, -1);
++  assert_native_contract (f, "no-parent", ATK_XY_WINDOW, -1, -1, -1, -1);
 +  atk_object_set_parent (f->socket, host);
-+  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_SCREEN);
-+  g_assert_cmpint (x, ==, 311); g_assert_cmpint (y, ==, 217);
-+  atk_component_get_position (ATK_COMPONENT (f->plug), &x, &y, ATK_XY_SCREEN);
-+  g_assert_cmpint (x, ==, -1); g_assert_cmpint (y, ==, -1);
-+  atk_component_get_size (ATK_COMPONENT (f->plug), &w, &h);
-+  g_assert_cmpint (w, ==, -1); g_assert_cmpint (h, ==, -1);
++  assert_native_contract (f, "parent", ATK_XY_SCREEN, 311, 217, 81, 47);
++  assert_native_contract (f, "parent", ATK_XY_WINDOW, 11, 17, 81, 47);
++  ((ProbeSocket *) host)->origin_x += 40;
++  ((ProbeSocket *) host)->origin_y += 60;
++  assert_native_contract (f, "changed-parent", ATK_XY_SCREEN, 351, 277, 81, 47);
++  assert_native_contract (f, "changed-parent", ATK_XY_WINDOW, 51, 77, 81, 47);
 +  atk_object_set_parent (f->socket, NULL);
++  assert_native_contract (f, "removed-parent", ATK_XY_SCREEN, -1, -1, -1, -1);
++  assert_native_contract (f, "removed-parent", ATK_XY_WINDOW, -1, -1, -1, -1);
 +  g_object_unref (host);
 +}
 +
