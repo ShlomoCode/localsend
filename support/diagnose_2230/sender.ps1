@@ -160,9 +160,9 @@ function SendToReceiver([string]$Ip) {
   $dialog=Snapshot 'address-dialog'
   ClickIpAddressTab $dialog
   $mode=Snapshot 'ip-mode'
-  # The retained original dialog places the field between its mode row and Example label.
+  # The retained dialog places the field above Example or Recently used after the first send.
   $hashtag=@($mode.words | Where-Object text -CEQ 'Hashtag')
-  $example=@($mode.words | Where-Object text -CEQ 'Example:')
+  $example=@($mode.words | Where-Object { $_.text -ceq 'Example:' -or $_.text -ceq 'Recently' })
   if($hashtag.Count -ne 1 -or $example.Count -ne 1 -or $example[0].y-$hashtag[0].y -lt 60 -or $example[0].y-$hashtag[0].y -gt 140) { throw 'Input field anchors were not uniquely rendered.' }
   $fieldX=[int]($mode.window.Left+$example[0].x+100)
   $fieldY=[int]($mode.window.Top+($hashtag[0].y+$hashtag[0].height+$example[0].y)/2)
@@ -173,7 +173,8 @@ function SendToReceiver([string]$Ip) {
   [ReceiverNative]::TypeIpv4($Ip)
   Start-Sleep -Milliseconds 500
   $confirmation=Snapshot 'address-filled'
-  if($confirmation.text -notmatch [regex]::Escape($Ip)) { throw 'Receiver IP was not visibly entered; no Confirm or Send.' }
+  $entered=@($confirmation.words | Where-Object { $_.text -ceq $Ip -and $_.y -gt ($hashtag[0].y+$hashtag[0].height+10) -and $_.y -lt ($example[0].y-10) })
+  if($entered.Count -ne 1) { throw 'Receiver IP was not visibly entered inside the field; no Confirm or Send.' }
   ClickWord $confirmation 'Confirm'
   Start-Sleep -Seconds 1
   [void](Snapshot 'after-send')
