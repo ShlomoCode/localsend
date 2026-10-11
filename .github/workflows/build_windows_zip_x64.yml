@@ -16,6 +16,10 @@ on:
       version:
         description: Official Windows ZIP release version
         default: '1.16.1'
+      current:
+        description: Use untouched current c1ce artifact from verified build 38108284774
+        type: boolean
+        default: false
 jobs:
   release:
     runs-on: windows-2022
@@ -67,10 +71,19 @@ jobs:
           Copy-Item build/windows/x64/runner/Release "$env:RUNNER_TEMP/guard2277" -Recurse
           Pop-Location
       - name: Download official reported release
+        if: ${{ !inputs.current }}
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v${{ inputs.version }}/LocalSend-${{ inputs.version }}-windows-x86-64.zip -OutFile $env:RUNNER_TEMP/app.zip
           Expand-Archive $env:RUNNER_TEMP/app.zip $env:RUNNER_TEMP/release
+      - name: Download untouched current baseline
+        if: ${{ inputs.current }}
+        uses: actions/download-artifact@v6
+        with:
+          name: baseline2381-c1ce
+          run-id: 38108284774
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release
       - name: Install OCR
         run: choco install tesseract --no-progress -y
       - name: Exercise actual application
