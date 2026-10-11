@@ -16,3 +16,5 @@ I10	infrastructure	Appium Flutter element click stays valid	Send-tab semantic cl
 E01	selection	16GB File selection causes ANR	16GB valid MP4 via File	Run38106817361	Selected16.0GB;0ANR/Wait over32.6s; screenshot confirmed	run-38106817361/large-video-file-observations.json	yes
 E02	selection	16GB Media selection causes ANR	Same16GB valid MP4 via Media	Run38106817361	Selected16.0GB with decoded thumbnail;0ANR/Wait over312.3s; screenshot confirmed	run-38106817361/large-video-media-observations.json	yes
 I11	infrastructure	Helper controls survive landscape/activity recreation	Refresh capacity after Media	Run38106817361	Offscreen control404; helper lastURI also lost on recreation; no share action	run-38106817361/failure.xml	no
+I12	infrastructure	Native chooser exposes LocalSend promptly	1MiB warm external share control	Run38107705939	Samsung chooser spinner still loading;5s target lookup404; no share dispatched	run-38107705939/small-share-control-chooser.png	no
+I13	infrastructure	Default terminate deadline suffices	PORTRAIT control run	Run38108062264	Appium still running after500ms; launcher later visible; no picker or share action	run-38108062264/appium.log	no
