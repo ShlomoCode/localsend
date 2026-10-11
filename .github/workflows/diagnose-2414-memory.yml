@@ -1,0 +1,103 @@
+name: Diagnose 2414 pre-Accept memory
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2414-many-files]
+    paths: [.github/workflows/diagnose-2414-memory.yml]
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-2414-vm-pair
+  cancel-in-progress: false
+jobs:
+  memory-desktop:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate diagnostic syntax in cloud
+        run: |
+          bash -n support/diagnostics/2414-memory-pair.sh
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ('2414-memory-host-ui.py', '2414-memory-receiver-driver.py'):
+              path = Path('support/diagnostics') / name
+              ast.parse(path.read_text(), filename=str(path))
+          PY
+      - name: Start qualified desktop experiment in background
+        run: |
+          mkdir -p evidence
+          rm -f /tmp/issue2414-memory-continue evidence/memory-checkpoint-ready evidence/memory-workload-exit-code
+          cat > /tmp/issue2414-memory-workload.sh <<'SH'
+          #!/usr/bin/env bash
+          set +e
+          trap 'status=$?; printf "%s\n" "$status" > "$GITHUB_WORKSPACE/evidence/memory-workload-exit-code.tmp"; mv "$GITHUB_WORKSPACE/evidence/memory-workload-exit-code.tmp" "$GITHUB_WORKSPACE/evidence/memory-workload-exit-code"' EXIT
+          cd "$GITHUB_WORKSPACE" || exit 1
+          bash support/diagnostics/2414-memory-pair.sh
+          SH
+          nohup bash /tmp/issue2414-memory-workload.sh > evidence/memory-pair-run.log 2>&1 < /dev/null &
+          echo "$!" > evidence/memory-workload-wrapper-pid
+      - name: Wait for five-file qualification checkpoint or failure
+        run: |
+          deadline=$((SECONDS + 35 * 60))
+          next_progress=0
+          while ! test -f evidence/memory-checkpoint-ready && ! test -f evidence/memory-workload-exit-code; do
+            if test "$SECONDS" -ge "$deadline"; then
+              echo "Qualification wait exceeded its observation deadline; preserve partial evidence."
+              exit 1
+            fi
+            if test "$SECONDS" -ge "$next_progress"; then
+              tail -n 5 evidence/memory-pair-run.log || true
+              next_progress=$((SECONDS + 60))
+            fi
+            sleep 5
+          done
+      - name: Restore checkpoint access
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" evidence
+          sudo chmod -R u+rwX evidence
+      - name: Retain early qualification or failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2414-memory-checkpoint-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Resume and await pre-Accept cases
+        if: always()
+        run: |
+          touch /tmp/issue2414-memory-continue
+          test -f evidence/memory-workload-wrapper-pid
+          deadline=$((SECONDS + 15 * 60))
+          next_progress=0
+          while ! test -f evidence/memory-workload-exit-code; do
+            if test "$SECONDS" -ge "$deadline"; then
+              echo "Workload wait exceeded its limit; this alone is not an application hang or OOM."
+              exit 1
+            fi
+            if test "$SECONDS" -ge "$next_progress"; then
+              tail -n 5 evidence/memory-pair-run.log || true
+              next_progress=$((SECONDS + 60))
+            fi
+            sleep 5
+          done
+          status=$(cat evidence/memory-workload-exit-code)
+          case "$status" in ''|*[!0-9]*) exit 1 ;; esac
+          exit "$status"
+      - name: Restore final evidence access
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" evidence
+          sudo chmod -R u+rwX evidence
+      - name: Retain final evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2414-memory-final-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
