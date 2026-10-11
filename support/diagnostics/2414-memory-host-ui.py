@@ -172,6 +172,21 @@ def host_window(pid):
     raise RuntimeError('Sender window missing')
 
 
+def normalize_host(window, case):
+    # Apply after the rendered alias is observed: Flutter startup restores its
+    # default size after the native window first becomes visible.
+    desktop('host','xdotool','windowsize',window,'1000','700')
+    desktop('host','xdotool','windowmove',window,'0','0')
+    focus('host',window)
+    geometry=desktop('host','xdotool','getwindowgeometry','--shell',window)['output']
+    (OUT/(case+'-sender-normalized-geometry.txt')).write_text(geometry)
+    fields=dict(line.split('=',1) for line in geometry.splitlines() if '=' in line)
+    if (fields.get('WIDTH'),fields.get('HEIGHT')) != ('1000','700') or fields.get('X') not in ('0','1','2') or fields.get('Y') not in ('0','20','40'):
+        raise RuntimeError('Sender measured geometry not established: '+geometry)
+    capture('host',case+'-sender-normalized')
+    return geometry
+
+
 def sender_sample(pid, stop, path):
     with path.open('w', buffering=1) as log:
         while not stop.wait(.5):
@@ -227,6 +242,7 @@ def run_case(count):
         swin=host_window(sender.pid)
         focus('host',swin)
         locate_host('Sender2414',case+'-sender-ready')
+        result['sender_ready_geometry']=normalize_host(swin,case)
         capture('host',case+'-sender-ready')
         result['stage']='picker'
         click('host',(96,188))
