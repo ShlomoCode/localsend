@@ -17,6 +17,20 @@ export default async function({session,wd,senderPort,transportStatus}){
   }
   writeFileSync(`evidence/${label}.json`,JSON.stringify({command,attempts,unavailable:true},null,2));return null;
  }
+ async function helperMetadata(filename,label){
+  await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.cloudtransport'});
+  const input=await waitForNativeControl({wd,prefix,label:label+'-metadata-filename',using:'accessibility id',value:'Metadata filename'});
+  await wd('POST',prefix+'/element/'+input['element-6066-11e4-a52e-4f735466cecf']+'/value',{text:filename});
+  await click('Read image metadata');
+  const outputTarget={using:'xpath',value:'//*[@package="org.localsend.cloudtransport" and starts-with(@content-desc,"Image metadata: ")]'};
+  const choices=[outputTarget,{using:'xpath',value:'//*[contains(@resource-id,"permission_allow_all_button") or contains(@resource-id,"permission_allow_button")]'}];
+  let e=await waitForNativeControl({wd,prefix,label:label+'-metadata-or-permission',choices,requireClickable:false});
+  if(e.readiness.choice===1){await capture(label+'-normal-media-permission');await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});e=await waitForNativeControl({wd,prefix,label:label+'-metadata-output',...outputTarget,requireClickable:false});}
+  const value=await wd('GET',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/attribute/content-desc');
+  const result=JSON.parse(value.slice('Image metadata: '.length));writeFileSync(`evidence/${label}-normal-metadata.json`,JSON.stringify(result,null,2));await capture(label+'-normal-metadata');
+  await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+  return result;
+ }
  try{
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName',`issue2311-${process.env.GITHUB_RUN_ID}-control.txt`,'-DiagnosticPeerPort',String(senderPort)]);
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action','click','-X','246','-Y','266','-Label','windows-control-favorites']);
@@ -54,7 +68,8 @@ export default async function({session,wd,senderPort,transportStatus}){
    if(savedSha256!==source.sha256.toLowerCase())throw new Error('Image saved bytes mismatch');
    const filesystem=await shell(`stat -c '%n|%s|%Y|%y' '${savedPath}'`,gallery+'-filesystem');
    const mediaStore=await shell(`content query --uri content://media/external/images/media --projection _id:_display_name:_data:date_modified:date_added:datetaken --where "_display_name='${filename}'"`,gallery+'-mediastore');
-   results.push({case:gallery,source,savedPath,savedSha256,byteExact:true,filesystem,mediaStore});
+   const normalMetadata=await helperMetadata(filename,gallery);
+   results.push({case:gallery,source,savedPath,savedSha256,byteExact:true,filesystem,mediaStore,normalMetadata});
    writeFileSync(`evidence/saved-${gallery}.png`,saved);
    await click('Done');
   }
