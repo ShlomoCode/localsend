@@ -3,7 +3,7 @@ param(
   [string] $OutputDirectory = $env:LS_RELEASE_UI_OUTPUT,
   [ValidateSet('File', 'Folder')][string] $SelectionMode = 'File',
   [ValidateSet('arm-64', 'x86-64')][string] $AssetArchitecture = 'arm-64',
-  [ValidateSet('windows-11-arm', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
+  [ValidateSet('windows-11-arm', 'windows-2022', 'windows-2025', 'auto')][string] $RunnerLabel = 'auto',
   [string] $ReleaseVersion = '1.18.2',
   [ValidateSet('Picker', 'SendTo')][string] $EntryMethod = 'Picker',
   [ValidateSet('PathEntry', 'ShellItem')][string] $SelectionMethod = 'PathEntry',
@@ -41,6 +41,7 @@ $osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchite
 $expectedExecution = switch ($RunnerLabel) {
   'windows-11-arm' { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on Windows 11 ARM' } else { 'x64 emulation on Windows 11 ARM' } }
   'windows-2025' { 'native x64 on Windows Server 2025' }
+  'windows-2022' { 'native x64 on Windows Server 2022' }
   default { if ($AssetArchitecture -eq 'arm-64') { 'native ARM64 on ARM64 host' } elseif ($osArchitecture -eq 'Arm64') { 'x64 emulation on ARM64 host' } else { 'native x64 on x64 host' } }
 }
 if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {

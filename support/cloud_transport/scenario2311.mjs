@@ -93,7 +93,7 @@ export default async function({session,wd,senderPort,transportStatus}){
  }
  try{
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-desktop.ps1']);
-  await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName',`issue2311-${process.env.GITHUB_RUN_ID}-control.txt`,'-DiagnosticPeerPort',String(senderPort)]);
+  await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel',process.env.DIAGNOSTIC_RUNNER_LABEL||'windows-11-arm','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName',`issue2311-${process.env.GITHUB_RUN_ID}-control.txt`,'-DiagnosticPeerPort',String(senderPort)]);
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action','click','-X','246','-Y','266','-Label','windows-control-favorites']);
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action','click','-X','145','-Y','205','-Label','windows-control-send']);
   try{await click('Accept');}catch(error){

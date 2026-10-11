@@ -14,6 +14,10 @@ on:
         type: choice
         options: ['10000', '20000', '30000']
         default: '10000'
+      physical_runner:
+        type: choice
+        options: [windows-11-arm, windows-2022]
+        default: windows-11-arm
 permissions:
   contents: read
 jobs:
@@ -82,12 +86,13 @@ jobs:
           retention-days: 14
   physical-control:
     if: inputs.scenario == 'physical-control'
-    runs-on: windows-11-arm
+    runs-on: ${{ inputs.physical_runner || 'windows-11-arm' }}
     timeout-minutes: 25
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue2311-${{ github.run_id }}
+      DIAGNOSTIC_RUNNER_LABEL: ${{ inputs.physical_runner || 'windows-11-arm' }}
       BASELINE_APP: bs://59b2370a166b5e36a4c948c50f22b70255046822
       BS_DEVICE: ${{ inputs.bs_device || 'Google Pixel 9' }}
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
