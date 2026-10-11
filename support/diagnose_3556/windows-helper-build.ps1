@@ -99,7 +99,8 @@ Invoke-Checked $ffmpeg @('-hide_banner','-loglevel','error','-i',$embeddedSeed,'
 $configPath=Join-Path $relayTemp 'assets/config.json'
 $transport=if($env:RELAY_TRANSPORT){$env:RELAY_TRANSPORT}else{'legacy'}
 if($transport -notin @('legacy','stream','coalesced')){throw 'Invalid explicit diagnostic relay transport.'}
-[IO.File]::WriteAllText($configPath,(ConvertTo-Json -Compress @{ endpoint=$RelayEndpoint; token=$env:RELAY_TOKEN; transport=$transport }),[Text.UTF8Encoding]::new($false))
+$peerAbsoluteMs=if($env:LARGE_TRANSFER_DIAGNOSTIC -eq '1'){90*60000}else{15*60000}
+[IO.File]::WriteAllText($configPath,(ConvertTo-Json -Compress @{ endpoint=$RelayEndpoint; token=$env:RELAY_TOKEN; transport=$transport; peerAbsoluteMs=$peerAbsoluteMs }),[Text.UTF8Encoding]::new($false))
 try {
  $fixtureApk=Build-Helper (Join-Path $RepositoryRoot 'support/diagnose_3556/android') $fixtureTemp 29 'fixture3556-helper.apk' 'Issue3556 fixture helper'
  $relayApk=Build-Helper (Join-Path $RepositoryRoot 'support/cloud_transport/android') $relayTemp 26 'cloud-transport-helper.apk' 'Cloud diagnostic'

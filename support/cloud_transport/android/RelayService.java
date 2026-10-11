@@ -19,6 +19,7 @@ public final class RelayService extends Service {
   private volatile Thread pullThread;
   private volatile int ownedStartId;
   private String endpoint,token,transport="legacy";
+  private long peerAbsoluteMs=15*60000;
   private final String instance=java.util.UUID.randomUUID().toString().replace("-","").substring(0,8);
   private final ConcurrentHashMap<String,HttpURLConnection> uploads=new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String,UploadMetrics> uploadMetrics=new ConcurrentHashMap<>();
@@ -38,7 +39,7 @@ public final class RelayService extends Service {
     result.put("servicePresent",true).put("instance",service.instance).put("running",service.running).put("ready",service.ready)
       .put("lifecycle",service.lifecycle).put("firstPullSucceeded",service.firstPullSucceeded).put("lastFailure",service.lastFailure)
       .put("listenerHost",listenerBound?"127.0.0.1":JSONObject.NULL).put("listenerPort",listenerBound?bound.getLocalPort():JSONObject.NULL)
-      .put("transport",service.transport).put("maxQueueBytes",QUEUE_LIMIT).put("readBufferBytes",READ_BUFFER);
+      .put("transport",service.transport).put("maxQueueBytes",QUEUE_LIMIT).put("readBufferBytes",READ_BUFFER).put("peerAbsoluteMs",service.peerAbsoluteMs);
     JSONObject peers=new JSONObject();
     for(String id:service.uploadMetrics.keySet()){
       UploadMetrics m=service.uploadMetrics.get(id);
@@ -68,6 +69,8 @@ public final class RelayService extends Service {
     pullThread=new Thread(()->{try{
       JSONObject config=new JSONObject(read(getAssets().open("config.json")));
       endpoint=config.getString("endpoint");token=config.getString("token");transport=intent.getStringExtra("transport");
+      peerAbsoluteMs=intent.getLongExtra("peerAbsoluteMs",config.optLong("peerAbsoluteMs",15*60000));
+      if(peerAbsoluteMs!=15*60000&&peerAbsoluteMs!=90*60000)throw new IOException("Invalid logical peer deadline");
       if(transport==null)transport=config.optString("transport","legacy");
       if(!transport.equals("legacy")&&!transport.equals("stream")&&!transport.equals("coalesced"))throw new IOException("Invalid transport mode");
       trace("transport-mode:"+transport,"-");
@@ -132,7 +135,7 @@ public final class RelayService extends Service {
     ScheduledExecutorService watchdog=Executors.newSingleThreadScheduledExecutor();
     watchdog.scheduleAtFixedRate(()->{
       long now=SystemClock.elapsedRealtime();
-      if(now-metrics.startedMs>=ABSOLUTE_MS||now-metrics.lastProgressMs>=PROGRESS_MS){
+      if(now-metrics.startedMs>=peerAbsoluteMs||now-metrics.lastProgressMs>=PROGRESS_MS){
         metrics.error="Upload deadline at "+metrics.phase;closeOwnedPeer(id,"upload-watchdog");
       }
     },1,1,TimeUnit.SECONDS);

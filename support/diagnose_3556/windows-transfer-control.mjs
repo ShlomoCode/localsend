@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdirSync,readFileSync,writeFileSync,appendFileSync,existsSync,createWriteStream} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,appendFileSync,existsSync,createWriteStream,unlinkSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
@@ -10,22 +10,27 @@ import shareScenario from './share-scenario.mjs';
 import {runTransportControls} from './stream-controls.mjs';
 
 // Drive the unmodified apps. The moderate control measures throughput; neither size proves 16GB behavior.
-const controlBytes=process.env.MODERATE_TRANSFER_CONTROL==='1'?64*1024*1024:1048576;
-const controlName=controlBytes===1048576?'1 MiB':'64 MiB';
-const controlSizeLabel=controlBytes===1048576?'1.0 MB':'67.1 MB';
+const largeDiagnostic=process.env.LARGE_TRANSFER_DIAGNOSTIC==='1';
+const minute=60000,reserveBytes=2*1024*1024*1024;
+let controlBytes=(largeDiagnostic||process.env.MODERATE_TRANSFER_CONTROL==='1')?64*1024*1024:1048576;
+let controlName=controlBytes===1048576?'1 MiB':'64 MiB';
+let controlSizeLabel=controlBytes===1048576?'1.0 MB':'67.1 MB';
 const transportMode=process.env.RELAY_TRANSPORT||'legacy';
 assert(['legacy','stream','coalesced'].includes(transportMode),'Unknown diagnostic transport mode');
 if(transportMode!=='legacy')assert.equal(controlBytes,67108864,'Improved transport must run the exact 64 MiB original-app gate');
 const here=path.dirname(fileURLToPath(import.meta.url));
 const output=path.resolve(process.env.TRANSFER_EVIDENCE_DIRECTORY||'evidence/windows-transfer');
-const windowsOutput=path.join(output,'windows');
+const windowsRoot=path.join(output,'windows');
+let windowsOutput=largeDiagnostic?path.join(windowsRoot,'moderate'):windowsRoot;
 mkdirSync(windowsOutput,{recursive:true});
 const required=['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','BS_LOCAL_ID','RELAY_TOKEN','RELAY_APP','HELPER_APP','BASELINE_APP'];
 for(const key of required) assert(process.env[key],key+' is required');
 const secrets=required.filter(k=>k!=='BS_LOCAL_ID').map(k=>process.env[k]);
 const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
 function redact(value){let s=String(value);for(const secret of [...secrets,auth])s=s.replaceAll(secret,'[redacted]');return s;}
-const save=(name,value)=>writeFileSync(path.join(output,name),typeof value==='string'?redact(value):redact(JSON.stringify(value,null,2)));
+let artifactPrefix='';
+const artifactName=name=>artifactPrefix&&!['results.json','relay-trace.json','relay-final-status.json','reverse-physical-controls.json','reverse-physical-trace.json'].includes(name)?artifactPrefix+name:name;
+const save=(name,value)=>writeFileSync(path.join(output,artifactName(name)),typeof value==='string'?redact(value):redact(JSON.stringify(value,null,2)));
 const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
  requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
@@ -33,16 +38,22 @@ const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Sam
  boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','One control cannot establish sustained 16GB throughput or behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
-let sessionCreationAttempted=false;
+let sessionCreationAttempted=false,sessionStart=null,phaseDeadline=Infinity,wdBusy=false,imageCount=0,observationCount=0;
+const sessionAge=()=>sessionStart===null?0:Date.now()-sessionStart;
+function remaining(){return largeDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+110*minute)-Date.now()):Infinity;}
+function admit(){assert(!largeDiagnostic||sessionAge()<20*minute,'Large stage/controls/selection/Send admission exceeded session age 20 minutes');}
+function commandLimit(url){if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
 const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
-async function wd(method,url,body,attempt=0){
+async function wd(method,url,body,attempt=0,readDeadline=Infinity){
  const started=Date.now();
- let response;
+ assert(!wdBusy,'WebDriver commands must remain serial');
+ const timeout=Math.floor(Math.min(commandLimit(url),remaining(),readDeadline-Date.now()));assert(timeout>0,'WebDriver phase deadline expired');
+ wdBusy=true;let response;
  try{
  response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{
   method,headers:{authorization:auth,'content-type':'application/json'},
-  body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(url==='/session'?300000:120000)});
+  body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(largeDiagnostic?timeout:(url==='/session'?300000:120000))});
  const json=await response.json();
  // Never retain capabilities containing private uploaded-app references.
  appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
@@ -57,13 +68,13 @@ async function wd(method,url,body,attempt=0){
   // Provider gateway returned session-absent while its Appium log showed this GET succeeding.
   // Retry only reads; never replay a touch, input, session creation or deletion.
   if(method==='GET'&&response?.status===404&&/Session not started or terminated/i.test(error.message)&&attempt<2){
-   await sleep(1000);return wd(method,url,body,attempt+1);
+   wdBusy=false;await sleep(Math.min(1000,remaining()));return wd(method,url,body,attempt+1,readDeadline);
   }
   throw error;
- }
+ }finally{wdBusy=false;}
 }
 const base=()=>'/session/'+session;
-async function source(){return wd('GET',base()+'/source');}
+async function source(readDeadline=Infinity){return wd('GET',base()+'/source',undefined,0,readDeadline);}
 async function waitHelperState({ready,mode,previousInstance,name}){
  const marker='HELPER_SERVICE_STATUS\n';let observed;
  const xml=await waitFor(value=>{
@@ -85,8 +96,9 @@ async function waitHelperState({ready,mode,previousInstance,name}){
 async function recoverOwnedStartupSession(){
  // A timed-out POST can still allocate a device. Resolve only this unique Actions build.
  const get=async url=>{
+  const timeout=Math.floor(Math.min(30000,remaining()));assert(timeout>0,'Owned startup recovery cleanup deadline expired');
   const response=await fetch('https://api-cloud.browserstack.com/app-automate/'+url,{
-   headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+   headers:{authorization:auth},signal:AbortSignal.timeout(timeout)});
   assert(response.ok,'Owned startup lookup failed: '+response.status);return response.json();
  };
  const builds=await get('builds.json');
@@ -102,9 +114,11 @@ async function recoverOwnedStartupSession(){
  }
 }
 async function snap(name,xml){
+ const terminal=/android-finished|failure|transfer-error|hash-ready/.test(name);
  const text=xml||await source();save(name+'.xml',text);
- const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
- writeFileSync(path.join(output,name+'.png'),png);
+ if(largeDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name,utc:new Date().toISOString(),sourceOnly:true});return text;}
+ imageCount++;const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
+ writeFileSync(path.join(output,artifactName(name+'.png')),png);
  const pngValid=png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
  const hierarchy=nodes(text).find(n=>n.class==='hierarchy');
  report.snapshots.push({name,utc:new Date().toISOString(),width:pngValid?png.readUInt32BE(16):null,
@@ -119,8 +133,8 @@ function nodes(xml){return [...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fro
  [...m[0].matchAll(/([\w.:-]+)=(["'])(.*?)\2/g)].map(a=>[a[1],decode(a[3])])));}
 function labels(xml){return nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);}
 async function waitFor(predicate,timeout,message){
- const end=Date.now()+timeout;
- do {const xml=await source();if(predicate(xml))return xml;await sleep(1000);}while(Date.now()<end);
+ const end=Math.min(Date.now()+timeout,largeDiagnostic?phaseDeadline:Infinity);
+ do {const xml=await source(end);if(predicate(xml))return xml;await sleep(Math.min(1000,Math.max(0,end-Date.now())));}while(Date.now()<end);
  throw Error(message);
 }
 function elementId(element){const id=element['element-6066-11e4-a52e-4f735466cecf']||element.ELEMENT;assert(id,'Missing WebDriver element ID');return id;}
@@ -149,17 +163,19 @@ function receiverResult(){
  try{return JSON.parse(readFileSync(file,'utf8'));}catch{return null;}
 }
 async function startReceiver(fixture){
+ const timeoutSeconds=largeDiagnostic&&fixture.bytes===16000000000?Math.max(1,Math.floor((sessionStart+105*minute-Date.now())/1000)):900;
  const stdout=createWriteStream(path.join(windowsOutput,'receiver.stdout.txt'));
  const stderr=createWriteStream(path.join(windowsOutput,'receiver.stderr.txt'));receiverLogs=[stdout,stderr];
  receiver=spawn('pwsh',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(here,'windows_receiver.ps1'),
-  '-OutputDirectory',windowsOutput,'-TimeoutSeconds','900','-ExpectedBytes',String(fixture.bytes),'-ExpectedSha256',fixture.sha256],
+  '-OutputDirectory',windowsOutput,'-TimeoutSeconds',String(timeoutSeconds),'-ExpectedBytes',String(fixture.bytes),'-ExpectedSha256',fixture.sha256||'',
+  ...(largeDiagnostic&&fixture.bytes===16000000000?['-VerificationDeadlineUtc',new Date(sessionStart+105*minute).toISOString()]:[])],
   {windowsHide:true,stdio:['ignore','pipe','pipe']});
  receiver.stdout.pipe(stdout);receiver.stderr.pipe(stderr);
  receiverDone=new Promise(ok=>{
   receiver.once('error',error=>{receiverExit={spawnError:redact(error.message)};ok();});
   receiver.once('exit',(code,signal)=>{receiverExit={code,signal};ok();});
  });
- const end=Date.now()+180000;
+ const end=Math.min(Date.now()+180000,largeDiagnostic?phaseDeadline:Infinity);
  while(Date.now()<end){
   if(receiverExit)throw Error('Windows receiver exited before readiness; inspect its stdout/stderr/results');
   const ready=path.join(windowsOutput,'ready.json');
@@ -170,6 +186,16 @@ async function startReceiver(fixture){
   await sleep(500);
  }
  throw Error('Windows receiver readiness exceeded 180 seconds');
+}
+async function checkLargeStorage(button,requiredBytes,stage){
+ const previous=Number(labels(await source()).find(t=>t.includes('storageCheckedUtcMs='))?.match(/storageCheckedUtcMs=(\d+)/)?.[1])||0;
+ const requested=Date.now();await click(button);
+ const xml=await waitFor(s=>labels(s).some(t=>Number(t.match(/storageCheckedUtcMs=(\d+)/)?.[1])>previous),30000,'Fresh Android capacity evidence missing at '+stage);
+ const detail=labels(xml).find(t=>t.includes('storageCheckedUtcMs='));
+ const availableBytes=Number(detail.match(/availableBytes=(\d+)/)?.[1]),checked=Number(detail.match(/storageCheckedUtcMs=(\d+)/)?.[1]);
+ assert(Number.isSafeInteger(availableBytes)&&checked>previous&&Date.now()-requested<30000,'Stale Android capacity evidence at '+stage);
+ report.largeStorageChecks??=[];report.largeStorageChecks.push({stage,availableBytes,requiredBytes,checkedUtc:new Date(checked).toISOString()});save('large-storage-checks.json',report.largeStorageChecks);
+ assert(availableBytes>=requiredBytes,'Insufficient fresh Android capacity at '+stage);admit();
 }
 function expectedControl(count){
  const bytes=Buffer.alloc(count);
@@ -365,7 +391,9 @@ try{
  assert(Number.isFinite(plan.parallel_sessions_running)&&Number.isFinite(plan.parallel_sessions_max_allowed),'BrowserStack live capacity is unavailable');
  assert(plan.parallel_sessions_running<plan.parallel_sessions_max_allowed,'No live BrowserStack slot');
  await r.start();startedRelay=true;
- sessionCreationAttempted=true;
+ sessionCreationAttempted=true;sessionStart=Date.now();if(largeDiagnostic)phaseDeadline=sessionStart+20*minute;
+ report.sessionStartBeforePostUtc=new Date(sessionStart).toISOString();
+ report.largeDeadlinePolicy=largeDiagnostic?{officialSessionMaxMinutes:120,admissionMinutes:20,transferSessionAgeMinutes:100,verificationAgeMinutes:105,cleanupAgeMinutes:110,observationsMax:300,imagesMax:120,androidImagesMax:60,androidObservationsMax:150}:null;
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{
   platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2',
   'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],
@@ -379,54 +407,106 @@ try{
  assert.equal(report.initialObservedOrientation,'PORTRAIT','The small transfer control requires initial portrait orientation');
  await wd('POST',base()+'/timeouts',{implicit:5000});
  await wd('POST',base()+'/appium/settings',{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
- await snap('fixture-before');await click(controlBytes===1048576?'Stage small video':'Stage 64MiB video');
- const staged=await waitFor(s=>{const t=labels(s).join('\n');if(/FAILED|INSUFFICIENT_STORAGE/.test(t))throw Error('Fixture staging failed');return /READY name=.*\.mp4/.test(t);},60000,'Small video staging timed out');
+ report.scenario=largeDiagnostic?'Actual 64 MiB control followed by valid 16,000,000,000-byte MP4 Android File/Recent selection, real Send, Windows Accept/save and late Android/Windows hash verification':report.scenario;
+ if(largeDiagnostic)report.boundaries[2]='One large attempt through reverse cloud relay does not establish shared-LAN behavior';
+ for(const passBytes of (largeDiagnostic?[67108864,16000000000]:[controlBytes])){
+ controlBytes=passBytes;controlName=passBytes===16000000000?'16GB':passBytes===67108864?'64 MiB':'1 MiB';
+ controlSizeLabel=passBytes===16000000000?'16.0 GB':passBytes===67108864?'67.1 MB':'1.0 MB';
+ const largePass=passBytes===16000000000;admit();
+ if(largePass){
+  save('moderate-control-results.json',report);
+  report.moderateControl={status:report.status,bytes:report.fixture.bytes,sha256:report.fixture.sha256,sendUtc:report.sendUtc,verifiedUtc:report.verifiedUtc,elapsedSendToVerifiedMs:report.elapsedSendToVerifiedMs,evidence:'moderate-control-results.json'};
+  artifactPrefix='large-';
+  await activate('org.localsend.cloudtransport');await click('Stop helper');await waitHelperState({ready:false,name:'moderate-stopped'});
+  r.closePeers('Moderate completion before fresh large instance');
+  const resetEnd=Math.min(Date.now()+10000,phaseDeadline);while(r.status().peers||r.status().activeUploads){assert(Date.now()<resetEnd,'Moderate peers failed cleanup');await sleep(100);}
+  r.setPeerLimit(90*minute);
+  await click(r.status().transport==='coalesced'?'Relay from LocalSend (coalesced large)':'Relay from LocalSend (large)');
+  report.largeHelperState=await waitHelperState({ready:true,mode:r.status().transport,previousInstance:(report.fallbackHelperState||report.initialHelperState).instance,name:'fresh-ready'});
+  assert.equal(report.largeHelperState.peerAbsoluteMs,90*minute,'Large helper peer limit must be observed at 90 minutes');
+  report.status='preparing';report.observations=[];report.sendUtc=null;report.verifiedUtc=null;report.elapsedSendToVerifiedMs=null;report.uploadStateAtAndroidFinished=null;
+  windowsOutput=windowsRoot;mkdirSync(windowsOutput,{recursive:true});
+  receiver=null;receiverExit=null;for(const log of receiverLogs)log.end();receiverLogs=[];
+  // Keep moderate evidence; each receiver owns distinct destination and coordination markers.
+  for(const file of ['ready.json','results.json','stop','sender-completed.json','expected-sha256.json','send-started.json'])if(existsSync(path.join(windowsOutput,file)))unlinkSync(path.join(windowsOutput,file));
+  await activate('org.localsend.fixture3556');await checkLargeStorage('Refresh capacity',2*passBytes+reserveBytes,'before-stage');
+ }
+ await snap('fixture-before');await click(largePass?'Stage 16GB video':controlBytes===1048576?'Stage small video':'Stage 64MiB video');
+ const staged=await waitFor(s=>{const t=labels(s).join('\n');if(/FAILED|INSUFFICIENT_STORAGE/.test(t))throw Error('Fixture staging failed');return /READY name=.*\.mp4/.test(t);},largePass?15*minute:60000,'Video staging timed out');
  await snap('fixture-ready',staged);
  const details=labels(staged).find(v=>v.includes('READY name='));
+ const uri=details.match(/\nuri=([^\n]+)/)?.[1];
  const name=details.match(/READY name=([^\n]+)/)?.[1],bytes=Number(details.match(/\nbytes=(\d+)/)?.[1]);
- const sha256=details.match(/\nsha256=([a-f0-9]{64})/)?.[1];
+ let sha256=details.match(/\nsha256=([a-f0-9]{64})/)?.[1];
  const availableBytes=Number(details.match(/availableBytes=(\d+)/)?.[1]);
  const totalBytes=Number(details.match(/totalBytes=(\d+)/)?.[1]);
- assert(name&&name.endsWith('.mp4')&&sha256,'Fixture identity missing');assert.equal(bytes,controlBytes,'Control must have the requested exact size');
+ assert(name&&name.endsWith('.mp4')&&(largePass||sha256),'Fixture identity missing');assert.equal(bytes,controlBytes,'Control must have the requested exact size');
  assert(Number.isSafeInteger(availableBytes)&&availableBytes>=0&&Number.isSafeInteger(totalBytes)&&totalBytes>0,'Android fixture storage evidence missing');
  const mediaDurationMs=Number(details.match(/mediaDurationMs=(\d+)/)?.[1]);
  const decodedFrame=details.match(/decodedFrame=(\d+)x(\d+)/);
  assert(mediaDurationMs>0,'Fixture helper did not report positive video duration');
  assert(decodedFrame&&Number(decodedFrame[1])>0&&Number(decodedFrame[2])>0,'Fixture helper did not decode a video frame');
- report.fixture={name,bytes,sha256,availableBytes,totalBytes,mediaDurationMs,decodedFrame:{width:Number(decodedFrame[1]),height:Number(decodedFrame[2])},details};save('fixture.json',report.fixture);
- await activate('org.localsend.cloudtransport');await snap('relay-before');await click('Relay from LocalSend');
+ report.fixture={name,uri,bytes,sha256,availableBytes,totalBytes,mediaDurationMs,decodedFrame:{width:Number(decodedFrame[1]),height:Number(decodedFrame[2])},details};save('fixture.json',report.fixture);
+ if(!largePass){await activate('org.localsend.cloudtransport');await snap('relay-before');await click('Relay from LocalSend');
  report.initialHelperState=await waitHelperState({ready:true,mode:transportMode,name:transportMode+'-ready'});
+ if(largeDiagnostic)assert.equal(report.initialHelperState.peerAbsoluteMs,15*minute,'Moderate helper peer limit must be observed at 15 minutes');
  await snap('relay-running');
  await runPhysicalReverseControl();
- await gateImprovedTransport();
+ await gateImprovedTransport();}
  // The temporary control server is fully closed before the real release binds TCP 53317.
  await startReceiver(report.fixture);
  await activate('org.localsend.localsend_app');
  await waitFor(s=>s.includes('org.localsend.localsend_app'),30000,'LocalSend did not activate');await snap('localsend-initial');
- await click('Send\nTab 2 of 3');await click('File');
+ if(largePass){
+  const prior=await source();assert(labels(prior).includes('Done'),'Moderate completion did not expose actual Done control');await click('Done');
+  await waitFor(s=>labels(s).includes('Send\nTab 2 of 3'),30000,'Moderate Done did not return to main app');
+ }
+ await click('Send\nTab 2 of 3');
+ if(largePass){await activate('org.localsend.fixture3556');await checkLargeStorage('Check picker storage',bytes+reserveBytes,'before-file');await activate('org.localsend.localsend_app');}
+ admit();await click('File');
  await waitFor(s=>s.includes('com.google.android.documentsui'),30000,'Android File picker did not appear');
  await snap('file-picker');await click('Show roots');
  const roots=await snap('file-picker-roots');
  const recent=nodes(roots).filter(n=>n.text==='Recent');assert(recent.length,'Recent root not observed');
  await ui('text("Recent").instance('+(recent.length-1)+')');
  await snap('file-picker-recent');await ui('textContains('+JSON.stringify(name)+')');
- const selected=await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),60000,'LocalSend did not show Selection, one file, and '+controlSizeLabel);
- await snap('selected-one-file',selected);await manualInputComparison();await addFavorite();
+ const selected=await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),largePass?Math.max(1,remaining()):60000,'LocalSend did not show Selection, one file, and '+controlSizeLabel);
+ await snap('selected-one-file',selected);if(!largePass){await manualInputComparison();await addFavorite();}
+ if(largePass){await activate('org.localsend.fixture3556');await checkLargeStorage('Refresh capacity',reserveBytes,'before-send');await activate('org.localsend.localsend_app');}
  const metricsBefore=r.status();
  r.beginMeasurement('Original '+controlName+' favorite-touch through Finished and verified save');
  // Favorite selection registers again and then startSession sends the already selected file.
  const favorite=await wd('POST',base()+'/element',{using:'-android uiautomator',value:'new UiSelector().descriptionContains("issue3556-cloud-receiver")'});
  const favoriteRect=await wd('GET',base()+'/element/'+elementId(favorite)+'/rect');
- report.sendUtc=new Date().toISOString();const sendStart=Date.now();
+ admit();report.sendUtc=new Date().toISOString();const sendStart=Date.now();
+ report.sendAdmissionAgeMs=sessionAge();
+ if(largePass)writeFileSync(path.join(windowsOutput,'send-started.json'),JSON.stringify({started:true,utc:report.sendUtc,evidence:'large-selected-one-file.xml'}));
  await touch(favoriteRect,'Select registered issue3556-cloud-receiver favorite');
+ if(largePass)phaseDeadline=Math.min(sendStart+90*minute,sessionStart+100*minute);
  await snap('send-first-frame');
- const end=sendStart+600000;let androidFinished=false,verifiedAt=null,waits=0;
+ let end=largePass?phaseDeadline:sendStart+600000;let androidFinished=false,verifiedAt=null,waits=0,lastImage=0;
+ const preservePeerDeadline=()=>{if(!largePass||androidFinished)return;const expiry=Date.parse(r.status().earliestPeerExpiryUtc);if(Number.isFinite(expiry)){end=Math.min(end,expiry-5*minute);phaseDeadline=end;}report.transferDeadlineUtc=new Date(end).toISOString();};preservePeerDeadline();
  do{
-  const xml=await source(),now=Date.now(),names=labels(xml);
+  preservePeerDeadline();assert(!largeDiagnostic||observationCount<150,'Maximum 150 bounded Android transfer observations reached');observationCount++;
+  const observationStarted=Date.now();const xml=await source(end),now=Date.now(),names=labels(xml);
+  const sourceElapsedMs=now-observationStarted;
+  const observationGapMs=report.observations.length?now-Date.parse(report.observations.at(-1).utc):null;
   const anr=/isn.t responding|not responding/i.test(names.join('\n'));
   const finished=names.some(v=>v==='Finished'||v==='100, Finished'||v.startsWith('Finished\n'))&&!names.some(v=>v.includes('Finished with error'));
-  await snap('transfer-'+String(report.observations.length).padStart(3,'0'),xml);
+  const frame='transfer-'+String(report.observations.length).padStart(3,'0');
+  if(!largeDiagnostic||now-lastImage>=6*minute||anr||finished||names.some(v=>v.includes('Finished with error'))){await snap(frame,xml);lastImage=now;}else save(frame+'.xml',xml);
   if(finished){androidFinished=true;report.uploadStateAtAndroidFinished??={utc:new Date(now).toISOString(),transport:r.status()};}
+  if(largePass&&finished&&!report.lateHash){
+   await snap('android-finished',xml);writeFileSync(path.join(output,'android-finished.xml'),xml);writeFileSync(path.join(windowsOutput,'sender-completed.json'),JSON.stringify({completed:true,utc:new Date().toISOString(),evidence:'android-finished.xml'}));
+   phaseDeadline=sessionStart+105*minute;report.verificationDeadlineUtc=new Date(phaseDeadline).toISOString();
+   await activate('org.localsend.fixture3556');await click('Hash owned fixture after completion');
+   const hashed=await waitFor(s=>{const t=labels(s).join('\n');if(t.includes('HASH_FAILED'))throw Error('Late fixture hash failed');return t.includes('HASH_READY uri=');},15*minute,'Late Android hash did not finish before verification deadline');
+   const detail=labels(hashed).find(t=>t.includes('HASH_READY uri='));
+   const hash=detail.match(/sha256=([a-f0-9]{64})/)?.[1],hashBytes=Number(detail.match(/bytes=(\d+)/)?.[1]);assert(hash&&hashBytes===bytes&&detail.match(/HASH_READY uri=([^\n]+)/)?.[1]===uri,'Late hash fixture identity mismatch');
+   sha256=hash;report.fixture.sha256=hash;report.lateHash={utc:new Date().toISOString(),bytes:hashBytes,sha256:hash};
+   writeFileSync(path.join(windowsOutput,'expected-sha256.json'),JSON.stringify({sha256:hash,bytes:hashBytes}));
+   await snap('hash-ready',hashed);await activate('org.localsend.localsend_app');end=sessionStart+105*minute;
+  }
   const result=receiverResult();
   if(result?.status==='saved-file-verified'&&!verifiedAt){
    verifiedAt=Number.isFinite(Date.parse(result.finishedUtc))?Date.parse(result.finishedUtc):now;
@@ -434,7 +514,7 @@ try{
    report.verificationObservationLagMs=now-verifiedAt;
    report.uploadStateAtVerifiedSave={observedUtc:new Date(now).toISOString(),transport:r.status(),destination:result.destination};
   }
-  report.observations.push({utc:new Date(now).toISOString(),elapsedMs:now-sendStart,anr,androidFinished:finished,receiverStatus:result?.status,transport:r.status()});
+  report.observations.push({utc:new Date(now).toISOString(),elapsedMs:now-sendStart,sourceElapsedMs,observationGapMs,uiObservationScope:'ANR is observed only in this actual app hierarchy; gaps and helper liveness do not imply absence of ANR',anr,androidFinished:finished,receiverStatus:result?.status,transport:r.status()});
   save('transfer-progress.json',report);
   if(names.some(v=>v.includes('Finished with error'))){
    await snap('android-transfer-error',xml);
@@ -464,11 +544,11 @@ try{
     return {id,...chunks,upload:r.status().uploads[id]||null,uploadSpanMs:span,wireBytesPerSecond:span>0?upload.bytes/(span/1000):null};
    });
    report.transport.wireRateScope='Per-peer relay byte rate covers only the explicit favorite-touch measurement window, including reused registration sockets, and excludes all earlier synthetic traffic. It includes TLS/protocol overhead and differs from file payload / send-to-verified-save elapsed time.';
-   await snap('android-finished',xml);break;
+   await snap('android-finished',xml);if(largeDiagnostic&&!largePass)save('moderate-android-finished.xml',xml);break;
   }
-  await sleep(5000);
+  await sleep(Math.min(largeDiagnostic?45000:5000,Math.max(0,end-Date.now())));
  }while(Date.now()<end);
- assert.equal(report.status,'passed','Ten-minute app-to-app control did not reach Android Finished and verified Windows save');
+ assert.equal(report.status,'passed',(largePass?'Large transfer/verification bounded deadline':'Ten-minute app-to-app control')+' did not reach Android Finished and verified Windows save');
  report.controlSizeBytes=bytes;
  report.endToEndBytesPerSecond=bytes/(report.elapsedSendToVerifiedMs/1000);
  if(transportMode!=='legacy'){
@@ -482,15 +562,19 @@ try{
   save('helper-after-real-transfer.json',report.realTransferHelper);
  }
  save('app-control-results.json',report);
- console.log(controlName+' Android-to-Windows app control passed; no 16GB claim.');
+ console.log(controlName+' Android-to-Windows app control passed.');
+ if(!largePass&&largeDiagnostic)phaseDeadline=sessionStart+20*minute;
+ }
  if(transportMode==='legacy'&&process.env.SHARE_AFTER_CONTROL==='1'&&controlBytes===1048576){
   report.shareScenario=await shareScenario({session,wd,output});
  }
 }catch(error){
  report.status='incomplete';report.error=redact(error.stack||error);
- if(session)await snap('failure').catch(()=>{});
+ if(session&&(!largeDiagnostic||remaining()>=2*minute))await source(Date.now()+30000).then(xml=>snap('failure',xml)).catch(()=>{});
  process.exitCode=1;
 }finally{
+ if(largeDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+110*minute;
+ if(largeDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.fixture3556'});}catch(error){report.cleanupErrors.push('Fixture helper terminate: '+redact(error.message));}
  try{await stopPhysicalServer();}catch(error){report.cleanupErrors.push('Temporary control server stop: '+redact(error.message));process.exitCode=1;}
  try{if(receiver&&!receiverExit){
   writeFileSync(path.join(windowsOutput,'stop'),'stop');

@@ -16,8 +16,9 @@ import android.media.MediaMetadataRetriever;
 public final class MainActivity extends Activity {
   private TextView status;
   private final ArrayList<Uri> owned=new ArrayList<>();
-  private boolean busy=false;
+  private volatile boolean busy=false;
   private Uri last;
+  private static final long LARGE_BYTES=16000000000L, RESERVE_BYTES=2147483648L;
   public void onCreate(Bundle state){
     super.onCreate(state);
     SharedPreferences saved=getPreferences(MODE_PRIVATE);
@@ -33,39 +34,56 @@ public final class MainActivity extends Activity {
     add(panel,"Stage 16GB video",()->stage(16000000000L,true));
     add(panel,"Share owned fixture",()->{if(last!=null){Intent i=new Intent(Intent.ACTION_SEND).setType(getContentResolver().getType(last)).putExtra(Intent.EXTRA_STREAM,last).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(i,"Share issue 3556 fixture"));}});
     add(panel,"Refresh capacity",()->status.setText(capacity()));
+    add(panel,"Check picker storage",()->status.setText(capacity()+"\npickerStorageChecked=true"));
+    add(panel,"Hash owned fixture after completion",()->hashLast());
     add(panel,"Delete owned fixtures",()->{if(!busy){for(Uri u:owned)getContentResolver().delete(u,null,null);owned.clear();last=null;getPreferences(MODE_PRIVATE).edit().clear().apply();status.setText(capacity()+"\nDeleted this session's fixture URIs only");}});
     ScrollView scroll=new ScrollView(this);scroll.addView(panel);setContentView(scroll);
   }
   private void add(LinearLayout panel,String title,Runnable action){Button b=new Button(this);b.setText(title);b.setContentDescription(title);b.setAllCaps(false);b.setOnClickListener(v->action.run());panel.addView(b);}
-  private String capacity(){StatFs s=new StatFs(Environment.getExternalStorageDirectory().getPath());return "Issue 3556 fixture helper\nAndroid="+Build.VERSION.RELEASE+" SDK="+Build.VERSION.SDK_INT+" model="+Build.MODEL+"\navailableBytes="+s.getAvailableBytes()+" totalBytes="+s.getTotalBytes();}
+  private String capacity(){StatFs s=new StatFs(Environment.getExternalStorageDirectory().getPath());long free=s.getAvailableBytes();return "Issue 3556 fixture helper\nAndroid="+Build.VERSION.RELEASE+" SDK="+Build.VERSION.SDK_INT+" model="+Build.MODEL+"\nstorageCheckedUtcMs="+System.currentTimeMillis()+"\navailableBytes="+free+" totalBytes="+s.getTotalBytes()+"\nlargeStageRequiredBytes="+(2*LARGE_BYTES+RESERVE_BYTES)+" largeStageStorageOk="+(free>=2*LARGE_BYTES+RESERVE_BYTES)+"\nlargePickerRequiredBytes="+(LARGE_BYTES+RESERVE_BYTES)+" largePickerStorageOk="+(free>=LARGE_BYTES+RESERVE_BYTES);}
   private void update(String value){runOnUiThread(()->status.setText(value));}
   private void stage(long size,boolean video){
     if(busy)return;
     long free=new StatFs(Environment.getExternalStorageDirectory().getPath()).getAvailableBytes();
-    if(free<size+2147483648L){update(capacity()+"\nINSUFFICIENT_STORAGE requested="+size);return;}
+    long required=(size==LARGE_BYTES?2*size:size)+RESERVE_BYTES;
+    if(free<required){update(capacity()+"\nINSUFFICIENT_STORAGE requested="+size+" required="+required);return;}
     busy=true;
     update(capacity()+"\nSTAGING requestedBytes="+size);
     new Thread(()->{Uri uri=null;long start=SystemClock.elapsedRealtime();try{
       String name="issue3556-"+System.currentTimeMillis()+"-"+size+(video?".mp4":".bin");
       ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);values.put(MediaStore.MediaColumns.MIME_TYPE,video?"video/mp4":"application/octet-stream");values.put(MediaStore.MediaColumns.RELATIVE_PATH,video?"Movies/Issue3556":"Download/Issue3556");values.put(MediaStore.MediaColumns.IS_PENDING,1);
       uri=getContentResolver().insert(video?MediaStore.Video.Media.EXTERNAL_CONTENT_URI:MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);if(uri==null)throw new IOException("MediaStore insert failed");owned.add(uri);
-      MessageDigest hash=MessageDigest.getInstance("SHA-256");byte[] chunk=new byte[1024*1024];for(int i=0;i<chunk.length;i++)chunk[i]=(byte)(i*31+7);
+      // The large fixture is hashed only after the actual app transfer finishes.
+      MessageDigest hash=size==LARGE_BYTES?null:MessageDigest.getInstance("SHA-256");byte[] chunk=new byte[1024*1024];for(int i=0;i<chunk.length;i++)chunk[i]=(byte)(i*31+7);
       long count=0;try(OutputStream out=getContentResolver().openOutputStream(uri)){
-        if(video){try(InputStream in=getAssets().open("seed.mp4")){int n;while((n=in.read(chunk))!=-1){out.write(chunk,0,n);hash.update(chunk,0,n);count+=n;}}}
+        if(video){try(InputStream in=getAssets().open("seed.mp4")){int n;while((n=in.read(chunk))!=-1){out.write(chunk,0,n);if(hash!=null)hash.update(chunk,0,n);count+=n;}}}
         // ISO-BMFF permits a free box. Extended length keeps a 16GB MP4 valid.
-        if(video){byte[] header=ByteBuffer.allocate(16).putInt(1).put(new byte[]{102,114,101,101}).putLong(size-count).array();out.write(header);hash.update(header);count+=header.length;}
+        if(video){if(size-count<16)throw new IOException("Fixture cannot hold extended free box");byte[] header=ByteBuffer.allocate(16).putInt(1).put(new byte[]{102,114,101,101}).putLong(size-count).array();out.write(header);if(hash!=null)hash.update(header);count+=header.length;}
         java.util.Arrays.fill(chunk,(byte)0x5a);
-        long deadline=start+1800000L;
-        while(count<size){if(SystemClock.elapsedRealtime()>deadline)throw new IOException("30 minute staging deadline");int n=(int)Math.min(chunk.length,size-count);out.write(chunk,0,n);hash.update(chunk,0,n);count+=n;if(count%(128*1024*1024)==0)update(capacity()+"\nstagingBytes="+count+" expected="+size);}
+        long deadline=start+(size==LARGE_BYTES?1140000L:1800000L);
+        while(count<size){if(SystemClock.elapsedRealtime()>deadline)throw new IOException("Staging deadline expired");int n=(int)Math.min(chunk.length,size-count);out.write(chunk,0,n);if(hash!=null)hash.update(chunk,0,n);count+=n;if(count%(128*1024*1024)==0)update(capacity()+"\nstagingBytes="+count+" expected="+size);}
       }
       ContentValues ready=new ContentValues();ready.put(MediaStore.MediaColumns.IS_PENDING,0);getContentResolver().update(uri,ready,null,null);last=uri;
-      StringBuilder hex=new StringBuilder();for(byte b:hash.digest())hex.append(String.format("%02x",b&255));
+      String hex=hash==null?"deferred-until-app-completion":hex(hash.digest());
       String media="";
-      if(video){MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);String duration=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);android.graphics.Bitmap frame=retriever.getFrameAtTime(0);if(frame==null)throw new IOException("MP4 frame did not decode");media="\nmediaDurationMs="+duration+" decodedFrame="+frame.getWidth()+"x"+frame.getHeight();frame.recycle();}finally{retriever.release();}}
+      if(video){MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);String duration=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);if(size==LARGE_BYTES&&!"1000".equals(duration))throw new IOException("Large MP4 must contain exactly one second of media");android.graphics.Bitmap frame=retriever.getFrameAtTime(0);if(frame==null)throw new IOException("MP4 frame did not decode");media="\nmediaDurationMs="+duration+" decodedFrame="+frame.getWidth()+"x"+frame.getHeight();frame.recycle();}finally{retriever.release();}}
       String details="\nREADY name="+name+"\nuri="+uri+"\nbytes="+count+"\nsha256="+hex+media+"\nelapsedMs="+(SystemClock.elapsedRealtime()-start);
       HashSet<String> retained=new HashSet<>();for(Uri u:owned)retained.add(u.toString());
       getPreferences(MODE_PRIVATE).edit().putStringSet("owned",retained).putString("last",uri.toString()).putString("readyDetails",details).commit();
       update(capacity()+details);
     }catch(Exception e){if(uri!=null)getContentResolver().delete(uri,null,null);update(capacity()+"\nFAILED "+e.getClass().getSimpleName()+": "+e.getMessage());}finally{busy=false;}},"fixture-writer").start();
+  }
+  private static String hex(byte[] digest){StringBuilder hex=new StringBuilder();for(byte b:digest)hex.append(String.format("%02x",b&255));return hex.toString();}
+  private void hashLast(){
+    if(busy||last==null)return;
+    busy=true;final Uri target=last;
+    update(capacity()+"\nHASHING uri="+target);
+    new Thread(()->{long start=SystemClock.elapsedRealtime(),count=0;try{
+      MessageDigest hash=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[1024*1024];
+      try(InputStream in=getContentResolver().openInputStream(target)){
+        int n;while((n=in.read(buffer))!=-1){if(SystemClock.elapsedRealtime()-start>900000L)throw new IOException("15 minute hash deadline");hash.update(buffer,0,n);count+=n;}
+      }
+      update(capacity()+"\nHASH_READY uri="+target+"\nbytes="+count+"\nsha256="+hex(hash.digest())+"\nhashElapsedMs="+(SystemClock.elapsedRealtime()-start));
+    }catch(Exception e){update(capacity()+"\nHASH_FAILED "+e.getClass().getSimpleName()+": "+e.getMessage());}finally{busy=false;}},"fixture-hash").start();
   }
 }

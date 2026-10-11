@@ -1,10 +1,15 @@
 # Official LocalSend 1.18.2 UI receiver for the cloud app-to-app control.
 param(
  [Parameter(Mandatory=$true)][string]$OutputDirectory,
- [ValidateRange(30,3600)][int]$TimeoutSeconds=1800,
+ [ValidateRange(30,7200)][int]$TimeoutSeconds=1800,
  [ValidateRange(10,120)][int]$ReadinessSeconds=60,
  [long]$ExpectedBytes=1048576,
- [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedSha256='bf63d8a95fcc2e64619813aae35fdcbe871fdd9264caa3f365eb3aed0f679129',
+ [ValidatePattern('^([0-9a-fA-F]{64})?$')][string]$ExpectedSha256='bf63d8a95fcc2e64619813aae35fdcbe871fdd9264caa3f365eb3aed0f679129',
+ [string]$VerificationDeadlineUtc,
+ [string]$SenderCompletionFile,
+ [string]$SendStartedFile,
+ [string]$ExpectedHashFile,
+ [ValidateRange(30,900)][int]$HashTimeoutSeconds=900,
  [string]$StopFile
 )
 $ErrorActionPreference='Stop'
@@ -12,6 +17,16 @@ $ProgressPreference='SilentlyContinue'
 $OutputDirectory=[IO.Path]::GetFullPath($OutputDirectory)
 [void][IO.Directory]::CreateDirectory($OutputDirectory)
 if (-not $StopFile) { $StopFile=Join-Path $OutputDirectory 'stop' }
+$large=$ExpectedBytes -eq 16000000000L
+if (-not $SenderCompletionFile) { $SenderCompletionFile=Join-Path $OutputDirectory 'sender-completed.json' }
+if (-not $SendStartedFile) { $SendStartedFile=Join-Path $OutputDirectory 'send-started.json' }
+if (-not $ExpectedHashFile) { $ExpectedHashFile=Join-Path $OutputDirectory 'expected-sha256.json' }
+$verificationDeadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+if ($VerificationDeadlineUtc) {
+ $parentDeadline=[DateTime]::Parse($VerificationDeadlineUtc,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+ if($parentDeadline -lt $verificationDeadline) { $verificationDeadline=$parentDeadline }
+} elseif($large) { throw 'Large receiver requires the parent absolute VerificationDeadlineUtc (session age 105 minutes or earlier).' }
+if($verificationDeadline -le [DateTime]::UtcNow) { throw 'Parent verification deadline has already expired.' }
 $readyPath=Join-Path $OutputDirectory 'ready.json'
 $resultPath=Join-Path $OutputDirectory 'results.json'
 if (Test-Path $readyPath) { Remove-Item $readyPath }
@@ -27,10 +42,17 @@ $report=[ordered]@{
  os=$null; osArchitecture=[Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
  session=$env:SESSIONNAME; archive=$null; executable=$null; processId=$null
  endpoint='https://127.0.0.1:53317'; destination=$null; expectedBytes=$ExpectedBytes; expectedSha256=$ExpectedSha256.ToLowerInvariant()
+ verificationDeadlineUtc=$verificationDeadline.ToString('o'); hashWorkers=@(); senderCompletion=$null; receiverCompletion=$null
+ imageLimit=60; imageCount=0; uiObservationLimit=150; uiObservationCount=0
  snapshots=@(); actions=@(); savedFiles=@(); errors=@()
 }
 $app=$null; $ruleName=$null; $appHwnd=[IntPtr]::Zero; $exitCode=1
-$nextOcr=[DateTime]::MinValue; $ocrNumber=0; $ocrUnavailable=$false
+$nextOcr=[DateTime]::MinValue; $ocrNumber=0; $ocrUnavailable=$false; $verifiedHashes=@{}; $nextUiProbe=[DateTime]::MinValue; $acceptProbes=0; $completionProbes=0
+function Get-RemainingMilliseconds([int]$Maximum) {
+ $remaining=[int][Math]::Max(0,[Math]::Min($Maximum,($verificationDeadline-[DateTime]::UtcNow).TotalMilliseconds))
+ if($remaining -le 0) { throw 'Absolute verification deadline expired.' }
+ return $remaining
+}
 function Write-JsonFile($Path,$Value) {
  [IO.File]::WriteAllText("$Path.tmp",(ConvertTo-Json -InputObject $Value -Depth 12),[Text.UTF8Encoding]::new($false))
  Move-Item -LiteralPath "$Path.tmp" -Destination $Path -Force
@@ -111,10 +133,15 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 function Get-AppElements {
+ if($large) {
+  if($report.uiObservationCount -ge $report.uiObservationLimit) { throw 'Large receiver UI observation budget exhausted.' }
+  $report.uiObservationCount++
+ }
  $root=[System.Windows.Automation.AutomationElement]::FromHandle($appHwnd)
  return $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 }
 function Save-Snapshot([string]$Name) {
+ if($large -and $report.imageCount -ge $report.imageLimit) { return }
  $tree=@()
  try {
   if($appHwnd -ne [IntPtr]::Zero) {
@@ -130,7 +157,7 @@ function Save-Snapshot([string]$Name) {
  try {
   $graphics=[Drawing.Graphics]::FromImage($bitmap)
   try { $graphics.CopyFromScreen($screen.Left,$screen.Top,0,0,$screen.Size) } finally { $graphics.Dispose() }
-  $path=Join-Path $OutputDirectory "$Name.png"; $bitmap.Save($path,[Drawing.Imaging.ImageFormat]::Png)
+  $path=Join-Path $OutputDirectory "$Name.png"; $bitmap.Save($path,[Drawing.Imaging.ImageFormat]::Png); $report.imageCount++
  } finally { $bitmap.Dispose() }
  Write-JsonFile (Join-Path $OutputDirectory "$Name.json") @{
   utc=[DateTime]::UtcNow.ToString('o'); windows=@([ReceiverNative]::All() | Where-Object Visible)
@@ -150,9 +177,10 @@ function Get-BitmapDigest([Drawing.Bitmap]$Bitmap) {
   try { return [Convert]::ToHexString($hash.ComputeHash($bytes)) } finally { $hash.Dispose() }
  } finally { $Bitmap.UnlockBits($locked) }
 }
-function Invoke-OcrAccept {
+function Invoke-OcrAccept([switch]$Completion) {
  # UIA can expose only FLUTTERVIEW in the official release. OCR must prove an incoming dialog first.
  if($script:ocrUnavailable) { return $false }
+ if($large -and $report.imageCount+2 -gt $report.imageLimit) { return $false }
  if([DateTime]::UtcNow -lt $script:nextOcr) { return $false }
  $script:nextOcr=[DateTime]::UtcNow.AddSeconds(5); $script:ocrNumber++
  $name='ocr-{0:D3}' -f $script:ocrNumber; Save-Snapshot $name
@@ -165,7 +193,7 @@ function Invoke-OcrAccept {
   if($rect.Left -lt 0 -or $rect.Top -lt 0 -or $rect.Right -gt $full.Width -or $rect.Bottom -gt $full.Height) { return $false }
   $frame=$full.Clone($rect,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
   try {
-   $framePath=Join-Path $OutputDirectory "$name-window.png"; $frame.Save($framePath,[Drawing.Imaging.ImageFormat]::Png)
+   $framePath=Join-Path $OutputDirectory "$name-window.png"; $frame.Save($framePath,[Drawing.Imaging.ImageFormat]::Png); $report.imageCount++
    $digest=Get-BitmapDigest $frame
   } finally { $frame.Dispose() }
  } finally { $full.Dispose() }
@@ -206,9 +234,10 @@ try {
 '@,[Text.UTF8Encoding]::new($false))
  }
  $result=Join-Path $OutputDirectory "$name-recognized.json"
+ $worker=$null
  try {
   $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$ocrScript+'"'),'-Image',('"'+$framePath+'"'),'-Result',('"'+$result+'"')) -PassThru -WindowStyle Hidden
-  if(-not $worker.WaitForExit(15000)) { $worker.Kill(); throw 'Native Windows OCR exceeded its 15-second bound.' }
+  if(-not $worker.WaitForExit((Get-RemainingMilliseconds 15000))) { $worker.Kill(); throw 'Native Windows OCR exceeded its bounded verification time.' }
   if(-not (Test-Path $result)) { throw 'Native Windows OCR produced no result.' }
   $observed=Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
   if($observed.status -ne 'recognized') { throw "Native Windows OCR unsupported: $($observed.error)" }
@@ -218,8 +247,19 @@ try {
   if(-not (Test-Path $result)) { Write-JsonFile $result @{status='unsupported';image=$framePath;error=$_.Exception.ToString();words=@()} }
   Write-JsonFile $resultPath $report
   return $false
+ } finally {
+  if($worker -and -not $worker.HasExited) { $worker.Kill(); [void]$worker.WaitForExit(5000) }
  }
  $report.ocrCapability.status='recognized'
+ if($Completion) {
+  $finished=@($observed.words | Where-Object text -CEQ 'Finished')
+  $done=@($observed.words | Where-Object text -CEQ 'Done')
+  if($finished.Count -eq 1 -and $done.Count -ge 1) {
+   $report.receiverCompletion=@{utc=[DateTime]::UtcNow.ToString('o');method='Native OCR observed Finished and Done in receiver window';recognized=$result;screenshot=$framePath}
+   return $true
+  }
+  return $false
+ }
  $accept=@($observed.words | Where-Object text -CEQ 'Accept')
  $decline=@($observed.words | Where-Object text -CEQ 'Decline')
  if($accept.Count -eq 0 -or $decline.Count -eq 0) { return $false }
@@ -263,17 +303,69 @@ function Invoke-Accept {
  if($hasUiaAccept) { return $false }
  return Invoke-OcrAccept
 }
+function Invoke-ReceiverCompletion {
+ $names=@()
+ foreach($element in (Get-AppElements)) {
+  try { $v=$element.Current; if(-not $v.IsOffscreen) { $names+=$v.Name } } catch {}
+ }
+ if('Finished' -in $names -and 'Done' -in $names) {
+  Save-Snapshot 'receiver-finished'
+  $report.receiverCompletion=@{utc=[DateTime]::UtcNow.ToString('o');method='UI Automation observed visible Finished and Done';screenshot=(Join-Path $OutputDirectory 'receiver-finished.png')}
+  return $true
+ }
+ return Invoke-OcrAccept -Completion
+}
 function Get-DestinationCapacity([string]$Path) {
  $root=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Path))
  $drive=[IO.DriveInfo]::new($root)
  if(-not $drive.IsReady){throw "Destination drive is not ready: $root"}
  return @{utc=[DateTime]::UtcNow.ToString('o');path=$Path;driveRoot=$root;availableFreeBytes=$drive.AvailableFreeSpace;totalFreeBytes=$drive.TotalFreeSpace;totalBytes=$drive.TotalSize;driveFormat=$drive.DriveFormat}
 }
+function Get-BoundedFileHash([string]$Path,[string]$Label) {
+ $scriptPath=Join-Path $OutputDirectory 'hash-worker.ps1'
+ if(-not (Test-Path $scriptPath)) {
+  [IO.File]::WriteAllText($scriptPath,@'
+param([string]$Path,[string]$Result)
+$ErrorActionPreference='Stop'
+# An exclusive-to-writers read rejects files still open for writing by the app.
+$stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+try {
+ $hash=[Security.Cryptography.SHA256]::Create()
+ try { $digest=[BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','').ToLowerInvariant() } finally { $hash.Dispose() }
+ [IO.File]::WriteAllText($Result,(ConvertTo-Json @{bytes=$stream.Length;sha256=$digest}),[Text.UTF8Encoding]::new($false))
+} finally { $stream.Dispose() }
+'@,[Text.UTF8Encoding]::new($false))
+ }
+ $result=Join-Path $OutputDirectory ($Label+'-hash.json')
+ if(Test-Path $result) { Remove-Item -LiteralPath $result }
+ $worker=$null; $entry=$null; $started=[DateTime]::UtcNow
+ $bound=$started.AddSeconds($HashTimeoutSeconds)
+ if($verificationDeadline -lt $bound) { $bound=$verificationDeadline }
+ try {
+  [void](Get-RemainingMilliseconds 1)
+  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$scriptPath+'"'),'-Path',('"'+$Path+'"'),'-Result',('"'+$result+'"')) -PassThru -WindowStyle Hidden
+  $entry=@{label=$Label;processId=$worker.Id;startedUtc=$started.ToString('o');deadlineUtc=$bound.ToString('o');status='running'}
+  $report.hashWorkers+=$entry; Write-JsonFile $resultPath $report
+  while(-not $worker.WaitForExit((Get-RemainingMilliseconds 250))) {
+   if(Test-Path $StopFile) { throw 'Workflow stopped the hash worker.' }
+   if([DateTime]::UtcNow -ge $bound) { throw 'Hash worker exceeded its bounded verification deadline.' }
+  }
+  if($worker.ExitCode -ne 0 -or -not (Test-Path $result)) { throw 'Hash worker failed; saved file may still be open for writing.' }
+  $observed=Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
+  if($observed.sha256 -notmatch '^[0-9a-f]{64}$' -or $observed.bytes -ne $ExpectedBytes) { throw 'Hash worker returned invalid content metadata.' }
+  $entry.status='complete'; $entry.finishedUtc=[DateTime]::UtcNow.ToString('o')
+  return $observed.sha256
+ } finally {
+  if($worker -and -not $worker.HasExited) { $worker.Kill(); [void]$worker.WaitForExit(5000) }
+  if($entry -and $entry.status -eq 'running') { $entry.status='terminated'; $entry.finishedUtc=[DateTime]::UtcNow.ToString('o') }
+ }
+}
 try {
  $report.os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
  if($report.osArchitecture -ne 'X64') { throw 'This receiver requires a native x64 Windows runner.' }
  $archive=Join-Path $OutputDirectory 'LocalSend-1.18.2-windows-x86-64.zip'
- Invoke-WebRequest -Uri $report.artifactUrl -OutFile $archive -MaximumRedirection 10 -TimeoutSec 120
+ $downloadSeconds=[Math]::Max(1,[Math]::Floor((Get-RemainingMilliseconds 120000)/1000))
+ Invoke-WebRequest -Uri $report.artifactUrl -OutFile $archive -MaximumRedirection 10 -TimeoutSec $downloadSeconds
  if((Get-Item $archive).Length -lt 1000000) { throw 'Release ZIP download is unexpectedly small.' }
  $report.archive=@{ path=$archive; bytes=(Get-Item $archive).Length; sha256=(Get-FileHash $archive -Algorithm SHA256).Hash }
  $releaseDirectory=Join-Path $OutputDirectory 'release'; Expand-Archive -LiteralPath $archive -DestinationPath $releaseDirectory -Force
@@ -291,7 +383,9 @@ try {
  $destination=[ReceiverNative]::Downloads(); [void][IO.Directory]::CreateDirectory($destination)
  $report.destination=@{ path=$destination; method='Normal release default Downloads destination; no Quick Save or profile changes' }
  $report.destination.capacityBefore=Get-DestinationCapacity $destination
- if($report.destination.capacityBefore.availableFreeBytes -lt $ExpectedBytes){throw 'Actual Windows destination drive cannot hold this controlled fixture.'}
+ $requiredBytes=$ExpectedBytes+2147483648L
+ $report.destination.requiredFreeBytes=$requiredBytes
+ if($report.destination.capacityBefore.availableFreeBytes -lt $requiredBytes){throw 'Actual Windows Downloads drive needs fixture bytes plus 2GiB free reserve.'}
  $beforePaths=@((Get-ChildItem $destination -File -Recurse).FullName)
  if(@(Get-Process -Name localsend_app,LocalSend -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Another LocalSend process exists; require an isolated hosted job.' }
  if(Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue) { throw 'Port 53317 is already in use.' }
@@ -299,6 +393,7 @@ try {
  New-NetFirewallRule -Name $ruleName -DisplayName $ruleName -Direction Inbound -Program $exe.FullName -Action Allow -Profile Any | Out-Null
  $app=Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
  $report.processId=$app.Id; $report.stage='readiness'; $deadline=[DateTime]::UtcNow.AddSeconds($ReadinessSeconds)
+ if($verificationDeadline -lt $deadline) { $deadline=$verificationDeadline }
  do {
   Start-Sleep -Milliseconds 500; $app.Refresh()
   if($app.HasExited) { throw "LocalSend exited during readiness: $($app.ExitCode)" }
@@ -309,33 +404,86 @@ try {
  $appHwnd=[IntPtr]::new($windows[0].Hwnd); [void][ReceiverNative]::Activate($appHwnd); Save-Snapshot 'ready'
  $report.stage='waiting-for-receive-request'; $report.status='ready'; Write-JsonFile $resultPath $report
  Write-JsonFile $readyPath @{ ready=$true; utc=[DateTime]::UtcNow.ToString('o'); processId=$app.Id; endpoint=$report.endpoint; destination=$destination; results=$resultPath }
- $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds); $accepted=$false
- $nextSnapshot=[DateTime]::UtcNow.AddSeconds(30); $snapshotNumber=0
+ $deadline=$verificationDeadline; $accepted=$false
+ $snapshotInterval=30; if($large) { $snapshotInterval=120 }
+ $nextSnapshot=[DateTime]::UtcNow.AddSeconds($snapshotInterval); $snapshotNumber=0
  do {
   if(Test-Path $StopFile) { throw 'Workflow stopped the receiver before a verified save.' }
   $app.Refresh(); if($app.HasExited) { throw 'LocalSend exited before a verified save.' }
-  if(-not $accepted) {
+  $sendStarted=-not $large
+  if($large -and (Test-Path $SendStartedFile)) {
+   $send=Get-Content -LiteralPath $SendStartedFile -Raw | ConvertFrom-Json
+   if($send.started -eq $true -and $send.utc) {
+    $sendUtc=[DateTime]::Parse($send.utc).ToUniversalTime()
+    $sendStarted=$sendUtc -ge [DateTime]::Parse($report.startedUtc).ToUniversalTime() -and $sendUtc -le [DateTime]::UtcNow
+   }
+  }
+  if(-not $accepted -and $sendStarted -and [DateTime]::UtcNow -ge $nextUiProbe) {
+   if($large) { $nextUiProbe=[DateTime]::UtcNow.AddSeconds(40) }
+   if($large -and $acceptProbes -ge 5) { throw 'No observed Accept after five bounded post-Send UI probes.' }
+   $acceptProbes++
+   $report.destination.capacityBeforeAccept=Get-DestinationCapacity $destination
+   if($report.destination.capacityBeforeAccept.availableFreeBytes -lt $requiredBytes) { throw 'Fresh Downloads capacity before Accept is below fixture plus 2GiB.' }
    $accepted=Invoke-Accept
    if($accepted) { $report.stage='waiting-for-saved-file'; Write-JsonFile $resultPath $report }
   }
   if($accepted) {
+   $completionAllowed=-not $large
+   if($large -and (Test-Path $SenderCompletionFile)) {
+    $completion=Get-Content -LiteralPath $SenderCompletionFile -Raw | ConvertFrom-Json
+    if($completion.completed -eq $true -and $completion.utc -and $completion.evidence) {
+     $completedUtc=[DateTime]::Parse($completion.utc).ToUniversalTime()
+     if($completedUtc -ge [DateTime]::Parse($report.startedUtc).ToUniversalTime() -and $completedUtc -le [DateTime]::UtcNow) {
+      $report.senderCompletion=$completion; $completionAllowed=$true
+     }
+    }
+   }
+   if($large -and $completionAllowed -and (Test-Path $ExpectedHashFile)) {
+    $expected=Get-Content -LiteralPath $ExpectedHashFile -Raw | ConvertFrom-Json
+    if($expected.bytes -ne $ExpectedBytes -or $expected.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Android post-completion hash metadata is invalid.' }
+    $ExpectedSha256=$expected.sha256.ToLowerInvariant(); $report.expectedSha256=$ExpectedSha256
+   }
+   if($large -and $completionAllowed -and -not $report.receiverCompletion -and [DateTime]::UtcNow -ge $nextUiProbe) {
+    if($completionProbes -ge 4) { throw 'No observed Finished and Done after four bounded post-completion UI probes.' }
+    $completionProbes++
+    $nextUiProbe=[DateTime]::UtcNow.AddSeconds(40)
+    [void](Invoke-ReceiverCompletion)
+    Write-JsonFile $resultPath $report
+   }
+   if($completionAllowed -and (-not $large -or $report.receiverCompletion)) {
    foreach($file in @(Get-ChildItem $destination -File -Recurse | Where-Object { $_.FullName -notin $beforePaths -and $_.Length -eq $ExpectedBytes })) {
-    try { $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } catch { continue }
-    if($hash -ne $ExpectedSha256.ToLowerInvariant()) { continue }
+    $beforeHash=Get-Item -LiteralPath $file.FullName
     Start-Sleep -Milliseconds 750
-    if((Get-Item $file.FullName).Length -ne $ExpectedBytes -or (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { continue }
+    $stable=Get-Item -LiteralPath $file.FullName
+    if($stable.Length -ne $ExpectedBytes -or $stable.LastWriteTimeUtc -ne $beforeHash.LastWriteTimeUtc) { continue }
+    $cacheKey=$file.FullName+'|'+$stable.Length+'|'+$stable.LastWriteTimeUtc.Ticks
+    if(-not $verifiedHashes.ContainsKey($cacheKey)) {
+     $report.stage='hashing-saved-file'; Save-Snapshot 'before-saved-file-hash'
+     $verifiedHashes[$cacheKey]=Get-BoundedFileHash $file.FullName 'saved-file'
+    }
+    $hash=$verifiedHashes[$cacheKey]
+    if($large -and -not (Test-Path $ExpectedHashFile)) { $report.stage='waiting-for-android-post-completion-hash'; continue }
+    if($hash -ne $ExpectedSha256.ToLowerInvariant()) { throw 'Saved Windows bytes disagree with the Android fixture hash.' }
+    $afterHash=Get-Item -LiteralPath $file.FullName
+    if($afterHash.Length -ne $ExpectedBytes -or $afterHash.LastWriteTimeUtc -ne $stable.LastWriteTimeUtc) { continue }
+    if(-not $large -and (Get-BoundedFileHash $file.FullName 'saved-file-confirmation') -ne $hash) { continue }
     $report.destination.capacityAfterSave=Get-DestinationCapacity $file.FullName
-    $copy=Join-Path $OutputDirectory ('saved-'+$file.Name); Copy-Item -LiteralPath $file.FullName -Destination $copy
-    $report.savedFiles+=@{ path=$file.FullName; evidenceCopy=$copy; bytes=$file.Length; sha256=$hash; lastWriteUtc=$file.LastWriteTimeUtc.ToString('o') }
+    $copy=$null
+    if(-not $large) { $copy=Join-Path $OutputDirectory ('saved-'+$file.Name); Copy-Item -LiteralPath $file.FullName -Destination $copy }
+    $report.savedFiles+=@{ path=$file.FullName; evidenceCopy=$copy; copyOmittedForLarge=$large; bytes=$afterHash.Length; sha256=$hash; lastWriteUtc=$afterHash.LastWriteTimeUtc.ToString('o');stableSizeBeforeAfterHash=$true }
     Save-Snapshot 'saved-file-verified'; $report.status='saved-file-verified'; $report.stage='complete'
     $report.evidenceLevel='Actual Windows release UI Accept and saved bytes verified; pair with Android sender evidence for app-to-app conclusion.'
     $exitCode=0; break
    }
+   }
   }
   if($exitCode -eq 0) { break }
   if([DateTime]::UtcNow -ge $nextSnapshot) {
-   $snapshotNumber++; Save-Snapshot ('waiting-{0:D3}' -f $snapshotNumber); Write-JsonFile $resultPath $report
-   $nextSnapshot=[DateTime]::UtcNow.AddSeconds(30)
+   $snapshotNumber++
+   # Reserve images for the incoming dialog, completed receiver and hash evidence.
+   if(-not $large -or $snapshotNumber -le 36) { Save-Snapshot ('waiting-{0:D3}' -f $snapshotNumber) }
+   Write-JsonFile $resultPath $report
+   $nextSnapshot=[DateTime]::UtcNow.AddSeconds($snapshotInterval)
   }
   Start-Sleep -Milliseconds 500
  } until([DateTime]::UtcNow -ge $deadline)

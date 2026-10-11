@@ -3,8 +3,10 @@ import net from 'node:net';
 import {randomBytes} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
 
-export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=randomBytes(24).toString('hex'),transport='legacy'}={}) {
+export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=randomBytes(24).toString('hex'),transport='legacy',peerAbsoluteTimeoutMs=15*60000}={}) {
   if(!['legacy','stream','coalesced'].includes(transport))throw new Error('Unknown diagnostic transport');
+  if(![15*60000,90*60000].includes(peerAbsoluteTimeoutMs))throw new Error('Invalid explicit logical peer limit');
+  const peerDeadlines=new Map();
   const uploadProgressTimeoutMs=90000,uploadAbsoluteTimeoutMs=15*60000,binaryLimit=1024*1024;
   const activeUploads=new Map(),uploads=Object.create(null);
   const peers=new Map(); const events=[]; let waiter=null; let queued=0; let peak=0; let next=0,traceDropped=0;
@@ -21,7 +23,8 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     for(const c of counters){c.count++;c.bytes+=length;c.min=c.min===null?length:Math.min(c.min,length);c.max=Math.max(c.max,length);c.firstElapsedMs??=now;c.lastElapsedMs=now;}
   }
   const status=()=>({...metrics,transport,queued,peak,peers:peers.size,activeUploads:activeUploads.size,traceDropped,
-    uploadLimits:{progressTimeoutMs:uploadProgressTimeoutMs,absoluteTimeoutMs:uploadAbsoluteTimeoutMs,binaryLimit},
+    uploadLimits:{progressTimeoutMs:uploadProgressTimeoutMs,absoluteTimeoutMs:uploadAbsoluteTimeoutMs,binaryLimit,peerAbsoluteTimeoutMs},
+    earliestPeerExpiryUtc:peerDeadlines.size?new Date(Math.min(...peerDeadlines.values())).toISOString():null,
     uploads:structuredClone(uploads),chunks:structuredClone(chunks),peerChunks:structuredClone(peerChunks),measurement:structuredClone(measurement)});
   function record(origin,id,detail={}){if(trace.length<4096)trace.push({elapsedMs:Number(process.hrtime.bigint()-started)/1e6,origin,id,...detail});else traceDropped++;}
   function dequeue() {
@@ -36,11 +39,13 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
   function enqueue(e) {events.push(e);queued+=e.bytes||0;peak=Math.max(peak,queued);if(queued>512*1024){for(const p of peers.values())p.pause();metrics.paused++;}wake();}
   function attach(p,id,source){
     peers.set(id,p);metrics.opened++;
+    const expiresAt=Date.now()+peerAbsoluteTimeoutMs;peerDeadlines.set(id,expiresAt);
+    const lifetime=setTimeout(()=>{record('logical-peer-deadline',id);activeUploads.get(id)?.fail('Logical peer absolute deadline');p.destroy();},peerAbsoluteTimeoutMs);
     record(source+'-open',id);
     p.on('data',data=>{metrics.fromSender+=data.length;measureChunk('fromSender',data.length,id);enqueue({id,kind:'data',bytes:data.length,data:data.toString('base64')});});
     p.on('end',()=>{record(source+'-eof',id);enqueue({id,kind:'eof'});});
     p.on('error',e=>{record(source+'-error',id,{code:e.code||'SOCKET_ERROR'});enqueue({id,kind:'error',error:e.code||'SOCKET_ERROR'});});
-    p.on('close',()=>{record(source+'-close',id);activeUploads.get(id)?.fail('Target socket closed during upload');peers.delete(id);enqueue({id,kind:'close'});});
+    p.on('close',()=>{clearTimeout(lifetime);peerDeadlines.delete(id);record(source+'-close',id);activeUploads.get(id)?.fail('Target socket closed during upload');peers.delete(id);enqueue({id,kind:'close'});});
   }
   const tcp=net.createServer({allowHalfOpen:true},p=>{
     const id=String(++next);attach(p,id,'sender');enqueue({id,kind:'open'});
@@ -127,6 +132,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
   server.setTimeout(uploadProgressTimeoutMs+5000,socket=>socket.destroy());
   const closePeers=reason=>{record('owned-peer-reset',null,{reason});for(const [id,p] of peers){activeUploads.get(id)?.fail(reason);p.destroy();}};
   return {token,metrics,trace,record,status,
+    setPeerLimit:milliseconds=>{if(![15*60000,90*60000].includes(milliseconds)||peers.size||activeUploads.size)throw new Error('Peer limit change requires empty owned peers');peerAbsoluteTimeoutMs=milliseconds;record('logical-peer-limit',null,{milliseconds});},
     beginMeasurement:label=>{measurement={label,startedElapsedMs:Number(process.hrtime.bigint()-started)/1e6,chunks:{fromSender:emptyChunks(),fromDevice:emptyChunks()},peerChunks:Object.create(null)};},
     closePeers,
     setTransport:mode=>{if(!['legacy','stream','coalesced'].includes(mode)||peers.size||activeUploads.size)throw new Error('Transport change requires no live peers');transport=mode;record('transport-mode',null,{mode});},
