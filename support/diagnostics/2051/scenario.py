@@ -38,6 +38,7 @@ def click(serial, label, name):
             if target.get("clickable") != "true" and target.get("is-collection-item") != "true":
                 target = n
             a,b,c,d = map(int, re.findall(r"\d+", target.get("bounds")))
+            print("INPUT", serial, label, target.get("class"), target.get("bounds"), flush=True)
             adb(serial, "shell", "input", "tap", str((a+c)//2), str((b+d)//2))
             time.sleep(2)
             return
@@ -59,7 +60,25 @@ try:
     # Android DocumentsUI defaults to Recents; choose the Download root explicitly.
     click(S, "Show roots", "picker-before-roots")
     click(S, "Downloads", "picker-before-downloads")
+    click(S, "List view", "picker-before-list-view")
     click(S, "a.txt", "picker-before-file")
+    picked_xml = snapshot(S, "picker-after-file")
+    if "com.google.android.documentsui" in picked_xml:
+        tree = ET.fromstring(picked_xml)
+        title = next(n for n in tree.iter() if n.get("text") == "a.txt")
+        a,b,c,d = map(int, re.findall(r"\d+", title.get("bounds")))
+        x,y = (a+c)//2,(b+d)//2
+        request("POST", "/session/" + sessions[S] + "/actions", {"actions": [{"type": "pointer", "id": "finger", "parameters": {"pointerType": "touch"}, "actions": [{"type": "pointerMove", "duration": 0, "x": x, "y": y}, {"type": "pointerDown", "button": 0}, {"type": "pause", "duration": 100}, {"type": "pointerUp", "button": 0}]}]})
+        time.sleep(2)
+        picked_xml = snapshot(S, "picker-after-w3c-touch")
+    if "com.google.android.documentsui" in picked_xml:
+        adb(S, "shell", "input", "swipe", str(x), str(y), str(x), str(y), "1200")
+        picked_xml = snapshot(S, "picker-after-longpress")
+        labels = [n.get("text", "") for n in ET.fromstring(picked_xml).iter()]
+        controls = [label for label in ["Open", "Select", "OPEN", "SELECT"] if label in labels]
+        if not controls:
+            raise RuntimeError("Picker remained without observed Open/Select after tap, touch, longpress")
+        click(S, controls[0], "picker-before-confirm-selection")
     click(S, receiver_alias, "sender-before-target")
     time.sleep(4)
     snapshot(R, "receiver-request")
