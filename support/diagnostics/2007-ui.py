@@ -81,6 +81,11 @@ run('xdotool', 'key', 'ctrl+l')
 run('xdotool', 'type', '--clearmodifiers', str(fixture))
 run('xdotool', 'key', 'Return')
 time.sleep(2)
+screen('file-location-resolved')
+# GTK's location entry first resolves the path; accept the enabled Open
+# action through the actual chooser rather than assuming Return selected it.
+click(*text('Open', 'file-picker-open'))
+time.sleep(2)
 words = screen('file-selected')
 if not any(w['text'].strip().startswith('Files:') for w in words):
     raise RuntimeError('Actual file picker did not produce a selection')
