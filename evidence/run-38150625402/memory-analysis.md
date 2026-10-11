@@ -25,7 +25,7 @@ Full-case aggregate memory samples with readable receiver status:
 | 500 | 89 | 351808 | 0 | 459876 | 4644 | 16.750 |
 | 5000 | 96 | 841360 | 275588 | 6932 | 730664 | 1126.069 |
 
-One additional missing receiver-status sample per case follows harness cleanup and is excluded from process maxima. PIDs/starttimes are 4607/9852, 5033/14610 and 5434/19084 respectively. Full-case maxima include post-hold transitions; they are not assigned solely to Options.
+One additional missing receiver-status sample per case follows harness cleanup and is excluded from process maxima. PIDs/starttimes are 4607/9852, 5033/14610 and 5434/19084 respectively. Full-case maxima include post-hold transitions; they are not assigned solely to Options. Peaks/minima are sampled values, and record fields are read sequentially rather than as atomic snapshots. Read wall duration includes scheduling and I/O, not just CPU time. The sampler CPU estimate excludes SSH, PSS helpers, scrot and Xvfb, so it is not total observation overhead.
 
 5000 stage PSS at actual input offsets +2.139/+6.155/+10.989 seconds is 779879/789166/795401 KiB, with stage Swap 113736/209828/183352 KiB. At the latter two stages, memory PSI avg10 some/full is 19.78/17.51% and 16.01/13.65%. Process VmSwap and stage Swap are observed at different times. The +10 PSS plus Swap is approximately 956 MiB, illustrating the pressure without claiming all of it is caused exclusively by the list.
 
