@@ -27,7 +27,11 @@ async function filePick(file,name){
 async function mediaPick(file,name){await reset();await click('Media');let source=await wd('GET',`/session/${session}/source`);if(source.includes('permissioncontroller'))await ui('textMatches("(?i)allow")');await snap(name+'-picker');await ui('descriptionContains('+JSON.stringify(file)+')');await snap(name+'-selected');await ui('descriptionStartsWith("Confirm")');await observe(name,name.startsWith('large')?300:30);}
 async function warmShare(name,seconds){
  await reset();await snap(name+'-before');const sendBounds=await locate('accessibility id','Manual sending');
- await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await helperClick('Share owned fixture');await snap(name+'-chooser');await ui('text("LocalSend")');await snap(name+'-first-frame');
+ await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await helperClick('Share owned fixture');await snap(name+'-chooser');
+ const chooserDeadline=Date.now()+60000;let chooserReady=false;
+ while(Date.now()<chooserDeadline){const source=await wd('GET',`/session/${session}/source`);if(/text="LocalSend"/.test(source)){chooserReady=true;break;}await new Promise(r=>setTimeout(r,2000));}
+ await snap(name+'-chooser-ready');if(!chooserReady)throw Error('Native share chooser did not expose LocalSend within60s');
+ await ui('text("LocalSend")');await snap(name+'-first-frame');
  // A normal next send action, using bounds observed on this app before sharing.
  await touch(sendBounds);await observe(name,seconds);
 }
@@ -35,6 +39,7 @@ try{
  const plan=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth}}).then(r=>r.json());writeFileSync('evidence/live-plan.json',JSON.stringify(plan));if(plan.parallel_sessions_running>=plan.parallel_sessions_max_allowed)throw Error('No live BrowserStack slot');
  const c=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'appium:newCommandTimeout':2400,'bstack:options':{idleTimeout:600,projectName:'LocalSend bug sprint',buildName:'issue3556-'+process.env.GITHUB_RUN_ID,sessionName:'issue3556-S20-selection-control',debug:true,video:true,networkLogs:false}},firstMatch:[{}]}});
  session=c.sessionId;if(!session)throw Error('No session ID');writeFileSync('evidence/session.json',JSON.stringify({session,device:'Samsung Galaxy S20',android:'10.0',baselineSha256:'82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3'}));
+ await wd('POST',`/session/${session}/orientation`,{orientation:'PORTRAIT'});
  await snap('capacity-before');await click('Stage small data');
  for(let i=0;i<30;i++){const s=await wd('GET',`/session/${session}/source`);if(s.includes('READY'))break;if(s.includes('FAILED')||s.includes('INSUFFICIENT'))throw Error('Staging failed');await new Promise(r=>setTimeout(r,1000));}
  await snap('small-data-ready');const smallData=fixtureName(await ready('.bin',30000));await click('Stage small video');
