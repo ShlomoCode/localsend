@@ -1,0 +1,93 @@
+name: Diagnose 2414 Debian compatibility
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2414-many-files]
+    paths: [.github/workflows/diagnose-2414-debian-compat.yml]
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-2414-vm-pair
+  cancel-in-progress: false
+jobs:
+  debian-tools:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    container: debian:12
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian tools and runtime providers
+        run: |
+          apt-get update
+          apt-get install -y bash binutils procps util-linux python3 sudo curl ca-certificates cloud-init systemd openssh-client xvfb openbox xdotool scrot fonts-dejavu-core network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
+          useradd --create-home --shell /bin/bash probe
+          mkdir -p /home/probe/released/base /home/probe/evidence
+          # Only a pathname fixture for findmnt's shared command sequence.
+          # Zero bytes, never formatted as swap or activated.
+          touch /swap.img
+      - name: Validate all diagnostic syntax in cloud
+        run: |
+          bash -n support/diagnostics/2414-memory-pair.sh
+          bash -n support/diagnostics/2414-memory-preflight.sh
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ('2414-memory-host-ui.py', '2414-memory-receiver-driver.py'):
+              path = Path('support/diagnostics') / name
+              ast.parse(path.read_text(), filename=str(path))
+          PY
+      - name: Verify release without running it
+        run: |
+          curl --fail --location --retry 3 --max-time 240 -o /home/probe/baseline.tar.gz https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz
+          printf '%s  %s\n' 6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81 /home/probe/baseline.tar.gz | sha256sum --check
+          tar xf /home/probe/baseline.tar.gz -C /home/probe/released/base
+          cp support/diagnostics/2414-memory-preflight.sh support/diagnostics/2414-memory-receiver-driver.py /home/probe/
+          chown -R probe:probe /home/probe
+      - name: Run exact shared preflight as non-login Debian user
+        run: |
+          # Container shares the host kernel. It never creates/enables swap or
+          # claims to validate VM capacity. The VM mode retains those assertions.
+          su -s /bin/bash probe -c 'bash /home/probe/2414-memory-preflight.sh container-tools'
+          su -s /bin/bash probe -c 'id; printf "PATH=%s\n" "$PATH"; command -v bash python3 stat findmnt getconf free ps journalctl cloud-init readelf scrot xdotool; /sbin/swapon --version; /sbin/ldconfig --version; journalctl -k -o short-monotonic --no-pager; cloud-init status --long; cat /proc/pressure/memory' > /home/probe/evidence/utility-contracts.txt 2>&1
+      - name: Exercise proc reader on an ordinary sleep process
+        run: |
+          su -s /bin/bash probe -c 'python3 -' <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+          import subprocess
+          import time
+          path = Path('/home/probe/2414-memory-receiver-driver.py')
+          spec = importlib.util.spec_from_file_location('driver', path)
+          driver = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(driver)
+          child = subprocess.Popen(['sleep', '4'])
+          state = {'count': 5, 'pid': child.pid, 'starttime': driver.proc_start(child.pid)}
+          assert state['starttime'] and driver.alive(state)
+          sampler = subprocess.Popen(['python3', str(path), 'sample', json.dumps(state)])
+          time.sleep(2)
+          stage = driver.stage(state, 'container-sleep')
+          assert stage['expected_starttime'] == stage['observed_starttime']
+          assert isinstance(stage['smaps_rollup'], str) and 'SwapPss:' in stage['smaps_rollup']
+          sampler.terminate()
+          sampler.wait(timeout=5)
+          child.terminate()
+          child.wait(timeout=5)
+          records = [json.loads(line) for line in (driver.OUT / 'files-5-memory-samples.jsonl').read_text().splitlines()]
+          assert len(records) >= 3
+          for record in records:
+              assert all(isinstance(record[key], str) for key in ('stat', 'status', 'meminfo', 'vmstat', 'pressure_memory'))
+              assert record['stat'].rsplit(')', 1)[1].split()[19] == state['starttime']
+              assert 'pswpin ' in record['vmstat'] and 'pswpout ' in record['vmstat']
+              assert 'some ' in record['pressure_memory'] and 'full ' in record['pressure_memory']
+          (driver.OUT / 'container-result.json').write_text(json.dumps({'classification': 'tools-and-proc-reader-qualified', 'samples': len(records), 'limits': 'No LocalSend execution, desktop validation, swap activation or VM capacity qualification.'}, indent=2))
+          PY
+      - name: Retain compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2414-debian-compat-${{ github.run_id }}
+          path: /home/probe/evidence/
+          if-no-files-found: warn
+          retention-days: 14
