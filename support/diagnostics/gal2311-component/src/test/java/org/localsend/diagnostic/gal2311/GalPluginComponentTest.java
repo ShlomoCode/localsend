@@ -16,6 +16,8 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
@@ -89,6 +91,7 @@ public class GalPluginComponentTest {
     @Test public void outputFailureRemovesOnlyTheOwnedItem()throws Exception{
         provider.failOutput=true;Outcome outcome=start(source(1739455860000L),true);await(outcome,10000);
         assertNotNull(outcome.error);assertTrue(outcome.error.contains("controlled output failure"));
+        assertEquals(1,provider.outputFailures.get());assertEquals(0,outcome.successes.get());assertEquals(1,outcome.terminals.get());
         assertFalse(provider.contains(provider.lastInserted));assertEquals(1,provider.deletes.size());
         assertEquals(provider.lastInserted,provider.deletes.get(0));assertEquals(1,provider.count());assertUnrelatedIntact();
     }
@@ -145,13 +148,21 @@ public class GalPluginComponentTest {
     }
     public static final class GalleryProvider extends ContentProvider {
         private final Map<Uri,File> items=new LinkedHashMap<>();final List<Uri> deletes=new ArrayList<>();final AtomicInteger inserts=new AtomicInteger();
-        volatile Uri lastInserted;volatile boolean failOutput;
+        volatile Uri lastInserted;volatile boolean failOutput;final AtomicInteger outputFailures=new AtomicInteger();
         public boolean onCreate(){return true;}
         public synchronized Uri insert(Uri collection,ContentValues values){
             try{
                 int id=inserts.incrementAndGet();Uri uri=ContentUris.withAppendedId(collection,id);
                 File file=new File(getContext().getCacheDir(),"owned-gallery-"+id+".png");Files.write(file.toPath(),new byte[0]);
-                items.put(uri,file);lastInserted=uri;return uri;
+                items.put(uri,file);lastInserted=uri;
+                if(failOutput){
+                    // Robolectric's one-argument openOutputStream swallows provider open failures.
+                    // Inject a write failure so the real Gal copy/rollback path receives it.
+                    Shadows.shadowOf(getContext().getContentResolver()).registerOutputStream(uri,new OutputStream(){
+                        public void write(int value)throws IOException{outputFailures.incrementAndGet();throw new IOException("controlled output failure");}
+                    });
+                }
+                return uri;
             }catch(Exception error){throw new IllegalStateException(error);}
         }
         public synchronized Cursor query(Uri uri,String[] columns,String selection,String[] args,String sort){
@@ -161,7 +172,6 @@ public class GalPluginComponentTest {
             }return cursor;
         }
         public synchronized ParcelFileDescriptor openFile(Uri uri,String mode)throws FileNotFoundException{
-            if(failOutput&&mode.contains("w"))throw new FileNotFoundException("controlled output failure");
             File file=items.get(uri);if(file==null)throw new FileNotFoundException(uri.toString());
             return ParcelFileDescriptor.open(file,ParcelFileDescriptor.parseMode(mode));
         }
