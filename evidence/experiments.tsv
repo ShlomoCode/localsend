@@ -5,3 +5,4 @@ E02	OCR scale	5-file cloud release control	visible Send still omitted from OCR; 
 E03	peer namespaces	5-file real-app control	Send navigation succeeds and genuine TCP discovery finds Receiver2414; OCR misses Folder; no picker reached	run-38104034501/	no
 E04	actual Folder control	5-file real picker	picker opened and path typed; GTK chooser remained open; no send reached	run-38104220074/	no
 E05	picker readiness and Return	5-file actual directory control	chooser remains in fixture dir with no subdirs and disabled Open; no app send	38104458684	no
+E06	parent directory navigation	5-file chooser row selection	chooser stays Recent with location entry; fixture row not reached	38104757974	no

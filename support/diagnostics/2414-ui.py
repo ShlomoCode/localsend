@@ -10,7 +10,7 @@ def screen(stage):
     ocr = out / (stage+'-ocr.png'); run('convert',str(p),'-resize','200%',str(ocr))
     t = run('tesseract',str(ocr),'stdout','--psm','11','tsv')
     (out/(stage+'.tsv')).write_text(t)
-    rows=list(csv.DictReader(io.StringIO(t),delimiter='\t'))
+    rows=list(csv.DictReader(io.StringIO(t),delimiter='\t',quoting=csv.QUOTE_NONE))
     for row in rows:
         for key in ['left','top','width','height']: row[key]=str(int(row[key])//2)
     return rows
@@ -71,7 +71,10 @@ for count in [5,5000]:
         receiver,rwin=apps[0]; sender,swin=apps[1]
         stop=threading.Event(); sampler=threading.Thread(target=metrics,args=(receiver.pid,stop,out/(case+'-metrics.jsonl'))); sampler.start()
         focus(swin); screen(case+'-send-observed'); click(96,188); screen(case+'-folder-observed'); click(514,150)
-        locate('Recent',case+'-picker-ready',10); screen(case+'-picker'); run('xdotool','key','ctrl+l'); run('xdotool','type','--clearmodifiers',str(fixture.parent)); run('xdotool','key','Return'); time.sleep(2)
+        locate('Recent',case+'-picker-ready',10); chooser=run('xdotool','search','--onlyvisible','--name','Choose Directory').split()[-1]; focus(chooser);
+        (out/(case+'-namespace-fixture.txt')).write_text(run('sudo','ip','netns','exec','issue2414-sender','find',str(fixture.parent),'-maxdepth','2','-type','f'))
+        with (out/(case+'-picker-tree-before.txt')).open('w') as tree: subprocess.run(['timeout','10','/usr/bin/python3','support/diagnostics/2414-desktop-tree.py'],stdout=tree,stderr=subprocess.STDOUT); screen(case+'-picker'); run('xdotool','key','ctrl+l'); run('xdotool','type','--clearmodifiers',str(fixture.parent)+'/'); run('xdotool','key','Return'); time.sleep(2)
+        with (out/(case+'-picker-tree-after.txt')).open('w') as tree: subprocess.run(['timeout','10','/usr/bin/python3','support/diagnostics/2414-desktop-tree.py'],stdout=tree,stderr=subprocess.STDOUT)
         click(*locate(case,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(1048,772); time.sleep(1)
         # GTK directory picker enters the directory; select its Open button.
         words=screen(case+'-picker-entered')
