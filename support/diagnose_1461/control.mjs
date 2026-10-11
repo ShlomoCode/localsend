@@ -86,13 +86,16 @@ async function toggleWifi(expected,name,{requireActivePeer=false}={}){
  assert(nodes(xml).some(n=>n.package==='com.android.settings')&&labels(xml).some(v=>/Wi-Fi/.test(v)),'Observed switch is not on native Wi-Fi settings');
  assert.equal(switches[0].checked,expected?'false':'true','Unexpected Wi-Fi starting state');
  const n=switches[0],bounds=n.bounds?.match(/^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/);assert(bounds,'Missing observed Wi-Fi switch bounds');
+ const targets=n.clickable==='true'?[n]:nodes(xml).filter(v=>v.package===n.package&&v.enabled==='true'&&v.displayed==='true'&&v.clickable==='true'&&v['resource-id']?.endsWith('/switch_bar')&&v.bounds);
+ assert.equal(targets.length,1,'Nonclickable native Switch requires its uniquely observed clickable switch bar');const target=targets[0];
+ const rect=target.bounds.match(/^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/);assert(rect&&+rect[1]<=+bounds[1]&&+rect[2]<=+bounds[2]&&+rect[3]>=+bounds[3]&&+rect[4]>=+bounds[4],'Observed clickable switch bar does not contain Wi-Fi switch');
  await snap(name+'-before',xml);
  if(requireActivePeer){const state=r.status();assert(state.activePeerIds.includes(report.interruptedPeer),'Large-upload peer already ended before Wi-Fi input');assert(state.peerChunks[report.interruptedPeer].fromSender.bytes<report.largeFixtureBytes*0.9,'Source may already have finished before Wi-Fi input');save('transport-immediately-before-wifi-input.json',state);}
  report.wifiSwitchMayHaveChanged=true;
- await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'wifi1461',parameters:{pointerType:'touch'},actions:[
-  {type:'pointerMove',duration:0,origin:'viewport',x:Math.round((+bounds[1]+ +bounds[3])/2),y:Math.round((+bounds[2]+ +bounds[4])/2)},
-  {type:'pointerDown',button:0},{type:'pause',duration:100},{type:'pointerUp',button:0}]}]});
- report.actions.push({utc:new Date().toISOString(),label:name,before:n});
+ const elements=await wd('POST',base()+'/elements',{using:'id',value:target['resource-id']});assert.equal(elements.length,1,'Observed clickable native switch target not unique');
+ const id=elements[0]['element-6066-11e4-a52e-4f735466cecf']||elements[0].ELEMENT;assert(id,'Native switch element reference missing');
+ await wd('POST',base()+'/element/'+id+'/click',{});
+ report.actions.push({utc:new Date().toISOString(),label:name,before:n,actionTarget:target,method:'Native click on observed clickable system switch-bar ancestor'});
  const changed=await wait(s=>wifiSwitches(s).length===1&&wifiSwitches(s)[0].checked===String(expected),30000,'System Wi-Fi did not change');
  await snap(name,changed);return changed;
 }
@@ -171,17 +174,25 @@ async function forwardControls(){
  const end=Date.now()+10000;while(r.status().peers){assert(Date.now()<end,'Control peers not closed');await sleep(100);}
 }
 async function preserveAndroidRecording(){
- const end=Date.now()+45000;let value;
+ const end=Date.now()+90000;let value;const observations=[];
  do{
   const response=await fetch('https://api-cloud.browserstack.com/app-automate/sessions/'+session+'.json',{headers:{authorization:auth},signal:AbortSignal.timeout(15000)});
   assert(response.ok,'Owned BrowserStack recording metadata unavailable');value=(await response.json()).automation_session;
-  if(value?.video_url)break;await sleep(3000);
+  if(value?.video_url){
+   const url=new URL(value.video_url);assert.equal(url.protocol,'https:','Recording URL must use HTTPS');
+   const media=await fetch(value.video_url,{headers:url.hostname.endsWith('.browserstack.com')?{authorization:auth}:{},signal:AbortSignal.timeout(30000)});
+   const binary=Buffer.from(await media.arrayBuffer());
+   const valid=media.ok&&binary.length>24&&binary.length<256*1024*1024&&binary.subarray(4,8).toString()==='ftyp';
+   observations.push({utc:new Date().toISOString(),httpStatus:media.status,contentType:media.headers.get('content-type'),bytes:binary.length,sha256:createHash('sha256').update(binary).digest('hex'),validMp4:valid,endpoint:{origin:url.origin,path:url.pathname}});
+   save('android-recording-readiness.json',observations);
+   if(valid){
+    fs.writeFileSync(path.join(out,'android-session.mp4'),binary);
+    save('android-recording.json',{session,status:value.status,duration:value.duration,bytes:binary.length,sha256:createHash('sha256').update(binary).digest('hex'),source:'Video URL returned by authenticated owned BrowserStack session API; capability URL omitted'});return;
+   }
+  }
+  await sleep(3000);
  }while(Date.now()<end);
- assert(value?.video_url,'Owned BrowserStack video was not published');
- const response=await fetch(value.video_url,{signal:AbortSignal.timeout(60000)});assert(response.ok,'Owned BrowserStack recording download failed');
- const binary=Buffer.from(await response.arrayBuffer());assert(binary.length>0&&binary.length<256*1024*1024,'Owned recording has unexpected size');
- fs.writeFileSync(path.join(out,'android-session.mp4'),binary);
- save('android-recording.json',{session,status:value.status,duration:value.duration,bytes:binary.length,sha256:createHash('sha256').update(binary).digest('hex'),source:'Video URL returned by authenticated owned BrowserStack session API; capability URL omitted'});
+ throw Error('Owned BrowserStack video did not become a valid MP4; no XML/HTML substituted for recording');
 }
 try{
  const capacityResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});

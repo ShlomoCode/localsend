@@ -277,6 +277,7 @@ public final class MainActivity extends Activity {
       android.content.ComponentName resolved=intent.resolveActivity(getPackageManager());
       if(resolved==null){fileResult.setText("WIFI_SETTINGS_UNAVAILABLE");return;}
       fileResult.setText("WIFI_SETTINGS_RESOLVED "+resolved.flattenToShortString());
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
       startActivity(intent);
     });
     Button control=new Button(this);control.setText("Start socket control");control.setContentDescription("Start socket control");control.setAllCaps(false);layout.addView(control);
