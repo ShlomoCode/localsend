@@ -1,4 +1,4 @@
-param([string]$Executable,[string]$CandidateExecutable,[bool]$ReverseFavorites=$false,[bool]$FallbackControl=$false,[string]$EvidenceDirectory)
+param([string]$Executable,[string]$CandidateExecutable,[bool]$ReverseFavorites=$false,[bool]$FallbackControl=$false,[bool]$DistinctOnly=$false,[string]$EvidenceDirectory)
 $ErrorActionPreference = "Stop"
 if($FallbackControl) {
  if(-not $CandidateExecutable) {throw "Fallback control requires the verified candidate build"}
@@ -538,6 +538,7 @@ if($FallbackControl) {
  $alphaHash=PublicFingerprint "receiver"
  $betaHash=PublicFingerprint "sender"
  if($alphaHash -eq $betaHash) {throw "Actual source and receiver identities are not distinct"}
+ if(-not $DistinctOnly) {
  ReverseControl "receiver" "fallback-learn-new-ip"
  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
  Click 103 199
@@ -551,6 +552,7 @@ if($FallbackControl) {
  $fallbackFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/fallback-original-favorites.json"
  if($fallbackFavorites.Count -ne 2 -or @($fallbackFavorites | Where-Object {$_.ip -eq "10.0.20.3" -or $_.fingerprint -ne $alphaHash}).Count -gt 0) {throw "New address has an exact favorite or a different identity"}
  ForwardControl "receiver" "fallback-actual-transfer" "My" 53317 $receiveDirectory
+ }
 
  # A third real app uses a fresh private profile/certificate at the SAME new IP.
  $gammaFolder="$EvidenceDirectory/gamma-app"
@@ -570,6 +572,7 @@ if($FallbackControl) {
  if($gammaHash -eq $alphaHash -or $gammaHash -eq $betaHash) {throw "Third app does not have a distinct actual identity"}
  ReverseControl "gamma" "distinct-peer-learn-same-ip"
  [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+ Click 103 199
  Screenshot "distinct-peer-nearby"
  $gammaRow=Import-Csv "$EvidenceDirectory/distinct-peer-nearby.tsv" -Delimiter "`t" | Where-Object {$_.text -eq "PeerGamma"} | Select-Object -First 1
  if(-not $gammaRow) {throw "Distinct peer is not displayed by its actual alias"}
