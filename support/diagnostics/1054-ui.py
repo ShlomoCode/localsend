@@ -175,7 +175,7 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
     screen(stage + "-before-send-selection")
     target = locate("Receiver", stage + "-target", 60)
     recording = None
-    if os.environ.get("ISSUE1054_CONTROLLED_VARIANT") and repeat == 1 and phase == "edited14MB-without-reselection":
+    if os.environ.get("ISSUE1054_CONTROLLED_VARIANT"):
         command = ["ffmpeg", "-y", "-f", "x11grab", "-framerate", "15", "-video_size", "1200x800",
                    "-i", os.environ["DISPLAY"], "-t", "30", "-c:v", "libx264", "-preset", "ultrafast",
                    "-pix_fmt", "yuv420p", str(OUT / (stage + "-continuous.mp4"))]
