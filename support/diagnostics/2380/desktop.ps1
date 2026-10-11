@@ -30,6 +30,7 @@ public static class Desktop2861 {
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
  [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint msg,UIntPtr wparam,IntPtr lparam,uint flags,uint timeout,out UIntPtr result);
 }
 "@
@@ -42,7 +43,6 @@ Start-Transcript "$EvidenceDirectory/transcript.txt"
 Start-Sleep -Seconds 3
 $desktop=[System.Windows.Automation.AutomationElement]::RootElement
 $setupInputs=@()
-Get-Process wsl,WindowsTerminal -ErrorAction SilentlyContinue|Stop-Process -Force
 for($attempt=0;$attempt -lt 8;$attempt++) {
  $setupBmp=New-Object System.Drawing.Bitmap(1920,1080);$setupG=[System.Drawing.Graphics]::FromImage($setupBmp);$setupG.CopyFromScreen(0,0,0,0,$setupBmp.Size);$setupBmp.Save("$EvidenceDirectory/setup-$attempt.png",[System.Drawing.Imaging.ImageFormat]::Png);$setupG.Dispose();$setupBmp.Dispose()
  $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
