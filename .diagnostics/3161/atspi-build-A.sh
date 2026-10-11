@@ -10,15 +10,12 @@ d4348bcd7197e837b03004f7e80ca6dc69b4bee8cd81ea35dba94dd37424f01d  /home/probe/ev
 HASHES
 mkdir -p "$task_build_root/A"
 tar -xzf "$task_build_root/source.tar.gz" -C "$task_build_root/A" --strip-components=1
-(
-  cd "$task_build_root/A"
-  git apply --check /home/probe/evidence/A-local-dispatch.patch
-  git apply /home/probe/evidence/A-local-dispatch.patch
-)
 flatpak info org.freedesktop.Sdk//25.08
 flatpak run --filesystem=/home/probe/evidence --command=sh org.freedesktop.Sdk//25.08 -c '
   set -eu
   cd /home/probe/evidence/atspi254/A
+  git apply --check /home/probe/evidence/A-local-dispatch.patch
+  git apply /home/probe/evidence/A-local-dispatch.patch
   pkg-config --modversion glib-2.0 gobject-2.0 dbus-1 gtk+-3.0
   meson setup build --buildtype=debugoptimized -Ddocs=false -Dintrospection=disabled -Dgtk2_atk_adaptor=false -Duse_systemd=false
   meson compile -C build
