@@ -1,6 +1,6 @@
 # Issue 2414 investigation
 
-Status: the initial 5,000-file transfer completed in the ordinary 2 GiB guest. Interaction run 38133441018 verified scroll/draft/Cancel, then reached 4,660 hash-complete files before its save window ended, with progress in every sample. Typed-versus-pasted input run 38136480853 completed its input gates, then its outer scenario deadline ended a still-progressing save at 4,602 hash-complete files. The approved qualified 1 GiB Debian/Openbox memory harness is under review; no new job is active. No historical hang or OOM is reproduced.
+Status: the initial 5,000-file transfer completed in the ordinary 2 GiB guest. Interaction run 38133441018 verified scroll/draft/Cancel, then reached 4,660 hash-complete files before its save window ended, with progress in every sample. Typed-versus-pasted input run 38136480853 completed its input gates, then its outer scenario deadline ended a still-progressing save at 4,602 hash-complete files. The qualified 1 GiB Debian/Openbox memory experiment is active as run38142087840 after a setup-only command-path correction. No historical hang or OOM is reproduced.
 
 Reported behavior: sending a directory with 5,000 files to an old PC, then receiving Options, causes hang, large memory use, and OOM. Reporter attributes it to eager file widgets. OS, architecture, exact version, RAM, filename lengths, and file content are unspecified. Other comments about large-file transfers/timeouts are separate claims and will not replace this one.
 
@@ -117,3 +117,5 @@ The new memory harness is immutable commit c770097. Full source inspection and i
 Run [38141203305](https://github.com/ShlomoCode/localsend/actions/runs/38141203305), head 311556a01d260b923a50db4a0a19443de957dd73, is the single approved 1 GiB memory experiment. It was started by scoped bootstrap push after the previous job completed, without an additional dispatch. No workload result is claimed before artifacts are inspected. Destination: evidence/run-38141203305/.
 
 Run 38141203305 completed before any app workload: guest-runtime-preflight exit127, swapon absent from non-login PATH. Kernel confirms2097148k active disk swap and util-linux is installed. This is a setup-only failure, not OOM. Explicit /sbin/swapon correction keeps the approved configuration identical; report evidence/run-38141203305/setup-analysis.md. A single retry follows after the completed job.
+
+Run38142087840 (https://github.com/ShlomoCode/localsend/actions/runs/38142087840), head e7e8bb3de33f40a7d5dabb0a858679c651afadc8, is the single active retry after38141203305 completed. Only explicit swapon command paths changed; no desktop/RAM/CPU/swap/release/action variable changed. Results pending, destination evidence/run-38142087840/.
