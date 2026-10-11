@@ -151,6 +151,33 @@ await pause(2000);
 await snapshot('fresh-media-before-dpad');
 await replay('fresh-media-dpad-original');
 await snapshot('fresh-media-after-dpad');
+async function freshEntry(name) {
+  adb('shell','am','force-stop','org.localsend.localsend_app');
+  adb('shell','am','start','-n','org.localsend.localsend_app/.MainActivity');
+  await pause(2500);
+  await mouseNode('Send',`${name}-send`);
+  await mouseNode('Media',`${name}-media`);
+  await pause(3000);
+  return snapshot(`${name}-initial`);
+}
+await freshEntry('no-input');
+for(let index=1;index<=4;index++) {
+  await pause(850); await snapshot(`no-input-step-${index}`);
+}
+await freshEntry('extended-arrows');
+await record('extended-arrows',async()=>{
+  for(const [index,key] of [20,20,20,20,20,20,22,22,21,19,23].entries()) {
+    await remote(key); await snapshot(`extended-arrows-key-${index+1}-${key}`);
+  }
+});
+await freshEntry('keyboard-control');
+await record('keyboard-control',async()=>{
+  for(const [index,key] of [61,61,66].entries()) {
+    log({type:'keyboard',action:'keyevent',key});
+    adb('shell','input','keyboard','keyevent',String(key));
+    await pause(650); await snapshot(`keyboard-control-key-${index+1}-${key}`);
+  }
+});
 fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
   mouseSelected: true,
   selectedPhotosAfterDpad: nodes(after).filter(n => /Image\d+,/.test(n['content-desc'] ?? '') && n.selected === 'true'),
