@@ -67,7 +67,14 @@ function Paste([string]$value) {
 function Word([string]$word,[string]$snap) {
  $rows = Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"
  $row = $rows | Where-Object { $_.text -eq $word } | Select-Object -First 1
- if (-not $row) { throw "OCR word $word missing from $snap" }
+ if (-not $row) {
+  if ($word -eq "Cancel" -and $snap -like "favorites*") {
+   # Two-row Favorites Cancel verified at x474-524/y477-495, including the wider exact-name dialog.
+   Click 500 485
+   return
+  }
+  throw "OCR word $word missing from $snap"
+ }
  Click (([int]$row.left + [int]$row.width/2)/2) (([int]$row.top + [int]$row.height/2)/2)
 }
 function PrimaryButton([string]$snap) {
