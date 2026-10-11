@@ -1,6 +1,9 @@
 snapshot() {
   scrot "evidence/$1.png"
-  tesseract "evidence/$1.png" "evidence/$1" --psm 11 tsv >/dev/null 2>&1
+  # Retain raw pixels; enhance a separate observation copy for small grey labels.
+  convert "evidence/$1.png" -colorspace Gray -resize 200% -threshold 70% "evidence/$1-ocr.png"
+  tesseract "evidence/$1-ocr.png" "evidence/$1-ocr" --psm 11 tsv >/dev/null 2>&1
+  awk -F '\t' -v OFS='\t' 'NR>1{for(i=7;i<=10;i++)$i=$i/2}{print}' "evidence/$1-ocr.tsv" > "evidence/$1.tsv"
   xwininfo -root -tree > "evidence/$1-windows.txt"
 }
 click_label() {

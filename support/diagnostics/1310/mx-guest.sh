@@ -6,7 +6,7 @@ mkdir -p evidence releases
 # Add remote observation tools without removing dependencies or changing
 # desktop defaults. First retain the pristine desktop/portal package list.
 printf 'demo\n' | sudo -S apt-get update
-printf 'demo\n' | sudo -S apt-get install -y xdotool scrot tesseract-ocr ffmpeg
+printf 'demo\n' | sudo -S apt-get install -y xdotool scrot tesseract-ocr ffmpeg imagemagick
 session=$(pgrep -u demo -x xfce4-session | head -1)
 test -n "$session"
 while IFS= read -r -d '' value; do
