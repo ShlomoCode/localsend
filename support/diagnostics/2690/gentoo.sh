@@ -14,6 +14,7 @@ packages=(x11-libs/gtk+ x11-wm/dwm x11-base/xorg-server x11-misc/xdotool x11-ter
 emerge --pretend --verbose --getbinpkg "${packages[@]}" > /evidence/gentoo-plan.txt
 cat /evidence/gentoo-plan.txt
 emerge --verbose --getbinpkg --jobs=2 "${packages[@]}"
+gcc /diagnostic/gtk-control.c -o /tmp/gtk-control $(pkg-config --cflags --libs gtk+-3.0)
 find /var/db/pkg -maxdepth 2 -type d | sort > /evidence/installed-before.txt
 if find /var/db/pkg/dev-libs -maxdepth 1 -name 'wayland-*' | grep .; then
   echo 'INVALID BASELINE: Wayland was unexpectedly installed'; exit 1
@@ -27,7 +28,12 @@ chmod 777 /evidence/launch
 Xvfb :99 -screen 0 1280x800x24 +extension GLX > /evidence/xvfb.log 2>&1 &
 sleep 3
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline'
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-current /evidence/current.AppImage'
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh baseline-repacked /evidence/repacked-baseline.AppImage'
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh candidate /evidence/repacked-candidate.AppImage'
 emerge --verbose --getbinpkg dev-libs/wayland
 find /var/db/pkg -maxdepth 2 -type d | sort > /evidence/installed-after.txt
 find /usr/lib* /lib* -name 'libwayland*' > /evidence/wayland-after.txt
 su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control'
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-current /evidence/current.AppImage'
+su tester -c 'DISPLAY=:99 dbus-run-session -- bash /diagnostic/launch.sh control-candidate /evidence/repacked-candidate.AppImage'

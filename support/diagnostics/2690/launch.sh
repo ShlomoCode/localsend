@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euxo pipefail
 phase=$1
+artifact=${2:-/evidence/original.AppImage}
 export XDG_SESSION_TYPE=x11
 export XDG_RUNTIME_DIR=/tmp/runtime-tester
 mkdir -p "$XDG_RUNTIME_DIR"
@@ -17,9 +18,17 @@ if ! xdotool search --name issue2690-known-working-X11 > /evidence/launch/x11-co
   exit 1
 fi
 kill "$term_pid"
+if [[ -x /tmp/gtk-control ]]; then
+  /tmp/gtk-control > /evidence/launch/gtk-$phase.log 2>&1 &
+  gtk_pid=$!
+  sleep 2
+  xdotool search --onlyvisible --name issue2690-native-GTK-X11-control > /evidence/launch/gtk-$phase.windows
+  xwd -root -silent -out /evidence/launch/gtk-$phase.xwd
+  kill "$gtk_pid"
+fi
 for iteration in 1 2 3; do
   set +e
-  /evidence/original.AppImage > /evidence/launch/$phase-$iteration.log 2>&1 &
+  "$artifact" > /evidence/launch/$phase-$iteration.log 2>&1 &
   app_pid=$!
   sleep 10
   if kill -0 "$app_pid" 2>/dev/null; then
@@ -37,7 +46,7 @@ for iteration in 1 2 3; do
   set -e
   printf '%s\t%s\t%s\t%s\n' "$phase" "$iteration" "$app_status" "$window_status" >> /evidence/launch/results.tsv
   cat /evidence/launch/$phase-$iteration.log
-  if [[ $phase == baseline ]]; then
+  if [[ $phase == baseline* ]]; then
     grep -q 'libwayland-cursor.so.0: cannot open shared object file' /evidence/launch/$phase-$iteration.log
   else
     test "$app_status" = running
