@@ -20,3 +20,9 @@ Next control sequence:
 4. Save the post-action state and require the editor still present. Stop on disappearance. Only then discover fields, enter each value and verify actual readback before Confirm.
 
 The next run is the 1 MiB actual application control only. Share is disabled until this gate passes.
+
+## Observed complete transition in run 38111740390
+
+Favorites → Add to favorites editor → native keyboard shown was now saved before any hide action. The pre-hide editor XML has three enabled/displayed/clickable EditTexts: Device name empty, bounds [192,441][888,585]; IP empty and focused, [192,708][888,852]; Port 53317, [192,975][888,1020]. Confirm is enabled/displayed/clickable at [590,1092][888,1236], visibly above the keyboard in the screenshot. Native is_keyboard_shown returned true at 04:32:35.259Z. The post-hide XML then has no editor, fields or Confirm. No field input was attempted. Independent review confirmed these attributes and the screenshot.
+
+The next control uses the observed fields directly and removes hide_keyboard entirely. After each field input it verifies actual text and saves a screenshot. It reobserves Confirm bounds after filling, because focusing Port may change the keyboard and layout. This is a diagnostic automation correction; it does not establish a LocalSend application defect.

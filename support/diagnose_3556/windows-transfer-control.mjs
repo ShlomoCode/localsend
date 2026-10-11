@@ -214,43 +214,21 @@ function visibleFavoriteFields(xml){
    Number(bounds[3])>Number(bounds[1])&&Number(bounds[4])>Number(bounds[2]);
  });
 }
-let keyboardObservation=0;
 function favoriteEditorPresent(xml){
  const names=labels(xml);return names.includes('Add to favorites')&&names.includes('Confirm');
-}
-async function hideFavoriteKeyboard(stage){
- const evidenceStage=stage+'-'+(++keyboardObservation);
- const shown=await wd('GET',base()+'/appium/device/is_keyboard_shown');
- assert.equal(typeof shown,'boolean','Keyboard visibility must be observable before hiding it');
- report.actions.push({utc:new Date().toISOString(),label:'Observed native keyboard visibility',stage,shown});
- if(!shown)return;
- const before=await source();assert(favoriteEditorPresent(before),'Favorite editor absent before observed keyboard hide');
- await snap('favorite-keyboard-shown-'+evidenceStage,before);
- try{await wd('POST',base()+'/appium/device/hide_keyboard',{});}catch(error){
-  const observed=await source();
-  await snap('favorite-hide-keyboard-error-'+evidenceStage,observed);
-  const keyboardAbsent=/keyboard.*(?:not.*(?:shown|open|present|visible)|already.*hidden)|no .*keyboard/i.test(error.message);
-  if(!keyboardAbsent||visibleFavoriteFields(observed).length!==3)throw Error('Keyboard hide failed without an absent-keyboard message and three visible favorite fields: '+redact(error.message));
-  report.actions.push({utc:new Date().toISOString(),label:'Keyboard hide error tolerated after observing three visible fields',stage,error:redact(error.message)});
- }
- const after=await snap('favorite-keyboard-hidden-'+evidenceStage);
- assert(favoriteEditorPresent(after),'Favorite editor disappeared after keyboard hide; no field input is permitted');
 }
 async function addFavorite(){
  await click('Favorites');await snap('favorites-before-add');await click('Add');
  const editor=await waitFor(favoriteEditorPresent,30000,'Favorite Add did not expose Add to favorites and Confirm');
  await snap('favorite-edit-before-keyboard-action',editor);
- // v1.18.2 auto-focuses IP. The keyboard can collapse all dialog fields in landscape.
- // Hide it before waiting for fields, including when the preceding app rotated the device.
- await hideFavoriteKeyboard('initial');
- await snap('favorite-edit-keyboard-hidden-initial');
- let xml;const fieldDeadline=Date.now()+30000;
- do{
-  xml=await source();if(visibleFavoriteFields(xml).length===3)break;
-  assert(favoriteEditorPresent(xml),'Favorite editor disappeared while exposing fields');
-  await hideFavoriteKeyboard('waiting-for-visible-fields');await sleep(500);
- }while(Date.now()<fieldDeadline);
- assert.equal(visibleFavoriteFields(xml).length,3,'Favorite dialog must expose exactly three visible EditTexts');
+ const shown=await wd('GET',base()+'/appium/device/is_keyboard_shown');
+ assert.equal(typeof shown,'boolean','Keyboard visibility must be observable');
+ report.actions.push({utc:new Date().toISOString(),label:'Observe keyboard without hiding it',shown});
+ // Portrait evidence exposes all fields and Confirm above the keyboard. A hide call dismissed the editor.
+ const xml=await waitFor(s=>{
+  assert(favoriteEditorPresent(s),'Favorite editor disappeared before field input');
+  return visibleFavoriteFields(s).length===3;
+ },30000,'Favorite dialog must expose exactly three visible EditTexts without hiding the keyboard');
  await snap('favorite-edit-before',xml);
  // v1.18.2 FavoriteEditDialog orders name, IP, and port; verify observed field bounds.
  const elements=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.EditText'});
@@ -270,12 +248,11 @@ async function addFavorite(){
  }
  save('favorite-fields.json',fields.map((f,i)=>({rect:f.rect,value:values[i],observedText:f.observedText})));
  await snap('favorite-edit-filled');
- await hideFavoriteKeyboard('before-confirm');
  const confirmSource=await waitFor(s=>nodes(s).some(n=>(n['content-desc']==='Confirm'||n.text==='Confirm')&&
-  n.enabled==='true'&&n.displayed==='true'&&/\[\d+,\d+\]\[\d+,\d+\]/.test(n.bounds||'')),30000,'Confirm did not remain visible after hiding the native keyboard');
+  n.enabled==='true'&&n.displayed==='true'&&/\[\d+,\d+\]\[\d+,\d+\]/.test(n.bounds||'')),30000,'Confirm did not remain visible after filling the fields');
  const confirm=await wd('POST',base()+'/element',{using:'accessibility id',value:'Confirm'});
  assert.equal(await wd('GET',base()+'/element/'+elementId(confirm)+'/displayed'),true,'Confirm is not displayed');
- await snap('favorite-confirm-keyboard-hidden',confirmSource);
+ await snap('favorite-confirm-without-keyboard-hide',confirmSource);
  await click('Confirm');
  const registered=await waitFor(s=>labels(s).some(v=>v.includes('issue3556-cloud-receiver')&&v.includes('127.0.0.1'))&&
   nodes(s).filter(n=>n.class==='android.widget.EditText').length===0,60000,'Favorite registration did not complete through the genuine relay');
