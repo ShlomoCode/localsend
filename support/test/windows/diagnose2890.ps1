@@ -119,6 +119,12 @@ function Word([string]$word,[string]$snap) {
  $rows = Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"
  $row = $rows | Where-Object { $_.text -eq $word } | Select-Object -First 1
  if (-not $row) {
+  if ($word -eq "Cancel" -and $snap -eq "add-after-long-list") {
+   # Actual current Add dialog Cancel visually verified in run 38133568384
+   # at x448-491/y548-561 when OCR omits its teal text.
+   Click 470 554
+   return
+  }
   if ($word -eq "Cancel" -and $snap -like "*favorites*") {
    # Two-row Favorites Cancel verified at x474-524/y477-495, including the wider exact-name dialog.
    $favoriteCount=@((Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json).'flutter.ls_favorites').Count
@@ -248,9 +254,11 @@ foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";w
 }
 $lastRows=Import-Csv "$EvidenceDirectory/larger-after-edge-drag.tsv" -Delimiter "`t"
 $lastPeer=$lastRows | Where-Object {$_.text -eq "Peer12"} | Select-Object -First 1
+$lastPeerIp=$lastRows | Where-Object {$_.text -like '*127.0.0.12*'} | Select-Object -First 1
 @{lastRowVisible=($null -ne $lastPeer);lastRowOcr=$lastPeer;input="six wheel notches, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
-if($lastPeer) {
- FavoritePencil "larger-after-edge-drag" (([int]$lastPeer.top + [int]$lastPeer.height/2)/2 + 10)
+if($lastPeer -or $lastPeerIp) {
+ $lastRowY=if($lastPeer){([int]$lastPeer.top + [int]$lastPeer.height/2)/2 + 10}else{([int]$lastPeerIp.top + [int]$lastPeerIp.height/2)/2 - 10}
+ FavoritePencil "larger-after-edge-drag" $lastRowY
  Screenshot "last-row-edit"
  Word "Cancel" "last-row-edit"
  Screenshot "last-row-edit-cancelled"
