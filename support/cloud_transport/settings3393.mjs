@@ -6,7 +6,7 @@ export default async function({session,wd}) {
  const appIdentity=`//*[@text="LocalSend" and ${settingsPackage}]`;
  const heading=label=>`//*[@text="${label}" and ${settingsPackage} and (@heading="true" or contains(@resource-id,"toolbar") or contains(@resource-id,"title") or ancestor::*[${settingsPackage} and contains(@resource-id,"toolbar")])] | //*[@content-desc="${label}" and ${settingsPackage} and contains(@resource-id,"toolbar")]`;
  const appInfoHeading=heading('App info');
- const textTarget=(text,screen='true()')=>({using:'xpath',value:`//*[@text="${text}" and ${settingsPackage} and (${screen})]`});
+ const textTarget=(text,screen='true()')=>({using:'xpath',value:`//*[@text="${text}" and ${settingsPackage} and (${screen})]`,sourceIncludes:[`text="${text}"`]});
  const appInfoScreen=`count(${appIdentity})>0 and count(${appInfoHeading})>0`;
  async function ready(label,targets,options={}){return await waitForNativeControl({wd,prefix,label:'settings-'+label,choices:targets,requireClickable:false,...options});}
  async function capture(label,element){

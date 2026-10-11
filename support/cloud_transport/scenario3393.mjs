@@ -3,6 +3,7 @@ import {promisify} from 'node:util';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {waitForNativeControl} from './native-readiness.mjs';
+import {exactNativeButton} from './native-labels.mjs';
 const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
@@ -24,7 +25,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
  const destinationUri='content://com.android.externalstorage.documents/tree/primary%3ADocuments';
  const appTarget=label=>({using:'xpath',value:`//*[@package="${appPackage}" and @content-desc="${label}" and @clickable="true"]`});
  const destinationTarget={using:'xpath',value:`//*[@package="${appPackage}" and contains(@content-desc,"${destinationUri}")]`};
- const editTarget={using:'xpath',value:'(//*[@package="org.localsend.localsend_app" and starts-with(@content-desc,"Save to folder")]/android.widget.Button[not(@content-desc) and @clickable="true"])[1]'},documentRow={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents"]/ancestor::*[@clickable="true"][1]'},folderTarget={using:'xpath',value:'//*[@package="com.google.android.documentsui" and translate(@text,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="use this folder" and @clickable="true"]'};
+ const editTarget={using:'xpath',value:'(//*[@package="org.localsend.localsend_app" and starts-with(@content-desc,"Save to folder")]/android.widget.Button[not(@content-desc) and @clickable="true"])[1]'},documentRow={using:'xpath',value:'//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents"]/ancestor::*[@clickable="true"][1]'},folderTarget=exactNativeButton({packageName:pickerPackage,resourceId:'android:id/button1',text:'Use this folder'});
  async function ready(label,target,options={}) {return await waitForNativeControl({wd,prefix,label,...target,...options});}
  async function clickElement(element,label){
   const record={started:new Date().toISOString(),elementId:element['element-6066-11e4-a52e-4f735466cecf'],readiness:element.readiness};
@@ -42,7 +43,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   return e;
  }
  async function selectedDestination(label){
-  const allowTarget={using:'xpath',value:`//*[@package="${pickerPackage}" and @resource-id="android:id/button1" and @text="Allow" and @clickable="true"]`};
+  const allowTarget=exactNativeButton({packageName:pickerPackage,resourceId:'android:id/button1',text:'Allow'});
   const e=await ready(label,{}, {choices:[allowTarget,destinationTarget],requireClickable:false});
   if(e.readiness.choice===0)await clickElement(e,label+'-allow');
   return await ready(label+'-uri',destinationTarget,{requireClickable:false,sourceIncludes:['pane-title="Options"']});
