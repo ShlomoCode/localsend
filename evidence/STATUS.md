@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: Short-text control, 105,000 ASCII characters without line breaks, and 105,000 characters with LF line breaks passed on Galaxy S23 / Android 13. Run 38109605530 tests the alternate 105 KiB interpretation. The reported Android freeze has not been reproduced. No production patch exists.
+Status: Short-text control, 105,000 ASCII characters without line breaks, 105,000 characters with LF line breaks, and 105 KiB passed on Galaxy S23 / Android 13. Run 38110353448 establishes a short control on Xiaomi Redmi Note 11 / Android 11. The reported Android freeze has not been reproduced. No production patch exists.
 
 ## Report and evidence boundary
 
@@ -16,7 +16,7 @@ The reporter uses Dell Inspiron 3501, Windows 11 Pro, and Xiaomi Redmi Note 10 P
 
 ## Environment gaps
 
-- One owned job/session at a time is allowed for this issue; the 105 KiB job is currently active.
+- One owned job/session at a time is allowed for this issue; the Xiaomi short-control job is currently active.
 - The shared transport and actual short-text app-to-app control have passed.
 - Windows 11 runner is ARM with original x64 release under emulation. Dell hardware and native x64 remain different.
 - Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 is the next comparison; its MIUI version is unknown. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
@@ -57,3 +57,7 @@ Run 38108176962 on c3bc4478 passed the actual short-text UI control. The Windows
 Run 38108693595 on the same c3bc4478 passed the actual 105,000-character ASCII transfer without LF or CR. Windows clipboard roundtrip verified 105,000 UTF-8 bytes and 210,000 UTF-16 bytes. Android displayed the preview, Copy dismissed it, and readback matches all source bytes: SHA-256 `83b801b3087bde5b41b2309cd1e364dbcccf7d9a8c86652a8479e08d3bffaf5a`. The result field sourceMatches=false means that the supplementary XML equality check runs only for the short fixture; clipboardVerified=true is the complete-content assertion. This is non-reproduction for the stated fixture and Galaxy S23 environment, not proof of resolution on Xiaomi/MIUI or attribution to any fix.
 
 Run 38109163891 on unchanged c3bc4478 passed the 105,000-character LF fixture on the same applications and Galaxy S23. The source contains 1,640 LF characters and no CR; UTF-8 is 105,000 bytes, UTF-16 is 210,000 bytes. Both source and clipboard readback have SHA-256 `caad1d316ceadf1c0b89ce451b846056c35476f84fd662c7c32177fd7c60c838`. Inspected screenshots show the real preview and the Receive page after Copy, with Quick Save Off. The first preview source response took 351 ms. See `source-matches-erratum.md` for the unchanged raw result-field semantics. Run 38109605530 now changes only the fixture to 107,520 ASCII characters (105 KiB).
+
+Run 38109605530 on unchanged c3bc4478 passed 107,520 ASCII characters (105 KiB), without LF/CR, on Galaxy S23. Source and clipboard readback have SHA-256 `0dbb926773683d012337417d054047989fa9eed6319736bec4e26931ccf1da56`; UTF-16 is 215,040 bytes. Inspected preview and after-Copy screenshots confirm visible preview and return to Receive. The first preview source response took 333 ms. Run 38110353448 uses diagnostic 721bfc80 and the same original applications for a short-text Xiaomi Note 11 / Android 11 control. Its MIUI version is unknown.
+
+Supplementary memory snapshots are available despite rejected `dumpsys activity` commands. Multiline PSS is 277,208→308,309 KiB and RSS is 380,084→412,696 KiB, before/preview. ASCII PSS is 256,023→311,900 KiB. These are snapshots in separate non-failing sessions, not peak memory or ANR measurements; they do not establish a cause.

@@ -17,6 +17,8 @@ export default async function({session,wd,senderPort,transportStatus}) {
  try {
   await exec("pwsh",["-NoProfile","-File","support/diagnostics/windows2830-startup.ps1","-OutputDirectory","evidence","-ReleaseVersion","1.17.0","-AssetArchitecture","x86-64","-RunnerLabel","windows-11-arm","-DiagnosticPeerPort",String(senderPort),"-StartupOnly"]);
   await snapshot("receiver-before");
+  await diagnostic("receiver-miui","getprop ro.miui.ui.version.name");
+  await diagnostic("receiver-build","getprop ro.build.fingerprint");
   await diagnostic("receiver-before-processes","dumpsys activity -p org.localsend.localsend_app processes");
   await diagnostic("receiver-before-memory","dumpsys meminfo org.localsend.localsend_app");
   const cases=(process.env.CLIPBOARD_CASES||"short").split(",");

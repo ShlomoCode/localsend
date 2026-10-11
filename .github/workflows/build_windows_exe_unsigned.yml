@@ -7,7 +7,7 @@ on:
         default: false
       clipboard_case:
         type: choice
-        options: [short, ascii105000, multiline105000, ascii105kib]
+        options: [short, ascii105000, multiline105000, ascii105kib, unbroken105000, manylines105000, cjk105000, emoji105000]
         default: short
       device:
         type: choice
