@@ -1,12 +1,14 @@
 require 'json'
 require 'time'
 require 'timeout'
+require 'digest'
 require_relative 'vnc'
 out, private_dir, iso = ARGV
 serial = File.join(out, 'guest-serial.txt')
 frames = File.join(out, 'frames')
 Dir.mkdir(frames)
 qemu = ENV.fetch('QEMU', 'qemu-system-x86_64')
+raise 'QEMU version differs from measured TCG control 11.1.0' unless File.read(File.join(ENV.fetch('CAPABILITY_DIR'), 'qemu-version.txt')).start_with?('QEMU emulator version 11.1.0')
 acceleration = ENV.fetch('INSTALL_ACCELERATION', 'hvf')
 raise 'Unsupported installation acceleration' unless %w[hvf tcg].include?(acceleration)
 accelerator_args = acceleration == 'hvf' ? ['-accel', 'hvf', '-cpu', 'host'] : ['-accel', 'tcg,thread=multi', '-cpu', 'max']
@@ -20,6 +22,13 @@ args = [qemu, '-machine', 'pc', *accelerator_args, '-smp', '2', '-m', '4096',
 # The private paths reveal no credentials; never copy the seed or guest disk.
 File.write(File.join(out, 'qemu-command.json'), JSON.pretty_generate(args))
 log = File.open(File.join(out, 'qemu-stderr.txt'), 'w')
+# Reserve the complete finite guest budget and evidence/cleanup margin. A slow
+# dependency or ISO preparation must not silently shorten the guest experiment.
+preparation_start = Time.iso8601(File.readlines(File.join(ENV.fetch('CAPABILITY_DIR'), 'stages.tsv')).first.split("\t").first)
+preparation_seconds = Time.now.utc - preparation_start
+raise 'Preparation exceeded 14 minutes; insufficient reserved job time for 90-minute guest gate' if preparation_seconds > 840
+launch_utc = Time.now.utc.iso8601
+launch_monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 guest = Process.spawn(*args, out: log, err: log)
 def frame(path)
   Timeout.timeout(20) do
@@ -27,7 +36,14 @@ def frame(path)
     begin; client.screenshot(path); ensure; client.close; end
   end
   png = path.sub(/\.bmp$/, '.png')
-  raise 'PNG conversion failed' unless system('sips', '-s', 'format', 'png', path, '--out', png, out: File::NULL)
+  converter = Process.spawn('sips', '-s', 'format', 'png', path, '--out', png, out: File::NULL)
+  begin
+    _, status = Timeout.timeout(20) { Process.waitpid2(converter) }
+    raise 'PNG conversion failed' unless status.success?
+  ensure
+    begin; Process.kill('KILL', converter); rescue Errno::ESRCH; end
+    begin; Process.wait(converter); rescue Errno::ECHILD; end
+  end
 end
 def observed_text(path, private_dir)
   output = path.sub(/\.png$/, '.ocr.raw.json')
@@ -43,15 +59,19 @@ def observed_text(path, private_dir)
   end
 end
 begin
-  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2700
-  boot_deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 720
+  File.write(File.join(out, 'preparation-timing.json'), JSON.pretty_generate(launch_utc: launch_utc,
+    guest_pid: guest, preparation_seconds: preparation_seconds, guest_budget_seconds: 5400,
+    initial_boot_gate_seconds: 720, checkpoint_minutes: [45, 60, 75, 90],
+    scope: 'Finite installation/activation/window preparation budget; not a transfer experiment.'))
+  deadline = launch_monotonic + 5400
+  boot_deadline = launch_monotonic + 720
+  checkpoints = [45, 60, 75, 90]
   setup_observed = false
   count = 0
   next_capture = 0
   ready = nil
   loop do
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    raise 'Windows installation/activation/window deadline exceeded (45 minutes)' if now > deadline
     raise 'QEMU exited during Windows preparation' if Process.waitpid(guest, Process::WNOHANG)
     records = File.exist?(serial) ? File.readlines(serial).map { |line|
       next unless line.start_with?('ISSUE1054 ')
@@ -60,6 +80,23 @@ begin
     File.write(File.join(out, 'guest-records.json'), JSON.pretty_generate(records))
     failure = records.find { |record| record['stage'] == 'guest-blocked' }
     raise "Guest preparation blocked: #{failure.dig('data', 'message')}" if failure
+    if !checkpoints.empty? && now >= launch_monotonic + checkpoints.first * 60
+      minute = checkpoints.shift
+      checkpoint = {utc: Time.now.utc.iso8601, elapsed_seconds: now - launch_monotonic,
+        minute: minute, guest_pid: guest, guest_stages: records.map { |record| record['stage'] },
+        scope: 'Same running VM checkpoint; inspect original pixels, not a completed guest or product gate.'}
+      begin
+        path = File.join(frames, format('checkpoint-%03d.bmp', minute))
+        frame(path)
+        checkpoint[:frame] = File.basename(path)
+        checkpoint[:sha256] = Digest::SHA256.file(path).hexdigest
+        checkpoint[:capture_completed_utc] = Time.now.utc.iso8601
+      rescue StandardError => error
+        checkpoint[:capture_error] = "#{error.class}: #{error.message}"
+      end
+      File.open(File.join(out, 'timing-checkpoints.jsonl'), 'a') { |file| file.puts JSON.generate(checkpoint) }
+    end
+    raise 'Windows installation/activation/window deadline exceeded (90 minutes)' if now > deadline
     ready = records.find { |record| record['stage'] == 'app-window-ready' }
     if ready
       frame(File.join(frames, 'official-app-window.bmp'))

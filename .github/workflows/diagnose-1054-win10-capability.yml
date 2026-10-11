@@ -27,7 +27,7 @@ jobs:
   capability:
     if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
     runs-on: macos-15-intel
-    timeout-minutes: 65
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
       - name: Measure host and guest preparation gates
