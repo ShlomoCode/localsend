@@ -130,7 +130,8 @@ File.open(File.join(output, 'source-all50-SHA256SUMS'), 'w') do |source_sums|
         [['source', original], ['packaged', installed]].each do |label, path|
           checked(['readelf', '--wide', '-h', '-l', '-S', path], File.join(evidence, label + '-load-layout.txt'))
           notes = checked(['readelf', '--wide', '-n', path], File.join(evidence, label + '-notes.txt'))
-          ids = notes.scan(/^\s*Build ID:\s+([0-9a-fA-F]+)\s*$/).flatten.map(&:downcase)
+          # GNU readelf --wide can append Build ID to the owner/type row.
+          ids = notes.scan(/\bBuild ID:[ \t]+([0-9a-fA-F]+)[ \t]*$/).flatten.map(&:downcase)
           raise "Expected exactly one GNU Build ID: #{relative} (#{label})" unless ids.length == 1
           build_ids << ids.first
           layout = elf_layout(path)
