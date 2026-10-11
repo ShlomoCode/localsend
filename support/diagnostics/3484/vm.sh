@@ -57,7 +57,7 @@ sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 6144 \
   -device virtio-vga -display none -usb -device usb-tablet \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 \
   -monitor unix:/tmp/tray3484/monitor,server,nowait -qmp unix:/tmp/tray3484/qmp,server,nowait -serial file:evidence/cloud/serial.log -daemonize
-ssh_opts=(-i /tmp/tray3484/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/tray3484/known_hosts -o ConnectTimeout=5)
+ssh_opts=(-i /tmp/tray3484/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/tray3484/known_hosts -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
 for i in $(seq 1 90); do
   if ssh "${ssh_opts[@]}" probe@127.0.0.1 'cloud-init status --wait' > evidence/cloud/cloud-init.log 2>&1; then break; fi
   sleep 5
@@ -66,11 +66,22 @@ ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo mkdir -p /work/support/diagnostics/34
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no support/diagnostics/3484/guest.sh support/diagnostics/3484/wayland-session.sh probe@127.0.0.1:/work/support/diagnostics/3484/
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no /tmp/tray3484/baseline/source-bundle.tar.gz probe@127.0.0.1:/work/source-bundle.tar.gz
 ssh "${ssh_opts[@]}" probe@127.0.0.1 "sudo bash /work/support/diagnostics/3484/guest.sh '${ARCH_DATE:-latest}'" > evidence/cloud/provision.log 2>&1
-ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo reboot' || true
+boot_id_before=$(timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')
+printf '%s\n' "$boot_id_before" > evidence/cloud/boot-id-before.txt
+timeout 10 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo reboot' || true
+boot_ready=0
+for i in $(seq 1 60); do
+  boot_id_after=$(timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' || true)
+  if [[ "$boot_id_after" =~ ^[0-9a-f-]{36}$ ]] && [ "$boot_id_after" != "$boot_id_before" ]; then boot_ready=1; break; fi
+  sleep 1
+done
+printf '%s\n' "$boot_id_after" > evidence/cloud/boot-id-after.txt
+test "$boot_ready" = 1
 ready=0
 last_seq=0
-for i in $(seq 1 600); do
-  request=$(ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /work/input/request 2>/dev/null || true' || true)
+scenario_deadline=$((SECONDS + 900))
+while [ "$SECONDS" -lt "$scenario_deadline" ]; do
+  request=$(timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cat /work/input/request 2>/dev/null || true' || true)
   if [[ "$request" =~ ^([0-9]+)\ ([0-9]+)\ ([0-9]+)$ ]]; then
     event_seq=${BASH_REMATCH[1]}
     pointer_x=${BASH_REMATCH[2]}
@@ -81,12 +92,12 @@ for i in $(seq 1 600); do
       printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","id":"pointer-%s","arguments":{"events":[{"type":"abs","data":{"axis":"x","value":%s}},{"type":"abs","data":{"axis":"y","value":%s}}]}}\n' "$event_seq" "$abs_x" "$abs_y" | timeout 5 sudo socat -t 1 - UNIX-CONNECT:/tmp/tray3484/qmp > /tmp/tray3484/qmp-response.jsonl
       cat /tmp/tray3484/qmp-response.jsonl >> evidence/cloud/input-qmp.log
       jq -s -e --arg event "pointer-$event_seq" 'any(.[]; .id == $event and has("return") and (has("error") | not))' /tmp/tray3484/qmp-response.jsonl > /dev/null
-      ssh "${ssh_opts[@]}" probe@127.0.0.1 "printf '%s\\n' '$event_seq' > /work/input/ack"
+      timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 "printf '%s\\n' '$event_seq' > /work/input/ack"
       printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$event_seq" "$pointer_x" "$pointer_y" >> evidence/cloud/input-events.tsv
       last_seq=$event_seq
     fi
   fi
-  if ssh "${ssh_opts[@]}" probe@127.0.0.1 'test -f /work/evidence/cloud/session.done'; then ready=1; break; fi
+  if timeout 5 ssh "${ssh_opts[@]}" probe@127.0.0.1 'test -f /work/evidence/cloud/session.done'; then ready=1; break; fi
   sleep 1
 done
 test "$ready" = 1

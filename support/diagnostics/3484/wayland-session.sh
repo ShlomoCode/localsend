@@ -9,7 +9,7 @@ move_pointer() {
   event_seq=$(cat /work/input/ack 2>/dev/null || printf '0')
   event_seq=$((event_seq + 1))
   printf '%s %s %s\n' "$event_seq" "$1" "$2" > /work/input/request
-  for i in $(seq 1 100); do
+  for i in $(seq 1 450); do
     if [ "$(cat /work/input/ack 2>/dev/null || true)" = "$event_seq" ]; then return; fi
     sleep 0.1
   done
