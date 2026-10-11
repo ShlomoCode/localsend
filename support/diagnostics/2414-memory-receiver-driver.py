@@ -182,7 +182,7 @@ def supervisor(count):
     destination = ROOT / f'received-{count}'
     destination.mkdir()
     (bundle / 'settings.json').write_text(json.dumps({'flutter.ls_alias': 'Receiver2414', 'flutter.ls_port': 53317,
-        'flutter.ls_locale': 'en', 'flutter.ls_destination': str(destination), 'flutter.ls_quick_save': False,
+        'flutter.ls_locale': 'en', 'flutter.ls_destination': str(destination), 'flutter.ls_quick_save': 'off' if SOURCE_PAIR else False,
         'flutter.ls_minimize_to_tray': False}))
     journal({'count': count, 'pid': None}, 'baseline')
     with (OUT / f'files-{count}-receiver.log').open('w') as log:
