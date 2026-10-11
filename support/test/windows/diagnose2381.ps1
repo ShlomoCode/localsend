@@ -73,6 +73,11 @@ function Word([string]$word,[string]$snap) {
    Click 500 485
    return
   }
+  if ($word -eq "Cancel" -and $snap -like "edit-confirmed*") {
+   # Actual Edit dialog Cancel verified at x446-492/y574-590.
+   Click 469 582
+   return
+  }
   throw "OCR word $word missing from $snap"
  }
  Click (([int]$row.left + [int]$row.width/2)/2) (([int]$row.top + [int]$row.height/2)/2)
@@ -108,10 +113,13 @@ Start-Sleep -Seconds 3
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
 Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status | ConvertTo-Json | Set-Content "$EvidenceDirectory/adapters.json"
 $apps = @{}
+$receiveDirectory="$EvidenceDirectory/received"
+New-Item -ItemType Directory -Force $receiveDirectory | Out-Null
 foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="sender";port=53318;alias="SourceBeta"})) {
  $folder = "$EvidenceDirectory/$($item.name)-app"
  Copy-Item (Split-Path $Executable) $folder -Recurse
  $settings = @{"flutter.ls_port"=$item.port;"flutter.ls_alias"=$item.alias;"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false;"flutter.ls_advanced_settings"=$true;"flutter.ls_network_whitelist"=@("10.0.20.2","100.95.193.205")}
+ if ($item.name -eq "receiver") {$settings["flutter.ls_destination"]=$receiveDirectory}
  $settings | ConvertTo-Json | Set-Content -Encoding UTF8 "$folder/settings.json"
  $p = Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
  Start-Sleep -Seconds 12
@@ -263,6 +271,16 @@ for ($step=0;$step -lt 9;$step++) {
 }
 if (-not $found) {throw "Whitelist UI was not reached"}
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces-after-ui.json"
+
+# The transfer stage uses a real native file picker, after all alias evidence.
+Click 103 199
+Screenshot "sender-transfer-selection"
+$fixture="$EvidenceDirectory/fixture-home.txt"
+[System.IO.File]::WriteAllText($fixture,("Issue 2381 real UI transfer Home route.`r`n" * 1024),[System.Text.Encoding]::UTF8)
+Get-FileHash $fixture -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/fixture-home-hash.json"
+Word "File" "sender-transfer-selection"
+Screenshot "native-file-picker"
+throw "Native file picker checkpoint: verify field before real transfer"
 
 
 foreach ($name in @("sender","receiver")) {
