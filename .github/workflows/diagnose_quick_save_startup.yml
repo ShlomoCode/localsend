@@ -1,6 +1,15 @@
 name: Diagnose 2380 actual FancyZones startup
 on:
   workflow_dispatch:
+    inputs:
+      current_build_run:
+        description: Exact current-source build run, empty for official 1.17 ZIP
+        type: string
+        required: false
+        default: ''
+permissions:
+  contents: read
+  actions: read
 jobs:
   observe:
     runs-on: windows-11-arm
@@ -15,8 +24,10 @@ jobs:
           "Installer exit $($install.ExitCode)"
           if ($install.ExitCode -notin @(0,3010)) { throw 'PowerToys installation failed' }
           Start-Sleep -Seconds 150
-          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
-          Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
+          if ('${{ inputs.current_build_run }}' -eq '') {
+            Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
+            Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
+          }
           # Complete the runner's normal WSL setup before input reaches application windows.
           $wsl = Start-Process wsl.exe -ArgumentList '--update','--web-download' -RedirectStandardOutput "$env:RUNNER_TEMP/wsl-update.log" -RedirectStandardError "$env:RUNNER_TEMP/wsl-update-error.log" -PassThru
           if (!$wsl.WaitForExit(180000)) { $wsl.Kill(); throw 'Normal WSL update exceeded preparation deadline' }
@@ -25,6 +36,20 @@ jobs:
           Expand-Archive "$env:RUNNER_TEMP/ffmpeg.zip" "$env:RUNNER_TEMP/ffmpeg"
           $ffmpeg = Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
           "FFMPEG2380=$($ffmpeg.FullName)" >> $env:GITHUB_ENV
+      - name: Download exact current control when requested
+        if: inputs.current_build_run != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: issue2380-current-c1ce-build
+          run-id: ${{ inputs.current_build_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/localsend
+      - name: Verify current control source identity
+        if: inputs.current_build_run != ''
+        shell: pwsh
+        run: |
+          $identity = Get-ChildItem "$env:RUNNER_TEMP/localsend" -Filter source-identity.txt -Recurse | Select-Object -First 1
+          if (!$identity -or (Get-Content $identity.FullName | Select-Object -First 1) -ne 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244') { throw 'Current control is not exact c1ce source' }
       - name: Observe genuine desktop and applications
         timeout-minutes: 30
         shell: powershell
@@ -37,3 +62,6 @@ jobs:
             ${{ runner.temp }}/evidence2380
             ${{ runner.temp }}/powertoys-install*.log
             ${{ runner.temp }}/wsl-update*.log
+            ${{ runner.temp }}/localsend/source-identity.txt
+            ${{ runner.temp }}/localsend/flutter-identity.txt
+            ${{ runner.temp }}/localsend/exe-identity.json
