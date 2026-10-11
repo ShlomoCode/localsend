@@ -1,0 +1,36 @@
+name: Inspect Flatpak runtime history for 3553
+
+on:
+  workflow_dispatch:
+
+jobs:
+  runtime-history:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Read public app and runtime deployment histories
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/runtime-history
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          date -u > evidence/runtime-history/query-environment.txt
+          flatpak --version >> evidence/runtime-history/query-environment.txt
+          refs=(
+            app/org.localsend.localsend_app/x86_64/stable
+            runtime/org.freedesktop.Platform/x86_64/25.08
+            runtime/org.freedesktop.Platform/x86_64/26.08
+            runtime/org.freedesktop.Platform.GL.default/x86_64/25.08
+            runtime/org.freedesktop.Platform.GL.default/x86_64/26.08
+          )
+          for ref in "${refs[@]}"; do
+            label=${ref//\//_}
+            timeout 90 flatpak remote-info --log flathub "$ref" > "evidence/runtime-history/$label-history.txt"
+            timeout 30 flatpak remote-info --show-metadata flathub "$ref" > "evidence/runtime-history/$label-metadata.txt"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flatpak-3553-runtime-history
+          path: evidence/runtime-history/
