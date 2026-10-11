@@ -1,9 +1,8 @@
 {
-  "round": 5,
+  "round": 6,
   "actions": [
-    {"kind": "key", "value": "c"},
     {"kind": "capture"},
-    {"kind": "probe", "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/capture-round5; mkdir -p \"$out\"; ps -p 34063 -o pid,lstart,args; cat /proc/34063/stat; timeout 15 /usr/bin/python3 /home/probe/source-input/geometry-oracle/snapshot-guest.py > \"$out/compositor-oracle.json\" 2> \"$out/compositor-oracle.stderr\"; cat \"$out/compositor-oracle.json\" \"$out/compositor-oracle.stderr\"; if timeout 25 /usr/bin/python3 /home/probe/source-input/geometry-oracle/atspi-snapshot.py --pid 34063 --max-nodes 1000 > \"$out/shell-screenshot-ui.jsonl\" 2> \"$out/shell-screenshot-ui.stderr\"; then tree_rc=0; else tree_rc=$?; fi; cat \"$out/shell-screenshot-ui.jsonl\" \"$out/shell-screenshot-ui.stderr\"; printf 'ROUND5_SHELL_UI_TREE_EXIT=%s\\n' \"$tree_rc\"; test \"$tree_rc\" -eq 0; printf 'ROUND5_SCREEN_SELECTION_OBSERVATION_COMPLETE\\n'"},
+    {"kind": "probe", "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/capture-round6; mkdir -p \"$out\"; ps -p 34063 -o pid,lstart,args; cat /proc/34063/stat; timeout 15 /usr/bin/python3 /home/probe/source-input/geometry-oracle/snapshot-guest.py > \"$out/compositor-oracle.json\" 2> \"$out/compositor-oracle.stderr\"; cat \"$out/compositor-oracle.json\" \"$out/compositor-oracle.stderr\"; if timeout 25 /usr/bin/python3 /home/probe/source-input/geometry-oracle/atspi-snapshot.py --pid 34063 --max-nodes 2000 --max-depth 8 > \"$out/shell-screenshot-ui-shallow.jsonl\" 2> \"$out/shell-screenshot-ui-shallow.stderr\"; then tree_rc=0; else tree_rc=$?; fi; cat \"$out/shell-screenshot-ui-shallow.jsonl\" \"$out/shell-screenshot-ui-shallow.stderr\"; printf 'ROUND6_SHELL_UI_SHALLOW_TREE_EXIT=%s\\n' \"$tree_rc\"; test \"$tree_rc\" -eq 0; printf 'ROUND6_SCREEN_STATE_READOUT_COMPLETE\\n'"},
     {"kind": "capture"}
   ]
 }
