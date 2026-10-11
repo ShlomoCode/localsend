@@ -1,0 +1,19 @@
+name: Issue 1310 supported XFCE investigation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  xfce:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normal XFCE release controls
+        run: bash support/diagnostics/1310/vm.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue1310-xfce-${{ github.run_id }}
+          path: evidence
+          retention-days: 30
