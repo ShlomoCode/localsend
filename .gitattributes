@@ -1,0 +1,2 @@
+# These guest scripts execute directly from the Windows checkout in WSL.
+support/diagnose_1461/wsl_*.sh text eol=lf

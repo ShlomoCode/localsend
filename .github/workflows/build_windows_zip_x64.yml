@@ -39,7 +39,13 @@ jobs:
           $ffmpeg=(Get-Command ffmpeg -ErrorAction Stop).Source
           "FFMPEG_PATH=$ffmpeg" | Out-File -Append $env:GITHUB_ENV
           $linuxRoot=(& wsl -d Ubuntu-24.04 -u root -- wslpath -a $PWD.Path.Replace('\','/')).Trim()
+          $autocrlf=& git config --show-origin --get core.autocrlf
+          @{exitCode=$LASTEXITCODE;output=@($autocrlf);scope='Actual checkout Git configuration; absent value remains unknown'} | ConvertTo-Json | Set-Content evidence/issue1461/checkout-core-autocrlf.json
           foreach($name in @('wsl_prepare.sh','wsl_receiver.sh','wsl_control.sh')){
+            $path=Join-Path $PWD "support/diagnose_1461/$name"
+            $bytes=[IO.File]::ReadAllBytes($path)
+            @{name=$name;sha256=(Get-FileHash $path -Algorithm SHA256).Hash;bytes=$bytes.Length;carriageReturnBytes=@($bytes|Where-Object {$_ -eq 13}).Count} | ConvertTo-Json | Set-Content "evidence/issue1461/$name.checkout.json"
+            if($bytes -contains 13){throw 'Guest shell script checkout must retain LF bytes; no app experiment admitted'}
             & wsl -d Ubuntu-24.04 -u root -- bash -n "$linuxRoot/support/diagnose_1461/$name"
             if($LASTEXITCODE){throw 'Guest source syntax failed'}
           }
