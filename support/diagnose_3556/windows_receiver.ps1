@@ -15,9 +15,10 @@ if (-not $StopFile) { $StopFile=Join-Path $OutputDirectory 'stop' }
 $readyPath=Join-Path $OutputDirectory 'ready.json'
 $resultPath=Join-Path $OutputDirectory 'results.json'
 if (Test-Path $readyPath) { Remove-Item $readyPath }
+$peerRelease=if($env:ALIAS_BASELINE_APK){'1.18.2'}else{'1.17.0'}
 $report=[ordered]@{
  status='starting'; stage='setup'; startedUtc=[DateTime]::UtcNow.ToString('o')
- release='1.18.2'; artifactUrl='https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.zip'
+ release=$peerRelease; artifactUrl="https://github.com/localsend/localsend/releases/download/v$peerRelease/LocalSend-$peerRelease-windows-x86-64.zip"
  environmentMismatch='Peer device and OS are unspecified in issue 2426; this is a real Windows Server 2022 x64 peer.'
  transportBoundary='Android 127.0.0.1:53318 reverse relay to Windows 127.0.0.1:53317; differs from a shared LAN.'
  evidenceLevel='Actual original Windows LocalSend discovery UI with repeated original Android registration; no file transfer.'
@@ -151,13 +152,29 @@ function Get-BitmapDigest([Drawing.Bitmap]$Bitmap) {
  } finally { $Bitmap.UnlockBits($locked) }
 }
 
-function Observe-Peer([string]$Name,[string]$TapLabel='') {
+function Observe-Peer([string]$Name,[string]$TapLabel='',[string]$ExpectedAlias='') {
+ $observeDeadline=[DateTime]::UtcNow.AddSeconds(30)
+ $attempt=0
+ do {
+ $attempt++
  Save-Snapshot $Name
  $image=Join-Path $OutputDirectory "$Name.png"; $recognized=Join-Path $OutputDirectory "$Name-ocr.json"
  $worker=Start-Process "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot '../diagnose_2426/native-ocr.ps1'),'-Image',$image,'-Result',$recognized) -PassThru -WindowStyle Hidden
  if(-not $worker.WaitForExit(15000)){$worker.Kill();throw 'OCR timeout'}
  $ocr=Get-Content $recognized -Raw | ConvertFrom-Json
  if($ocr.status -ne 'recognized'){throw 'Native OCR unavailable'}
+ if($ExpectedAlias){
+  $window=@([ReceiverNative]::All()|Where-Object{$_.Pid -eq $app.Id -and $_.Hwnd -eq $appHwnd.ToInt64()})
+  if($window.Count -ne 1){throw 'Owned peer window unavailable'}
+  $words=@($ocr.words|Where-Object{$_.x -ge $window[0].Left -and $_.x -lt ($window[0].Left+$window[0].Width) -and $_.y -ge $window[0].Top -and $_.y -lt ($window[0].Top+$window[0].Height)}|ForEach-Object text)
+  $missing=@($ExpectedAlias.Split(' ')|Where-Object{$_ -cnotin $words})
+  if($missing.Count -eq 0){break}
+  Copy-Item $image (Join-Path $OutputDirectory "$Name-pending-$attempt.png")
+  Copy-Item $recognized (Join-Path $OutputDirectory "$Name-pending-$attempt-ocr.json")
+  if([DateTime]::UtcNow -ge $observeDeadline){throw "Peer alias was not visibly observed: $ExpectedAlias"}
+  Start-Sleep -Milliseconds 700
+ }else{break}
+ }while($true)
  if($TapLabel){
   $word=@($ocr.words|Where-Object text -CEQ $TapLabel)
   if($word.Count -ne 1){throw "Expected unique visible $TapLabel word"}
@@ -170,7 +187,7 @@ function Observe-Peer([string]$Name,[string]$TapLabel='') {
 try {
  $report.os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
  if($report.osArchitecture -ne 'X64') { throw 'This receiver requires a native x64 Windows runner.' }
- $archive=Join-Path $OutputDirectory 'LocalSend-1.18.2-windows-x86-64.zip'
+ $archive=Join-Path $OutputDirectory "LocalSend-$peerRelease-windows-x86-64.zip"
  Invoke-WebRequest -Uri $report.artifactUrl -OutFile $archive -MaximumRedirection 10 -TimeoutSec 120
  if((Get-Item $archive).Length -lt 1000000) { throw 'Release ZIP download is unexpectedly small.' }
  $report.archive=@{ path=$archive; bytes=(Get-Item $archive).Length; sha256=(Get-FileHash $archive -Algorithm SHA256).Hash }
@@ -215,7 +232,7 @@ try {
    $command=Get-Content $commandPath -Raw|ConvertFrom-Json
    if($command.id -ne $lastId){
     $lastId=$command.id
-    Observe-Peer $command.id $command.tap
+    Observe-Peer $command.id $command.tap $command.expectedAlias
     if($command.tap){Observe-Peer ($command.id+'-after')}
     Write-JsonFile (Join-Path $OutputDirectory ('response-'+$command.id+'.json')) @{id=$command.id;utc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;status='observed'}
    }

@@ -313,9 +313,9 @@ async function addFavorite(){
  save('favorite-registration-transport.json',{before:registerBefore,after:r.status()});
  await snap('favorite-registered',registered);
 }
-async function peerObserve(id,tap=''){
- save('peer-command-'+id+'.json',{id,tap});
- writeFileSync(path.join(windowsOutput,'command.json'),JSON.stringify({id,tap}));
+async function peerObserve(id,tap='',expectedAlias=''){
+ save('peer-command-'+id+'.json',{id,tap,expectedAlias});
+ writeFileSync(path.join(windowsOutput,'command.json'),JSON.stringify({id,tap,expectedAlias}));
  const end=Date.now()+60000;
  while(Date.now()<end){if(existsSync(path.join(windowsOutput,'response-'+id+'.json')))return;await sleep(500);}
  throw Error('Real Windows peer observation timed out: '+id);
@@ -343,7 +343,7 @@ async function refreshRegistration(label){
  assert.equal(favorite.length,1,'Exactly one owned localhost favorite must be observed');
  await click(favorite[0]['content-desc']);
  await waitFor(s=>labels(s).includes(report.release==='1.17.0'?'No files selected':'What do you want to add?')&&r.status().fromSender>before.fromSender&&r.status().fromDevice>before.fromDevice,60000,'Actual favorite connection refresh failed');
- await snap(label+'-registered');save(label+'-transport.json',{utc:new Date().toISOString(),before,after:r.status()});await peerObserve(label);
+ await snap(label+'-registered');save(label+'-transport.json',{utc:new Date().toISOString(),before,after:r.status()});await peerObserve(label,'',label==='peer-after-confirm'?report.aliasBefore:report.aliasConfirmed);
  await wd('POST',base()+'/appium/device/press_keycode',{keycode:4});await snap(label+'-picker-dismissed');
 
 }
