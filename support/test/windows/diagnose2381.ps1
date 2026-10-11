@@ -348,7 +348,46 @@ if(@($saved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-
 [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
 Start-Sleep -Seconds 2
 Screenshot "sender-transfer-completed"
-throw "Completed transfer checkpoint: inspect Close/Finish before second route"
+if($currentView) {throw "Current first transfer checkpoint: inspect selected route and route switching"}
+# Actual Finished screens in run 38107089706 have Done at x930/y714.
+Click 930 714
+Screenshot "sender-second-route-ready"
+[Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
+Click 930 714
+Screenshot "receiver-second-route-ready"
+[Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+Screenshot "sender-second-route-selection"
+$secondRows=Import-Csv "$EvidenceDirectory/sender-second-route-selection.tsv" -Delimiter "`t"
+if($secondRows | Where-Object {$_.text -eq "File"}) {
+ Word "File" "sender-second-route-selection"
+ Screenshot "native-second-file-picker"
+ Click 400 442
+ Paste (Resolve-Path $fixture).Path
+ Screenshot "native-second-file-picker-filled"
+ Click 464 473
+ Start-Sleep -Seconds 3
+}
+Screenshot "sender-second-file-selected"
+$secondBefore=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+$secondBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/second-transfer-sockets-before.json"
+Word "#205" "sender-second-file-selected"
+Start-Sleep -Seconds 3
+Screenshot "sender-second-transfer-requested"
+$secondAfter=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+$secondAfter | ConvertTo-Json | Set-Content "$EvidenceDirectory/second-transfer-sockets-after.json"
+@($secondAfter | Where-Object {$secondBefore.LocalPort -notcontains $_.LocalPort}) | ConvertTo-Json | Set-Content "$EvidenceDirectory/second-transfer-new-sockets.json"
+[Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
+Start-Sleep -Seconds 2
+Screenshot "receiver-second-transfer-request"
+Click 566 702
+Start-Sleep -Seconds 5
+Screenshot "receiver-second-transfer-completed"
+$savedSecond=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash}})
+$savedSecond | ConvertTo-Json | Set-Content "$EvidenceDirectory/second-transfer-saved-files.json"
+if(@($savedSecond | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length}).Count -ne 2) {throw "Second actual receive did not preserve two matching saved fixtures"}
+[Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+Start-Sleep -Seconds 2
+Screenshot "sender-second-transfer-completed"
 
 
 foreach ($name in @("sender","receiver")) {
