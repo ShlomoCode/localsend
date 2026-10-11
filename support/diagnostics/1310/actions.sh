@@ -86,6 +86,25 @@ for version in 1.14.0 1.18.2; do
   snapshot "$version-after-text"
   xdotool key Escape
   sleep 2
+  if test "${TRANSFER_CONTROL:-0}" = 1 && test "$version" = 1.14.0; then
+    snapshot "$version-transfer-before"
+    point=$(awk -F '\t' '$12=="devices" && $11>60 {print int($7+$9+58),int($8+$10/2);exit}' "evidence/$version-transfer-before.tsv")
+    test -n "$point"
+    xdotool mousemove --sync $point
+    sleep 2
+    snapshot "$version-transfer-manual-tooltip"
+    awk -F '\t' '$12=="Manual"{found=1}END{exit !found}' "evidence/$version-transfer-manual-tooltip.tsv"
+    xdotool click 1
+    sleep 2
+    click_label "$version-transfer-ip-mode" IP
+    xdotool type --clearmodifiers --delay 50 10.0.2.2
+    click_label "$version-transfer-confirm-address" Confirm
+    sleep 8
+    snapshot "$version-transfer-progress"
+    sleep 5
+    snapshot "$version-transfer-completion"
+    if awk -F '\t' '$12=="Done"{found=1}END{exit !found}' "evidence/$version-transfer-completion.tsv"; then click_label "$version-transfer-done" Done; fi
+  fi
   { systemctl --user status xdg-desktop-portal xdg-desktop-portal-gtk --no-pager || true; journalctl --user -u xdg-desktop-portal -u xdg-desktop-portal-gtk --no-pager || true; busctl --user list || true; } > "evidence/$version-portal-state.txt"
   app_pid=$(xprop -id "$window" _NET_WM_PID | awk '{print $NF}')
   kill "$app_pid" "$pid" 2>/dev/null || true

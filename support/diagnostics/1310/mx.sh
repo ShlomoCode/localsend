@@ -40,4 +40,10 @@ sleep 3
 vncdo -s localhost::5900 capture evidence/mx/ssh-start.png
 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'id; cat /etc/os-release; command -v xdotool || true; command -v scrot || true; command -v tesseract || true'
 sshpass -p demo scp -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" support/diagnostics/1310/mx-guest.sh support/diagnostics/1310/actions.sh demo@127.0.0.1:/home/demo/
-timeout 1200 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 "PACKAGE_FORMAT=${PACKAGE_FORMAT:-tar} bash /home/demo/mx-guest.sh" | tee evidence/mx/scenario.log
+bash support/diagnostics/1310/host-peer.sh > evidence/host-peer-workload.log 2>&1 &
+peer_job=$!
+timeout 1200 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 "TRANSFER_CONTROL=1 PACKAGE_FORMAT=${PACKAGE_FORMAT:-tar} bash /home/demo/mx-guest.sh" | tee evidence/mx/scenario.log
+wait "$peer_job"
+printf 'Issue 1310 real file selection control\n' > evidence/expected-control.txt
+cmp evidence/expected-control.txt evidence/host-peer/saved-control.txt
+sha256sum evidence/expected-control.txt evidence/host-peer/saved-control.txt > evidence/real-transfer-hashes.txt
