@@ -16,7 +16,7 @@ sed "s@/home/probe@/home/mint@g" support/diagnostics/2754-ui.py > /tmp/issue2754
 cat > /tmp/issue2754-mint/seed/bootstrap.sh <<"BOOT"
 #!/bin/bash
 set -euxo pipefail
-exec > /tmp/issue2754-bootstrap.log 2>&1
+exec > >(tee /tmp/issue2754-bootstrap.log /dev/ttyS0) 2>&1
 mkdir -p /home/mint/.ssh /home/mint/evidence /home/mint/support/diagnostics
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/ui.py /home/mint/support/diagnostics/2754-ui.py
@@ -24,7 +24,7 @@ chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/support
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
 apt-get update
-apt-get install -y openssh-server xdotool scrot tesseract-ocr xclip ffmpeg gdb strace
+apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
 systemctl start ssh
 touch /home/mint/evidence/bootstrap-complete
 BOOT
@@ -61,7 +61,7 @@ sleep 3
 printf "screendump %s/evidence/cloud/terminal-checkpoint.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor > evidence/cloud/checkpoint-monitor.log
 opts=(-i /tmp/issue2754-mint/id -p 2275 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known -o ConnectTimeout=5)
 ready=0
-for n in $(seq 1 20); do
+for n in $(seq 1 12); do
  if timeout 10 ssh "${opts[@]}" mint@127.0.0.1 "test -f /home/mint/evidence/bootstrap-complete && pgrep -x cinnamon && command -v tesseract" > evidence/cloud/readiness.log 2>&1; then ready=1; break; fi
  sleep 15
 done
@@ -73,6 +73,7 @@ timeout 600 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
+sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace
 curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
 sha256sum /tmp/localsend.deb > evidence/release-sha256.txt
 sudo apt-get install -y /tmp/localsend.deb
