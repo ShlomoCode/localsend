@@ -5,6 +5,21 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class Desktop2381 {
+ [StructLayout(LayoutKind.Sequential)] public struct KeyboardInput {public ushort vk,scan;public uint flags,time;public UIntPtr extra;}
+ [StructLayout(LayoutKind.Sequential)] public struct MouseInput {public int x,y;public uint data,flags,time;public UIntPtr extra;}
+ [StructLayout(LayoutKind.Explicit)] public struct InputUnion {[FieldOffset(0)] public KeyboardInput keyboard;[FieldOffset(0)] public MouseInput mouse;}
+ [StructLayout(LayoutKind.Sequential)] public struct Input {public uint type;public InputUnion union;}
+ [DllImport("user32.dll",SetLastError=true)] public static extern uint SendInput(uint count,Input[] inputs,int size);
+ public static void Text(string value) {
+  foreach(char character in value) {
+   var input = new Input {type=1,union=new InputUnion {keyboard=new KeyboardInput {scan=character,flags=4}}};
+   if(SendInput(1,new[]{input},Marshal.SizeOf(typeof(Input)))!=1) throw new Exception("SendInput Unicode key down failed");
+   System.Threading.Thread.Sleep(80);
+   input.union.keyboard.flags=6;
+   if(SendInput(1,new[]{input},Marshal.SizeOf(typeof(Input)))!=1) throw new Exception("SendInput Unicode key up failed");
+   System.Threading.Thread.Sleep(80);
+  }
+ }
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int z,bool repaint);
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
@@ -39,16 +54,8 @@ function Click([int]$x,[int]$y) {
  Start-Sleep -Milliseconds 800
 }
 function Paste([string]$value) {
- [System.Windows.Forms.Clipboard]::SetText($value)
- if ([System.Windows.Forms.Clipboard]::GetText() -ne $value) {throw "Clipboard input control failed"}
- [Desktop2381]::keybd_event(0x11,0,0,[UIntPtr]::Zero)
- Start-Sleep -Milliseconds 120
- [Desktop2381]::keybd_event(0x56,0,0,[UIntPtr]::Zero)
- Start-Sleep -Milliseconds 120
- [Desktop2381]::keybd_event(0x56,0,2,[UIntPtr]::Zero)
- Start-Sleep -Milliseconds 120
- [Desktop2381]::keybd_event(0x11,0,2,[UIntPtr]::Zero)
-
+ # Native Unicode keyboard events avoid modifier loss in the legacy SendKeys backend.
+ [Desktop2381]::Text($value)
  Start-Sleep -Milliseconds 600
 }
 function Word([string]$word,[string]$snap) {
