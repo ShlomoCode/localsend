@@ -18,9 +18,18 @@ mkdir -p "$dest"
 [[ -z $(find "$dest" -mindepth 1 -maxdepth 1 -print -quit) ]]
 findmnt -T "$dest" -o TARGET,SOURCE,FSTYPE,OPTIONS > "$out/destination-filesystem.txt"
 [[ $(findmnt -n -T "$dest" -o FSTYPE) == ext4 ]]
-# v1.14 persistence version is 1; Linux uses shared_preferences_linux, NOT
-# Windows-only portable settings.json. Keys/types follow v1.14.0 source.
-settings="$XDG_DATA_HOME/org.localsend.localsend_app/shared_preferences.json"
+# v1.14 locks shared_preferences_linux 2.3.2 and path_provider_linux 2.2.1.
+# The latter uses the GTK application ID if available, otherwise the executable
+# basename. Its getApplicationSupportPath also prefers an existing legacy
+# executable directory whenever the application-ID directory does not exist.
+# Seed that supported legacy directory on a fresh profile so both paths resolve
+# here, including systems without the unversioned libgio-2.0.so used by its FFI.
+# The storage version is 1; flutter.-prefixed keys/types follow v1.14.0 source.
+[[ $(basename "$exe") == localsend_app ]]
+[[ ! -e "$XDG_DATA_HOME/org.localsend.localsend_app" && ! -e "$XDG_DATA_HOME/localsend_app" ]] || {
+  echo 'Fresh profile requires neither application-ID nor legacy data directory'; exit 1;
+}
+settings="$XDG_DATA_HOME/localsend_app/shared_preferences.json"
 mkdir -p "$(dirname "$settings")"
 [[ ! -e "$settings" ]] || { echo 'Fresh tester profile required'; exit 1; }
 cat > "$settings" <<'JSON'
@@ -39,15 +48,47 @@ cat > "$settings" <<'JSON'
 }
 JSON
 cp "$settings" "$out/settings-before.json"
-export DISPLAY=:99 LANG=C.UTF-8 LIBGL_ALWAYS_SOFTWARE=1 XDG_RUNTIME_DIR=/tmp/localsend-1461-runtime
+printf 'HOME=%s\nXDG_DATA_HOME=%s\nXDG_CONFIG_HOME=%s\nsettings=%s\n' "$HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$settings" > "$out/preferences-location.txt"
+export LANG=C.UTF-8 LIBGL_ALWAYS_SOFTWARE=1 XDG_RUNTIME_DIR=/tmp/localsend-1461-runtime
 mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
-Xvfb "$DISPLAY" -screen 0 1280x900x24 -nolisten tcp > "$out/xvfb.log" 2>&1 & xvfb_pid=$!
-for ((attempt=0; attempt<40; attempt++)); do xdotool getdisplaygeometry >/dev/null 2>&1 && break; sleep 0.25; done
+# Xvfb selects an unused display and reports the actual number through its own
+# descriptor. A pre-existing :99 or WSLg display is never reused or terminated.
+display_receipt="$out/xvfb-display-number.txt"
+[[ ! -e "$display_receipt" ]]
+xvfb_exe=$(readlink -f "$(command -v Xvfb)")
+Xvfb -displayfd 3 -screen 0 1280x900x24 -nolisten tcp 3>"$display_receipt" > "$out/xvfb.log" 2>&1 & xvfb_pid=$!
+xvfb_start_tick=$(awk '{print $22}' "/proc/$xvfb_pid/stat")
+printf '%s\n' "$xvfb_pid" > "$out/xvfb.pid"
+printf '%s\n' "$xvfb_start_tick" > "$out/xvfb.start-tick"
+printf '%s\n' "$xvfb_exe" > "$out/xvfb-executable.txt"
+xvfb_owned() {
+  kill -0 "$xvfb_pid" 2>/dev/null && [[ -r "/proc/$xvfb_pid/stat" ]] &&
+    [[ $(awk '{print $22}' "/proc/$xvfb_pid/stat") == "$xvfb_start_tick" && $(readlink -f "/proc/$xvfb_pid/exe") == "$xvfb_exe" ]]
+}
+for ((attempt=0; attempt<80; attempt++)); do
+  kill -0 "$xvfb_pid" || { echo 'Owned Xvfb exited before display assignment'; exit 1; }
+  [[ ! -s "$display_receipt" ]] || break
+  sleep 0.25
+done
+[[ -s "$display_receipt" ]]
+display_number=$(cat "$display_receipt")
+[[ "$display_number" =~ ^[0-9]+$ ]]
+export DISPLAY=":$display_number"
+xvfb_owned
+date -u --iso-8601=ns > "$out/xvfb-assigned.utc"
+for ((attempt=0; attempt<40; attempt++)); do
+  xvfb_owned || { echo 'Owned Xvfb identity failed during display readiness'; exit 1; }
+  xdotool getdisplaygeometry >/dev/null 2>&1 && break
+  sleep 0.25
+done
+xvfb_owned
 xdotool getdisplaygeometry
 eval "$(dbus-launch --sh-syntax)"
 openbox > "$out/openbox.log" 2>&1 & wm_pid=$!
 "$exe" > "$out/app.log" 2>&1 & app_pid=$!
 printf 'DISPLAY=%q\nAPP_PID=%q\nDEST=%q\nSETTINGS=%q\nEXE=%q\n' "$DISPLAY" "$app_pid" "$dest" "$settings" "$exe" > "$out/session.env"
+printf 'XVFB_PID=%q\nXVFB_START_TICK=%q\nXVFB_EXE=%q\nDISPLAY_NUMBER=%q\nDISPLAY_RECEIPT=%q\n' \
+  "$xvfb_pid" "$xvfb_start_tick" "$xvfb_exe" "$display_number" "$display_receipt" >> "$out/session.env"
 awk '{print $22}' "/proc/$app_pid/stat" > "$out/app.start-tick"
 ip -4 -o addr show dev eth0 scope global > "$out/guest-eth0-address.txt"
 guest_ip=$(awk '{split($4,a,"/");print a[1]}' "$out/guest-eth0-address.txt")
@@ -55,6 +96,7 @@ guest_ip=$(awk '{split($4,a,"/");print a[1]}' "$out/guest-eth0-address.txt")
 printf '%s\n' "$guest_ip" > "$out/guest-ipv4.txt"
 printf 'GUEST_IP=%q\nALIAS=%q\nPORT=41631\n' "$guest_ip" WSL1461 >> "$out/session.env"
 for ((attempt=0; attempt<60; attempt++)); do
+  xvfb_owned || { echo 'Owned Xvfb exited during actual app readiness'; exit 1; }
   kill -0 "$app_pid" || { echo 'Receiver exited before readiness'; exit 1; }
   windows=$(xdotool search --onlyvisible --pid "$app_pid" 2>/dev/null || true)
   if [[ -n "$windows" && $(wc -l <<< "$windows") == 1 ]]; then
@@ -79,5 +121,6 @@ done
 status=0; wait "$app_pid" || status=$?
 cp "$settings" "$out/settings-after.json"
 printf 'exited\t%s\t%s\n' "$(date -u --iso-8601=ns)" "$status" > "$out/app-exited.tsv"
-kill "$wm_pid" "$xvfb_pid" "${DBUS_SESSION_BUS_PID:-}" 2>/dev/null || true
+kill "$wm_pid" "${DBUS_SESSION_BUS_PID:-}" 2>/dev/null || true
+if xvfb_owned; then kill "$xvfb_pid" 2>/dev/null || true; fi
 exit "$status"
