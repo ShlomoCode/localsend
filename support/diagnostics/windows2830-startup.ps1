@@ -314,7 +314,7 @@ namespace LocalSendReleaseUiProbe {
   Add-Type -TypeDefinition $source -Language CSharp
 
   if ($DiagnosticPeerPort -gt 0) {
-    $favorite = @{id='issue2830-relay';fingerprint='issue2830-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='Android13 receiver';customAlias=$true} | ConvertTo-Json -Compress
+    $favorite = @{id='issue2830-relay';fingerprint='issue2830-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='Android receiver';customAlias=$true} | ConvertTo-Json -Compress
     @{'flutter.ls_alias'='Windows2830';'flutter.ls_favorites'=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
   }
   if ($EntryMethod -eq 'SendTo') {

@@ -9,6 +9,10 @@ on:
         type: choice
         options: [short, ascii105000, multiline105000, ascii105kib]
         default: short
+      device:
+        type: choice
+        options: [Samsung Galaxy S23, Xiaomi Redmi Note 11]
+        default: Samsung Galaxy S23
 permissions:
   contents: read
 jobs:
@@ -43,8 +47,8 @@ jobs:
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue2830-${{ github.run_id }}
       BASELINE_APP: bs://574bec77a4f5e69c930410dd76792eac94625a15
-      BS_DEVICE: Samsung Galaxy S23
-      BS_OS: '13.0'
+      BS_DEVICE: ${{ inputs.device }}
+      BS_OS: ${{ inputs.device == 'Xiaomi Redmi Note 11' && '11.0' || '13.0' }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2830.mjs
       CLIPBOARD_CASES: ${{ inputs.clipboard_case }}
     steps:

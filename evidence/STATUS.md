@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: Repairing the cloud UI harness. The original Windows app reached Send, but the Clipboard action was not executed. No app-to-app control or reported failure has been established. No production patch exists.
+Status: Short-text control, 105,000 ASCII characters without line breaks, and 105,000 characters with LF line breaks passed on Galaxy S23 / Android 13. Run 38109605530 tests the alternate 105 KiB interpretation. The reported Android freeze has not been reproduced. No production patch exists.
 
 ## Report and evidence boundary
 
@@ -16,10 +16,10 @@ The reporter uses Dell Inspiron 3501, Windows 11 Pro, and Xiaomi Redmi Note 10 P
 
 ## Environment gaps
 
-- No device reservation or Actions job is active for this issue.
-- The shared transport is validated as byte-exact, but the actual app-to-app control is still being validated by the 3393 investigator.
+- One owned job/session at a time is allowed for this issue; the 105 KiB job is currently active.
+- The shared transport and actual short-text app-to-app control have passed.
 - Windows 11 runner is ARM with original x64 release under emulation. Dell hardware and native x64 remain different.
-- BrowserStack Android 13 device availability and Xiaomi/MIUI coverage remain unconfirmed.
+- Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 is the next comparison; its MIUI version is unknown. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
 - BrowserStack public devices reject unrestricted ADB. Memory/CPU and lifecycle trace coverage must be determined with supported commands; absence of those metrics will be explicit.
 
 ## Gates
@@ -51,3 +51,9 @@ Comparing the workflow with 3393 found that this run generated RELAY_TOKEN throu
 Run 38106982847 on bbd4b1c2 passed all four byte controls (0, 1, 65,537, and 8,388,608 bytes) with exact hashes and replies after half-close on Galaxy S23 / Android 13. Both capability reports show presence true and length 48. This restores the transport gate after separating the build step. The original Android LocalSend activated. Windows startup then exited 1 despite a valid Send screenshot, errors [], and imageChanged true. The retained startup helper's final exit condition only accepted file-selection statuses; it omitted its StartupOnly statuses. The next run corrects that diagnostic exit gate, requiring StartupOnly, no errors, a verified Send image transition, and a captured status. No real app-to-app transfer has occurred yet.
 
 Run 38107484781 on 3f8cd787 passed the same byte controls and reached Windows clipboard selection and the actual Favorites target. The Windows target screenshot shows Error; Android stays on the normal Receive page. The helper handoff failed before any app response: device logs show the control service destroyed at 03:14:50.711 UTC, a new relay service started at 03:14:51.390, and GET /pull returned HTTP 409 at 03:14:51.435. The relay permits one pending long poll, lasting up to 15 seconds. Stopping the first service did not immediately release that pending request. The next diagnostic waits for the relay's explicit pending-poll state to clear, with a 20-second deadline, before starting the LocalSend relay. This is a transport handoff failure, not the reported Android freeze. Short-text app-to-app control remains unmet.
+
+Run 38108176962 on c3bc4478 passed the actual short-text UI control. The Windows original 1.17 app selected the 44-byte clipboard item and sent it through Favorites. Android original 1.17 on Galaxy S23 / Android 13 showed the exact text. Its first preview source response took 197 ms. Clicking Copy dismissed the preview; the clipboard readback is byte-identical to the source, with SHA-256 `10f6b75f53e5d94f86ef113f23647fba57e411f34f8ba74c30ca334e92b02fd4`. Both before/after screenshots were inspected. The transport handoff waited 14,686 ms until the pending poll ended. Next: repeat this sequence with 105,000 ASCII characters, keeping device, releases, settings, and harness unchanged.
+
+Run 38108693595 on the same c3bc4478 passed the actual 105,000-character ASCII transfer without LF or CR. Windows clipboard roundtrip verified 105,000 UTF-8 bytes and 210,000 UTF-16 bytes. Android displayed the preview, Copy dismissed it, and readback matches all source bytes: SHA-256 `83b801b3087bde5b41b2309cd1e364dbcccf7d9a8c86652a8479e08d3bffaf5a`. The result field sourceMatches=false means that the supplementary XML equality check runs only for the short fixture; clipboardVerified=true is the complete-content assertion. This is non-reproduction for the stated fixture and Galaxy S23 environment, not proof of resolution on Xiaomi/MIUI or attribution to any fix.
+
+Run 38109163891 on unchanged c3bc4478 passed the 105,000-character LF fixture on the same applications and Galaxy S23. The source contains 1,640 LF characters and no CR; UTF-8 is 105,000 bytes, UTF-16 is 210,000 bytes. Both source and clipboard readback have SHA-256 `caad1d316ceadf1c0b89ce451b846056c35476f84fd662c7c32177fd7c60c838`. Inspected screenshots show the real preview and the Receive page after Copy, with Quick Save Off. The first preview source response took 351 ms. See `source-matches-erratum.md` for the unchanged raw result-field semantics. Run 38109605530 now changes only the fixture to 107,520 ASCII characters (105 KiB).

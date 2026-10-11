@@ -42,7 +42,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
    let copied=null;try{copied=await wd("POST",`/session/${session}/appium/device/get_clipboard`,{contentType:"plaintext"});writeFileSync(`evidence/${name}-clipboard.txt`,Buffer.from(copied,"base64"));}catch(e){writeFileSync(`evidence/${name}-clipboard-unavailable.txt`,String(e));}
    if(copied===null)throw new Error(`${name}: received clipboard content could not be verified`);
    if(Buffer.from(copied,"base64").toString()!==expected)throw new Error(`${name}: received clipboard content differs`);
-   results.push({name,previewVisible:true,copyResponsive:true,sourceMatches:name==="short",clipboardVerified:copied!==null});
+   results.push({name,previewVisible:true,copyResponsive:true,sourceMatches:name==="short"?true:null,clipboardVerified:copied!==null});
    if(name!==cases.at(-1))throw new Error("Additional cases require verified Windows selection reset; initial run intentionally stops after short control");
   }
  } finally {writeFileSync("evidence/scenario-results.json",JSON.stringify({results,transport:transportStatus()},null,2));}
