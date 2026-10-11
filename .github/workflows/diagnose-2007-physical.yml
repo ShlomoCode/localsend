@@ -22,6 +22,11 @@ on:
         options: [permanent, trash]
         default: permanent
         description: Require the actual native permanent deletion or trash operation
+      destination:
+        type: choice
+        options: [downloads, saf-documents]
+        default: downloads
+        description: Default Downloads path or Documents selected through native SAF
 jobs:
   original-app-control:
     runs-on: ubuntu-24.04
@@ -39,6 +44,7 @@ jobs:
       ISSUE_2007_VARIANT: ${{ inputs.scenario || 'unchanged' }}
       ISSUE_2007_DELETE_TIMING: ${{ inputs.deletion_timing || 'absence' }}
       ISSUE_2007_DELETE_ACTION: ${{ inputs.deletion_action || 'permanent' }}
+      ISSUE_2007_DESTINATION: ${{ inputs.destination || 'downloads' }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-physical-control.mjs
     steps:
       - uses: actions/checkout@v6
