@@ -1,10 +1,15 @@
 name: Diagnose 2830 clipboard UI readiness
 on:
   workflow_dispatch:
+    inputs:
+      physical:
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   clipboard-readiness:
+    if: '!inputs.physical'
     runs-on: windows-11-arm
     timeout-minutes: 15
     steps:
@@ -24,4 +29,67 @@ jobs:
         with:
           name: issue2830-clipboard-readiness
           path: evidence
+          retention-days: 14
+  clipboard-physical:
+    if: inputs.physical
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      BS_LOCAL_ID: issue2830-${{ github.run_id }}
+      BASELINE_APP: bs://574bec77a4f5e69c930410dd76792eac94625a15
+      BS_DEVICE: Samsung Galaxy S23
+      BS_OS: '13.0'
+      SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2830.mjs
+      CLIPBOARD_CASES: short
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: x64
+      - name: Prepare separate diagnostic relay
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:/tmp/helper,evidence | Out-Null
+          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+          ./support/cloud_transport/build-helper.ps1
+      - name: Run live-capacity checked physical clipboard control
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
+          Expand-Archive C:/tmp/bs-local.zip C:/tmp/bs-local-bin -Force
+          Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
+          Start-Process node -ArgumentList support/cloud_transport/local.mjs -RedirectStandardOutput "$PWD/evidence/local.stdout.txt" -RedirectStandardError "$PWD/evidence/local.stderr.txt"
+          $deadline=(Get-Date).AddSeconds(240)
+          while(-not (Test-Path C:/tmp/helper/local-ready) -and (Get-Date) -lt $deadline){Start-Sleep 2}
+          if(-not (Test-Path C:/tmp/helper/local-ready)){throw 'Local tunnel not ready'}
+          Start-Sleep -Seconds 15
+          curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/plan.json -o evidence/plan-before.json
+          if($LASTEXITCODE -ne 0){throw 'Capacity check failed'}
+          $plan=Get-Content evidence/plan-before.json | ConvertFrom-Json
+          if($plan.parallel_sessions_running -ge 5 -or $plan.parallel_sessions_running -ge $plan.parallel_sessions_max_allowed){throw 'No session capacity'}
+          curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/upload -F file=@C:/tmp/helper/cloud-transport-helper.apk -o C:/tmp/helper/upload.json
+          if($LASTEXITCODE -ne 0){throw 'Helper upload failed'}
+          $env:HELPER_APP=(Get-Content C:/tmp/helper/upload.json | ConvertFrom-Json).app_url
+          if(-not $env:HELPER_APP){throw 'Helper app URL missing'}
+          node support/cloud_transport/mobile-control.mjs
+      - name: Collect own session identity
+        if: always()
+        shell: pwsh
+        run: Copy-Item C:/tmp/helper/session-id evidence/session-id -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2830-physical-control
+          path: |
+            evidence
+            mobile-control-results.json
+            mobile-control-final-status.json
+            mobile-control-error.txt
+            helper-failure-source.xml
+            helper-failure.png
+            localsend-source.xml
+            relay-trace.json
           retention-days: 14

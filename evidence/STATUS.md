@@ -28,7 +28,7 @@ Baseline failure: unmet. Deterministic failure: unmet. Cause: unmet. Fix: not st
 
 ## Current execution
 
-Cloud run 38103974509 on diagnostic commit b658c1b verifies the Windows short-text clipboard selection only. It cannot establish an app-to-app control or reproduce the Android freeze. The separate BrowserStack session has not started. Live capacity before preparation was 0 of 5 running sessions. The catalog has Redmi Note 11 / Android 11 only; Samsung Galaxy S23 / Android 13 is the selected initial comparison environment. Xiaomi Redmi Note 10 Pro, MIUI 14, remains uncovered.
+Cloud run 38103974509 on diagnostic commit b658c1b reached the Windows Send page but failed before Clipboard selection. It cannot establish an app-to-app control or reproduce the Android freeze. The separate BrowserStack session has not started. Live capacity before preparation was 0 of 5 running sessions. The catalog has Redmi Note 11 / Android 11 only; Samsung Galaxy S23 / Android 13 is the selected initial comparison environment. Xiaomi Redmi Note 10 Pro, MIUI 14, remains uncovered.
 
 ## Resumed investigation
 
@@ -39,3 +39,7 @@ Run 38103974509 failed at `windows2830-ui.ps1:19`: `FindWindowEx` returned no im
 The next diagnostic changes only input targeting: enumerate descendant HWNDs with class, parent and PID; hit-test the requested client point; map coordinates into the child; reject a target from another process. This reuses the original release startup helper's hit-test method. A fresh cloud run will preserve both the window tree and the post-click screenshot. It must demonstrate clipboard selection before the app-to-app run.
 
 Live BrowserStack capacity after resumption: zero sessions running, shared maximum five. No session was created by this investigator.
+
+Readiness run 38104902432 on 3a8a9b02 passed. Inspected screenshot shows one selected text item, 44 B. The fixture reports 44 ASCII characters, 44 UTF-8 bytes, 88 UTF-16 bytes, successful Windows clipboard roundtrip, and SHA-256 `10f6b75f53e5d94f86ef113f23647fba57e411f34f8ba74c30ca334e92b02fd4`. The recorded target is FLUTTERVIEW, PID 3836, matching the parent and enumerated child. This proves Windows clipboard selection only.
+
+The physical control uses the unmodified 1.17.0 Android arm64 release, SHA-256 `2c7f5fd4872da25115bb8e5e62f92de94dda47b0f249ff387ac667b13871dc3e`, uploaded as `bs://574bec77a4f5e69c930410dd76792eac94625a15`. The diagnostic workflow reuses 3393's foreground BrowserStack Local process in the same step as session creation, with a live plan check before starting the owned issue2830 session. The relay/service copies come from shared transport 187f39d1; helper UI inset handling comes from 3393 commit 6c171bc0. All changes are diagnostic and remain outside a production PR.

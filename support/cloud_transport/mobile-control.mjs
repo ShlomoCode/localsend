@@ -18,11 +18,13 @@ async function clickText(text){
 }
 const results=[];
 try {
- const caps={platformName:'Android','appium:deviceName':process.env.BS_DEVICE||'Vivo Y21','appium:platformVersion':process.env.BS_OS||'11.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend cloud transport',buildName:'cloud-transport-'+process.env.GITHUB_RUN_ID,sessionName:'physical socket control',debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
+ const caps={platformName:'Android','appium:deviceName':process.env.BS_DEVICE||'Vivo Y21','appium:platformVersion':process.env.BS_OS||'11.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend cloud transport',buildName:'cloud-transport-'+process.env.GITHUB_RUN_ID,sessionName:'issue2830 clipboard short control',debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
  assert(session,'Session ID missing');writeFileSync('/tmp/helper/session-id',session);
  console.log('BrowserStack control session created for '+caps['appium:deviceName']);
+ writeFileSync('evidence/helper-before.xml',await wd('GET',`/session/${session}/source`));
+ writeFileSync('evidence/helper-before.png',Buffer.from(await wd('GET',`/session/${session}/screenshot`),'base64'));
  await new Promise(ok=>setTimeout(ok,3000));await clickText('Start socket control');
  await new Promise(ok=>setTimeout(ok,2500));
  for(const size of [0,1,65537,8*1024*1024]){
