@@ -327,7 +327,7 @@ async function refreshRegistration(label){
  const favorite=nodes(xml).filter(n=>n.class==='android.widget.Button'&&n['content-desc']?.includes('(127.0.0.1)'));
  assert.equal(favorite.length,1,'Exactly one owned localhost favorite must be observed');
  await click(favorite[0]['content-desc']);
- await waitFor(s=>!labels(s).includes('Add')&&r.status().opened>before.opened,60000,'Actual favorite connection refresh failed');
+ await waitFor(s=>labels(s).includes('What do you want to add?')&&r.status().fromSender>before.fromSender&&r.status().fromDevice>before.fromDevice,60000,'Actual favorite connection refresh failed');
  await snap(label+'-registered');save(label+'-transport.json',{utc:new Date().toISOString(),before,after:r.status()});await peerObserve(label);
  await wd('POST',base()+'/appium/device/press_keycode',{keycode:4});await snap(label+'-picker-dismissed');
 
