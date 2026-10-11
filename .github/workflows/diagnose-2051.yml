@@ -11,6 +11,11 @@ on:
         description: Optional immutable historical control build run
         type: string
         default: ''
+      apk_variant:
+        description: Immutable artifact kind
+        type: choice
+        default: historical-control
+        options: [historical-control, current-control, current-guessed-uri]
 jobs:
   reproduce:
     runs-on: ubuntu-24.04
@@ -21,6 +26,7 @@ jobs:
     env:
       ISSUE2051_SCENARIO: ${{ inputs.scenario || 'saf' }}
       ISSUE2051_APK_RUN: ${{ inputs.apk_run_id }}
+      ISSUE2051_APK_VARIANT: ${{ inputs.apk_variant || 'historical-control' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +55,7 @@ jobs:
           trap 'adb devices > evidence/adb-devices.txt; tail -n 100 evidence/*-emulator.log || true' EXIT
           if [[ -n "$ISSUE2051_APK_RUN" ]]; then
             [[ "$ISSUE2051_APK_RUN" =~ ^[0-9]+$ ]]
-            gh run download "$ISSUE2051_APK_RUN" --repo ShlomoCode/localsend --pattern "issue-2051-historical-control-$ISSUE2051_APK_RUN-*" --dir /tmp/issue2051-build
+            gh run download "$ISSUE2051_APK_RUN" --repo ShlomoCode/localsend --pattern "issue-2051-$ISSUE2051_APK_VARIANT-$ISSUE2051_APK_RUN-*" --dir /tmp/issue2051-build
             mapfile -t apk_paths < <(find /tmp/issue2051-build -name app-release.apk -type f)
             [[ "${#apk_paths[@]}" == 1 ]]
             cp "${apk_paths[0]}" /tmp/localsend.apk

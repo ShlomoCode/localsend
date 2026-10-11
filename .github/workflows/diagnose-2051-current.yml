@@ -1,0 +1,78 @@
+name: Build 2051 current URI comparison
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Record source and diagnostic signing
+        run: |
+          mkdir -p evidence-current/control evidence-current/revert
+          git rev-parse HEAD > evidence-current/source-commit.txt
+          flutter --version > evidence-current/flutter-version.txt
+          rustc --version > evidence-current/rust-version.txt
+          git merge-base --is-ancestor 9e8a51d0039a0daca39735d90590ba80b08ccd22 HEAD
+          printf '%s\n' 9e8a51d0039a0daca39735d90590ba80b08ccd22 > evidence-current/included-uri-change.txt
+          sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/' app/android/app/build.gradle
+          git diff > evidence-current/diagnostic-signing.diff
+      - name: Build unchanged current control
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --target-platform android-x64
+          cp build/app/outputs/flutter-apk/app-release.apk ../evidence-current/control/app-release.apk
+          sha256sum ../evidence-current/control/app-release.apk > ../evidence-current/control/apk-sha256.txt
+          sha256sum ../pubspec.lock > ../evidence-current/resolved-lock-sha256.txt
+      - name: Apply isolated URI reversion for causal experiment
+        run: |
+          ruby <<'RUBY'
+          p='packages/localsend_isolates/lib/src/task/server/file_saver.dart'
+          s=File.read(p)
+          target='displayPath: createdFile.uri,'
+          raise 'URI target must occur exactly once' unless s.scan(target).length == 1
+          File.write(p,s.sub(target,'displayPath: destinationPath,'))
+          RUBY
+          git diff -- packages/localsend_isolates/lib/src/task/server/file_saver.dart > evidence-current/revert/uri-only.diff
+      - name: Build current with guessed URI only
+        working-directory: app
+        run: |
+          flutter build apk --release --target-platform android-x64
+          cp build/app/outputs/flutter-apk/app-release.apk ../evidence-current/revert/app-release.apk
+          sha256sum ../evidence-current/revert/app-release.apk > ../evidence-current/revert/apk-sha256.txt
+          sha256sum ../pubspec.lock > ../evidence-current/revert/resolved-lock-sha256.txt
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue-2051-current-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence-current/control/
+            evidence-current/source-commit.txt
+            evidence-current/flutter-version.txt
+            evidence-current/rust-version.txt
+            evidence-current/included-uri-change.txt
+            evidence-current/diagnostic-signing.diff
+            evidence-current/resolved-lock-sha256.txt
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue-2051-current-guessed-uri-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence-current/revert/
+            evidence-current/source-commit.txt
+            evidence-current/flutter-version.txt
+            evidence-current/rust-version.txt
+            evidence-current/included-uri-change.txt
+            evidence-current/diagnostic-signing.diff
