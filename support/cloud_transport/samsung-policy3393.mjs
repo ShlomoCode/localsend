@@ -146,6 +146,33 @@ function context({session, wd}, phase) {
   return {event, capture, failure, openPolicy, observePolicy, setPolicy, verifyPowerOff, returnApp};
 }
 
+export async function observe({session, wd, requiredPolicy = 'Optimized'}) {
+  if (!policies.includes(requiredPolicy)) throw new Error('Observation requires an exact captured Samsung policy label');
+  const ctx = context({session, wd}, 'observe');
+  let state;
+  let failure;
+  try {
+    await ctx.verifyPowerOff();
+    await ctx.openPolicy();
+    const observedPolicy = await ctx.observePolicy('baseline-policy');
+    if (observedPolicy !== requiredPolicy) throw new Error(`Samsung baseline policy is ${observedPolicy}; expected ${requiredPolicy}`);
+    await ctx.verifyPowerOff();
+    state = Object.freeze({observedPolicy, requiredPolicy, powerSaving: false, appPackage, session});
+    ctx.event('baseline-policy-verified', {state});
+  } catch (error) {
+    failure = error;
+    await ctx.failure(error);
+  } finally {
+    try { await ctx.returnApp(); }
+    catch (error) {
+      await ctx.failure(error);
+      failure = failure ? new AggregateError([failure, error], 'Samsung observation and app return failed') : error;
+    }
+  }
+  if (failure) throw failure;
+  return state;
+}
+
 export async function prepare({session, wd, onMutationAttempt}) {
   if (onMutationAttempt !== undefined && typeof onMutationAttempt !== 'function') throw new Error('onMutationAttempt must be a function');
   const ctx = context({session, wd}, 'prepare');

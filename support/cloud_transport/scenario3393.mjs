@@ -9,10 +9,12 @@ export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
  const oneplusPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
  const samsungPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-enable-and-restore';
+ const samsungPolicyObserved=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-observe-optimized';
  const policyOn=oneplusPolicyOn||samsungPolicyOn;
  const samsungDiscovery=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-policy-discovery';
  if(samsungDiscovery&&process.env.BS_DEVICE!=='Samsung Galaxy S25')throw new Error('Samsung policy discovery requires Samsung Galaxy S25');
  if(policyOn&&(process.env.BS_DEVICE!==(samsungPolicyOn?'Samsung Galaxy S25':'OnePlus 13R')||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires its selected device and scheduled 20 s');
+ if(samsungPolicyObserved&&(process.env.BS_DEVICE!=='Samsung Galaxy S25'||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Samsung Optimized observation requires Samsung Galaxy S25 and scheduled 20 s');
  let policyAttempted=false,policyModule,samsungPolicyState;
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
@@ -69,6 +71,9 @@ export default async function({session,wd,senderPort,transportStatus}) {
   if(samsungPolicyOn){
    policyModule=await import('./samsung-policy3393.mjs');
    samsungPolicyState=await policyModule.prepare({session,wd,onMutationAttempt:state=>{samsungPolicyState=state;policyAttempted=true;}});
+  }else if(samsungPolicyObserved){
+   policyModule=await import('./samsung-policy3393.mjs');
+   await policyModule.observe({session,wd,requiredPolicy:'Optimized'});
   }else if(oneplusPolicyOn){
    policyModule=await import('./oneplus-policy3393.mjs');
    await policyModule.setOnePlusBackground({session,wd,enabled:true,requireInitial:false,label:'policy-enable',onMutationAttempt:()=>{policyAttempted=true;}});
@@ -95,9 +100,9 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await source('control-notification-handled');
   const {default:observeSettings}=await import('./settings3393.mjs');await observeSettings({session,wd});
   if(samsungDiscovery)return;
-  if(policyOn){
+  if(policyOn||samsungPolicyObserved){
    const {default:timedPicker}=await import('./picker3393-timed.mjs');
-   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true,samsungPicker:samsungPolicyOn});
+   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true,samsungPicker:samsungPolicyOn||samsungPolicyObserved});
    return;
   }
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case','picker-calibration']);
@@ -144,6 +149,6 @@ export default async function({session,wd,senderPort,transportStatus}) {
    if(samsungPolicyOn&&policyAttempted)await policyModule.restore({session,wd,state:samsungPolicyState});
    else if(oneplusPolicyOn&&policyAttempted)await policyModule.setOnePlusBackground({session,wd,enabled:false,label:'policy-restore'});
   }
-  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyOnExperiment:samsungPolicyOn,samsungPolicyDiscovery:samsungDiscovery,transport:transportStatus()},null,2));}
+  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyOnExperiment:samsungPolicyOn,samsungPolicyObserved,samsungPolicyDiscovery:samsungDiscovery,transport:transportStatus()},null,2));}
  }
 }
