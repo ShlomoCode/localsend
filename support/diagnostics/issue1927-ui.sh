@@ -38,6 +38,8 @@ wait_rendered_application() {
     label="$identity_label-mature-attempt-$attempt"
     identity_command "render-$attempt" import -window "$wid" "$OUT/$label.png" || return 1
     identity_command "properties-$attempt" xprop -id "$wid" WM_CLASS _NET_WM_PID > "$OUT/$label-properties.txt" || return 1
+    # Bootstrap may already have an owner; this observation grants no input.
+    identity_command "bootstrap-owner-$attempt" /home/mint/xres-owner "$wid" > "$OUT/$label-owner.txt" || return 1
     # Retained mature 900/1000px renders place these labels in this crop.
     # Exclude icons and body headings; full-frame OCR duplicates/misreads them.
     identity_command "navigation-crop-$attempt" convert "$OUT/$label.png" -crop 170x170+70+90 +repage "$OUT/$label-navigation.png" || return 1
@@ -229,7 +231,7 @@ identity_command() {
 qualified_app_pid() {
   # Flatpak ps reports the supervisor, not the executable leaf. Resolve the
   # unique descendant by UID, executable inode and exact sandbox identity.
-  local identity_label=$1 transition_deadline=$((SECONDS+12)) uid rows instance anchor descendants pid actual expected status info ticks before_ticks found=''
+  local identity_label=$1 transition_deadline=$((SECONDS+12)) uid rows instance anchor descendants pid actual expected status info ticks before_ticks gtk_path found=''
   uid=$(id -u) || return 1
   identity_command instances flatpak ps --columns=instance,application,pid > "$OUT/$identity_label-instances.txt" || return 1
   identity_command topology ps -u "$uid" -o pid=,ppid=,uid=,comm= > "$OUT/$identity_label-topology.txt" || return 1
@@ -251,6 +253,11 @@ qualified_app_pid() {
     expected=$(identity_command "app-inode-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/root/app/localsend_app") || continue
     printf 'pid=%s executable_inode=%s expected_inode=%s\n' "$pid" "$actual" "$expected" >> "$OUT/$identity_label-identity-observer.txt"
     [ "$actual" = "$expected" ] || continue
+    identity_command "maps-$pid" sudo -n cat "/proc/$pid/maps" > "$OUT/$identity_label-$pid-maps.txt" || return 1
+    gtk_path=$(identity_command "gtk-path-$pid" awk '$NF~/\/libgtk-3\.so\./ {paths[$NF]=1} END {for(path in paths) print path}' "$OUT/$identity_label-$pid-maps.txt") || return 1
+    [[ "$gtk_path" = /* && "$gtk_path" != *$'\n'* ]] || return 1
+    identity_command "gtk-hash-$pid" sudo -n sha256sum "/proc/$pid/root$gtk_path" > "$OUT/$identity_label-$pid-gtk-sha256.txt" || return 1
+    identity_command "gtk-build-id-$pid" sudo -n readelf -n "/proc/$pid/root$gtk_path" > "$OUT/$identity_label-$pid-gtk-build-id.txt" || return 1
     info="$OUT/$identity_label-$pid-flatpak-info.txt"
     identity_command "sandbox-$pid" sudo -n cat "/proc/$pid/root/.flatpak-info" > "$info" || return 1
     identity_command "uid-$pid" awk -v uid="$uid" '/^Uid:/ {matched=($2==uid && $3==uid && $4==uid && $5==uid)} END {exit !matched}' "$status" || return 1
@@ -264,22 +271,84 @@ qualified_app_pid() {
     [ "$ticks" = "$before_ticks" ] || return 1
     [ -z "$found" ] || return 1
     found=$pid
+    printf '%s\n' "$actual" > "$OUT/$identity_label-executable-identity.txt"
     printf '%s %s %s %s\n' "$instance" "$anchor" "$pid" "$ticks" > "$OUT/$identity_label-process-identity.txt"
   done
   [ -n "$found" ] && [ "$SECONDS" -lt "$transition_deadline" ] || return 1
   printf '%s\n' "$found"
 }
+xres_host_namespace() {
+  local display_name=${DISPLAY%%.*} server_pid init_namespace collector_namespace server_namespace
+  identity_command xserver-topology ps -eo pid=,comm=,args= > "$OUT/$identity_label-xserver-topology.txt" || return 1
+  server_pid=$(identity_command xserver-selection awk -v display="$display_name" '
+    $2=="Xorg" {for(i=3;i<=NF;i++) if($i==display) {print $1; break}}
+  ' "$OUT/$identity_label-xserver-topology.txt") || return 1
+  [[ "$server_pid" =~ ^[0-9]+$ ]] || return 1
+  init_namespace=$(identity_command init-pid-namespace sudo -n readlink /proc/1/ns/pid) || return 1
+  collector_namespace=$(identity_command collector-pid-namespace readlink /proc/self/ns/pid) || return 1
+  server_namespace=$(identity_command server-pid-namespace sudo -n readlink "/proc/$server_pid/ns/pid") || return 1
+  printf 'display=%s xserver=%s init=%s collector=%s server=%s\n' "$DISPLAY" "$server_pid" "$init_namespace" "$collector_namespace" "$server_namespace" >> "$OUT/$identity_label-identity-observer.txt"
+  [ -n "$init_namespace" ] && [ "$init_namespace" = "$collector_namespace" ] && [ "$init_namespace" = "$server_namespace" ]
+}
+xres_query_matches() {
+  local window=$1 expected=$2 owner
+  owner=$(identity_command "xres-window-$window" /home/mint/xres-owner "$window") || return $?
+  [[ "$owner" =~ ^[0-9]+$ && "$expected" =~ ^[0-9]+$ ]] || return 4
+  printf 'window=%s host_expected=%s xres_owner=%s\n' "$window" "$expected" "$owner" >> "$OUT/$identity_label-identity-observer.txt"
+  [ "$owner" = "$expected" ] || return 6
+}
+xres_negative_controls() {
+  local pid=$1 result=0
+  [[ "${XRES_CONTROL_WINDOW:-}" =~ ^[0-9]+$ && "${XRES_CONTROL_DESTROYED:-}" =~ ^[0-9]+$ && "${XRES_CONTROL_PID:-}" =~ ^[0-9]+$ ]] || return 1
+  [ "$XRES_CONTROL_PID" != "$pid" ] || return 1
+  xres_query_matches "$XRES_CONTROL_WINDOW" "$XRES_CONTROL_PID" || return 1
+  xres_query_matches "$XRES_CONTROL_WINDOW" "$pid" || result=$?
+  printf 'unrelated-window-result=%s expected=6\n' "$result" >> "$OUT/$identity_label-identity-observer.txt"
+  [ "$result" = 6 ] || return 1
+  result=0
+  identity_command destroyed-window /home/mint/xres-owner "$XRES_CONTROL_DESTROYED" > "$OUT/$identity_label-destroyed-owner.txt" || result=$?
+  printf 'destroyed-window-result=%s expected=3\n' "$result" >> "$OUT/$identity_label-identity-observer.txt"
+  [ "$result" = 3 ]
+}
+start_xres_control() {
+  local identity_label="xres-control-${1}" transition_deadline=$((SECONDS+8)) fixture_report
+  # Initial session or a newly restarted LightDM only. The old fixture exits
+  # when its X connection closes; a remembered numeric PID is never signaled.
+  /home/mint/xres-owner --fixture > "$OUT/$identity_label.txt" 2> "$OUT/$identity_label-error.txt" &
+  XRES_CONTROL_PID=$!
+  while [ "$SECONDS" -lt "$transition_deadline" ] && [ ! -s "$OUT/$identity_label.txt" ]; do sleep .1; done
+  fixture_report=$(identity_command fixture-report cat "$OUT/$identity_label.txt") || return 1
+  [[ "$fixture_report" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] || return 1
+  local reported_pid
+  read -r XRES_CONTROL_WINDOW reported_pid XRES_CONTROL_DESTROYED <<< "$fixture_report"
+  [ "$reported_pid" = "$XRES_CONTROL_PID" ] || return 1
+  export XRES_CONTROL_PID XRES_CONTROL_WINDOW XRES_CONTROL_DESTROYED
+  xres_host_namespace || return 1
+  xres_query_matches "$XRES_CONTROL_WINDOW" "$XRES_CONTROL_PID" || return 1
+  [ "$SECONDS" -lt "$transition_deadline" ]
+}
 qualified_visible_window() {
-  local identity_label=$1 pid=$2 transition_deadline=$((SECONDS+8)) windows property_pid namespace_pid
+  local identity_label=$1 pid=$2 transition_deadline=$((SECONDS+8)) windows expected_ticks actual_ticks actual_inode expected_inode uid
   windows=$(identity_command windows xdotool search --onlyvisible --name '^LocalSend$') || return 1
   [[ "$windows" =~ ^[0-9]+$ ]] || return 1
   identity_command window-properties xprop -id "$windows" WM_CLASS _NET_WM_PID > "$OUT/$identity_label-window-properties.txt" || return 1
   identity_command window-class grep -Fq '"org.localsend.localsend_app"' "$OUT/$identity_label-window-properties.txt" || return 1
-  property_pid=$(identity_command window-pid xdotool getwindowpid "$windows") || return 1
-  namespace_pid=$(identity_command namespace-pid sudo -n awk '/^NSpid:/ {print $NF}' "/proc/$pid/status") || return 1
-  [[ "$property_pid" =~ ^[0-9]+$ && "$namespace_pid" =~ ^[0-9]+$ ]] || return 1
-  printf 'host_pid=%s namespace_pid=%s window_pid=%s\n' "$pid" "$namespace_pid" "$property_pid" >> "$OUT/$identity_label-identity-observer.txt"
-  [ "$property_pid" = "$pid" ] || [ "$property_pid" = "$namespace_pid" ] || return 1
+  xres_host_namespace || return 1
+  xres_negative_controls "$pid" || return 1
+  xres_query_matches "$windows" "$pid" || return 1
+  # XRes reports host PID in this verified server namespace, never sandbox PID2.
+  # Bind the later owner query back to the earlier unique leaf qualification.
+  expected_ticks=$(identity_command qualified-start awk -v pid="$pid" '$3==pid {print $4}' "$OUT/$identity_label-process-identity.txt") || return 1
+  identity_command owner-stat sudo -n cat "/proc/$pid/stat" > "$OUT/$identity_label-owner-stat.txt" || return 1
+  actual_ticks=$(identity_command owner-start awk '{sub(/^.*\) /,""); print $20}' "$OUT/$identity_label-owner-stat.txt") || return 1
+  [[ "$expected_ticks" =~ ^[0-9]+$ && "$actual_ticks" =~ ^[0-9]+$ ]] || return 1
+  [ "$actual_ticks" = "$expected_ticks" ] || return 1
+  expected_inode=$(identity_command qualified-inode cat "$OUT/$identity_label-executable-identity.txt") || return 1
+  actual_inode=$(identity_command owner-inode sudo -n stat -Lc '%d:%i' "/proc/$pid/exe") || return 1
+  [ "$actual_inode" = "$expected_inode" ] || return 1
+  uid=$(id -u) || return 1
+  identity_command owner-status sudo -n cat "/proc/$pid/status" > "$OUT/$identity_label-owner-status.txt" || return 1
+  identity_command owner-uid awk -v uid="$uid" '/^Uid:/ {matched=($2==uid && $3==uid && $4==uid && $5==uid)} END {exit !matched}' "$OUT/$identity_label-owner-status.txt" || return 1
   [ "$SECONDS" -lt "$transition_deadline" ] || return 1
   printf '%s\n' "$windows"
 }

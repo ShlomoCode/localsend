@@ -19,7 +19,11 @@ for i in $(seq 1 30); do
   sleep 1
 done
 test -n "$wid"
-stabilize_window
+sleep 8
+# Positive native Flatpak control through the same exact owner gate.
+native_pid=$(qualified_app_pid native-owner-control)
+wid=$(qualified_visible_window native-owner-control "$native_pid")
+stabilize_window initialized
 import -window "$wid" "$OUT/receive.png"
 xdotool mousemove --window "$wid" 105 211 click 1
 sleep 3
@@ -30,7 +34,7 @@ find "$HOME/.config/autostart" "$HOME/.var/app/org.localsend.localsend_app/confi
 flatpak kill org.localsend.localsend_app
 sleep 2
 launch_settings() {
-  local label=$1
+  local label=$1 pid
   flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
   wid=''
   for i in $(seq 1 30); do
@@ -39,7 +43,10 @@ launch_settings() {
     sleep 1
   done
   test -n "$wid"
-  stabilize_window
+  sleep 8
+  pid=$(qualified_app_pid "$label-owner")
+  wid=$(qualified_visible_window "$label-owner" "$pid")
+  stabilize_window initialized
   xdotool mousemove --window "$wid" 105 211 click 1
   sleep 2
   import -window "$wid" "$OUT/$label-before.png"

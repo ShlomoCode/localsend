@@ -24,6 +24,7 @@ cp /tmp/issue1927-mint/id.pub /tmp/issue1927-mint/seed/id.pub
 cp support/diagnostics/issue1927.sh /tmp/issue1927-mint/seed/scenario.sh
 cp support/diagnostics/issue1927-portal-gui.sh /tmp/issue1927-mint/seed/portal-gui.sh
 cp support/diagnostics/issue1927-ui.sh /tmp/issue1927-mint/seed/ui.sh
+cp support/diagnostics/issue1927-xres-owner.c /tmp/issue1927-mint/seed/xres-owner.c
 cp evidence/packages/{baseline,candidate}.flatpak /tmp/issue1927-mint/seed/
 cat > /tmp/issue1927-mint/seed/bootstrap.sh <<'BOOT'
 #!/bin/bash
@@ -34,6 +35,7 @@ cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/scenario.sh /home/mint/scenario.sh
 cp /mnt/portal-gui.sh /home/mint/portal-gui.sh
 cp /mnt/ui.sh /home/mint/ui.sh
+cp /mnt/xres-owner.c /home/mint/xres-owner.c
 cp /mnt/{baseline,candidate}.flatpak /home/mint/
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
@@ -51,7 +53,9 @@ for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
   sed -i '/^[[:space:]]*deb.*cdrom:/s/^/# Live-media cdrom source disabled: /' "$source"
 done
 timeout --foreground 240 apt-get update
-timeout --foreground 600 apt-get install -y openssh-server xdotool imagemagick tesseract-ocr ffmpeg
+timeout --foreground 600 apt-get install -y openssh-server xdotool imagemagick tesseract-ocr ffmpeg gcc pkg-config libx11-dev libxres-dev
+gcc -std=c11 -Wall -Wextra -Werror /home/mint/xres-owner.c -o /home/mint/xres-owner $(pkg-config --cflags --libs x11 xres)
+{ pkg-config --modversion x11 xres; dpkg-query -W libxres1 libxres-dev libx11-6; sha256sum /home/mint/xres-owner.c /home/mint/xres-owner; } > /home/mint/evidence/xres-build-provenance.txt
 systemctl start ssh
 touch /home/mint/evidence/bootstrap-complete
 BOOT
@@ -93,6 +97,7 @@ source /home/mint/ui.sh
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
 tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
+start_xres_control initial
 { cinnamon --version; flatpak --version; loginctl list-sessions; } > evidence/desktop-identity.txt
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user --noninteractive -y flathub org.freedesktop.Platform/x86_64/26.08
@@ -113,7 +118,7 @@ relogin() {
   sudo systemctl restart lightdm
   for attempt in $(seq 1 60); do
     new_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1 || true)
-    if [ -n "$new_pid" ] && [ "$new_pid" != "$before_pid" ]; then sleep 15; session_environment; return; fi
+    if [ -n "$new_pid" ] && [ "$new_pid" != "$before_pid" ]; then sleep 15; session_environment; start_xres_control "$new_pid"; return; fi
     sleep 2
   done
   return 1
