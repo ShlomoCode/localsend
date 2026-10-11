@@ -80,7 +80,8 @@ for count in [5,5000]:
         click(*locate(fixture.name,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(*locate('Open',case+'-picker-open',10)); time.sleep(2)
         screen(case+'-picker-accepted')
         click(*locate('Receiver2414',case+'-target',60)); time.sleep(2)
-        focus(rwin); option_xy=locate('Options',case+'-receive',30)
+        focus(rwin); run('xdotool','windowmove',rwin,'0','0'); run('xdotool','windowsize',rwin,'1000','700'); time.sleep(1)
+        screen(case+'-normalized-approval'); option_xy=locate('Options',case+'-receive',30)
         started=time.monotonic(); click(*option_xy)
         try:
             locate('Save',case+'-options',30)
@@ -91,9 +92,12 @@ for count in [5,5000]:
             run('xdotool','mousemove','--window',rwin,'28','28','click','1'); time.sleep(1)
             focus(rwin); screen(case+'-returned-from-options')
             locate('Options',case+'-accept-ready',10)
-            # Recorded returned-screen screenshot: Accept center is (669,670),
-            # receiver client origin (150,120), hence client-relative (519,550).
-            run('xdotool','mousemove','--window',rwin,'519','550','click','1'); time.sleep(1)
+            # Observed at 900x600 and 1000x700: the bottom button row is
+            # centered; Accept center is 69px after center and 50px above bottom.
+            geometry=run('xdotool','getwindowgeometry','--shell',rwin); print('RECEIVER_GEOMETRY',geometry,flush=True)
+            geometry=dict(line.split('=',1) for line in geometry.splitlines())
+            accept_x=int(geometry['WIDTH'])//2+69; accept_y=int(geometry['HEIGHT'])-50
+            run('xdotool','mousemove','--window',rwin,str(accept_x),str(accept_y),'click','1'); time.sleep(1)
             screen(case+'-accepted')
             end=time.monotonic()+180
             while time.monotonic()<end and len(list(dest.rglob('*.txt')))<count: time.sleep(1)
@@ -103,7 +107,7 @@ for count in [5,5000]:
         except Exception as e:
             screen(case+'-failure'); result={'count':count,'failure':str(e),'receiver_exit':receiver.poll(),'options_response_seconds':locals().get('render')}
         stop.set(); sampler.join(); results.append(result); (out/'results.json').write_text(json.dumps(results,indent=2))
-        if count==5 and not result.get('content_valid'): raise RuntimeError('Small directory control failed; do not interpret large case')
+        if not result.get('content_valid'): raise RuntimeError('File save verification failed: '+case)
     finally:
         if 'stop' in locals(): stop.set()
         with (out/(case+'-kernel-final.txt')).open('w') as kernel:

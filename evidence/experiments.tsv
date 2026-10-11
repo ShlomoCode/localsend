@@ -13,3 +13,4 @@ E10	Home browse directory selection	select5→real send→Options	selection and 
 E11	receiver-relativeBack	5-fileOptions→approval	Options1.322s; approvalvisiblyshowsAccept butOCRmisseslabel; noacceptclick	38106625564	no
 E12	observedAcceptbounds	5-file directory→send→Options→save	saved5, byte-exactcontenttrue, bothappsFinished	38106985658	yes-control
 E13	5000 count prepared	5-file prerequisite	Home tooltip covers fixture label; no selection, 5000neverstarted	38107209480	no
+E14	5000 ordinaryfiles	real selection→send→Options	Optionsvisible3.765s, RSSHWM1170088kB, noOSOOM; Acceptmiss causedzero saved	38107406174	yes-options-only
