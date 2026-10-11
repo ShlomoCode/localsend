@@ -41,6 +41,11 @@ foreach($thread in $threads){if($thread -and $thread -ne $current -and [Explorer
 try{[void][Explorer2311]::ShowWindow($hwnd,9);[void][Explorer2311]::SetForegroundWindow($hwnd)}finally{foreach($thread in $attached){[void][Explorer2311]::AttachThreadInput($current,$thread,$false)}}
 if([Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Explorer foreground could not be established; no context-menu keys were sent'}
 $filename=[IO.Path]::GetFileNameWithoutExtension($fixture)
+$shellItem=$window[0].Document.Folder.ParseName([IO.Path]::GetFileName($fixture))
+if(!$shellItem -or $shellItem.Path -ne $fixture){throw 'Explorer folder did not resolve the exact fixture'}
+# Native Explorer selection also scrolls virtualized rows into view.
+# SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE | SVSI_FOCUSED.
+$window[0].Document.SelectItem($shellItem,29)
 $deadline=[DateTime]::UtcNow.AddSeconds(10)
 do{
  $items=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
