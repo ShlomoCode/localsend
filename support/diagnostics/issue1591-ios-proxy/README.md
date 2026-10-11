@@ -2,7 +2,7 @@
 
 This standalone diagnostic app connects a Windows TCP relay to an unmodified LocalSend app on the same physical iPad. It forwards opaque TCP bytes to `127.0.0.1:53317`. TLS negotiation, client certificates, protocol requests, receive decisions, and saving remain in the actual LocalSend applications.
 
-The helper uses an ordinary UIKit app, `URLSession`, and `NWConnection`. Its source-defined Info.plist permits HTTP for the private diagnostic relay. The helper has no Photos permission or background modes. It requests a finite `UIApplication.beginBackgroundTask` budget before the operator switches to LocalSend. iOS controls that budget and can suspend or expire the helper. An expired or stalled helper is a transport failure, not a LocalSend reproduction.
+The helper uses an ordinary UIKit app, `URLSession`, and `NWConnection`. Its source-defined Info.plist permits HTTP only for the exact `bs-local.com` diagnostic relay hostname, without subdomains or a global ATS exception. The helper has no Photos permission or background modes. It requests a finite `UIApplication.beginBackgroundTask` budget before the operator switches to LocalSend. iOS controls that budget and can suspend or expire the helper. An expired or stalled helper is a transport failure, not a LocalSend reproduction.
 
 ## Build and install
 
@@ -12,7 +12,9 @@ Upload `Issue1591ByteProxy.ipa` through BrowserStack normal app upload and re-si
 
 ## Run the relay
 
-Use the retained `android-relay.mjs` Node relay with a private random bearer token. Expose its HTTP port through BrowserStack Local. The relay origin must have only a scheme, host, and optional port, for example `http://bs-local.com:8080`. The helper accepts HTTP or HTTPS origins.
+Use the matching acknowledged Node relay with a private random bearer token. Expose its HTTP port through BrowserStack Local. The relay origin must have only a scheme, host, and optional port. Use `http://bs-local.com:8080` for the configured HTTP exception. The helper accepts other HTTPS origins under normal ATS requirements; its configuration does not exempt other HTTP hostnames or IP-address URLs.
+
+Apple documents that on iOS 10 and later, the presence of `NSAllowsLocalNetworking` causes `NSAllowsArbitraryLoads` to be ignored and its default `NO` value to apply. The former combination therefore failed before polling with `NSURLErrorDomain -1022` in cloud trial 38180108492. The replacement uses the supported `NSExceptionDomains` dictionary and `NSExceptionAllowsInsecureHTTPLoads` for the exact hostname. This affects only the outer URLSession relay connection. The opaque LocalSend TCP/TLS stream and its certificates remain unchanged. See Apple's [global ATS key behavior](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowsarbitraryloads), [domain matching rules](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsexceptiondomains), and [HTTP exception semantics](https://developer.apple.com/documentation/bundleresources/information-property-list/nsexceptionallowsinsecurehttploads).
 
 1. Open the helper and fill **Relay origin** and **Relay token**. Their accessibility identifiers are `relayURL` and `relayToken`.
 2. Select **Start proxy** (`startProxy`) while the helper is in the foreground.
