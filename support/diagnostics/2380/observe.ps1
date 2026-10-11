@@ -18,15 +18,24 @@ function Snapshot($name,$process) {
  $elements=$root.FindAll($scope,[System.Windows.Automation.Condition]::TrueCondition)
  $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString();pid=$_.Current.ProcessId;offscreen=$_.Current.IsOffscreen}}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-uia.json"
 }
+function FocusLocalSend($process) {
+ Get-Process wsl,WindowsTerminal -ErrorAction SilentlyContinue|Stop-Process -Force
+ [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
+ $process.Refresh();if(!$process.MainWindowHandle){throw 'No LocalSend window to focus'}
+ [Desktop2861]::SetForegroundWindow($process.MainWindowHandle)|Out-Null
+ $window=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle).Current.BoundingRectangle
+ [Desktop2861]::SetCursorPos([int]$window.Left+100,[int]$window.Top+15)|Out-Null
+ [Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+ Start-Sleep -Milliseconds 500
+ if([Desktop2861]::GetForegroundWindow() -ne $process.MainWindowHandle){throw 'Real title-bar focus did not reach LocalSend'}
+}
 Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
 $exe=Get-ChildItem $ReleaseRoot -Filter localsend_app.exe -Recurse|Select-Object -First 1
 Get-FileHash $exe.FullName|ConvertTo-Json|Set-Content "$EvidenceDirectory/localsend-exe.json"
 New-NetFirewallRule -DisplayName 'Bug2380 disposable LocalSend' -Direction Inbound -Program $exe.FullName -Action Allow -Profile Any|Out-Null
 $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
 Start-Sleep -Seconds 15
-Get-Process wsl -ErrorAction SilentlyContinue|Stop-Process -Force
-[System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
-$app.Refresh();[Desktop2861]::SetForegroundWindow($app.MainWindowHandle)|Out-Null
+FocusLocalSend $app
 Start-Sleep -Seconds 2
 Snapshot 'control-no-powertoys' $app
 Stop-Process -Id $app.Id -Force
@@ -73,11 +82,23 @@ function RealZoneKey {
  [Input2380]::keybd_event(0x25,0,2,[UIntPtr]::Zero);[Input2380]::keybd_event(0x5b,0,2,[UIntPtr]::Zero)
 }
 $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;Start-Sleep -Seconds 15
-$app.Refresh();[Desktop2861]::SetForegroundWindow($app.MainWindowHandle)|Out-Null
+FocusLocalSend $app
 Start-Sleep -Seconds 1;Snapshot 'restore-enabled-before-zone' $app
 if([Desktop2861]::GetForegroundWindow() -ne $app.MainWindowHandle){throw 'LocalSend not foreground before actual zone key'}
 RealZoneKey;Start-Sleep -Seconds 3;Snapshot 'actual-win-left-zone' $app
 $history="$ptSettings/FancyZones/app-zone-history.json"
+if(!(Test-Path $history) -or !((Get-Content $history -Raw|ConvertFrom-Json).'app-zone-history'|Where-Object{$_.'app-path' -ieq $exe.FullName})){
+ # Use the normal Shift-drag workflow when this desktop's Win+arrow override does not record a zone.
+ FocusLocalSend $app
+ $window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle).Current.BoundingRectangle
+ $startX=[int]$window.Left+100;$startY=[int]$window.Top+15
+ [Desktop2861]::SetCursorPos($startX,$startY)|Out-Null;[Input2380]::keybd_event(0x10,0,0,[UIntPtr]::Zero)
+ [Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
+ for($step=1;$step -le 20;$step++){[Desktop2861]::SetCursorPos([int]($startX+(300-$startX)*$step/20),[int]($startY+(350-$startY)*$step/20))|Out-Null;Start-Sleep -Milliseconds 40}
+ Snapshot 'actual-shift-drag-highlight' $app
+ [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)
+ Start-Sleep -Seconds 3;Snapshot 'actual-shift-drag-zone' $app
+}
 if(!(Test-Path $history)){throw 'No actual FancyZones history recorded'}
 Copy-Item $history "$EvidenceDirectory/actual-zone-history.json"
 $historyData=Get-Content $history -Raw|ConvertFrom-Json

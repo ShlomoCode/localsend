@@ -18,6 +18,7 @@ jobs:
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
           Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
       - name: Observe genuine desktop and applications
+        timeout-minutes: 12
         shell: powershell
         run: ./support/diagnostics/2380/observe.ps1 -ReleaseRoot "$env:RUNNER_TEMP/localsend" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2380"
       - uses: actions/upload-artifact@v6

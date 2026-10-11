@@ -40,9 +40,10 @@ Start-Transcript "$EvidenceDirectory/transcript.txt"
 Start-Sleep -Seconds 3
 $desktop=[System.Windows.Automation.AutomationElement]::RootElement
 $setupInputs=@()
+Get-Process wsl,WindowsTerminal -ErrorAction SilentlyContinue|Stop-Process -Force
 for($attempt=0;$attempt -lt 8;$attempt++) {
  $setupBmp=New-Object System.Drawing.Bitmap(1920,1080);$setupG=[System.Drawing.Graphics]::FromImage($setupBmp);$setupG.CopyFromScreen(0,0,0,0,$setupBmp.Size);$setupBmp.Save("$EvidenceDirectory/setup-$attempt.png",[System.Drawing.Imaging.ImageFormat]::Png);$setupG.Dispose();$setupBmp.Dispose()
- $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
  $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-uia-$attempt.json"
  $privacy=$elements|Where-Object{$_.Current.Name -eq 'Microsoft account' -and !$_.Current.IsOffscreen -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window}|Select-Object -First 1
  if($privacy){
