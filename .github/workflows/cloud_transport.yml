@@ -23,7 +23,7 @@ jobs:
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' >/dev/null
           mkdir -p /tmp/helper/classes /tmp/helper/dex /tmp/helper/assets
           printf '{"endpoint":"http://bs-local.com:8080","token":"control-only-placeholder"}' > /tmp/helper/assets/config.json
-          javac -source 8 -target 8 -bootclasspath "$ANDROID_HOME/platforms/android-35/android.jar" -d /tmp/helper/classes support/cloud_transport/android/*.java
+          javac -source 8 -target 8 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d /tmp/helper/classes support/cloud_transport/android/*.java
           "$ANDROID_HOME/build-tools/35.0.0/d8" --lib "$ANDROID_HOME/platforms/android-35/android.jar" --min-api 26 --output /tmp/helper/dex /tmp/helper/classes/org/localsend/cloudtransport/*.class
           "$ANDROID_HOME/build-tools/35.0.0/aapt" package -f -M support/cloud_transport/android/AndroidManifest.xml -I "$ANDROID_HOME/platforms/android-35/android.jar" -A /tmp/helper/assets -F /tmp/helper/unsigned.apk
           zip -j /tmp/helper/unsigned.apk /tmp/helper/dex/classes.dex
