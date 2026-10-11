@@ -29,7 +29,9 @@ jobs:
         working-directory: app
         run: |
           cp lib/widget/dialogs/text_field_with_actions.dart ../evidence-build/candidate-widget.dart
+          cp lib/pages/tabs/settings_tab.dart ../evidence-build/candidate-settings.dart
           git show c1ce322fb3acf08e44f329b8b7208b8b0d91e244:app/lib/widget/dialogs/text_field_with_actions.dart > lib/widget/dialogs/text_field_with_actions.dart
+          git show c1ce322fb3acf08e44f329b8b7208b8b0d91e244:app/lib/pages/tabs/settings_tab.dart > lib/pages/tabs/settings_tab.dart
           cat > test/bug_2462_baseline_test.dart <<'DART'
           import 'package:flutter/material.dart';
           import 'package:flutter_test/flutter_test.dart';
@@ -55,6 +57,7 @@ jobs:
           grep -F "Expected: 'Original alias'" ../evidence-build/baseline-widget.log
           grep -F "Actual: 'Edited alias'" ../evidence-build/baseline-widget.log
           cp ../evidence-build/candidate-widget.dart lib/widget/dialogs/text_field_with_actions.dart
+          cp ../evidence-build/candidate-settings.dart lib/pages/tabs/settings_tab.dart
           rm test/bug_2462_baseline_test.dart
       - name: Check candidate regression behavior
         working-directory: app
