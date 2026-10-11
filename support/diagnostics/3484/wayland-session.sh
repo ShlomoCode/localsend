@@ -14,8 +14,8 @@ move_pointer() {
 }
 capture_ocr() {
   grim "$1.png"
-  magick "$1.png" -crop 1280x80+0+0 -resize 300% "$1-ocr.png"
-  tesseract "$1-ocr.png" "$1" --psm 11 2>/dev/null
+  magick "$1.png" -crop 400x52+0+28 -colorspace gray -negate -resize 300% -bordercolor white -border 12 "$1-ocr.png"
+  tesseract "$1-ocr.png" "$1" --psm 6 2>/dev/null
 }
 env | sort > "$out/session-environment.txt"
 hyprctl version > "$out/hyprland-version.txt"
@@ -43,7 +43,11 @@ for x in 12 24 36 48 60 72; do
   sleep 2
   capture_ocr "$out/control-${x}"
 done
-grep -i -q flameshot "$out"/control-*.txt
+if grep -i -q flameshot "$out"/control-*.txt; then
+  printf 'OCR located Flameshot; inspect original control screenshot before accepting application results.\n' > "$out/control-observation.txt"
+else
+  printf 'OCR missed control; manual inspection of original control screenshots is required.\n' > "$out/control-observation.txt"
+fi
 for app_case in release current-base; do
 mkdir -p "$out/$app_case" "$HOME/cases/$app_case/data" "$HOME/cases/$app_case/config"
 if [ "$app_case" = release ]; then app_binary=/opt/localsend/localsend; else app_binary=/opt/current-base/localsend_app; fi
@@ -75,6 +79,16 @@ for repeat in 1 2; do
     capture_ocr "$out/$app_case/hover-${repeat}-${x}"
   done
 done
+move_pointer 1000 700
+wf-recorder --no-dmabuf -c libx264 -f "$out/$app_case/actual-hover.mp4" > "$out/$app_case/recording.log" 2>&1 &
+record_pid=$!
+sleep 1
+move_pointer 72 16
+sleep 3
+move_pointer 96 16
+sleep 3
+kill -INT "$record_pid"
+wait "$record_pid"
 kill -0 "$app_pid"
 kill "$app_pid"
 wait "$app_pid" || true

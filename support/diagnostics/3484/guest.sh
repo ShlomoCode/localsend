@@ -8,7 +8,7 @@ if [ "$archive_date" != latest ]; then
 else
   pacman -Syu --noconfirm
 fi
-pacman -S --noconfirm base-devel git curl jq gtk3 libayatana-appindicator libayatana-indicator fuse2 xdg-user-dirs quickshell hyprland xorg-xwayland grim imagemagick tesseract tesseract-data-eng mesa ttf-dejavu flameshot inotify-tools power-profiles-daemon sudo
+pacman -S --noconfirm base-devel git curl jq gtk3 libayatana-appindicator libayatana-indicator fuse2 xdg-user-dirs quickshell hyprland xorg-xwayland grim imagemagick tesseract tesseract-data-eng mesa ttf-dejavu flameshot inotify-tools power-profiles-daemon sudo wf-recorder ffmpeg
 pacman -Q > /work/evidence/cloud/package-versions.txt
 cat /etc/os-release > /work/evidence/cloud/os-release.txt
 useradd -m -G wheel,video,render investigator
