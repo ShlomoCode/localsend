@@ -6,6 +6,8 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 dbus-update-activation-environment --all
 export KDE_SKIP_SYSTEMD_BOOT=1
+mkdir -p /run/dbus
+dbus-daemon --system --fork || true
 startplasma-x11 > evidence/plasma.log 2>&1 &
 sleep 30
 qdbus_bin=$(command -v qdbus6 || command -v qdbus || echo /usr/lib/qt6/bin/qdbus)
@@ -30,3 +32,4 @@ xdotool key Escape
 "$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels();for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){if(ws[j].type=="org.kde.plasma.systemtray") ws[j].showConfigurationInterface();}}'
 sleep 3
 import -window root evidence/tray-settings.png
+python3 support/diagnostics/3546/accessibility.py
