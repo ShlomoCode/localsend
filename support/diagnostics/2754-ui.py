@@ -83,6 +83,24 @@ def text_case(label):
     if trace:
         run("sudo","kill","-INT",str(trace.pid))
     run("xdotool","key","Escape"); time.sleep(2)
+def picker_control(word,label):
+    # Open and cancel the actual chooser in the same process/keyboard setting.
+    click_word(word,label+"-before")
+    start=time.monotonic(); deadline=start+10
+    observed=False; attempt=0
+    while time.monotonic()<deadline:
+        rows=snap(label+"-chooser-"+str(attempt))
+        labels={r["text"].lower().strip() for r in rows}
+        if "cancel" in labels and ("open" in labels or "select" in labels):
+            observed=True; break
+        attempt+=1; time.sleep(1)
+    log("picker-control",case=label,app_pid=app.pid,observed=observed,elapsed=time.monotonic()-start)
+    if not observed: raise RuntimeError("Rendered chooser controls absent: "+label)
+    click_word("Cancel",label+"-cancel")
+    time.sleep(2)
+    rows=snap(label+"-returned")
+    if not any(r["text"].lower().strip()=="selection" for r in rows):
+        raise RuntimeError("Chooser cancel did not return to rendered Send page: "+label)
 def capture_geometry_phase():
     # Optional accessibility queries occur only after every original timing case.
     # Capture completion is process evidence, not a geometry or speech pass.
@@ -173,6 +191,19 @@ if state != "true": raise RuntimeError("UI did not enable supported virtual keyb
 (out/"activation-mode.txt").write_text(run("gsettings","get","org.cinnamon.keyboard","activation-mode").stdout)
 run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-on")
+picker_control("File","keyboard-on-file-control")
+picker_control("Folder","keyboard-on-folder-control")
+# Repeat Paste under the enabled keyboard, then remove its real selection.
+subprocess.run(["xclip","-selection","clipboard"],input=b"Paste enabled keyboard control",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+click_word("Paste","keyboard-on-paste-before"); time.sleep(3); snap("keyboard-on-paste-result")
+rows=snap("keyboard-on-paste-clear-before")
+selection=next(r for r in rows if r["text"].lower()=="selection")
+clear_x=int(selection["left"])+510
+clear_y=int(selection["top"])+int(selection["height"])//2
+log("clear-paste-ui",case="keyboard-on",x=clear_x,y=clear_y)
+run("xdotool","mousemove",str(clear_x),str(clear_y),"click","1"); time.sleep(2)
+cleared=snap("keyboard-on-paste-cleared")
+if not any(r["text"].lower()=="text" for r in cleared): raise RuntimeError("Keyboard-on Paste selection was not cleared")
 text_case("keyboard-on-repeat")
 # Return the supported setting through the same UI, then repeat the original trigger.
 run("xdotool","windowactivate","--sync",wid); time.sleep(2)

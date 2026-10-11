@@ -6,7 +6,7 @@ on:
         description: 'Run native source gates before any new VM experiment'
         type: choice
         default: vm
-        options: [vm, native, engine, engine-app]
+        options: [vm, native, engine, engine-app, packaged-comparison]
       environment:
         type: choice
         default: mint
@@ -45,6 +45,77 @@ concurrency:
   group: issue2754-cinnamon-diagnostic
   cancel-in-progress: false
 jobs:
+  packaged-comparison:
+    if: inputs.stage == 'packaged-comparison'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require an explicit completed app bundle run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_RUN_ID: ${{ inputs.bundle_run_id }}
+        run: |
+          [[ "$APP_RUN_ID" =~ ^[0-9]+$ ]]
+          mkdir -p evidence/package
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APP_RUN_ID" > evidence/package/app-run.json
+          jq -e '.status == "completed" and .conclusion == "success"' evidence/package/app-run.json
+      - name: Download verified control application bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-c1ce-engine-control-linux-x64
+          run-id: ${{ inputs.bundle_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/issue2754-control-app
+      - name: Download verified B application bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-c1ce-engine-B-linux-x64
+          run-id: ${{ inputs.bundle_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/issue2754-B-app
+      - name: Install official AT-SPI source package prerequisites
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tee evidence/package/apt-update.log
+          sudo apt-get install -y --no-install-recommends \
+            build-essential dpkg-dev debhelper-compat devscripts quilt curl ca-certificates binutils jq \
+            dbus libdbus-1-dev dbus-broker libsystemd-dev libglib2.0-dev libxml2-dev libx11-dev libxtst-dev \
+            meson pkgconf gtk-doc-tools gi-docgen python3-sphinx gir1.2-dbus-1.0-dev gir1.2-glib-2.0-dev \
+            gir1.2-gobject-2.0-dev gobject-introspection xauth xvfb at-spi2-core docbook-xml libglib2.0-doc libglib2.0-dev-bin \
+            2>&1 | tee evidence/package/apt-install.log
+      - name: Build A through the normal Debian source package rules
+        run: bash support/diagnostics/2754-atspi-package/build-package.sh evidence/package/build
+      - name: Run control system then B system then A plus B package in Mint
+        env:
+          APP_RUN_ID: ${{ inputs.bundle_run_id }}
+        run: |
+          bash support/diagnostics/2754-engine-build/run-packaged-comparison.sh \
+            "$RUNNER_TEMP/issue2754-control-app" "$RUNNER_TEMP/issue2754-B-app" \
+            "$GITHUB_WORKSPACE/evidence/package/build/candidate" "$APP_RUN_ID"
+      - name: Preserve readable evidence on every outcome
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" evidence
+          mkdir -p /tmp/issue2754-packaged-compact
+          rsync -a --exclude='*.mp4' --exclude='*.ppm' --exclude='*.deb' --exclude='*.udeb' \
+            --exclude='*.tar.*' --exclude='*.so' --exclude='*.so.*' --exclude='work/' --exclude='target-root/' \
+            evidence/ /tmp/issue2754-packaged-compact/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-packaged-comparison-evidence-compact
+          path: /tmp/issue2754-packaged-compact/
+          compression-level: 9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-packaged-comparison-evidence-full
+          path: evidence/
+          compression-level: 0
   engine-app-retry:
     if: inputs.stage == 'engine-app'
     runs-on: ubuntu-24.04
@@ -340,7 +411,8 @@ jobs:
               provenance=/tmp/issue2754-build/provenance
               jq -e --arg variant "$PROBE_ENGINE_VARIANT" --arg run_id "$PROBE_BUNDLE_RUN_ID" \
                 --arg patch_hash "$(sha256sum support/diagnostics/2754-engine-build/B-with-tests.patch | awk '{print $1}')" \
-                '.variant == $variant and .app_build_run_id == $run_id and .run_id == $run_id and
+                '.variant == $variant and .app_build_run_id == $run_id and
+                 (.run_id == $run_id or .run_id == "38153341418") and
                  .engine_sha == "42d3d75a56efe1a2e9902f52dc8006099c45d937" and
                  .framework_sha == "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694" and
                  .localsend_sha == "c1ce322fb3acf08e44f329b8b7208b8b0d91e244" and
