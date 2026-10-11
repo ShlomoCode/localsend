@@ -1,0 +1,30 @@
+{
+  "run": "38134203137",
+  "head": "7e144bdd",
+  "method": "direct visual review of firmware-about-direct.png",
+  "androidVersion": "11",
+  "androidBuild": "RKQ1.211001.001",
+  "miuiLabel": "MIUI Global 13.0.8Stable",
+  "miuiBuild": "13.0.8.0(RGCINXM)",
+  "securityUpdate": "2022-02-01",
+  "model": "2201117TI",
+  "screenshotSha256": "d27d031765e6efabd0ce9fbb9eb943b2bf7eae2262f118ed0b43c09bcf826477",
+  "xmlPackage": "com.miui.home",
+  "automatedAboutPageObserved": false,
+  "limitation": "Screenshot precedes source; automated flag only checks later XML. Settings exit reason unknown.",
+  "settingsChanged": false,
+  "sessionStatus": "done",
+  "catalogRetrievedAt": "2026-10-11T11:17:33.068Z",
+  "catalogTotalDevices": 110,
+  "xiaomiDevices": [
+    {
+      "os": "android",
+      "os_version": "11.0",
+      "device": "Xiaomi Redmi Note 11",
+      "realMobile": true,
+      "device_tier": "Tier 4",
+      "device_limit": 5
+    }
+  ],
+  "miuiFieldsPresent": false
+}

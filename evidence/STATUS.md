@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: No reported freeze in ten exercised long-text conditions. Parent has accepted nine; corrected selection raw evidence awaits review. Last read-only MIUI diagnostic run 38134203137 is active. No production patch or PR exists.
+Status: Parent accepted a reproduction blocker after ten independently reviewed long-text conditions showed no reported freeze. Final read-only firmware diagnostic 38134203137 completed. Available Xiaomi firmware is MIUI Global 13.0.8 Stable / Android 11, confirmed by screenshot. No production patch or PR exists.
 
 ## Report and evidence boundary
 
@@ -16,17 +16,17 @@ The reporter uses Dell Inspiron 3501, Windows 11 Pro, and Xiaomi Redmi Note 10 P
 
 ## Environment gaps
 
-- One owned job/session at a time is allowed for this issue; firmware run 38134203137 is the only owned active run/session.
+- One owned job/session at a time is allowed for this issue; firmware run 38134203137 completed; no further job or session has been started.
 - The shared transport and actual short-text app-to-app control have passed.
 - Windows 11 runner is ARM with original x64 release under emulation. Dell hardware and native x64 remain different.
-- Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 is the next comparison; its MIUI version is unknown. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
+- Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 was exercised; its MIUI version is now confirmed by screenshot as Global 13.0.8 Stable. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
 - BrowserStack public devices reject unrestricted ADB. Memory/CPU and lifecycle trace coverage must be determined with supported commands; absence of those metrics will be explicit.
 
 ## Gates
 
 Baseline failure: unmet. Deterministic failure: unmet. Cause: unmet. Fix: not started. Same-scenario validation: unmet. Independent review: not applicable yet. Internal PR: not started.
 
-## Current execution
+## Investigation checkpoints (historical)
 
 Cloud run 38103974509 on diagnostic commit b658c1b reached the Windows Send page but failed before Clipboard selection. It cannot establish an app-to-app control or reproduce the Android freeze. The separate BrowserStack session has not started. Live capacity before preparation was 0 of 5 running sessions. The catalog has Redmi Note 11 / Android 11 only; Samsung Galaxy S23 / Android 13 is the selected initial comparison environment. Xiaomi Redmi Note 10 Pro, MIUI 14, remains uncovered.
 
@@ -92,10 +92,18 @@ Emoji run 38119855958 / 4c0100f9 reached Preview and returned to Receive after C
 
 Supplementary scroll run 38123089865 / f026ca65 passed. Actual Preview is receiver-1 (receiver-0 is still Receive). Inspected after-scroll screenshot shows shifted source text in the card, after a 600 ms vertical swipe inside observed ScrollView bounds [66,1268,1014,1521]. Copy returned to Receive and complete clipboard equals the 105000-byte unbroken source, SHA-256 19d2eb39f3714bc4270a1e9aba5f85fb732af570947a65354a5dcc7e2949ab4b. This is a supplementary interaction scenario, not an action stated in the issue. Selection long-press run 38124266718 uses matching f026ca65, fixture/device/settings. Raw timeline detail.name overwrites event name for some records; gestures remain identifiable by interaction/actions fields. Future diagnostics add eventType without rewriting original raw artifacts.
 
-Selection 38124266718 / f026ca65 exercised its 1200 ms long-press: screenshots show highlight, handle, and toolbar. The following diagnostic failed because the selection toolbar overlays the main Copy button: attempted coordinate [540,1626] lies in Read aloud bounds [410,1544,654,1665]. The heading tap [540,1148] did not dismiss the overlay; after-select, selection-dismissed and after-copy screenshots/semantics prove this. This is invalid supplementary Copy targeting, not a reproduced freeze. Next harness dismisses via one tap within the text and requires overlay absence before main Copy. Original product untouched. Read-only firmware UI run 38129498505 / 42c50598 is active.
+Selection 38124266718 / f026ca65 exercised its 1200 ms long-press: screenshots show highlight, handle, and toolbar. The following diagnostic failed because the selection toolbar overlays the main Copy button: attempted coordinate [540,1626] lies in Read aloud bounds [410,1544,654,1665]. The heading tap [540,1148] did not dismiss the overlay; after-select, selection-dismissed and after-copy screenshots/semantics prove this. This is invalid supplementary Copy targeting, not a reproduced freeze. Next harness dismisses via one tap within the text and requires overlay absence before main Copy. Original product untouched. Read-only firmware UI run 38129498505 / 42c50598 was scheduled next and subsequently completed.
 
-Firmware UI run 38129498505 / 42c50598 opened ordinary Settings, with About phone visible in inspected screenshot and XML (TextView, text=About phone, bounds [204,639,489,706]). UiSelector lookup returned no such element, so the About page was not opened and MIUI remains unknown. The next read-only diagnostic uses that observed title bounds, not the separate Update control. This is not an additional long-text condition. Selection repeat 38132269475 / 9581f72c is active.
+Firmware UI run 38129498505 / 42c50598 opened ordinary Settings, with About phone visible in inspected screenshot and XML (TextView, text=About phone, bounds [204,639,489,706]). UiSelector lookup returned no such element, so the About page was not opened and MIUI remains unknown. The next read-only diagnostic uses that observed title bounds, not the separate Update control. This is not an additional long-text condition. Selection repeat 38132269475 / 9581f72c was scheduled next and subsequently completed.
 
-Corrected selection repeat 38132269475 / 9581f72c passed after diagnostic toolbar dismissal. Inspected highlight/handle/toolbar, dismissed overlay, and Receive after main Copy screenshots. Complete 105000-byte source/readback SHA-256 19d2eb39f3714bc4270a1e9aba5f85fb732af570947a65354a5dcc7e2949ab4b. It remains the tenth distinct condition and awaits parent raw review. Artifact download ultimately succeeded via bounded proxy retry; no repack cloud job ran (new workflow dispatch was404 before job creation), and the unused repack workflow is removed.
+Corrected selection repeat 38132269475 / 9581f72c passed after diagnostic toolbar dismissal. Inspected highlight/handle/toolbar, dismissed overlay, and Receive after main Copy screenshots. Complete 105000-byte source/readback SHA-256 19d2eb39f3714bc4270a1e9aba5f85fb732af570947a65354a5dcc7e2949ab4b. It remains the tenth distinct condition and is parent accepted after raw review. Artifact download ultimately succeeded via bounded proxy retry; no repack cloud job ran (new workflow dispatch was 404 before job creation), and the unused repack workflow is removed.
 
-Firmware 38132746719 / b7fff69d does not reveal MIUI: initial source has only Settings/Search settings while screenshot is Home. The previous firmware failure screenshot/source also Home. Appium activation200 and subsequent source/screenshot sequence retained; device logs do not establish Settings exit cause. Actual MIUI remains unknown. One last read-only attempt uses Android standard DEVICE_INFO_SETTINGS intent and captures screenshot before the slower source call, using documented UiAutomator2 mobile:startActivity action. No OS/ROM/settings writes.
+Firmware 38132746719 / b7fff69d does not reveal MIUI: initial source has only Settings/Search settings while screenshot is Home. The previous firmware failure screenshot/source also Home. Appium activation 200 and subsequent source/screenshot sequence retained; device logs do not establish Settings exit cause. Actual MIUI remains unknown. One last read-only attempt uses Android standard DEVICE_INFO_SETTINGS intent and captures screenshot before the slower source call, using documented UiAutomator2 mobile:startActivity action. No OS/ROM/settings writes.
+
+Run 38134203137 / 7e144bdd opened About phone using the standard Android DEVICE_INFO_SETTINGS intent without changing settings. The screenshot, inspected directly, shows Android 11 RKQ1.211001.001, MIUI Global 13.0.8 Stable / 13.0.8.0(RGCINXM), security update 2022-02-01, and model 2201117TI. The later XML already shows com.miui.home, so firmware-ui-result.json reports aboutPageObserved=false; that field checks XML labels, not the preceding screenshot. Firmware version is screenshot evidence. The reason Settings returns to Home remains unknown. Raw path: xiaomi-firmware-direct-38134203137/issue2830-physical-control/evidence/.
+
+The parent has accepted all ten conditions, including corrected selection. Historical run-plan statements above describe the investigation at each checkpoint, not active work.
+
+A fresh authenticated BrowserStack App Automate device catalog read at 2026-10-11 11:17:33 UTC returns 110 rows. Case-insensitive Xiaomi/Redmi/Poco filtering returns only Xiaomi Redmi Note 11 / Android 11.0 (device_limit 5). No Xiaomi Android 13 alternative is present; catalog rows contain no MIUI/firmware version field. The firmware screenshot confirms this available device uses MIUI 13.0.8. The final owned session status is done; the Actions run completed successfully. No owned job/session remains active. Sanitized evidence and screenshot hash: firmware-catalog-review.json.
+
+Parent decision: investigation blocked after independent review of all ten conditions, firmware screenshot, and fresh catalog. No evidence-backed product freeze or cause is established. Resume only with new evidence: access to the original Redmi Note 10 Pro / MIUI 14 / Android 13 environment, or the reporter's exact clipboard source together with confirmed LocalSend build and settings. A legitimate native Windows 11 x64 sender can close the separate architecture gap. No additional arbitrary payloads, product change, PR, or upstream post is authorized by this checkpoint.
