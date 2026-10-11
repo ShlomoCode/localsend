@@ -47,7 +47,7 @@ jobs:
             - libayatana-appindicator3-1
             - python3-pyatspi
           runcmd:
-            - [sh, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm3/custom.conf"]
+            - [sh, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm3/daemon.conf"]
             - [systemctl, set-default, graphical.target]
             - [systemctl, enable, gdm3]
           power_state:
@@ -150,12 +150,11 @@ jobs:
           loginctl list-sessions
           GUEST
 
-      - name: Prepare Settings UI automation and preserve its tree
+      - name: Prepare live VM controls
         run: |
           set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
-          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' <<'GUEST'
-          set -e
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' <<'GUEST'
           cat > /home/probe/session-env <<'ENV'
           export XDG_RUNTIME_DIR=/run/user/$(id -u)
           export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
@@ -165,118 +164,308 @@ jobs:
           export DISPLAY=$(printf '%s\n' "$user_environment" | sed -n 's/^DISPLAY=//p' | head -1)
           export XAUTHORITY=$(printf '%s\n' "$user_environment" | sed -n 's/^XAUTHORITY=//p' | head -1)
           ENV
+          mkdir -p /home/probe/evidence
           . /home/probe/session-env
           gsettings set org.gnome.desktop.session idle-delay 0
           gsettings set org.gnome.desktop.screensaver lock-enabled false
-          mkdir -p /home/probe/evidence
-          cat > /home/probe/settings-ui.py <<'PY'
-          import pyatspi, time, sys
-          def descendants(obj, depth=0):
-              if depth > 12: return
-              yield obj, depth
-              try:
-                  for child in obj:
-                      yield from descendants(child, depth+1)
-              except Exception: pass
-          nodes=list(descendants(pyatspi.Registry.getDesktop(0)))
-          for obj,d in nodes:
-              try:
-                  print(' '*d+str(obj.getRoleName())+' '+repr(obj.name)+' '+str(obj.getState().getStates()))
-              except Exception: pass
-          if len(sys.argv)==1: sys.exit(0)
-          label=sys.argv[1]
-          candidates=[]
-          for obj,d in nodes:
-              try:
-                  if (obj.name or '').strip().lower()==label.lower(): candidates.append(obj)
-              except Exception: pass
-          for obj in candidates:
-              for target,_ in descendants(obj):
-                  try:
-                      action=target.queryAction()
-                      if action.nActions:
-                          print('UI_ACTION',target.name,target.getRoleName(),action.getName(0),flush=True)
-                          action.doAction(0)
-                          time.sleep(3)
-                          sys.exit(0)
-                  except Exception: pass
-          print('NO_ACTION_FOR',label,flush=True)
-          sys.exit(2)
-          PY
-          nohup gnome-control-center universal-access > /home/probe/evidence/settings.log 2>&1 < /dev/null &
+          gsettings get org.gnome.desktop.interface toolkit-accessibility
+          gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled
           GUEST
-          sleep 10
-          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/settings-initial.png"
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/settings-initial-tree.txt
-          # Navigate the genuine Settings UI. The schema is only read to verify UI action outcomes.
-
-      - name: Exercise real Zoom UI and tab input with controls
-        run: |
-          set -euo pipefail
-          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
-          export DISPLAY=:99
-          qemu_window=$(xdotool search --onlyvisible --class qemu | head -1)
-          xdotool windowfocus "$qemu_window"
-          ffmpeg -y -f x11grab -video_size 1280x800 -framerate 10 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p evidence/vm/zoom-ui.mp4 > evidence/vm/video.log 2>&1 &
-          video_pid=$!
-          trap 'kill -INT "$video_pid" 2>/dev/null || true' EXIT
-          cat > /tmp/localsend-vm/click-text <<'CLICK'
+          cat > /tmp/localsend-vm/round <<'CONTROL'
           #!/bin/bash
           set -euo pipefail
-          word=$1; name=$2
-          /tmp/localsend-vm/capture "$name-before.png"
-          tesseract "$name-before.png" "$name-ocr" tsv >/dev/null 2>&1
-          point=$(awk -F '\t' -v w="$word" '$12==w && $11>40 {printf "%d %d",$7+$9/2,$8+$10/2; exit}' "$name-ocr.tsv")
-          test -n "$point"
-          printf '%s target=%s point=%s\n' "$(date -u +%FT%T.%N)" "$word" "$point" >> "$GITHUB_WORKSPACE/evidence/vm/input-timing.txt"
-          read -r x y <<< "$point"
-          DISPLAY=:99 xdotool mousemove "$x" "$y" click 1
-          sleep 3
-          /tmp/localsend-vm/capture "$name-after.png"
-          CLICK
-          chmod +x /tmp/localsend-vm/click-text
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; nohup flatpak run org.localsend.localsend_app > /home/probe/evidence/localsend.log 2>&1 < /dev/null &' > evidence/vm/zoom-off-start.txt
-          sleep 25
-          xdotool key alt+F10
-          sleep 3
-          /tmp/localsend-vm/click-text Send "$GITHUB_WORKSPACE/evidence/vm/control-off-send"
-          /tmp/localsend-vm/click-text Receive "$GITHUB_WORKSPACE/evidence/vm/control-off-receive"
-          # Return to Settings, activate its Zoom action, and verify the actual GNOME state.
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gnome-control-center universal-access' > evidence/vm/settings-present.log 2>&1 &
-          sleep 5
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Zoom; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-action.txt
-          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/zoom-action.png"
-          # A Zoom row may open a subpage; if so, use the Zoom switch on that subpage.
-          if ! tail -1 evidence/vm/zoom-action.txt | grep -q true; then
-            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py "Desktop Zoom"; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-switch-action.txt
-          fi
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-confirmed.txt
-          grep -q true evidence/vm/zoom-confirmed.txt
-          xdotool key alt+Tab
-          sleep 3
-          for repeat in 1 2 3; do
-            /tmp/localsend-vm/click-text Send "$GITHUB_WORKSPACE/evidence/vm/zoom-on-$repeat-send" || true
-            /tmp/localsend-vm/click-text Receive "$GITHUB_WORKSPACE/evidence/vm/zoom-on-$repeat-receive" || true
-            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 'date -u; ps -eLo pid,tid,stat,pcpu,wchan:30,comm | grep -E "localsend|gnome-shell"; cat /home/probe/evidence/localsend.log' > "evidence/vm/zoom-on-$repeat-state.txt"
+          round=$1
+          mkdir -p "evidence/vm/round-$round"
+          target="$GITHUB_WORKSPACE/evidence/vm/round-$round"
+          for attempt in $(seq 1 90); do
+            gh api "repos/ShlomoCode/localsend/contents/.diagnostics/3161/command.json?ref=codex/bug-3161-gnome-zoom-diagnostics" --jq .content | base64 -d > /tmp/localsend-vm/command.json
+            if [ "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round" ]; then break; fi
+            sleep 10
           done
-          sleep 10
-          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/zoom-on-final.png"
-          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'app_pid=$(pgrep -n -x localsend || true); if [ -n "$app_pid" ]; then sudo gdb -q -batch -p "$app_pid" -ex "thread apply all bt 16"; fi' > evidence/vm/zoom-on-backtrace.txt 2>&1 || true
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' > evidence/vm/calculator-start.txt
-          sleep 5
-          xdotool type --clearmodifiers '2+3'
-          xdotool key Return
-          sleep 3
-          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/calculator-zoom-on.png"
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/calculator-tree.txt
-          kill -INT "$video_pid"
-          wait "$video_pid" || true
-          trap - EXIT
-
+          test "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round"
+          cp /tmp/localsend-vm/command.json "$target/command.json"
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          export DISPLAY=:99
+          qemu_window=$(xdotool search --onlyvisible --name QEMU | head -1)
+          xdotool windowfocus "$qemu_window"
+          jq -c '.actions[]' /tmp/localsend-vm/command.json | while IFS= read -r action; do
+            date -u +%FT%T.%N >> "$target/timing.txt"
+            printf '%s\n' "$action" >> "$target/timing.txt"
+            kind=$(jq -r .kind <<< "$action")
+            case "$kind" in
+              capture) : ;;
+              click) xdotool mousemove "$(jq -r .x <<< "$action")" "$(jq -r .y <<< "$action")" click 1 ;;
+              move) xdotool mousemove "$(jq -r .x <<< "$action")" "$(jq -r .y <<< "$action")" ;;
+              key) xdotool key "$(jq -r .value <<< "$action")" ;;
+              text) xdotool type --clearmodifiers "$(jq -r .value <<< "$action")" ;;
+              scroll) xdotool click --repeat "$(jq -r '.count // 1' <<< "$action")" "$(jq -r '.button // 5' <<< "$action")" ;;
+              wait) sleep "$(jq -r .seconds <<< "$action")" ;;
+              flatpak) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup flatpak run org.localsend.localsend_app > /home/probe/evidence/localsend.log 2>&1 < /dev/null &' ;;
+              settings) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-control-center universal-access > /home/probe/evidence/settings.log 2>&1 < /dev/null &' ;;
+              calculator) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' ;;
+              stop-app) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pkill -x localsend || true; pkill -x localsend_app || true' ;;
+              stack) timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then sudo gdb -q -batch -p "$pid" -ex "thread apply all bt 16"; fi' > "$target/backtrace.txt" 2>&1 || true ;;
+              finish) touch evidence/vm/finished ;;
+              *) echo "Unsupported action=$kind"; exit 1 ;;
+            esac
+            sleep 2
+          done
+          /tmp/localsend-vm/capture "$target/screen.png"
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; gsettings list-recursively org.gnome.desktop.a11y.magnifier; ps -eLo pid,tid,stat,pcpu,wchan:30,comm | grep -E "localsend|gnome-shell|calculator|control-center"; cat /home/probe/evidence/localsend.log 2>/dev/null || true' > "$target/state.txt"
+          CONTROL
+          chmod +x /tmp/localsend-vm/round
+          DISPLAY=:99 ffmpeg -y -f x11grab -video_size 1280x800 -framerate 10 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p evidence/vm/live-ui.mp4 > evidence/vm/video.log 2>&1 &
+          echo $! > /tmp/localsend-vm/video.pid
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/ready.png"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gnome-zoom-3161-ready
+          path: evidence/vm/ready.png
+      - name: Live UI round 1
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 1
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-1
+          path: evidence/vm/round-1/
+      - name: Live UI round 2
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 2
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-2
+          path: evidence/vm/round-2/
+      - name: Live UI round 3
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 3
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-3
+          path: evidence/vm/round-3/
+      - name: Live UI round 4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 4
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-4
+          path: evidence/vm/round-4/
+      - name: Live UI round 5
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 5
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-5
+          path: evidence/vm/round-5/
+      - name: Live UI round 6
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 6
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-6
+          path: evidence/vm/round-6/
+      - name: Live UI round 7
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 7
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-7
+          path: evidence/vm/round-7/
+      - name: Live UI round 8
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 8
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-8
+          path: evidence/vm/round-8/
+      - name: Live UI round 9
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 9
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-9
+          path: evidence/vm/round-9/
+      - name: Live UI round 10
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 10
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-10
+          path: evidence/vm/round-10/
+      - name: Live UI round 11
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 11
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-11
+          path: evidence/vm/round-11/
+      - name: Live UI round 12
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 12
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-12
+          path: evidence/vm/round-12/
+      - name: Live UI round 13
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 13
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-13
+          path: evidence/vm/round-13/
+      - name: Live UI round 14
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 14
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-14
+          path: evidence/vm/round-14/
+      - name: Live UI round 15
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 15
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-15
+          path: evidence/vm/round-15/
+      - name: Live UI round 16
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 16
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-16
+          path: evidence/vm/round-16/
+      - name: Live UI round 17
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 17
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-17
+          path: evidence/vm/round-17/
+      - name: Live UI round 18
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 18
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-18
+          path: evidence/vm/round-18/
+      - name: Live UI round 19
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 19
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-19
+          path: evidence/vm/round-19/
+      - name: Live UI round 20
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 20
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-20
+          path: evidence/vm/round-20/
+      - name: Live UI round 21
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 21
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-21
+          path: evidence/vm/round-21/
+      - name: Live UI round 22
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 22
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-22
+          path: evidence/vm/round-22/
+      - name: Live UI round 23
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 23
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-23
+          path: evidence/vm/round-23/
+      - name: Live UI round 24
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/localsend-vm/round 24
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && !hashFiles('evidence/vm/finished') }}
+        with:
+          name: gnome-zoom-3161-round-24
+          path: evidence/vm/round-24/
       - name: Collect session diagnostics and identities
         if: always()
         run: |
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          if [ -f /tmp/localsend-vm/video.pid ]; then kill -INT "$(cat /tmp/localsend-vm/video.pid)" || true; sleep 3; fi
           timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'journalctl --user -b --no-pager; sudo journalctl -b -p warning --no-pager' > evidence/vm/session-journal.txt 2>&1 || true
           timeout 30 scp "${ssh_opts[@]/-p/-P}" -r probe@127.0.0.1:/home/probe/evidence evidence/vm/guest-files || true
           /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/final.png" || true
