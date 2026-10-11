@@ -29,7 +29,7 @@ jobs:
       BASELINE_REF: ${{ inputs.baseline_ref }}
       CANDIDATE_REF: ${{ inputs.candidate_ref }}
       PAIR_OUTPUT: ${{ github.workspace }}/pair-artifacts
-      PAIR_SIGNER: ${{ runner.temp }}/2007-pair-signer.jks
+      PAIR_SIGNER: ${{ github.workspace }}/2007-pair-signer.jks
       PAIR_SIGNER_PASSWORD: localsend-diagnostic-only
     steps:
       - name: Require immutable source references
