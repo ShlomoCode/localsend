@@ -7,8 +7,10 @@ async function wd(method,path,body){
  const j=await response.json();appendFileSync('evidence/wd-commands.jsonl',JSON.stringify({at:new Date(started).toISOString(),method,path,body,status:response.status,elapsedMs:Date.now()-started})+'\n');if(!response.ok||j.value?.error)throw Error('WebDriver '+response.status+' '+String(j.value?.error||''));return j.value;
 }
 async function snap(name){writeFileSync('evidence/'+name+'.xml',await wd('GET',`/session/${session}/source`));writeFileSync('evidence/'+name+'.png',Buffer.from(await wd('GET',`/session/${session}/screenshot`),'base64'));}
-async function click(name){const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:name});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{});}
-async function ui(expression){const e=await wd('POST',`/session/${session}/element`,{using:'-android uiautomator',value:'new UiSelector().'+expression});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{});}
+async function touch(rect){await wd('POST',`/session/${session}/actions`,{actions:[{type:'pointer',id:'finger3556',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,origin:'viewport',x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:120},{type:'pointerUp',button:0}]}]});}
+async function locate(using,value){const e=await wd('POST',`/session/${session}/element`,{using,value});return wd('GET',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/rect`);}
+async function click(name){await touch(await locate('accessibility id',name));}
+async function ui(expression){await touch(await locate('-android uiautomator','new UiSelector().'+expression));}
 async function reset(){await wd('POST',`/session/${session}/appium/device/terminate_app`,{appId:'org.localsend.localsend_app'});await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await click('Send\nTab 2 of 3');}
 async function ready(suffix,deadlineMs){const end=Date.now()+deadlineMs;while(Date.now()<end){const s=await wd('GET',`/session/${session}/source`);if(s.includes('FAILED')||s.includes('INSUFFICIENT_STORAGE'))throw Error('Fixture generation failed');if(s.includes('READY')&&s.includes(suffix))return s;await new Promise(r=>setTimeout(r,3000));}throw Error('Fixture staging deadline');}
 function fixtureName(source){const m=source.match(/READY name=([^&<"]+)/);if(!m)throw Error('Fixture name absent');return m[1];}
@@ -32,11 +34,17 @@ try{
  for(let i=0;i<30;i++){const s=await wd('GET',`/session/${session}/source`);if(s.includes('READY')&&s.includes('.mp4'))break;await new Promise(r=>setTimeout(r,1000));}
  await snap('small-video-ready');const smallVideo=fixtureName(await ready('.mp4',30000));await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await new Promise(r=>setTimeout(r,4000));await snap('baseline-initial');
  await wd('POST',`/session/${session}/timeouts`,{implicit:5000});
+ await wd('POST',`/session/${session}/appium/settings`,{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
  if(process.env.SELECTION_MATRIX==='true'){
    await filePick(smallVideo,'small-file-control');
    await mediaPick(smallVideo,'small-media-control');
    await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Stage 16GB video');const largeVideo=fixtureName(await ready('16000000000.mp4',1800000));await snap('large-video-ready');await filePick(largeVideo,'large-video-file');await mediaPick(largeVideo,'large-video-media');
    await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Refresh capacity');await snap('capacity-after-media');
+   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await snap('warm-before-share');const sendBounds=await locate('accessibility id','Manual sending');
+   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Share owned fixture');await snap('large-share-chooser');await ui('text("LocalSend")');await snap('large-share-first-frame');
+   // A real user attempts the next send action while the shared file is added.
+   // The bounds were observed on the same app immediately before sharing.
+   await touch(sendBounds);await observe('large-video-share-warm',300);
  }
  console.log('S20 storage and small fixture snapshots captured. No large file staged or transferred.');
  if(process.env.HOLD_SECONDS){console.log('Owned issue3556 session='+session);const end=Date.now()+Number(process.env.HOLD_SECONDS)*1000;while(Date.now()<end){await new Promise(r=>setTimeout(r,20000));try{await wd('GET',`/session/${session}/source`);}catch(e){console.log('Owned session was ended externally; closing runner.');break;}}await snap('selection-final').catch(()=>{});}

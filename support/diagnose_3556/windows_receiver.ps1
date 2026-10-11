@@ -32,6 +32,13 @@ function Write-JsonFile($Path,$Value) {
  [IO.File]::WriteAllText("$Path.tmp",(ConvertTo-Json -InputObject $Value -Depth 12),[Text.UTF8Encoding]::new($false))
  Move-Item -LiteralPath "$Path.tmp" -Destination $Path -Force
 }
+# Retain setup exceptions too, including native/UI Automation initialization failures.
+trap {
+ $report.status='incomplete'; $report.errors+=$_.Exception.ToString()
+ $report.finishedUtc=[DateTime]::UtcNow.ToString('o')
+ Write-JsonFile $resultPath $report
+ exit 1
+}
 # Typed HWND enumeration and Flutter child hit-testing follow the proven release UI probe.
 Add-Type -TypeDefinition @'
 using System;
@@ -131,7 +138,7 @@ function Save-Snapshot([string]$Name) {
 }
 function Invoke-Accept {
  foreach($element in (Get-AppElements)) {
-  $v=$element.Current
+  try { $v=$element.Current } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
   if($v.Name -ne 'Accept' -or -not $v.IsEnabled -or $v.IsOffscreen -or $v.ControlType -ne [System.Windows.Automation.ControlType]::Button) { continue }
   Save-Snapshot 'incoming-before-accept'; $pattern=$null; $method='UI Automation InvokePattern'
   if($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) {
@@ -150,13 +157,20 @@ try {
  $report.os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
  if($report.osArchitecture -ne 'X64') { throw 'This receiver requires a native x64 Windows runner.' }
  $archive=Join-Path $OutputDirectory 'LocalSend-1.18.2-windows-x86-64.zip'
- Invoke-WebRequest -Uri $report.artifactUrl -OutFile $archive -MaximumRedirection 10
+ Invoke-WebRequest -Uri $report.artifactUrl -OutFile $archive -MaximumRedirection 10 -TimeoutSec 120
  if((Get-Item $archive).Length -lt 1000000) { throw 'Release ZIP download is unexpectedly small.' }
  $report.archive=@{ path=$archive; bytes=(Get-Item $archive).Length; sha256=(Get-FileHash $archive -Algorithm SHA256).Hash }
  $releaseDirectory=Join-Path $OutputDirectory 'release'; Expand-Archive -LiteralPath $archive -DestinationPath $releaseDirectory -Force
  $executables=@(Get-ChildItem $releaseDirectory -Recurse -File | Where-Object { $_.Name -in @('localsend_app.exe','LocalSend.exe') })
  if($executables.Count -ne 1) { throw "Expected one LocalSend executable; found $($executables.Count)." }
  $exe=$executables[0]
+ $stream=[IO.File]::OpenRead($exe.FullName)
+ try {
+  $reader=[IO.BinaryReader]::new($stream)
+  [void]$stream.Seek(0x3C,[IO.SeekOrigin]::Begin); $peOffset=$reader.ReadInt32()
+  [void]$stream.Seek($peOffset,[IO.SeekOrigin]::Begin)
+  if($reader.ReadUInt32() -ne 0x00004550 -or $reader.ReadUInt16() -ne 0x8664) { throw 'Release executable is not a valid x64 PE artifact.' }
+ } finally { $stream.Dispose() }
  $report.executable=@{ path=$exe.FullName; fileVersion=$exe.VersionInfo.FileVersion; bytes=$exe.Length; sha256=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash }
  $destination=[ReceiverNative]::Downloads(); [void][IO.Directory]::CreateDirectory($destination)
  $report.destination=@{ path=$destination; method='Normal release default Downloads destination; no Quick Save or profile changes' }
