@@ -87,7 +87,11 @@ for count in [5]:
             focus(rwin); run('xdotool','getwindowgeometry','--shell',rwin)
             run('xdotool','mousemove','--window',rwin,'28','28','click','1'); time.sleep(1)
             focus(rwin); screen(case+'-returned-from-options')
-            click(*locate('Accept',case+'-accept',10))
+            locate('Options',case+'-accept-ready',10)
+            # Recorded returned-screen screenshot: Accept center is (669,670),
+            # receiver client origin (150,120), hence client-relative (519,550).
+            run('xdotool','mousemove','--window',rwin,'519','550','click','1'); time.sleep(1)
+            screen(case+'-accepted')
             end=time.monotonic()+180
             while time.monotonic()<end and len(list(dest.rglob('*.txt')))<count: time.sleep(1)
             files=list(dest.rglob('*.txt')); valid=len(files)==count and all(p.read_bytes()==content for p in files)

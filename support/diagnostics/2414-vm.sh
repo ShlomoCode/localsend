@@ -50,14 +50,15 @@ for n in $(seq 1 60); do
   sleep 10
 done
 test "$ready" = 1
-scp -i /tmp/issue2414-vm/id -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2414-vm/known support/diagnostics/2414-ui.py probe@127.0.0.1:/home/probe/2414-ui.py
+ssh "${opts[@]}" probe@127.0.0.1 'mkdir -p /home/probe/support/diagnostics'
+scp -i /tmp/issue2414-vm/id -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2414-vm/known support/diagnostics/2414-ui.py support/diagnostics/2414-network.sh probe@127.0.0.1:/home/probe/support/diagnostics/
 set +e
 timeout 800 ssh "${opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/scenario.log 2>&1 <<'GUEST'
 set -euo pipefail
 cd /home/probe
 mkdir -p evidence released/base
 sudo systemctl start NetworkManager
-bash 2414-network.sh
+bash support/diagnostics/2414-network.sh
 curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o released/baseline.tar.gz
 sha256sum released/baseline.tar.gz > evidence/artifact-sha256.txt
 tar xf released/baseline.tar.gz -C released/base
@@ -67,7 +68,7 @@ lscpu >> evidence/environment.txt
 swapon --show >> evidence/environment.txt
 # This ordinary guest's total RAM is 2GiB. There are no per-process caps,
 # artificially consumed RAM, disabled runtime dependencies, or injected OOM.
-dbus-run-session -- xvfb-run -a -s '-screen 0 1200x800x24' bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/openbox.log 2>&1 & python3 2414-ui.py' > evidence/ui-input.log 2>&1
+dbus-run-session -- xvfb-run -a -s '-screen 0 1200x800x24' bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/openbox.log 2>&1 & python3 support/diagnostics/2414-ui.py' > evidence/ui-input.log 2>&1
 GUEST
 scenario_status=$?
 set -e
