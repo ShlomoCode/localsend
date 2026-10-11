@@ -112,9 +112,12 @@ for service in $(awk -v pid="$app_pid" '$2 == pid {print $1}' "$out/$app_case/db
       object_file=${object_path//\//_}
       object_file=${object_file//:/_}
       stem="$out/$app_case/sni-${service_file}-${object_file}"
-      if busctl --user introspect "$service" "$object_path" org.kde.StatusNotifierItem > "$stem-introspection.txt" 2>&1; then
+      busctl --user introspect "$service" "$object_path" org.kde.StatusNotifierItem > "$stem-introspection.txt" 2>&1 || true
+      # busctl introspection returns success even for a missing interface.
+      # A readable mandatory property distinguishes the SNI from its Menu.
+      if busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Id > "$stem-Id.txt" 2>&1; then
         printf '%s\t%s\n' "$service" "$object_path" >> "$out/$app_case/sni-objects.tsv"
-        for property in Title Id ToolTip; do
+        for property in Title ToolTip; do
           busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem "$property" > "$stem-$property.txt" 2>&1 || true
         done
       fi
