@@ -147,7 +147,17 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const pathAbsenceUtc=absenceObservations.at(-1).pathObservedUtc;
    writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,pathAbsenceUtc,firstToastObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
-   const done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'});
+   let done;
+   const doneDeadline=Date.now()+5000;
+   do {
+    done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'}).catch(error=>{
+     if(!String(error).includes('no such element'))throw error;
+     return null;
+    });
+    if(done)break;
+    await new Promise(r=>setTimeout(r,100));
+   } while(Date.now()<doneDeadline);
+   assert(done,'Original receiver Finished screen did not render its actual Done button');
    await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
    await waitFile('evidence/resend-requested',90000);
