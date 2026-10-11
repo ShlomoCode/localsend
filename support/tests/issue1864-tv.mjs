@@ -276,11 +276,18 @@ if(process.env.ISSUE1864_TRACE==='true') {
   await pause(2500);
   const send=await snapshot('returned-file-send-list');
   const labels=nodes(send).map(node=>node['content-desc'] || node.text || '').join(' ');
-  const visible=labels.match(/\b(?:orange|green|yellow|purple|blue|red)\.jpg\b/);
   const pickerStillPresent=nodes(send).some(node=>/^Image\d+,/.test(node['content-desc'] ?? ''));
-  if(!visible || pickerStillPresent || !nodes(send).some(node=>node.text==='Send' || node['content-desc']?.startsWith('Send&#10;Tab'))) {
-    throw new Error('Picker did not close to a visible Send file row');
+  if(pickerStillPresent || !/Files: 1\b/.test(labels)
+    || !nodes(send).some(node=>node.text==='Send' || node['content-desc']?.startsWith('Send&#10;Tab'))) {
+    throw new Error('Picker did not close to Send with one selected file');
   }
+  // Send's collapsed selection card shows thumbnails/count/size, not filenames.
+  // Observe the existing Edit page only after both unchanged D-pad snapshots.
+  await mouseNode('Edit','returned-file-open-edit');
+  const details=await snapshot('returned-file-details');
+  const detailLabels=nodes(details).map(node=>node['content-desc'] || node.text || '').join(' ');
+  const visible=detailLabels.match(/\b(?:orange|green|yellow|purple|blue|red)\.jpg\b/);
+  if(!visible || !/Files: 1\b/.test(detailLabels)) throw new Error('Selected-file details lack one visible seeded filename');
   const currentPid=adb('shell','pidof','org.localsend.localsend_app').trim();
   if(!/^\d+$/.test(currentPid)) throw new Error('Returned-file control has no unique current app PID');
   const deviceLog=adb('logcat','-d','-v','threadtime',`--pid=${currentPid}`);
@@ -294,7 +301,7 @@ if(process.env.ISSUE1864_TRACE==='true') {
   const added=traces.slice(returnedIndex+1).find(trace=>trace.stage==='send-files-added'
     && trace.files?.some(file=>file.name===converted?.name && file.size===converted?.size));
   if(returnedIndex<0 || !converted || !added) throw new Error('Visible Send filename lacks correlated picker return/conversion/added evidence');
-  returnedFileControl={method:'native mouse Confirm after D-pad observations; not a D-pad success claim',name:converted.name,size:converted.size,path:converted.path};
+  returnedFileControl={method:'native mouse Confirm then Edit filename observation after D-pad snapshots; not a D-pad success claim',name:converted.name,size:converted.size,path:converted.path};
 }
 async function freshEntry(name) {
   adb('shell','am','force-stop','org.localsend.localsend_app');
