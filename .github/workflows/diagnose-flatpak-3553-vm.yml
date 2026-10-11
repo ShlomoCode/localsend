@@ -22,7 +22,7 @@ jobs:
       - name: Prepare ordinary X11 desktop and historical release
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr dbus-x11 libgtk-3-0 libayatana-appindicator3-1 ffmpeg libegl1 libgl1-mesa-dri libgles2 at-spi2-core
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr dbus-x11 libgtk-3-0 libayatana-appindicator3-1 ffmpeg libegl1 libgl1-mesa-dri libgles2 at-spi2-core python3-pil
           mkdir -p /tmp/evidence1840 /tmp/release1840 /tmp/current1840/app
           curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz -o /tmp/release1840/release.tar.gz
           tar -xzf /tmp/release1840/release.tar.gz -C /tmp/release1840

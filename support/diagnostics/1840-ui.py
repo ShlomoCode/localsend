@@ -7,6 +7,7 @@ import pathlib
 import shutil
 import subprocess
 import time
+from PIL import Image
 
 if os.environ.get('GITHUB_ACTIONS') != 'true':
     raise RuntimeError('This diagnostic runs only in the authorized fork Actions')
@@ -23,9 +24,15 @@ def record(event, **values):
 def snap(name):
     image = out/(name+'.png')
     run('scrot', str(image))
-    result = run('tesseract', str(image), 'stdout', '--psm', '11', 'tsv')
+    original = Image.open(image)
+    enlarged = out/(name+'-ocr.png')
+    original.resize((original.width*2, original.height*2)).save(enlarged)
+    result = run('tesseract', str(enlarged), 'stdout', '--psm', '11', 'tsv')
     (out/(name+'.tsv')).write_text(result)
     rows = [r for r in csv.DictReader(io.StringIO(result), delimiter='\t') if r['text'].strip()]
+    for row in rows:
+        for dimension in ('left', 'top', 'width', 'height'):
+            row[dimension] = str(int(row[dimension])//2)
     record('screenshot', stage=stage, name=name, labels=[r['text'] for r in rows])
     return rows
 
