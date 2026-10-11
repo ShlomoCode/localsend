@@ -10,6 +10,8 @@ param(
  [string]$SendStartedFile,
  [string]$ExpectedHashFile,
  [ValidateRange(30,900)][int]$HashTimeoutSeconds=900,
+ [ValidateRange(4,120)][int]$ImageLimit=60,
+ [ValidateRange(1,300)][int]$UiObservationLimit=150,
  [string]$StopFile
 )
 $ErrorActionPreference='Stop'
@@ -18,6 +20,7 @@ $OutputDirectory=[IO.Path]::GetFullPath($OutputDirectory)
 [void][IO.Directory]::CreateDirectory($OutputDirectory)
 if (-not $StopFile) { $StopFile=Join-Path $OutputDirectory 'stop' }
 $large=$ExpectedBytes -eq 16000000000L
+$boundedDiagnostic=$large -or $env:LARGE_TRANSFER_DIAGNOSTIC -eq '1'
 if (-not $SenderCompletionFile) { $SenderCompletionFile=Join-Path $OutputDirectory 'sender-completed.json' }
 if (-not $SendStartedFile) { $SendStartedFile=Join-Path $OutputDirectory 'send-started.json' }
 if (-not $ExpectedHashFile) { $ExpectedHashFile=Join-Path $OutputDirectory 'expected-sha256.json' }
@@ -43,7 +46,7 @@ $report=[ordered]@{
  session=$env:SESSIONNAME; archive=$null; executable=$null; processId=$null
  endpoint='https://127.0.0.1:53317'; destination=$null; expectedBytes=$ExpectedBytes; expectedSha256=$ExpectedSha256.ToLowerInvariant()
  verificationDeadlineUtc=$verificationDeadline.ToString('o'); hashWorkers=@(); senderCompletion=$null; receiverCompletion=$null
- imageLimit=60; imageCount=0; uiObservationLimit=150; uiObservationCount=0
+ imageLimit=$ImageLimit; imageCount=0; terminalImageReserve=[Math]::Min(10,$ImageLimit-2); uiObservationLimit=$UiObservationLimit; uiObservationCount=0; terminalObservationReserve=4; uiWorkers=@()
  snapshots=@(); actions=@(); savedFiles=@(); errors=@()
 }
 $app=$null; $ruleName=$null; $appHwnd=[IntPtr]::Zero; $exitCode=1
@@ -133,21 +136,66 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 function Get-AppElements {
- if($large) {
-  if($report.uiObservationCount -ge $report.uiObservationLimit) { throw 'Large receiver UI observation budget exhausted.' }
-  $report.uiObservationCount++
- }
+ if($boundedDiagnostic) { throw 'Diagnostic UI Automation must run in a bounded child process.' }
  $root=[System.Windows.Automation.AutomationElement]::FromHandle($appHwnd)
  return $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 }
+function Get-BoundedUiSnapshot([string]$Name) {
+ if($report.uiObservationCount -ge $report.uiObservationLimit) { return @() }
+ $terminal=$Name -in @('failure','saved-file-verified','before-saved-file-hash','receiver-finished') -or $Name.StartsWith('completion-ocr-')
+ if(-not $terminal -and $report.uiObservationCount -ge $report.uiObservationLimit-$report.terminalObservationReserve) { return @() }
+ $report.uiObservationCount++
+ $scriptPath=Join-Path $OutputDirectory 'uia-snapshot-worker.ps1'
+ if(-not (Test-Path $scriptPath)) {
+  [IO.File]::WriteAllText($scriptPath,@'
+param([long]$Hwnd,[string]$Result,[string]$DeadlineUtc)
+$ErrorActionPreference='Stop'
+$deadline=[DateTime]::Parse($DeadlineUtc).ToUniversalTime()
+if([DateTime]::UtcNow -ge $deadline) { throw 'UIA worker deadline expired before observation.' }
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($Hwnd))
+$elements=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+$tree=@()
+foreach($element in $elements) {
+ if([DateTime]::UtcNow -ge $deadline) { throw 'UIA worker deadline expired.' }
+ try { $v=$element.Current; $tree+=@{name=$v.Name;type=$v.ControlType.ProgrammaticName;enabled=$v.IsEnabled;offscreen=$v.IsOffscreen;bounds=$v.BoundingRectangle.ToString()} } catch {}
+ if($tree.Count -ge 500) { break }
+}
+[IO.File]::WriteAllText($Result,(ConvertTo-Json -InputObject $tree -Depth 6),[Text.UTF8Encoding]::new($false))
+'@,[Text.UTF8Encoding]::new($false))
+ }
+ $result=Join-Path $OutputDirectory ($Name+'-uia-worker.json')
+ $worker=$null; $entry=$null
+ try {
+  $bound=Get-RemainingMilliseconds 30000
+  $workerDeadline=[DateTime]::UtcNow.AddMilliseconds($bound).ToString('o')
+  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$scriptPath+'"'),'-Hwnd',$appHwnd.ToInt64(),'-Result',('"'+$result+'"'),'-DeadlineUtc',('"'+$workerDeadline+'"')) -PassThru -WindowStyle Hidden
+  $entry=@{name=$Name;processId=$worker.Id;status='running';timeoutMs=$bound}; $report.uiWorkers+=$entry
+  if(-not $worker.WaitForExit((Get-RemainingMilliseconds $bound))) { throw 'UI Automation snapshot exceeded its 30-second/remaining-deadline bound.' }
+  if($worker.ExitCode -ne 0 -or -not (Test-Path $result)) { throw 'UI Automation snapshot worker failed.' }
+  $entry.status='complete'
+  return @(Get-Content -LiteralPath $result -Raw | ConvertFrom-Json)
+ } catch {
+  if($entry) { $entry.status='failed'; $entry.error=$_.Exception.Message }
+  $report.errors+="Bounded UI tree at $Name : $($_.Exception.Message)"
+  return @()
+ } finally {
+  if($worker -and -not $worker.HasExited) { $worker.Kill(); [void]$worker.WaitForExit(5000) }
+ }
+}
 function Save-Snapshot([string]$Name) {
- if($large -and $report.imageCount -ge $report.imageLimit) { return }
+ $terminal=$Name -in @('failure','saved-file-verified','before-saved-file-hash','receiver-finished') -or $Name.StartsWith('completion-ocr-')
+ $allowed=$report.imageLimit
+ if(-not $terminal) { $allowed-=$report.terminalImageReserve }
+ if($boundedDiagnostic -and $report.imageCount -ge $allowed) { return }
  $tree=@()
  try {
   if($appHwnd -ne [IntPtr]::Zero) {
-   foreach($element in (Get-AppElements)) {
+   if($boundedDiagnostic) { $tree=Get-BoundedUiSnapshot $Name } else { foreach($element in (Get-AppElements)) {
     try { $v=$element.Current; $tree+=@{ name=$v.Name; type=$v.ControlType.ProgrammaticName; enabled=$v.IsEnabled; offscreen=$v.IsOffscreen; bounds=$v.BoundingRectangle.ToString() } } catch {}
     if($tree.Count -ge 500) { break }
+   }
    }
   }
  } catch { $report.errors+="UI tree at $Name : $($_.Exception.Message)" }
@@ -179,11 +227,19 @@ function Get-BitmapDigest([Drawing.Bitmap]$Bitmap) {
 }
 function Invoke-OcrAccept([switch]$Completion) {
  # UIA can expose only FLUTTERVIEW in the official release. OCR must prove an incoming dialog first.
- if($script:ocrUnavailable) { return $false }
- if($large -and $report.imageCount+2 -gt $report.imageLimit) { return $false }
  if([DateTime]::UtcNow -lt $script:nextOcr) { return $false }
+ $ocrLimit=$report.imageLimit-$report.terminalImageReserve
+ if($Completion) { $ocrLimit=$report.imageLimit-2 }
+ $observationLimit=$report.uiObservationLimit-$report.terminalObservationReserve
+ if($Completion) { $observationLimit=$report.uiObservationLimit-2 }
+ if($boundedDiagnostic -and ($report.imageCount+2 -gt $ocrLimit -or $report.uiObservationCount+2 -gt $observationLimit)) { throw 'Diagnostic OCR observation/image budget exhausted; retain terminal evidence and stop.' }
+ # Count attempted OCR probes even if capability/setup prevents worker launch.
+ if($boundedDiagnostic) { $report.uiObservationCount++ }
+ if($script:ocrUnavailable) { return $false }
  $script:nextOcr=[DateTime]::UtcNow.AddSeconds(5); $script:ocrNumber++
- $name='ocr-{0:D3}' -f $script:ocrNumber; Save-Snapshot $name
+ $name='ocr-{0:D3}' -f $script:ocrNumber
+ if($Completion) { $name='completion-'+$name }
+ Save-Snapshot $name
  $window=@([ReceiverNative]::All() | Where-Object { $_.Hwnd -eq $appHwnd.ToInt64() -and $_.Visible })
  if($window.Count -ne 1 -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd) { return $false }
  $w=$window[0]; $screen=[System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -201,8 +257,9 @@ function Invoke-OcrAccept([switch]$Completion) {
  if(-not (Test-Path $ocrScript)) {
   # Framework Windows PowerShell supports native WinRT projection independently of pwsh's runtime.
   [IO.File]::WriteAllText($ocrScript,@'
-param([string]$Image,[string]$Result)
+param([string]$Image,[string]$Result,[string]$DeadlineUtc)
 $ErrorActionPreference='Stop'
+$deadline=[DateTime]::Parse($DeadlineUtc).ToUniversalTime()
 $report=@{status='unsupported';image=$Image;words=@()}
 try {
  Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -212,7 +269,10 @@ try {
  [void][Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
  function Await($Operation,[Type]$Type) {
   $method=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
-  $task=$method.MakeGenericMethod($Type).Invoke($null,@($Operation)); $task.Wait(); return $task.Result
+  $task=$method.MakeGenericMethod($Type).Invoke($null,@($Operation))
+  $remaining=[int][Math]::Max(0,($deadline-[DateTime]::UtcNow).TotalMilliseconds)
+  if($remaining -le 0 -or -not $task.Wait($remaining)) { throw 'Native OCR worker deadline expired.' }
+  return $task.Result
  }
  $file=Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Image)) ([Windows.Storage.StorageFile])
  $stream=Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
@@ -236,7 +296,8 @@ try {
  $result=Join-Path $OutputDirectory "$name-recognized.json"
  $worker=$null
  try {
-  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$ocrScript+'"'),'-Image',('"'+$framePath+'"'),'-Result',('"'+$result+'"')) -PassThru -WindowStyle Hidden
+  $workerDeadline=[DateTime]::UtcNow.AddMilliseconds((Get-RemainingMilliseconds 15000)).ToString('o')
+  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$ocrScript+'"'),'-Image',('"'+$framePath+'"'),'-Result',('"'+$result+'"'),'-DeadlineUtc',('"'+$workerDeadline+'"')) -PassThru -WindowStyle Hidden
   if(-not $worker.WaitForExit((Get-RemainingMilliseconds 15000))) { $worker.Kill(); throw 'Native Windows OCR exceeded its bounded verification time.' }
   if(-not (Test-Path $result)) { throw 'Native Windows OCR produced no result.' }
   $observed=Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
@@ -283,6 +344,7 @@ try {
  Start-Sleep -Milliseconds 500; Save-Snapshot 'after-accept'; return $true
 }
 function Invoke-Accept {
+ if($boundedDiagnostic) { return Invoke-OcrAccept }
  $hasUiaAccept=$false
  foreach($element in (Get-AppElements)) {
   try { $v=$element.Current } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
@@ -304,6 +366,7 @@ function Invoke-Accept {
  return Invoke-OcrAccept
 }
 function Invoke-ReceiverCompletion {
+ if($boundedDiagnostic) { return Invoke-OcrAccept -Completion }
  $names=@()
  foreach($element in (Get-AppElements)) {
   try { $v=$element.Current; if(-not $v.IsOffscreen) { $names+=$v.Name } } catch {}
@@ -325,13 +388,16 @@ function Get-BoundedFileHash([string]$Path,[string]$Label) {
  $scriptPath=Join-Path $OutputDirectory 'hash-worker.ps1'
  if(-not (Test-Path $scriptPath)) {
   [IO.File]::WriteAllText($scriptPath,@'
-param([string]$Path,[string]$Result)
+param([string]$Path,[string]$Result,[string]$DeadlineUtc)
 $ErrorActionPreference='Stop'
+$deadline=[DateTime]::Parse($DeadlineUtc).ToUniversalTime()
+if([DateTime]::UtcNow -ge $deadline) { throw 'Hash worker deadline expired before reading.' }
 # An exclusive-to-writers read rejects files still open for writing by the app.
 $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
 try {
  $hash=[Security.Cryptography.SHA256]::Create()
  try { $digest=[BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','').ToLowerInvariant() } finally { $hash.Dispose() }
+ if([DateTime]::UtcNow -ge $deadline) { throw 'Hash worker deadline expired before result.' }
  [IO.File]::WriteAllText($Result,(ConvertTo-Json @{bytes=$stream.Length;sha256=$digest}),[Text.UTF8Encoding]::new($false))
 } finally { $stream.Dispose() }
 '@,[Text.UTF8Encoding]::new($false))
@@ -343,7 +409,7 @@ try {
  if($verificationDeadline -lt $bound) { $bound=$verificationDeadline }
  try {
   [void](Get-RemainingMilliseconds 1)
-  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$scriptPath+'"'),'-Path',('"'+$Path+'"'),'-Result',('"'+$result+'"')) -PassThru -WindowStyle Hidden
+  $worker=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$scriptPath+'"'),'-Path',('"'+$Path+'"'),'-Result',('"'+$result+'"'),'-DeadlineUtc',('"'+$bound.ToString('o')+'"')) -PassThru -WindowStyle Hidden
   $entry=@{label=$Label;processId=$worker.Id;startedUtc=$started.ToString('o');deadlineUtc=$bound.ToString('o');status='running'}
   $report.hashWorkers+=$entry; Write-JsonFile $resultPath $report
   while(-not $worker.WaitForExit((Get-RemainingMilliseconds 250))) {

@@ -38,17 +38,22 @@ const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Sam
  boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','One control cannot establish sustained 16GB throughput or behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
-let sessionCreationAttempted=false,sessionStart=null,phaseDeadline=Infinity,wdBusy=false,imageCount=0,observationCount=0;
+let sessionCreationAttempted=false,sessionStart=null,phaseDeadline=Infinity,wdBusy=false,imageCount=0,observationCount=0,sourceCount=0;
+const androidSourceLimit=200,windowsObservationLimit=100;
+let windowsImagesRemaining=60,windowsObservationsRemaining=windowsObservationLimit,windowsLargeReceiverStarted=false;
 const sessionAge=()=>sessionStart===null?0:Date.now()-sessionStart;
 function remaining(){return largeDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+110*minute)-Date.now()):Infinity;}
 function admit(){assert(!largeDiagnostic||sessionAge()<20*minute,'Large stage/controls/selection/Send admission exceeded session age 20 minutes');}
 function commandLimit(url){if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
 const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
-async function wd(method,url,body,attempt=0,readDeadline=Infinity){
+async function wd(method,url,body,attempt=0,readDeadline=Infinity,terminalRead=false){
  const started=Date.now();
  assert(!wdBusy,'WebDriver commands must remain serial');
  const timeout=Math.floor(Math.min(commandLimit(url),remaining(),readDeadline-Date.now()));assert(timeout>0,'WebDriver phase deadline expired');
+ if(method==='GET'&&url.endsWith('/source')){
+  assert(!largeDiagnostic||sourceCount<(terminalRead?androidSourceLimit:androidSourceLimit-4),'Android hierarchy read allocation exhausted');sourceCount++;
+ }
  wdBusy=true;let response;
  try{
  response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{
@@ -68,13 +73,13 @@ async function wd(method,url,body,attempt=0,readDeadline=Infinity){
   // Provider gateway returned session-absent while its Appium log showed this GET succeeding.
   // Retry only reads; never replay a touch, input, session creation or deletion.
   if(method==='GET'&&response?.status===404&&/Session not started or terminated/i.test(error.message)&&attempt<2){
-   wdBusy=false;await sleep(Math.min(1000,remaining()));return wd(method,url,body,attempt+1,readDeadline);
+   wdBusy=false;await sleep(Math.min(1000,remaining()));return wd(method,url,body,attempt+1,readDeadline,terminalRead);
   }
   throw error;
  }finally{wdBusy=false;}
 }
 const base=()=>'/session/'+session;
-async function source(readDeadline=Infinity){return wd('GET',base()+'/source',undefined,0,readDeadline);}
+async function source(readDeadline=Infinity,terminalRead=false){return wd('GET',base()+'/source',undefined,0,readDeadline,terminalRead);}
 async function waitHelperState({ready,mode,previousInstance,name}){
  const marker='HELPER_SERVICE_STATUS\n';let observed;
  const xml=await waitFor(value=>{
@@ -115,13 +120,13 @@ async function recoverOwnedStartupSession(){
 }
 async function snap(name,xml){
  const terminal=/android-finished|failure|transfer-error|hash-ready/.test(name);
- const text=xml||await source();save(name+'.xml',text);
- if(largeDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name,utc:new Date().toISOString(),sourceOnly:true});return text;}
+ const text=xml||await source(Infinity,terminal);save(name+'.xml',text);
+ if(largeDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name:artifactName(name),utc:new Date().toISOString(),sourceOnly:true,reason:'Android image budget reserved or exhausted'});return text;}
  imageCount++;const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
  writeFileSync(path.join(output,artifactName(name+'.png')),png);
  const pngValid=png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
  const hierarchy=nodes(text).find(n=>n.class==='hierarchy');
- report.snapshots.push({name,utc:new Date().toISOString(),width:pngValid?png.readUInt32BE(16):null,
+ report.snapshots.push({name:artifactName(name),utc:new Date().toISOString(),width:pngValid?png.readUInt32BE(16):null,
   height:pngValid?png.readUInt32BE(20):null,sourceWidth:Number(hierarchy?.width)||null,sourceHeight:Number(hierarchy?.height)||null,
   primarypackage:nodes(text).find(n=>n.package)?.package||null});
  return text;
@@ -132,9 +137,10 @@ function decode(text){return text.replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.from
 function nodes(xml){return [...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fromEntries(
  [...m[0].matchAll(/([\w.:-]+)=(["'])(.*?)\2/g)].map(a=>[a[1],decode(a[3])])));}
 function labels(xml){return nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);}
-async function waitFor(predicate,timeout,message){
+async function waitFor(predicate,timeout,message,terminalRead=false){
  const end=Math.min(Date.now()+timeout,largeDiagnostic?phaseDeadline:Infinity);
- do {const xml=await source(end);if(predicate(xml))return xml;await sleep(Math.min(1000,Math.max(0,end-Date.now())));}while(Date.now()<end);
+ const poll=largeDiagnostic&&timeout>=3*minute?15000:1000;
+ do {const xml=await source(end,terminalRead);if(predicate(xml))return xml;await sleep(Math.min(poll,Math.max(0,end-Date.now())));}while(Date.now()<end);
  throw Error(message);
 }
 function elementId(element){const id=element['element-6066-11e4-a52e-4f735466cecf']||element.ELEMENT;assert(id,'Missing WebDriver element ID');return id;}
@@ -163,11 +169,13 @@ function receiverResult(){
  try{return JSON.parse(readFileSync(file,'utf8'));}catch{return null;}
 }
 async function startReceiver(fixture){
+ if(largeDiagnostic&&fixture.bytes===16000000000)windowsLargeReceiverStarted=true;
  const timeoutSeconds=largeDiagnostic&&fixture.bytes===16000000000?Math.max(1,Math.floor((sessionStart+105*minute-Date.now())/1000)):900;
  const stdout=createWriteStream(path.join(windowsOutput,'receiver.stdout.txt'));
  const stderr=createWriteStream(path.join(windowsOutput,'receiver.stderr.txt'));receiverLogs=[stdout,stderr];
  receiver=spawn('pwsh',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(here,'windows_receiver.ps1'),
   '-OutputDirectory',windowsOutput,'-TimeoutSeconds',String(timeoutSeconds),'-ExpectedBytes',String(fixture.bytes),'-ExpectedSha256',fixture.sha256||'',
+  ...(largeDiagnostic?['-ImageLimit',String(windowsImagesRemaining),'-UiObservationLimit',String(windowsObservationsRemaining)]:[]),
   ...(largeDiagnostic&&fixture.bytes===16000000000?['-VerificationDeadlineUtc',new Date(sessionStart+105*minute).toISOString()]:[])],
   {windowsHide:true,stdio:['ignore','pipe','pipe']});
  receiver.stdout.pipe(stdout);receiver.stderr.pipe(stderr);
@@ -393,7 +401,7 @@ try{
  await r.start();startedRelay=true;
  sessionCreationAttempted=true;sessionStart=Date.now();if(largeDiagnostic)phaseDeadline=sessionStart+20*minute;
  report.sessionStartBeforePostUtc=new Date(sessionStart).toISOString();
- report.largeDeadlinePolicy=largeDiagnostic?{officialSessionMaxMinutes:120,admissionMinutes:20,transferSessionAgeMinutes:100,verificationAgeMinutes:105,cleanupAgeMinutes:110,observationsMax:300,imagesMax:120,androidImagesMax:60,androidObservationsMax:150}:null;
+ report.largeDeadlinePolicy=largeDiagnostic?{officialSessionMaxMinutes:120,admissionMinutes:20,transferSessionAgeMinutes:100,verificationAgeMinutes:105,cleanupAgeMinutes:110,observationsMax:300,imagesMax:120,androidImagesMax:60,androidHierarchyReadsMax:androidSourceLimit,windowsUiObservationsMax:windowsObservationLimit}:null;
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{
   platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2',
   'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],
@@ -414,8 +422,14 @@ try{
  controlSizeLabel=passBytes===16000000000?'16.0 GB':passBytes===67108864?'67.1 MB':'1.0 MB';
  const largePass=passBytes===16000000000;admit();
  if(largePass){
+  const moderateWindows=receiverResult();
+  assert(moderateWindows?.status==='saved-file-verified'&&Number.isInteger(moderateWindows.imageCount)&&Number.isInteger(moderateWindows.uiObservationCount),'Moderate Windows evidence budget counters missing');
+  assert(moderateWindows.imageCount>=0&&moderateWindows.imageCount<=60&&moderateWindows.uiObservationCount>=0&&moderateWindows.uiObservationCount<=windowsObservationLimit,'Moderate Windows evidence exceeded global allocation');
+  windowsImagesRemaining=60-moderateWindows.imageCount;windowsObservationsRemaining=windowsObservationLimit-moderateWindows.uiObservationCount;
+  report.windowsEvidenceBudget={moderateImages:moderateWindows.imageCount,moderateObservations:moderateWindows.uiObservationCount,largeImagesRemaining:windowsImagesRemaining,largeObservationsRemaining:windowsObservationsRemaining,maxImages:60,maxObservations:windowsObservationLimit};
+  assert(windowsImagesRemaining>=6&&windowsObservationsRemaining>=1,'Moderate Windows control left insufficient evidence budget for large transfer');
   save('moderate-control-results.json',report);
-  report.moderateControl={status:report.status,bytes:report.fixture.bytes,sha256:report.fixture.sha256,sendUtc:report.sendUtc,verifiedUtc:report.verifiedUtc,elapsedSendToVerifiedMs:report.elapsedSendToVerifiedMs,evidence:'moderate-control-results.json'};
+  report.moderateControl={status:report.status,bytes:report.fixture.bytes,sha256:report.fixture.sha256,sendUtc:report.sendUtc,verifiedUtc:report.verifiedUtc,elapsedSendToVerifiedMs:report.elapsedSendToVerifiedMs,evidence:'moderate-control-results.json',windowsEvidenceBudget:report.windowsEvidenceBudget};
   artifactPrefix='large-';
   await activate('org.localsend.cloudtransport');await click('Stop helper');await waitHelperState({ready:false,name:'moderate-stopped'});
   r.closePeers('Moderate completion before fresh large instance');
@@ -487,7 +501,7 @@ try{
  let end=largePass?phaseDeadline:sendStart+600000;let androidFinished=false,verifiedAt=null,waits=0,lastImage=0;
  const preservePeerDeadline=()=>{if(!largePass||androidFinished)return;const expiry=Date.parse(r.status().earliestPeerExpiryUtc);if(Number.isFinite(expiry)){end=Math.min(end,expiry-5*minute);phaseDeadline=end;}report.transferDeadlineUtc=new Date(end).toISOString();};preservePeerDeadline();
  do{
-  preservePeerDeadline();assert(!largeDiagnostic||observationCount<150,'Maximum 150 bounded Android transfer observations reached');observationCount++;
+  preservePeerDeadline();observationCount++;
   const observationStarted=Date.now();const xml=await source(end),now=Date.now(),names=labels(xml);
   const sourceElapsedMs=now-observationStarted;
   const observationGapMs=report.observations.length?now-Date.parse(report.observations.at(-1).utc):null;
@@ -500,7 +514,7 @@ try{
    await snap('android-finished',xml);writeFileSync(path.join(output,'android-finished.xml'),xml);writeFileSync(path.join(windowsOutput,'sender-completed.json'),JSON.stringify({completed:true,utc:new Date().toISOString(),evidence:'android-finished.xml'}));
    phaseDeadline=sessionStart+105*minute;report.verificationDeadlineUtc=new Date(phaseDeadline).toISOString();
    await activate('org.localsend.fixture3556');await click('Hash owned fixture after completion');
-   const hashed=await waitFor(s=>{const t=labels(s).join('\n');if(t.includes('HASH_FAILED'))throw Error('Late fixture hash failed');return t.includes('HASH_READY uri=');},15*minute,'Late Android hash did not finish before verification deadline');
+   const hashed=await waitFor(s=>{const t=labels(s).join('\n');if(t.includes('HASH_FAILED'))throw Error('Late fixture hash failed');return t.includes('HASH_READY uri=');},15*minute,'Late Android hash did not finish before verification deadline',true);
    const detail=labels(hashed).find(t=>t.includes('HASH_READY uri='));
    const hash=detail.match(/sha256=([a-f0-9]{64})/)?.[1],hashBytes=Number(detail.match(/bytes=(\d+)/)?.[1]);assert(hash&&hashBytes===bytes&&detail.match(/HASH_READY uri=([^\n]+)/)?.[1]===uri,'Late hash fixture identity mismatch');
    sha256=hash;report.fixture.sha256=hash;report.lateHash={utc:new Date().toISOString(),bytes:hashBytes,sha256:hash};
@@ -511,7 +525,7 @@ try{
   if(result?.status==='saved-file-verified'&&!verifiedAt){
    verifiedAt=Number.isFinite(Date.parse(result.finishedUtc))?Date.parse(result.finishedUtc):now;
    report.verifiedUtc=new Date(verifiedAt).toISOString();report.elapsedSendToVerifiedMs=verifiedAt-sendStart;
-   report.verificationObservationLagMs=now-verifiedAt;
+   report.verificationObservationLagMs=Date.now()-verifiedAt;
    report.uploadStateAtVerifiedSave={observedUtc:new Date(now).toISOString(),transport:r.status(),destination:result.destination};
   }
   report.observations.push({utc:new Date(now).toISOString(),elapsedMs:now-sendStart,sourceElapsedMs,observationGapMs,uiObservationScope:'ANR is observed only in this actual app hierarchy; gaps and helper liveness do not imply absence of ANR',anr,androidFinished:finished,receiverStatus:result?.status,transport:r.status()});
@@ -546,7 +560,7 @@ try{
    report.transport.wireRateScope='Per-peer relay byte rate covers only the explicit favorite-touch measurement window, including reused registration sockets, and excludes all earlier synthetic traffic. It includes TLS/protocol overhead and differs from file payload / send-to-verified-save elapsed time.';
    await snap('android-finished',xml);if(largeDiagnostic&&!largePass)save('moderate-android-finished.xml',xml);break;
   }
-  await sleep(Math.min(largeDiagnostic?45000:5000,Math.max(0,end-Date.now())));
+  await sleep(Math.min(largeDiagnostic?90000:5000,Math.max(0,end-Date.now())));
  }while(Date.now()<end);
  assert.equal(report.status,'passed',(largePass?'Large transfer/verification bounded deadline':'Ten-minute app-to-app control')+' did not reach Android Finished and verified Windows save');
  report.controlSizeBytes=bytes;
@@ -570,7 +584,7 @@ try{
  }
 }catch(error){
  report.status='incomplete';report.error=redact(error.stack||error);
- if(session&&(!largeDiagnostic||remaining()>=2*minute))await source(Date.now()+30000).then(xml=>snap('failure',xml)).catch(()=>{});
+ if(session&&(!largeDiagnostic||remaining()>=2*minute))await source(Date.now()+30000,true).then(xml=>snap('failure',xml)).catch(()=>{});
  process.exitCode=1;
 }finally{
  if(largeDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+110*minute;
@@ -586,6 +600,15 @@ try{
    await Promise.race([receiverDone,sleep(5000)]);
   }
  }}catch(error){report.cleanupErrors.push('Owned receiver shutdown: '+redact(error.message));process.exitCode=1;}
+ const finalWindows=receiverResult();
+ if(largeDiagnostic&&finalWindows&&Number.isInteger(finalWindows.imageCount)&&Number.isInteger(finalWindows.uiObservationCount)){
+  report.windowsEvidenceBudget??={moderateImages:0,moderateObservations:0,maxImages:60,maxObservations:windowsObservationLimit};
+  const budget=report.windowsEvidenceBudget;
+  budget.finalPassImages=finalWindows.imageCount;budget.finalPassObservations=finalWindows.uiObservationCount;
+  budget.totalImages=(windowsLargeReceiverStarted?budget.moderateImages:0)+finalWindows.imageCount;budget.totalObservations=(windowsLargeReceiverStarted?budget.moderateObservations:0)+finalWindows.uiObservationCount;
+  if(budget.totalImages>60||budget.totalObservations>windowsObservationLimit){report.cleanupErrors.push('Windows evidence exceeded combined session allocation');process.exitCode=1;}
+ }
+ report.androidEvidenceBudget={hierarchyReads:sourceCount,transferObservations:observationCount,images:imageCount,maxHierarchyReads:largeDiagnostic?androidSourceLimit:null,reservedTerminalReads:largeDiagnostic?4:null,maxImages:largeDiagnostic?60:null};
  report.receiverExit=receiverExit;report.finishedUtc=new Date().toISOString();
  for(const log of receiverLogs)log.end();
  if(!session&&sessionCreationAttempted){
