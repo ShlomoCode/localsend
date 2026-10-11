@@ -1,0 +1,104 @@
+name: Diagnose 2414 exact source memory pair
+on:
+  push:
+    branches: [codex/diagnose-2414-many-files]
+    paths: [.github/workflows/diagnose-2414-causal-pair.yml]
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful controlled pair source build run
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-2414-vm-pair
+  cancel-in-progress: false
+jobs:
+  pair:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate diagnostic syntax in cloud
+        run: |
+          bash -n support/diagnostics/2414-memory-pair.sh
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ('2414-memory-host-ui.py', '2414-memory-receiver-driver.py'):
+              path = Path('support/diagnostics') / name
+              ast.parse(path.read_text(), filename=str(path))
+          PY
+      - name: Retrieve controlled source bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run }}
+        run: |
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          mkdir -p pair-results
+          gh run view "$BUILD_RUN" --repo ShlomoCode/localsend --json status,conclusion,headSha,url > pair-results/build-run.json
+          jq -e '.status == "completed" and .conclusion == "success"' pair-results/build-run.json
+          gh run download "$BUILD_RUN" --repo ShlomoCode/localsend --name "issue-2414-source-pair-$BUILD_RUN" --dir source-bundles
+          for label in parent fix; do
+            (cd "source-bundles/$label"; sha256sum --check SHA256SUMS)
+            test ! -s "source-bundles/$label/source-after-build.diff"
+          done
+          diff -u source-bundles/parent/committed-locks-before.txt source-bundles/fix/committed-locks-before.txt
+          diff -u source-bundles/parent/runtime-locks.txt source-bundles/fix/runtime-locks.txt
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Real apps, five-file save control and 5000-file Options, sequential variants
+        env:
+          ISSUE2414_SOURCE_PAIR: '1'
+        run: |
+          for label in parent fix; do
+            case "$label" in parent) ref=165d7fe3f90bba1f0c44c2e8dc9b21b8a64d8a88 ;; fix) ref=76a356a2dd12404d2ce482b8b6aa4cf3afc7b6be ;; esac
+            mkdir -p "pair-results/$label/support"
+            cp -R support/diagnostics "pair-results/$label/support/"
+            cp "source-bundles/$label/identity.txt" "pair-results/$label/source-identity.txt"
+            export ISSUE2414_ARCHIVE="$GITHUB_WORKSPACE/source-bundles/$label/localsend-source-$label-$ref-linux-x86-64.tar.gz"
+            export ISSUE2414_ARCHIVE_SHA="$(sha256sum "$ISSUE2414_ARCHIVE" | cut -d ' ' -f 1)"
+            set +e
+            (cd "pair-results/$label"; bash support/diagnostics/2414-memory-pair.sh) > "pair-results/$label/workload.log" 2>&1
+            result=$?
+            set -e
+            printf '%s\n' "$result" > "pair-results/$label/workload-exit-code"
+            if test -d "pair-results/$label/evidence/vm/guest"; then
+              find "pair-results/$label/evidence/vm/guest" -name '*-options-continuous.mkv' -type f -print0 | while IFS= read -r -d '' recording; do
+                set +e
+                ffprobe -v error -show_streams -show_format -of json "$recording" > "$recording.ffprobe.json"
+                probe_result=$?
+                ffmpeg -v error -i "$recording" -f null - > "$recording.decode.log" 2>&1
+                decode_result=$?
+                set -e
+                printf '{"ffprobe_exit":%s,"decode_exit":%s}\n' "$probe_result" "$decode_result" > "$recording.validation.json"
+              done
+            fi
+            # The workload teardown has stopped its own guest before removing
+            # its private scratch paths for the next identical fresh guest.
+            sudo rm -rf /tmp/issue2414-memory-pair /home/runner/issue2414-memory-pair
+            rm -rf /tmp/files-5-memory-host-sender /tmp/files-5000-memory-host-sender
+          done
+          test "$(cat pair-results/parent/workload-exit-code)" = 0
+          test "$(cat pair-results/fix/workload-exit-code)" = 0
+          # Compare image bytes (paths differ) and installed package versions.
+          test "$(cut -d ' ' -f 1 pair-results/parent/evidence/vm/image-sha512.txt)" = "$(cut -d ' ' -f 1 pair-results/fix/evidence/vm/image-sha512.txt)"
+          diff -u pair-results/parent/evidence/vm/guest/package-inventory.txt pair-results/fix/evidence/vm/guest/package-inventory.txt
+          for label in parent fix; do
+            for count in 5 5000; do
+              jq -e '.ffprobe_exit == 0 and .decode_exit == 0' "pair-results/$label/evidence/vm/guest/files-$count-options-continuous.mkv.validation.json"
+            done
+          done
+      - name: Preserve both source outcomes and raw recordings
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" pair-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2414-causal-pair-${{ github.run_id }}
+          path: pair-results/
+          retention-days: 14
+          if-no-files-found: error

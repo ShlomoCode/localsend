@@ -15,6 +15,7 @@ OUT = Path('evidence')
 OUT.mkdir(exist_ok=True)
 VM = Path('/tmp/issue2414-memory-pair')
 CONTENT = b'LocalSend issue 2414 fixed ordinary file content\n'
+SOURCE_PAIR = os.environ.get('ISSUE2414_SOURCE_PAIR') == '1'
 SSH = ['ssh', '-i', str(VM/'id'), '-p', '2222', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile='+str(VM/'known'), '-o', 'ConnectTimeout=5', 'probe@127.0.0.1']
 SCP = ['scp', '-i', str(VM/'id'), '-P', '2222', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile='+str(VM/'known'), '-o', 'ConnectTimeout=5']
 
@@ -198,13 +199,16 @@ def sender_sample(pid, stop, path):
 
 
 def metadata_fixture(count):
-    fixture=Path.home()/('Case2414Files'+str(count))
+    fixture=Path.home()/('Case2414Files'+str(count)+('Flat' if SOURCE_PAIR else ''))
     fixture.mkdir(exist_ok=True)
     manifest=[]
     for index in range(count):
-        path=fixture/f'file-{index:05d}.txt'
+        leaf=f'file-{index:05d}-'+('a'*65)+'.txt' if SOURCE_PAIR else f'file-{index:05d}.txt'
+        if SOURCE_PAIR and len(leaf.encode('ascii')) != 80:
+            raise RuntimeError('Fixture leaf length differs from plan')
+        path=fixture/leaf
         path.write_bytes(CONTENT)
-        manifest.append({'name':path.name,'size':len(CONTENT),'sha256':hashlib.sha256(CONTENT).hexdigest()})
+        manifest.append({'name':path.name,'relative_path':fixture.name+'/'+path.name,'size':len(CONTENT),'sha256':hashlib.sha256(CONTENT).hexdigest()})
     if {path.name for path in fixture.iterdir()} != {entry['name'] for entry in manifest}:
         raise RuntimeError('Fixture directory contains unexpected entries')
     write(f'files-{count}-manifest.json',manifest)
@@ -273,6 +277,8 @@ def run_case(count):
         approval=guest('capture','approval')
         guest('stage','approval')
         result['approval_capture']=approval
+        if SOURCE_PAIR:
+            result['recording']=guest('record-start')
         result['stage']='options'
         result['options_click']=click('guest',(517,611))
         start=time.monotonic()
@@ -318,14 +324,37 @@ def run_case(count):
             raise RuntimeError('Options list not observed after nominal ten-second hold; cause unknown')
         result['stage']='return'
         guest('stage','before-cancel')
-        result['back_click']=click('guest',(28,28),rwin)
+        if not SOURCE_PAIR or count != 5000:
+            result['back_click']=click('guest',(28,28),rwin)
         # The retained 5000-file frame is still Options around input+1.2s,
         # then approval by+3.4s. Observe the normal transition with a bounded
         # wait rather than declaring failure from one early screenshot.
+        if SOURCE_PAIR and count==5000:
+            result['scroll_down']=desktop('guest','xdotool','mousemove','600','450','click','--repeat','8','--delay','100','5')
+            time.sleep(2)
+            result['scroll_down_capture']=guest('capture','scroll-down')
+            result['scroll_down_stage']=guest('stage','scroll-down')
+            result['scroll_up']=desktop('guest','xdotool','mousemove','600','450','click','--repeat','8','--delay','100','4')
+            time.sleep(2)
+            result['scroll_up_capture']=guest('capture','scroll-up')
+            result['scroll_up_stage']=guest('stage','scroll-up')
+            # Return once after actual scrolling, then reopen in the same PID.
+            result['back_click']=click('guest',(28,28),rwin)
         returned,return_capture=check_guest('back',['wants','Sender2414',str(count),'Options'],30)
         result['back_approval_capture']=return_capture
         result['back_approval_guest_offset_from_input_seconds']=return_capture['completed']-result['back_click']['started']
         return_source=OUT/Path(return_capture['path']).name
+        if SOURCE_PAIR and count==5000:
+            result['back_stage']=guest('stage','back')
+            result['reopen_click']=click('guest',(517,611))
+            time.sleep(10)
+            result['reopen_capture']=guest('capture','reopen')
+            result['reopen_stage']=guest('stage','reopen')
+            reopened,_=check_guest('reopen-observed',['Options','Files','49B'],30)
+            result['reopen_tokens']=[word['text'] for word in reopened]
+            result['second_back_click']=click('guest',(28,28),rwin)
+            returned,return_capture=check_guest('second-back',['wants','Sender2414',str(count),'Options'],30)
+            return_source=OUT/Path(return_capture['path']).name
         if count==5:
             result['stage']='control-save'
             click('guest',approval_button(count,'Accept',returned,return_source))
@@ -395,6 +424,8 @@ def run_case(count):
                 lifecycle=result['cleanup'].get('lifecycle')
                 if not result['cleanup']['stopped'] or not isinstance(lifecycle,str) or not any(json.loads(line).get('event')=='exited' for line in lifecycle.splitlines() if line.strip()):
                     raise RuntimeError('Receiver cleanup or supervisor exit record not established')
+                if SOURCE_PAIR and not result['cleanup'].get('recording',{}).get('finalized'):
+                    raise RuntimeError('Recorder completion not established; do not continue to another case')
             except Exception as error:
                 result['cleanup_error']=str(error)
                 if not result['failure']:
@@ -405,13 +436,13 @@ def run_case(count):
 
 def main():
     results=[]
-    for count in (5,500,5000):
+    for count in ((5,5000) if SOURCE_PAIR else (5,500,5000)):
         result=run_case(count)
         results.append(result)
         write('memory-results.json',results)
         print(json.dumps({'phase':'case-complete',**result}),flush=True)
         if result['failure']: raise SystemExit(f'{count}-file case failed; inspect evidence')
-        if count==5:
+        if count==5 and not SOURCE_PAIR:
             checkpoint=OUT/'vm'/'checkpoint-guest'
             checkpoint.parent.mkdir(exist_ok=True)
             run(SCP+['-r','probe@127.0.0.1:/home/probe/evidence',str(checkpoint)],120)

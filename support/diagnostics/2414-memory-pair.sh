@@ -28,8 +28,14 @@ trap cleanup EXIT
 sudo apt-get update
 sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils openssh-client xvfb openbox xdotool scrot tesseract-ocr imagemagick network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 binutils
 sudo systemctl start NetworkManager
-curl --fail --location --retry 3 --max-time 240 -o released/baseline.tar.gz https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz
-printf '%s  %s\n' 6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81 released/baseline.tar.gz | sha256sum --check > evidence/artifact-hash-verification.txt
+artifact_sha=${ISSUE2414_ARCHIVE_SHA:-6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81}
+[[ "$artifact_sha" =~ ^[0-9a-f]{64}$ ]]
+if [[ -n "${ISSUE2414_ARCHIVE:-}" ]]; then
+  cp "$ISSUE2414_ARCHIVE" released/baseline.tar.gz
+else
+  curl --fail --location --retry 3 --max-time 240 -o released/baseline.tar.gz https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.tar.gz
+fi
+printf '%s  %s\n' "$artifact_sha" released/baseline.tar.gz | sha256sum --check > evidence/artifact-hash-verification.txt
 sha256sum released/baseline.tar.gz > evidence/artifact-sha256.txt
 tar xf released/baseline.tar.gz -C released/base
 { findmnt --target "$vm_disk_root"; df -B1 "$vm_disk_root"; } > evidence/vm/disk-environment.txt
@@ -70,6 +76,12 @@ swap:
 package_update: true
 packages: [xvfb, openbox, xdotool, x11-utils, scrot, fonts-dejavu-core, network-manager, gsettings-desktop-schemas, at-spi2-core, libayatana-appindicator3-1, libsecret-1-0, libgtk-3-0, libegl1, libgles2, libgl1-mesa-dri, libopengl0, libglx-mesa0, openssh-server, binutils, python3]
 CONFIG
+if [[ "${ISSUE2414_SOURCE_PAIR:-0}" == 1 ]]; then
+  printf '  - [apt-get, install, -y, ffmpeg]\n' > "$vm_root/recording-package.txt"
+  # Cloud-init's supported runcmd installs the optional recorder normally.
+  printf 'runcmd:\n' >> "$vm_root/user-data"
+  cat "$vm_root/recording-package.txt" >> "$vm_root/user-data"
+fi
 cp "$vm_root/user-data" evidence/vm/cloud-config.txt
 printf 'instance-id: issue2414-memory\nlocal-hostname: issue2414-memory-receiver\n' > "$vm_root/meta-data"
 cloud-localds "$vm_disk_root/seed.iso" "$vm_root/user-data" "$vm_root/meta-data"
@@ -92,11 +104,14 @@ test "$ready" = 1
 stage=guest-runtime-preflight
 ssh "${opts[@]}" probe@127.0.0.1 'mkdir -p /home/probe/released/base /home/probe/evidence'
 scp "${copy_opts[@]}" released/baseline.tar.gz support/diagnostics/2414-memory-receiver-driver.py support/diagnostics/2414-memory-preflight.sh probe@127.0.0.1:/home/probe/
+printf '%s\n' "$artifact_sha" > "$vm_root/artifact-sha"
+printf '%s\n' "${ISSUE2414_SOURCE_PAIR:-0}" > "$vm_root/source-pair-mode"
+scp "${copy_opts[@]}" "$vm_root/artifact-sha" "$vm_root/source-pair-mode" probe@127.0.0.1:/home/probe/
 ssh "${opts[@]}" probe@127.0.0.1 'bash -s' <<'GUEST'
 set -euo pipefail
 export LC_ALL=C
 cd /home/probe
-printf '%s  %s\n' 6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81 baseline.tar.gz | sha256sum --check > evidence/artifact-hash-verification.txt
+printf '%s  %s\n' "$(cat artifact-sha)" baseline.tar.gz | sha256sum --check > evidence/artifact-hash-verification.txt
 tar xf baseline.tar.gz -C released/base
 sha256sum baseline.tar.gz > evidence/artifact-sha256.txt
 bash /home/probe/2414-memory-preflight.sh vm

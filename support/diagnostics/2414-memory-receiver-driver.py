@@ -15,6 +15,35 @@ OUT = ROOT / 'evidence'
 OUT.mkdir(exist_ok=True)
 STATE = OUT / 'memory-state.json'
 CONTENT = b'LocalSend issue 2414 fixed ordinary file content\n'
+SOURCE_PAIR = (ROOT / 'source-pair-mode').exists() and (ROOT / 'source-pair-mode').read_text().strip() == '1'
+
+
+def stop_recording(state):
+    marker = OUT / f"files-{state['count']}-recording.json"
+    if not marker.exists():
+        return {'active': False}
+    report = json.loads(marker.read_text())
+    was_alive = alive(report)
+    if was_alive:
+        os.kill(report['pid'], signal.SIGINT)
+        end = time.monotonic() + 10
+        while alive(report) and time.monotonic() < end:
+            time.sleep(.2)
+    forced = alive(report)
+    if forced:
+        os.kill(report['pid'], signal.SIGKILL)
+        end = time.monotonic() + 5
+        while alive(report) and time.monotonic() < end:
+            time.sleep(.2)
+    report['stopped_guest_monotonic'] = time.monotonic()
+    report['file_bytes'] = Path(report['path']).stat().st_size if Path(report['path']).exists() else 0
+    report['was_alive_before_stop'] = was_alive
+    report['forced_harness_cleanup'] = forced
+    report['alive_after_stop'] = alive(report)
+    report['final_proc_stat'] = read(f"/proc/{report['pid']}/stat")
+    report['finalized'] = was_alive and not forced and not report['alive_after_stop'] and report['file_bytes'] > 0
+    write(marker, report)
+    return report
 
 
 def write(path, value):
@@ -280,11 +309,28 @@ def main():
             'kernel': kernel}))
     elif action == 'verify':
         files = [path for path in Path(state['destination']).rglob('*') if path.is_file()]
-        expected = {f'file-{i:05d}.txt' for i in range(state['count'])}
+        expected = {(f'file-{i:05d}-'+('a'*65)+'.txt' if SOURCE_PAIR else f'file-{i:05d}.txt') for i in range(state['count'])}
         digest = hashlib.sha256(CONTENT).hexdigest()
         valid = len(files) == state['count'] and {path.name for path in files} == expected and all(hashlib.sha256(path.read_bytes()).hexdigest() == digest for path in files)
         print(json.dumps({'content_valid': valid, 'saved_files': len(files), 'expected_sha256': digest}))
+    elif action == 'record-start':
+        if not SOURCE_PAIR:
+            raise RuntimeError('Recording requires source-pair mode')
+        output = OUT / f"files-{state['count']}-options-continuous.mkv"
+        argv = ['ffmpeg', '-nostdin', '-y', '-video_size', '1200x800', '-framerate', '5', '-f', 'x11grab',
+                '-i', os.environ['DISPLAY'], '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-threads', '1', str(output)]
+        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+            stdout=(OUT / f"files-{state['count']}-recording.log").open('w'), stderr=subprocess.STDOUT, start_new_session=True)
+        time.sleep(.5)
+        if process.poll() is not None:
+            raise RuntimeError('Recorder failed to start')
+        report = {'pid': process.pid, 'starttime': proc_start(process.pid), 'path': str(output),
+                  'argv': argv, 'started_guest_monotonic': time.monotonic(),
+                  'observer_limit': '5 fps continuous native screen capture; identical recorder adds CPU/RAM to both source variants'}
+        write(OUT / f"files-{state['count']}-recording.json", report)
+        print(json.dumps(report))
     elif action == 'stop':
+        recording = stop_recording(state)
         marker = OUT / f"files-{state['count']}-stop-requested"
         marker.write_text(str(time.monotonic()))
         journal(state, 'final')
@@ -307,6 +353,7 @@ def main():
             time.sleep(.2)
         print(json.dumps({'stopped': not alive(state), 'harness_term_sent': was_alive,
                          'harness_kill_sent': forced, 'lifecycle': lifecycle,
+                         'recording': recording,
                          'guest_monotonic': time.monotonic()}))
     else: raise ValueError(action)
 
