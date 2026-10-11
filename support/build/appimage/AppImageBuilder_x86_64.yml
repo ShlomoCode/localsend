@@ -3,6 +3,7 @@ version: 1
 script:
   # Workaround for error in Github Actions (https://github.com/AppImageCrafters/appimage-builder/issues/271)
   - which mksquashfs || apt install squashfs-tools
+  - install -Dm644 support/build/appimage/org.localsend.localsend_app.desktop AppDir/usr/share/applications/org.localsend.localsend_app.desktop
 
 AppDir:
   path: AppDir
@@ -13,8 +14,6 @@ AppDir:
     version: 1.18.2
     exec: localsend_app
     exec_args: $@
-  after_runtime:
-    - printf '\nStartupWMClass=org.localsend.localsend_app\n' >> "$TARGET_APPDIR/org.localsend.localsend_app.desktop"
   apt:
     arch:
       - amd64
