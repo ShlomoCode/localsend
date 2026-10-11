@@ -1,9 +1,15 @@
 name: Build current baseline for issue 2381
 on:
-  push:
-    branches: [codex/diagnose-2381-favorite-alias]
-    paths: [.github/workflows/diagnose2381-current.yml]
   workflow_dispatch:
+    inputs:
+      build_ref:
+        description: Immutable source commit to build
+        required: true
+        default: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+      artifact_name:
+        description: Build artifact name
+        required: true
+        default: baseline2381-c1ce
 jobs:
   baseline:
     runs-on: windows-latest
@@ -11,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: e768240d1ad95f0f162b852b5ff37bec71cde1ef
+          ref: ${{ inputs.build_ref }}
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.41.9
@@ -25,10 +31,10 @@ jobs:
       - name: Resolve dependencies
         working-directory: app
         run: flutter pub get
-      - name: Build untouched current baseline
+      - name: Build specified source
         working-directory: app
         run: flutter build windows
       - uses: actions/upload-artifact@v6
         with:
-          name: baseline2381-current
+          name: ${{ inputs.artifact_name }}
           path: app/build/windows/x64/runner/Release

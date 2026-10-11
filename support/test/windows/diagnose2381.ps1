@@ -1,4 +1,4 @@
-param([string]$Executable,[string]$EvidenceDirectory)
+param([string]$Executable,[string]$CandidateExecutable,[string]$EvidenceDirectory)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
 Add-Type @"
@@ -36,6 +36,7 @@ function Screenshot([string]$name) {
  $g.CopyFromScreen(0,0,0,0,$bmp.Size)
  $path = "$EvidenceDirectory/$name.png"
  $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
+ @{screenshot=$name;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$name-observation.json"
  $g.Dispose()
  $scaled = New-Object System.Drawing.Bitmap(1984,1440)
  $sg = [System.Drawing.Graphics]::FromImage($scaled)
@@ -113,6 +114,12 @@ function FavoritePencil([string]$snap,[int]$rowY) {
  Write-Host "Favorite pencil right edge in ${snap}: $rightmost"
  Click ($rightmost-8) $rowY
 }
+function ExportSettings([string]$name,[string]$snapshot) {
+ $stored=Get-Content "$EvidenceDirectory/$name-app/settings.json" -Raw | ConvertFrom-Json
+ $stored.PSObject.Properties.Remove("flutter.ls_security_context")
+ $stored.PSObject.Properties.Remove("flutter.ls_show_token")
+ $stored | ConvertTo-Json -Depth 10 | Set-Content "$EvidenceDirectory/$snapshot.json"
+}
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
 Get-FileHash $Executable -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/executable-hash.json"
 if (-not (Get-Command New-VMSwitch -ErrorAction SilentlyContinue)) {
@@ -127,6 +134,7 @@ foreach ($network in @(@{name="bug2381-home";ip="10.0.20.2"},@{name="bug2381-net
 Start-Sleep -Seconds 3
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
 Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status | ConvertTo-Json | Set-Content "$EvidenceDirectory/adapters.json"
+@{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;runnerOs=$env:RUNNER_OS;runnerArch=$env:RUNNER_ARCH;diagnosticCommit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID} | ConvertTo-Json | Set-Content "$EvidenceDirectory/runner.json"
 $apps = @{}
 $receiveDirectory="$EvidenceDirectory/received"
 New-Item -ItemType Directory -Force $receiveDirectory | Out-Null
@@ -145,6 +153,7 @@ foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="send
  Start-Sleep -Seconds 2
  Screenshot "$($item.name)-initial"
  $apps[$item.name]=$p
+ ExportSettings $item.name "$($item.name)-settings-initial"
 }
 # Establish network controls before submitting either real UI favorite.
 Get-NetIPAddress | Select-Object InterfaceAlias,InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json | Set-Content "$EvidenceDirectory/source-addresses-before-ui.json"
@@ -308,6 +317,8 @@ for ($step=0;$step -lt 9;$step++) {
 }
 if (-not $found) {throw "Whitelist UI was not reached"}
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces-after-ui.json"
+ExportSettings "sender" "sender-settings-before-transfer"
+ExportSettings "receiver" "receiver-settings-before-transfer"
 
 # The transfer stage uses a real native file picker, after all alias evidence.
 Click 36 59
@@ -342,12 +353,92 @@ Click 566 702
 Start-Sleep -Seconds 5
 Screenshot "receiver-transfer-completed"
 $originalHash=(Get-FileHash $fixture -Algorithm SHA256).Hash
-$saved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash}})
+$saved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
 $saved | ConvertTo-Json | Set-Content "$EvidenceDirectory/first-transfer-saved-files.json"
 if(@($saved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length}).Count -ne 1) {throw "Real UI receive did not save exactly one matching fixture"}
+$preserved="$EvidenceDirectory/first-transfer-preserved"
+New-Item -ItemType Directory -Force $preserved | Out-Null
+Copy-Item $saved[0].path "$preserved/$($saved[0].name)"
 [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
 Start-Sleep -Seconds 2
 Screenshot "sender-transfer-completed"
+if($currentView -and $CandidateExecutable) {
+ # Preserve the real receiver and complete private sender profile. Only replace
+ # sender program files; settings and certificates are never re-created.
+ Click 930 714
+ Screenshot "baseline-sender-done"
+ [Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
+ Click 930 714
+ Screenshot "baseline-receiver-done"
+ ExportSettings "sender" "baseline-sender-before-replacement"
+ ExportSettings "receiver" "baseline-receiver-before-replacement"
+ $receiverId=$apps.receiver.Id
+ $senderFolder="$EvidenceDirectory/sender-app"
+ Stop-Process -Id $apps.sender.Id -Force
+ Start-Sleep -Seconds 3
+ $privateProfile=Get-Content "$senderFolder/settings.json" -Raw
+ Get-ChildItem $senderFolder | Where-Object {$_.Name -ne "settings.json"} | Remove-Item -Recurse -Force
+ Get-ChildItem (Split-Path $CandidateExecutable) | Where-Object {$_.Name -ne "settings.json"} | Copy-Item -Destination $senderFolder -Recurse
+ if((Get-Content "$senderFolder/settings.json" -Raw) -cne $privateProfile) {throw "Sender profile changed during binary replacement"}
+ Get-FileHash $CandidateExecutable -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-executable-hash.json"
+ $apps.sender=Start-Process "$senderFolder/localsend_app.exe" -WorkingDirectory $senderFolder -PassThru
+ Start-Sleep -Seconds 12
+ $apps.sender.Refresh()
+ if(!$apps.sender.MainWindowHandle) {throw "Candidate sender did not open"}
+ if((Get-Process -Id $receiverId).HasExited) {throw "Preserved receiver stopped"}
+ @{receiverPidBefore=$receiverId;receiverPidAfter=$apps.receiver.Id;senderPidAfter=$apps.sender.Id;profileByteIdenticalBeforeStart=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-replacement.json"
+ [Desktop2381]::MoveWindow($apps.sender.MainWindowHandle,0,0,1000,760,$true) | Out-Null
+ [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+ Screenshot "candidate-initial"
+ Word "Send" "candidate-initial"
+ Click 497 212
+ Start-Sleep -Seconds 8
+ Screenshot "candidate-nearby-after-scan"
+ Click 868 288
+ Screenshot "candidate-device-details"
+ Click 36 59
+ Screenshot "candidate-details-returned"
+ Click 576 212
+ Screenshot "candidate-favorites-reopened"
+ ExportSettings "sender" "candidate-sender-before-transfer"
+ ExportSettings "receiver" "candidate-receiver-before-transfer"
+ $candidateStored=Get-Content "$senderFolder/settings.json" -Raw | ConvertFrom-Json
+ $candidateFavorites=@($candidateStored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
+ $candidateFavorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/candidate-favorites.json"
+ if(($candidateFavorites | ConvertTo-Json -Compress -Depth 5) -cne ($customFavorites | ConvertTo-Json -Compress -Depth 5)) {throw "Favorite identity, aliases or order changed across replacement"}
+ Word "Cancel" "candidate-favorites-reopened"
+ Screenshot "candidate-selection"
+ Word "File" "candidate-selection"
+ Screenshot "candidate-native-file-picker"
+ Click 400 442
+ Paste (Resolve-Path $fixture).Path
+ Screenshot "candidate-native-file-picker-filled"
+ Click 464 473
+ Start-Sleep -Seconds 3
+ Screenshot "candidate-file-selected"
+ $candidateBefore=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+ $candidateBefore | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-sockets-before.json"
+ Word "My" "candidate-file-selected"
+ Start-Sleep -Seconds 3
+ Screenshot "candidate-transfer-requested"
+ $candidateAfter=@(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.RemotePort -eq 53317} | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+ $candidateAfter | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-sockets-after.json"
+ @($candidateAfter | Where-Object {$candidateBefore.LocalPort -notcontains $_.LocalPort}) | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-new-sockets.json"
+ [Desktop2381]::SetForegroundWindow($apps.receiver.MainWindowHandle) | Out-Null
+ Start-Sleep -Seconds 2
+ Screenshot "candidate-receiver-request"
+ Click 566 702
+ Start-Sleep -Seconds 5
+ Screenshot "candidate-receiver-completed"
+ $candidateSaved=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
+ $candidateSaved | ConvertTo-Json | Set-Content "$EvidenceDirectory/candidate-transfer-saved-files.json"
+ if(@($candidateSaved | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $_.lastWriteTicks -gt $saved[0].lastWriteTicks}).Count -lt 1) {throw "Candidate actual receive did not write a new matching fixture"}
+ [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
+ Screenshot "candidate-sender-completed"
+ ExportSettings "sender" "candidate-sender-after-transfer"
+ ExportSettings "receiver" "candidate-receiver-after-transfer"
+ throw "Matched transfer checkpoint: inspect before/after selected route and aliases before adding controls"
+}
 if($currentView) {throw "Current first transfer checkpoint: inspect selected route and route switching"}
 # Actual Finished screens in run 38107089706 have Done at x930/y714.
 Click 930 714
@@ -382,9 +473,9 @@ Screenshot "receiver-second-transfer-request"
 Click 566 702
 Start-Sleep -Seconds 5
 Screenshot "receiver-second-transfer-completed"
-$savedSecond=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash}})
+$savedSecond=@(Get-ChildItem $receiveDirectory -File | ForEach-Object {@{name=$_.Name;path=$_.FullName;length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash;lastWriteUtc=$_.LastWriteTimeUtc.ToString("o");lastWriteTicks=$_.LastWriteTimeUtc.Ticks}})
 $savedSecond | ConvertTo-Json | Set-Content "$EvidenceDirectory/second-transfer-saved-files.json"
-if(@($savedSecond | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length}).Count -ne 2) {throw "Second actual receive did not preserve two matching saved fixtures"}
+if(@($savedSecond | Where-Object {$_.sha256 -eq $originalHash -and $_.length -eq (Get-Item $fixture).Length -and $_.lastWriteTicks -gt $saved[0].lastWriteTicks}).Count -lt 1) {throw "Second actual receive did not write a new matching fixture"}
 [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
 Start-Sleep -Seconds 2
 Screenshot "sender-second-transfer-completed"

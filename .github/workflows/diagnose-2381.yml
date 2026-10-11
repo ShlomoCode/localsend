@@ -1,13 +1,20 @@
 name: Diagnose 2381 favorite aliases
 on:
-  push:
-    branches: [codex/diagnose-2381-favorite-alias]
   workflow_dispatch:
     inputs:
       current_baseline:
         description: Use the untouched current baseline artifact
         type: boolean
         default: false
+      baseline_run:
+        description: Build run containing baseline2381-c1ce
+        default: '38102878653'
+      baseline_artifact:
+        description: Baseline build artifact name
+        default: baseline2381-current
+      candidate_run:
+        description: Optional matched candidate build run
+        default: ''
 jobs:
   release:
     runs-on: windows-latest
@@ -24,17 +31,26 @@ jobs:
         if: ${{ inputs.current_baseline }}
         uses: actions/download-artifact@v6
         with:
-          name: baseline2381-current
-          run-id: 38102878653
+          name: ${{ inputs.baseline_artifact }}
+          run-id: ${{ inputs.baseline_run }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/release
+      - name: Download matched candidate
+        if: ${{ inputs.candidate_run != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: candidate2381-c1ce
+          run-id: ${{ inputs.candidate_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/candidate
       - name: Install screenshot OCR
         run: choco install tesseract --no-progress -y
       - name: Run actual Windows apps
         shell: powershell
         run: |
           $exe = (Get-ChildItem $env:RUNNER_TEMP/release -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName
-          & ./support/test/windows/diagnose2381.ps1 -Executable $exe -EvidenceDirectory $env:RUNNER_TEMP/evidence2381
+          $candidate = if ('${{ inputs.candidate_run }}' -ne '') { (Get-ChildItem $env:RUNNER_TEMP/candidate -Recurse -Filter localsend_app.exe | Select-Object -First 1).FullName } else { '' }
+          & ./support/test/windows/diagnose2381.ps1 -Executable $exe -CandidateExecutable $candidate -EvidenceDirectory $env:RUNNER_TEMP/evidence2381
       - uses: actions/upload-artifact@v6
         if: always()
         with:
