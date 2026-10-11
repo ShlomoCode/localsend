@@ -1,0 +1,57 @@
+name: Diagnose 2861 exact font-axis correction
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          - name: parent
+            ref: 4fd66064d2a432b1d30f163ce542d1ba3b9c7a57
+          - name: correction
+            ref: e090117bde419536e8c95710b961fcbf5893fe01
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: flutter/flutter
+          ref: ${{ matrix.ref }}
+          path: flutter-sdk
+          fetch-depth: 1
+      - name: Build same component against exact before/after correction
+        shell: pwsh
+        run: |
+          $sdk="$env:GITHUB_WORKSPACE/flutter-sdk"
+          $folder="$env:RUNNER_TEMP/font_probe"
+          & "$sdk/bin/flutter.bat" create --platforms windows --project-name font_probe $folder
+          Copy-Item support/diagnostics/font-probe/main.dart "$folder/lib/main.dart"
+          Set-Location $folder
+          & "$sdk/bin/flutter.bat" build windows --release
+          if($LASTEXITCODE -ne 0){throw 'Exact SDK build failed'}
+          & "$sdk/bin/flutter.bat" --version | Out-File build/windows/x64/runner/Release/sdk.txt
+          @((git -C $sdk rev-parse HEAD),(Get-Content "$sdk/bin/cache/engine.stamp")) | Out-File build/windows/x64/runner/Release/sdk-source.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: font-probe-${{ matrix.name }}
+          path: ${{ runner.temp }}/font_probe/build/windows/x64/runner/Release
+  observe:
+    needs: build
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: font-probe-*
+          path: ${{ runner.temp }}/probes
+      - name: Observe exact correction pair on same installed fonts
+        shell: powershell
+        run: ./support/diagnostics/font-probe/observe.ps1 -ReleaseRoot $env:RUNNER_TEMP/probes -EvidenceDirectory $env:RUNNER_TEMP/font-evidence -Sdks @('parent','correction')
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: font-evidence
+          path: ${{ runner.temp }}/font-evidence

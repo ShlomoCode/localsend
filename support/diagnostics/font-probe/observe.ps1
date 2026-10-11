@@ -1,4 +1,4 @@
-param([string]$ReleaseRoot,[string]$EvidenceDirectory)
+param([string]$ReleaseRoot,[string]$EvidenceDirectory,[string[]]$Sdks=@('3.24.5','3.38.10','3.41.9'))
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -67,7 +67,7 @@ $setupInputs|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-inputs.json"
 if([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width -lt 1215){throw 'Desktop smaller than original screenshot; do not run report scenario'}
 
 Get-ChildItem 'C:/Windows/Fonts' -Filter '*seg*'|Get-FileHash -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/segoe-fonts.json"
-foreach($sdk in @('3.24.5','3.38.10','3.41.9')) {
+foreach($sdk in $Sdks) {
  $env:BUG2861_OUTPUT="$EvidenceDirectory/$sdk.json";$env:BUG2861_SDK=$sdk
  $folder="$ReleaseRoot/font-probe-$sdk"
  $p=Start-Process "$folder/font_probe.exe" -WorkingDirectory $folder -PassThru
@@ -81,6 +81,7 @@ foreach($sdk in @('3.24.5','3.38.10','3.41.9')) {
   $g.CopyFromScreen(0,0,0,0,$bmp.Size);$bmp.Save("$EvidenceDirectory/$sdk.png",[System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose();$bmp.Dispose()
   Copy-Item "$folder/sdk.txt" "$EvidenceDirectory/$sdk-sdk.txt"
+  if(Test-Path "$folder/sdk-source.txt"){Copy-Item "$folder/sdk-source.txt" "$EvidenceDirectory/$sdk-source.txt"}
   Get-FileHash "$folder/data/app.so" -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/$sdk-aot.json"
  } finally { if(!$p.HasExited){Stop-Process -Id $p.Id -Force} }
 }
