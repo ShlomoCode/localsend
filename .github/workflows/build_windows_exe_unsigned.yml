@@ -1,75 +1,68 @@
-name: Build windows exe (unsigned)
-
+name: Diagnose 3393 Windows Android networking
 on:
   workflow_dispatch:
-
-env:
-  FLUTTER_VERSION: "3.41.9"
-
+permissions:
+  contents: read
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Get version from pubspec.yaml
-        id: get_version
-        run: |
-          VERSION=$(sed -n 's/^version: \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' app/pubspec.yaml)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-  build_windows_exe_x86_64:
-    needs: build
+  windows-android:
     runs-on: windows-latest
-
+    timeout-minutes: 40
     steps:
-      - name: Fix long file paths
-        run: git config --system core.longpaths true
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-
-      # Required by the CMake install step (app/windows/CMakeLists.txt installs localsend_msix_helper.msix)
-      - name: Build MSIX helper
+      - uses: actions/checkout@v4
+      - name: Inspect virtualization and SDK
+        shell: pwsh
         run: |
-          $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
-          & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
-          & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
-
-      - name: Dependencies
-        working-directory: app
-        run: flutter pub get
-
-      - name: Compile for Windows
-        working-directory: app
-        run: flutter build windows
-
-      - name: Prepare Inno Setup payload
+          New-Item -ItemType Directory evidence -Force | Out-Null
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content evidence/os.json
+          Get-CimInstance Win32_Processor | Select-Object Name,VirtualizationFirmwareEnabled,SecondLevelAddressTranslationExtensions | ConvertTo-Json | Set-Content evidence/cpu.json
+          Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform | Out-String | Set-Content evidence/whpx.txt
+          "ANDROID_HOME=$env:ANDROID_HOME ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT" | Set-Content evidence/sdk.txt
+          Get-ChildItem "$env:ANDROID_HOME" | Out-String | Add-Content evidence/sdk.txt
+          & "$env:ANDROID_HOME/emulator/emulator.exe" -accel-check 2>&1 | Tee-Object evidence/accel.txt
+          exit 0
+      - name: Prepare Android15 software emulator and released applications
+        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno" | Out-Null
-          Copy-Item -Path "app\build\windows\x64\runner\Release\*" -Destination "${{ runner.temp }}\inno" -Recurse
-          Copy-Item -Path "app\assets\packaging\logo.ico" -Destination "${{ runner.temp }}\inno"
-          Copy-Item -Path "support\build\windows\x64\*" -Destination "${{ runner.temp }}\inno" -Recurse
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno-result" | Out-Null
-
-      # SkipMsixHelper: the helper would be unsigned and Add-AppxPackage rejects unsigned packages
-      - name: Compile installer (unsigned)
-        run: iscc /DSkipSignTool /DSkipMsixHelper "/DPayloadDir=${{ runner.temp }}\inno" "/DResultDir=${{ runner.temp }}\inno-result" support\scripts\compile_windows_exe-inno.iss
-
-      - name: Rename installer
-        run: Rename-Item -Path "${{ runner.temp }}\inno-result\localsend.exe" -NewName "LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe"
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v6
+          $sdkmanager = "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
+          1..100 | ForEach-Object { 'y' } | & $sdkmanager 'system-images;android-35;google_apis;x86_64' 'platform-tools' 'emulator' 2>&1 | Tee-Object evidence/sdk-install.txt
+          if ($LASTEXITCODE -ne 0) { throw 'SDK installation failed' }
+          'no' | & "$env:ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" create avd -n issue3393 -k 'system-images;android-35;google_apis;x86_64' --force
+          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-android-x64.apk -OutFile evidence/android.apk
+          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile evidence/windows.zip
+          Get-FileHash evidence/android.apk,evidence/windows.zip | ConvertTo-Json | Set-Content evidence/artifact-hashes.json
+          Expand-Archive evidence/windows.zip sender
+          Start-Process "$env:ANDROID_HOME/emulator/emulator.exe" -ArgumentList '-avd issue3393 -accel off -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 2048 -cores 2' -RedirectStandardOutput evidence/emulator.stdout.txt -RedirectStandardError evidence/emulator.stderr.txt
+          $adb = "$env:ANDROID_HOME/platform-tools/adb.exe"
+          $deadline = (Get-Date).AddMinutes(22)
+          do {
+            Start-Sleep 15
+            $boot = & $adb shell getprop sys.boot_completed 2>&1
+            "$(Get-Date -Format o) $boot" | Add-Content evidence/boot.txt
+          } until ($boot -match '^1' -or (Get-Date) -gt $deadline)
+          if ($boot -notmatch '^1') { throw 'Android15 did not boot before deadline' }
+          & $adb shell getprop | Set-Content evidence/android-properties.txt
+          & $adb install evidence/android.apk | Set-Content evidence/install.txt
+          & $adb forward tcp:53317 tcp:53317
+          & $adb shell monkey -p org.localsend.localsend_app 1 | Set-Content evidence/android-launch.txt
+          Start-Sleep 15
+          & $adb shell uiautomator dump /sdcard/window.xml
+          & $adb pull /sdcard/window.xml evidence/android-window.xml
+          & $adb shell screencap -p /sdcard/startup.png
+          & $adb pull /sdcard/startup.png evidence/android-startup.png
+          & $adb logcat -d | Set-Content evidence/android-logcat.txt
+          $exe = Get-ChildItem sender -Recurse -Filter localsend_app.exe | Select-Object -First 1
+          Start-Process $exe.FullName -ArgumentList (Join-Path $PWD 'evidence/artifact-hashes.json')
+          Start-Sleep 10
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $image = New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($image)
+          $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+          $image.Save((Join-Path $PWD 'evidence/windows-startup.png'))
+          Get-Process localsend_app | Select-Object Id,MainWindowTitle,MainWindowHandle | ConvertTo-Json | Set-Content evidence/windows-process.json
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: windows-exe-x86-64-unsigned
-          path: ${{ runner.temp }}\inno-result\LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.exe
-          if-no-files-found: error
+          name: issue3393-network-feasibility
+          path: evidence
+          retention-days: 14
