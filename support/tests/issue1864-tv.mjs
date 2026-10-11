@@ -24,6 +24,8 @@ async function snapshot(name) {
   fs.writeFileSync(`${out}/${name}.xml`, source.value);
   fs.writeFileSync(`${out}/${name}.png`, execFileSync('adb', ['exec-out', 'screencap', '-p']));
   fs.writeFileSync(`${out}/${name}-window.txt`, adb('shell', 'dumpsys', 'window', 'windows'));
+  fs.writeFileSync(`${out}/${name}-activity.txt`, adb('shell', 'dumpsys', 'activity', 'activities'));
+  execFileSync('tesseract', [`${out}/${name}.png`, `${out}/${name}-ocr`, '--psm', '11', 'tsv'], { timeout: 30000 });
   return fs.readFileSync(`${out}/${name}.xml`, 'utf8');
 }
 function nodes(xml) {
@@ -32,8 +34,15 @@ function nodes(xml) {
 async function mouseNode(label, name) {
   const xml = await snapshot(`${name}-before`);
   const node = nodes(xml).find(n => (n.text === label || n['content-desc'] === label || n['content-desc']?.startsWith(`${label}&#10;`)));
-  if (!node) throw new Error(`Missing visible semantic label ${label}; inspect ${name}-before.png`);
-  const bounds = [...node.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
+  let bounds;
+  if (node) bounds = [...node.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
+  else {
+    const words = fs.readFileSync(`${out}/${name}-before-ocr.tsv`, 'utf8').trim().split('\n').slice(1).map(line => line.split('\t'));
+    const hits = words.filter(w => w[11] === label && Number(w[10]) > 65);
+    if (hits.length !== 1) throw new Error(`Missing or ambiguous visible OCR label ${label}; inspect ${name}-before.png`);
+    const word = hits[0];
+    bounds = [Number(word[6]), Number(word[7]), Number(word[6]) + Number(word[8]), Number(word[7]) + Number(word[9])];
+  }
   const x = Math.round((bounds[0] + bounds[2]) / 2), y = Math.round((bounds[1] + bounds[3]) / 2);
   log({ type: 'mouse', action: 'tap', label, x, y });
   adb('shell', 'input', 'mouse', 'tap', String(x), String(y));
@@ -46,7 +55,7 @@ async function remote(key) {
 }
 async function record(name, action) {
   const path = `/sdcard/issue1864-recordings/${name}.mp4`;
-  const process = spawn('adb', ['shell', 'screenrecord', '--time-limit', '15', path]);
+  const process = spawn('adb', ['shell', 'screenrecord', '--time-limit', '45', path]);
   const finished = new Promise(resolve => process.once('exit', (code, signal) => resolve({ code, signal })));
   process.stderr.on('data', data => fs.appendFileSync(`${out}/${name}-screenrecord.log`, data));
   log({ type: 'recording', action: 'start', name });
@@ -79,9 +88,24 @@ await mouseNode('Media', 'open-media');
 await pause(3000);
 const media = await snapshot('media-initial');
 const photo = nodes(media).find(n => /^Image\d+,/.test(n['content-desc'] ?? ''));
-if (!photo) throw new Error('First seeded photo is absent; inspect media-initial.png');
-const photoLabel = photo['content-desc'].split(',')[0] + ',';
-const bounds = [...photo.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
+let bounds;
+if (photo) bounds = [...photo.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
+else {
+  // Sparse TV accessibility trees require an independent image observation.
+  // Locate only the seeded orange rectangle in this exact screenshot.
+  const [w, h] = execFileSync('identify', ['-format', '%w %h', `${out}/media-initial.png`], { encoding: 'utf8' }).split(' ').map(Number);
+  const rgb = execFileSync('convert', [`${out}/media-initial.png`, '-depth', '8', 'rgb:-'], { maxBuffer: 20000000 });
+  let left=w, top=h, right=0, bottom=0, count=0;
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
+    const p=(y*w+x)*3;
+    if (rgb[p]>210 && rgb[p+1]>130 && rgb[p+1]<185 && rgb[p+2]<25) {
+      left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);count++;
+    }
+  }
+  bounds=[left,top,right+1,bottom+1];
+  fs.writeFileSync(`${out}/photo-image-observation.json`, JSON.stringify({width:w,height:h,bounds,count},null,2));
+  if (count<10000 || right-left<100 || bottom-top<100) throw new Error('Seeded orange thumbnail not visibly located');
+}
 // The original picker's selection indicator occupies the thumbnail's top end.
 // Read the actual semantic bounds rather than substitute an accessibility click.
 const width = bounds[2] - bounds[0];
@@ -93,17 +117,37 @@ async function mousePhoto() {
 }
 await record('mouse-photo-control', mousePhoto);
 const selected = await snapshot('mouse-photo-selected');
-const selectedPhoto = nodes(selected).find(n => n['content-desc']?.startsWith(photoLabel));
-if (selectedPhoto?.selected !== 'true') throw new Error('Mouse control did not select the first photo');
+function selectedCount(xml, name) {
+  const labels = nodes(xml).map(n => n['content-desc'] || n.text || '');
+  if (labels.includes('Confirm')) return 0;
+  const label = labels.find(label => /^Confirm \(\d+\/999\)$/.test(label));
+  if (label) return Number(label.match(/\((\d+)/)[1]);
+  const words=fs.readFileSync(`${out}/${name}-ocr.tsv`,'utf8').trim().split('\n').slice(1).map(line=>line.split('\t')).filter(w=>Number(w[10])>40).map(w=>w[11]).join(' ');
+  const match=words.match(/Confirm\s*\((\d+)\s*\/\s*999\)/);
+  return match ? Number(match[1]) : /\bConfirm\b/.test(words) ? 0 : null;
+}
+if (selectedCount(selected,'mouse-photo-selected') !== 1) throw new Error('Mouse control did not visibly select one photo');
 await mousePhoto();
-await snapshot('media-reset-before-dpad');
-await record('media-dpad-original', async () => {
-  await remote(20); await remote(20); await remote(22); await remote(23);
-});
+const reset=await snapshot('media-reset-before-dpad');
+if (selectedCount(reset,'media-reset-before-dpad') !== 0) throw new Error('Mouse reset did not visibly return to zero');
+async function replay(name) {
+  await record(name,async()=>{
+    for(const [index,key] of [20,20,22,23].entries()) {
+      await remote(key); await snapshot(`${name}-key-${index+1}-${key}`);
+    }
+  });
+}
+await replay('media-dpad-original');
 const after = await snapshot('media-after-dpad');
+await remote(4);
+await mouseNode('Media','fresh-open-media');
+await pause(2000);
+await snapshot('fresh-media-before-dpad');
+await replay('fresh-media-dpad-original');
+await snapshot('fresh-media-after-dpad');
 fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
   mouseSelected: true,
-  selectedPhotosAfterDpad: nodes(after).filter(n => n['content-desc']?.startsWith('Image') && n.selected === 'true'),
+  selectedPhotosAfterDpad: nodes(after).filter(n => /Image\d+,/.test(n['content-desc'] ?? '') && n.selected === 'true'),
   focusedNodesAfterDpad: nodes(after).filter(n => n.focused === 'true'),
   boundary: 'Original 1.15.4 APK, supplementary compatible emulator; not physical Sony Android TV 10',
 }, null, 2));
