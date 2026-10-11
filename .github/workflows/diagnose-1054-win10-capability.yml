@@ -2,6 +2,11 @@ name: Diagnose 1054 Windows 10 capability
 
 on:
   workflow_dispatch:
+    inputs:
+      install_guest:
+        description: Install the verified Windows evaluation and observe official LocalSend after capability gates
+        type: boolean
+        default: false
   push:
     branches: [codex/bug-1054-reselection-diagnostic]
     paths: [.github/workflows/diagnose-1054-win10-capability.yml]
@@ -17,12 +22,13 @@ jobs:
   capability:
     if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
     runs-on: macos-15-intel
-    timeout-minutes: 35
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
       - name: Measure host and guest preparation gates
         env:
           EVIDENCE_DIR: ${{ runner.temp }}/issue1054-win10-capability
+          ISSUE1054_INSTALL_GUEST: ${{ inputs.install_guest && '1' || '0' }}
         run: bash support/diagnostics/1054-win10-capability.sh
       - name: Preserve every reached gate
         if: always()

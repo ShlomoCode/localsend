@@ -164,6 +164,12 @@ printf '%s  %s\n' 'ef7312733a9f5d7d51cfa04ac497671995674ca5e1058d5164d6028f0938d
 shasum -a 256 -c "$OUT/iso.expected.sha256" | tee "$OUT/iso-verification.txt"
 stat -f '%z' "$ISO" > "$OUT/iso-size.txt"
 [[ "$(cat "$OUT/iso-size.txt")" == 5550497792 ]]
+if [[ ${ISSUE1054_INSTALL_GUEST:-0} == 1 ]]; then
+  stage 'ordinary-evaluation-installation-and-official-app-window'
+  EVIDENCE_DIR="$OUT/install" CAPABILITY_DIR="$OUT" WINDOWS_ISO="$ISO" EVALUATION_TERMS_ACCEPTED=true \
+    bash support/diagnostics/1054-win10-install/run.sh
+  stage 'Windows-and-official-app-window-stage-returned; inspect original frames and guest records'
+fi
 # Keep tiny evidence rather than uploading or redistributing installation media.
 rm "$ISO"
 stage 'official-iso-verified; Windows installation/activation and actual-app workflow remain unexecuted'
