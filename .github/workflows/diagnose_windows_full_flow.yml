@@ -5,7 +5,7 @@ on:
       scenario:
         type: choice
         default: selection
-        options: [selection, windows-transfer-control, moderate-transfer-control, direct-tcp-gate]
+        options: [selection, windows-transfer-control, moderate-transfer-control, stream-moderate-control, direct-tcp-gate]
 jobs:
   direct-tcp-gate:
     if: inputs.scenario == 'direct-tcp-gate'
@@ -48,15 +48,19 @@ jobs:
           name: issue3556-storage-evidence
           path: evidence/
   windows-transfer-control:
-    if: inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control'
+    if: github.repository == 'ShlomoCode/localsend' && (inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control')
+    concurrency:
+      group: issue3556-owned-diagnostics
+      cancel-in-progress: false
     runs-on: windows-2022
     timeout-minutes: 45
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
-      BS_LOCAL_ID: issue3556-${{ github.run_id }}
+      BS_LOCAL_ID: issue3556-${{ github.run_id }}-${{ github.run_attempt }}
       SHARE_AFTER_CONTROL: '1'
-      MODERATE_TRANSFER_CONTROL: ${{ inputs.scenario == 'moderate-transfer-control' && '1' || '0' }}
+      MODERATE_TRANSFER_CONTROL: ${{ (inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control') && '1' || '0' }}
+      RELAY_TRANSPORT: ${{ inputs.scenario == 'stream-moderate-control' && 'stream' || 'legacy' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -80,6 +84,10 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Share callback syntax failed'}
           node --check support/cloud_transport/relay.mjs
           if($LASTEXITCODE -ne 0){throw 'Relay syntax failed'}
+          node --check support/diagnose_3556/stream-controls.mjs
+          if($LASTEXITCODE -ne 0){throw 'Transport controls syntax failed'}
+          node --check support/diagnose_3556/relay-stream-check.mjs
+          if($LASTEXITCODE -ne 0){throw 'Relay regression check syntax failed'}
           foreach($script in @('windows-helper-build.ps1','windows-transfer-step.ps1','windows_receiver.ps1')){
             $tokens=$null; $errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD "support/diagnose_3556/$script"),[ref]$tokens,[ref]$errors)
@@ -103,6 +111,12 @@ jobs:
           $env:RELAY_TOKEN=Get-Content (Join-Path $env:RUNNER_TEMP 'relay-token') -Raw
           Remove-Item (Join-Path $env:RUNNER_TEMP 'relay-token')
           ./support/diagnose_3556/windows-helper-build.ps1 -VideoSeedPath $seed -FfmpegPath $ffmpeg -FfprobePath $ffprobe
+      - name: Synthetic streaming route, isolation and finite request limit over five minutes
+        if: inputs.scenario == 'stream-moderate-control'
+        shell: pwsh
+        run: |
+          node support/diagnose_3556/relay-stream-check.mjs
+          exit $LASTEXITCODE
       - name: Small real Android sender and Windows receiver control
         shell: pwsh
         run: |

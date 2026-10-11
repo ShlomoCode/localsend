@@ -1,0 +1,9 @@
+# Issue 3556 diagnostic upload transport plan
+
+Implement an explicit `stream` helper transport mode while retaining `legacy` as the default. Android acknowledges peer open first, streams opaque upload bytes in one authenticated chunked binary POST per peer, and keeps reverse pull delivery independent. The runner pipes the request into that peer with backpressure; actual request EOF alone half-closes runner TCP output. Peer cancellation closes only its request/socket, with finite progress and absolute deadlines, per-peer byte/chunk/queue/timing metrics, and bounded shutdown.
+
+Gate stream mode on physical reverse challenge delivery before Android sends suffix/EOF. Only a bounded challenge `SocketTimeoutException` after an exact native prefix count/hash permits selecting a separately explicit `coalesced` binary POST mode with a bounded 1 MiB queue and a short finite flush deadline; record the failed discriminator first. No silence becomes TCP EOF. The fallback requires the same physical gates before real apps. Wrong challenge bytes, early EOF, hash or isolation failures stop the job.
+
+Required gates: existing 0/1/65,537-byte/hash/EOF cases; duplex prefix/challenge/suffix before upload EOF; slow runner with bounded queue/backpressure; cancel one peer while another completes; and a sparse open stream lasting more than 300 seconds under a finite configured request limit and progress watchdog. All runtime and syntax/build checks run in the one owned Windows Actions job and S20 Android 10 session.
+
+Only after every synthetic gate passes, run the exact 67,108,864-byte original 1.18.2 app send through the Android File picker, Windows Accept and real save, byte count/SHA verification, and Android Finished. Observe these results independently of HTTP upload completion, since TCP keepalive may remain open. Preserve original APKs, TLS and bytes. There is no 16 GB transfer in this job. Parent owns review, commit and dispatch.

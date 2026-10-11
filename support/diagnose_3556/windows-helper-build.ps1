@@ -97,7 +97,9 @@ if((Get-Item -LiteralPath $embeddedSeed).Length -ge 1048560) { throw 'Embedded M
 Invoke-Checked $ffmpeg @('-hide_banner','-loglevel','error','-i',$embeddedSeed,'-map','0:v:0','-frames:v','1','-f','null','NUL') 'Decode embedded video seed'
 # JSON serialization handles token escaping without placing the token on a process command line.
 $configPath=Join-Path $relayTemp 'assets/config.json'
-[IO.File]::WriteAllText($configPath,(ConvertTo-Json -Compress @{ endpoint=$RelayEndpoint; token=$env:RELAY_TOKEN }),[Text.UTF8Encoding]::new($false))
+$transport=if($env:RELAY_TRANSPORT){$env:RELAY_TRANSPORT}else{'legacy'}
+if($transport -notin @('legacy','stream','coalesced')){throw 'Invalid explicit diagnostic relay transport.'}
+[IO.File]::WriteAllText($configPath,(ConvertTo-Json -Compress @{ endpoint=$RelayEndpoint; token=$env:RELAY_TOKEN; transport=$transport }),[Text.UTF8Encoding]::new($false))
 try {
  $fixtureApk=Build-Helper (Join-Path $RepositoryRoot 'support/diagnose_3556/android') $fixtureTemp 29 'fixture3556-helper.apk' 'Issue3556 fixture helper'
  $relayApk=Build-Helper (Join-Path $RepositoryRoot 'support/cloud_transport/android') $relayTemp 26 'cloud-transport-helper.apk' 'Cloud diagnostic'
@@ -113,6 +115,7 @@ try {
   embeddedSeed=@{ bytes=(Get-Item $embeddedSeed).Length; sha256=(Get-FileHash $embeddedSeed -Algorithm SHA256).Hash }
   fixtureApk=@{ bytes=(Get-Item $fixtureApk).Length; sha256=(Get-FileHash $fixtureApk -Algorithm SHA256).Hash }
   cloudTransport='Private capability-bearing APK built and signature verified; path and hash excluded from evidence.'
+  diagnosticTransport=$transport
   fixtureGeneration='Existing MainActivity supplies legal MP4 free-box padding, including its 16GB fixture; this build does not change it.'
  }
  [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'build.json'),(ConvertTo-Json $safeReport -Depth 5),[Text.UTF8Encoding]::new($false))

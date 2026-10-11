@@ -79,7 +79,17 @@ try {
  }),[Text.UTF8Encoding]::new($false))
  $env:HELPER_APP=Upload-App -ApkPath $env:FIXTURE_3556_APK -Label 'fixture'
  $env:RELAY_APP=Upload-App -ApkPath $env:CLOUD_TRANSPORT_APK -Label 'relay'
- $env:BASELINE_APP=Upload-App -RemoteUrl $BaselineUrl -Label 'baseline'
+ if($env:RELAY_TRANSPORT -and $env:RELAY_TRANSPORT -ne 'legacy'){
+  $baselinePath=Join-Path $private 'original-1.18.2-arm64.apk'
+  Invoke-WebRequest $BaselineUrl -OutFile $baselinePath -TimeoutSec 120
+  $baselineHash=(Get-FileHash $baselinePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if($baselineHash -ne '82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3'){throw 'Original Android release APK SHA-256 differs; no session is created.'}
+  [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'original-android-apk.json'),(ConvertTo-Json @{
+   release='1.18.2'; architecture='arm64v8'; sha256=$baselineHash; bytes=(Get-Item $baselinePath).Length
+   provenance='Original downloaded release APK verified before private file upload; no build or modification'
+  }),[Text.UTF8Encoding]::new($false))
+  $env:BASELINE_APP=Upload-App -ApkPath $baselinePath -Label 'baseline'
+ }else{$env:BASELINE_APP=Upload-App -RemoteUrl $BaselineUrl -Label 'baseline'}
  $env:TRANSFER_EVIDENCE_DIRECTORY=$EvidenceDirectory
  & node (Join-Path $PSScriptRoot 'windows-transfer-control.mjs')
  $exitCode=$LASTEXITCODE

@@ -263,6 +263,12 @@ function Invoke-Accept {
  if($hasUiaAccept) { return $false }
  return Invoke-OcrAccept
 }
+function Get-DestinationCapacity([string]$Path) {
+ $root=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Path))
+ $drive=[IO.DriveInfo]::new($root)
+ if(-not $drive.IsReady){throw "Destination drive is not ready: $root"}
+ return @{utc=[DateTime]::UtcNow.ToString('o');path=$Path;driveRoot=$root;availableFreeBytes=$drive.AvailableFreeSpace;totalFreeBytes=$drive.TotalFreeSpace;totalBytes=$drive.TotalSize;driveFormat=$drive.DriveFormat}
+}
 try {
  $report.os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
  if($report.osArchitecture -ne 'X64') { throw 'This receiver requires a native x64 Windows runner.' }
@@ -284,6 +290,8 @@ try {
  $report.executable=@{ path=$exe.FullName; fileVersion=$exe.VersionInfo.FileVersion; bytes=$exe.Length; sha256=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash }
  $destination=[ReceiverNative]::Downloads(); [void][IO.Directory]::CreateDirectory($destination)
  $report.destination=@{ path=$destination; method='Normal release default Downloads destination; no Quick Save or profile changes' }
+ $report.destination.capacityBefore=Get-DestinationCapacity $destination
+ if($report.destination.capacityBefore.availableFreeBytes -lt $ExpectedBytes){throw 'Actual Windows destination drive cannot hold this controlled fixture.'}
  $beforePaths=@((Get-ChildItem $destination -File -Recurse).FullName)
  if(@(Get-Process -Name localsend_app,LocalSend -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Another LocalSend process exists; require an isolated hosted job.' }
  if(Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue) { throw 'Port 53317 is already in use.' }
@@ -316,6 +324,7 @@ try {
     if($hash -ne $ExpectedSha256.ToLowerInvariant()) { continue }
     Start-Sleep -Milliseconds 750
     if((Get-Item $file.FullName).Length -ne $ExpectedBytes -or (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { continue }
+    $report.destination.capacityAfterSave=Get-DestinationCapacity $file.FullName
     $copy=Join-Path $OutputDirectory ('saved-'+$file.Name); Copy-Item -LiteralPath $file.FullName -Destination $copy
     $report.savedFiles+=@{ path=$file.FullName; evidenceCopy=$copy; bytes=$file.Length; sha256=$hash; lastWriteUtc=$file.LastWriteTimeUtc.ToString('o') }
     Save-Snapshot 'saved-file-verified'; $report.status='saved-file-verified'; $report.stage='complete'

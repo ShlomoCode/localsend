@@ -7,11 +7,15 @@ import net from 'node:net';
 import {createHash} from 'node:crypto';
 import {relay} from '../cloud_transport/relay.mjs';
 import shareScenario from './share-scenario.mjs';
+import {runTransportControls} from './stream-controls.mjs';
 
 // Drive the unmodified apps. The moderate control measures throughput; neither size proves 16GB behavior.
 const controlBytes=process.env.MODERATE_TRANSFER_CONTROL==='1'?64*1024*1024:1048576;
 const controlName=controlBytes===1048576?'1 MiB':'64 MiB';
 const controlSizeLabel=controlBytes===1048576?'1.0 MB':'67.1 MB';
+const transportMode=process.env.RELAY_TRANSPORT||'legacy';
+assert(['legacy','stream','coalesced'].includes(transportMode),'Unknown diagnostic transport mode');
+if(transportMode!=='legacy')assert.equal(controlBytes,67108864,'Improved transport must run the exact 64 MiB original-app gate');
 const here=path.dirname(fileURLToPath(import.meta.url));
 const output=path.resolve(process.env.TRANSFER_EVIDENCE_DIRECTORY||'evidence/windows-transfer');
 const windowsOutput=path.join(output,'windows');
@@ -25,13 +29,13 @@ const save=(name,value)=>writeFileSync(path.join(output,name),typeof value==='st
 const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
  requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
- release:'1.18.2',scenario:'Actual '+controlName+' MP4 Android File/Recent selection, favorite registration/send, Windows UI Accept and saved hash',
+ release:'1.18.2',requestedTransport:transportMode,scenario:'Actual '+controlName+' MP4 Android File/Recent selection, favorite registration/send, Windows UI Accept and saved hash',
  boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','One control cannot establish sustained 16GB throughput or behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
 let sessionCreationAttempted=false;
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
-const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317});
+const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
 async function wd(method,url,body,attempt=0){
  const started=Date.now();
  let response;
@@ -165,6 +169,7 @@ async function stopPhysicalServer(){
  physicalTrace.push({utc:new Date().toISOString(),event:'temporary-control-server-closed'});
 }
 async function runPhysicalReverseControl(){
+ physicalCases.length=0;
  const expected=[0,1,65537].map(expectedControl),metricsBefore=r.status();
  physicalServer=net.createServer({allowHalfOpen:true},socket=>{
   physicalSockets.add(socket);const index=physicalCases.length;
@@ -213,7 +218,37 @@ async function runPhysicalReverseControl(){
  }
  report.physicalReverseControl={status:'passed',scope:'Transport proof only; temporary TCP server and native helper, not LocalSend app reproduction',
   expected,android:native,windows:physicalCases,metricsBefore,metricsAfter:r.status()};
- save('reverse-physical-controls.json',report.physicalReverseControl);save('reverse-physical-trace.json',physicalTrace);
+ save('reverse-physical-controls.json',report.physicalReverseControl);save('reverse-physical-controls-'+r.status().transport+'.json',report.physicalReverseControl);save('reverse-physical-trace.json',physicalTrace);
+}
+async function gateImprovedTransport(){
+ if(transportMode==='legacy')return;
+ report.transportControls=[];
+ try{
+  report.transportControls.push(await runTransportControls({r,snap,click,waitFor,labels,save,sleep,output}));
+ }catch(error){
+  // Fallback is authorized only for the discriminating prefix/challenge streaming-route failure.
+  const partial=error.nativeResult?.cases?.find(c=>c.case==='duplex'&&c.status==='failed');
+  const prefix=Buffer.alloc(32768);for(let i=0;i<prefix.length;i++)prefix[i]=(i*31+11)&255;
+  const prefixHash=createHash('sha256').update('TC1 duplex\n').update(prefix).digest('hex');
+  if(r.status().transport!=='stream'||error.failedPhase!=='duplex-challenge-before-eof'||error.nativeErrorType!=='SocketTimeoutException'
+    ||partial?.count!==32779||partial?.sha256!==prefixHash||partial?.receivedCount!==0)throw error;
+  report.streamRouteFailure={phase:error.failedPhase,errorType:error.nativeErrorType,prefixCount:partial.count,prefixSha256:partial.sha256,
+   reason:'Exact native prefix sent, then bounded challenge read timed out while source output remained open'};
+  save('stream-route-fallback.json',report.streamRouteFailure);
+  await click('Stop helper');await waitFor(s=>labels(s).includes('Stopped'),30000,'Streaming helper did not stop');
+  r.closePeers('Owned streaming route discriminator ended');
+  const deadline=Date.now()+10000;
+  while(r.status().peers||r.status().activeUploads){assert(Date.now()<deadline,'Owned stream peers failed bounded cleanup');await sleep(100);}
+  await sleep(1000);r.setTransport('coalesced');
+  await click('Relay from LocalSend (coalesced)');
+  await waitFor(s=>labels(s).some(v=>v.includes('Receiving LocalSend connections (coalesced) at localhost:53318')),30000,'Coalesced helper did not start');
+  await runPhysicalReverseControl();
+  report.transportControls.push(await runTransportControls({r,snap,click,waitFor,labels,save,sleep,output}));
+ }
+ report.selectedTransport=r.status().transport;
+ assert(report.transportControls.every(c=>c.status==='passed'),'All selected-mode synthetic gates must pass before original app');
+ save('transport-gate-results.json',{selectedTransport:report.selectedTransport,streamRouteFailure:report.streamRouteFailure,
+  controls:report.transportControls,physicalReverseControl:report.physicalReverseControl});
 }
 function visibleFavoriteFields(xml){
  return nodes(xml).filter(n=>{
@@ -310,8 +345,8 @@ try{
   platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2',
   'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],
   'appium:autoGrantPermissions':true,'appium:newCommandTimeout':1200,
-  'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,idleTimeout:600,projectName:'LocalSend bug sprint',
-   buildName:'issue3556-'+process.env.GITHUB_RUN_ID,sessionName:'issue3556-S20-to-Windows-1MiB-control',debug:true,video:true,networkLogs:false}},
+  'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,idleTimeout:300,projectName:'LocalSend bug sprint',
+   buildName:'issue3556-'+process.env.GITHUB_RUN_ID,sessionName:'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
   firstMatch:[{}]}});
  session=created.sessionId;assert(session,'No BrowserStack session ID');save('session.json',{session,device:report.device,android:report.android});
  await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});
@@ -325,16 +360,20 @@ try{
  const details=labels(staged).find(v=>v.includes('READY name='));
  const name=details.match(/READY name=([^\n]+)/)?.[1],bytes=Number(details.match(/\nbytes=(\d+)/)?.[1]);
  const sha256=details.match(/\nsha256=([a-f0-9]{64})/)?.[1];
+ const availableBytes=Number(details.match(/availableBytes=(\d+)/)?.[1]);
+ const totalBytes=Number(details.match(/totalBytes=(\d+)/)?.[1]);
  assert(name&&name.endsWith('.mp4')&&sha256,'Fixture identity missing');assert.equal(bytes,controlBytes,'Control must have the requested exact size');
+ assert(Number.isSafeInteger(availableBytes)&&availableBytes>=0&&Number.isSafeInteger(totalBytes)&&totalBytes>0,'Android fixture storage evidence missing');
  const mediaDurationMs=Number(details.match(/mediaDurationMs=(\d+)/)?.[1]);
  const decodedFrame=details.match(/decodedFrame=(\d+)x(\d+)/);
  assert(mediaDurationMs>0,'Fixture helper did not report positive video duration');
  assert(decodedFrame&&Number(decodedFrame[1])>0&&Number(decodedFrame[2])>0,'Fixture helper did not decode a video frame');
- report.fixture={name,bytes,sha256,mediaDurationMs,decodedFrame:{width:Number(decodedFrame[1]),height:Number(decodedFrame[2])},details};save('fixture.json',report.fixture);
+ report.fixture={name,bytes,sha256,availableBytes,totalBytes,mediaDurationMs,decodedFrame:{width:Number(decodedFrame[1]),height:Number(decodedFrame[2])},details};save('fixture.json',report.fixture);
  await activate('org.localsend.cloudtransport');await snap('relay-before');await click('Relay from LocalSend');
  await waitFor(s=>labels(s).some(v=>v.includes('Receiving LocalSend connections at localhost:53318')),30000,'Relay UI did not confirm reverse mode');
  await snap('relay-running');
  await runPhysicalReverseControl();
+ await gateImprovedTransport();
  // The temporary control server is fully closed before the real release binds TCP 53317.
  await startReceiver(report.fixture);
  await activate('org.localsend.localsend_app');
@@ -349,6 +388,7 @@ try{
  const selected=await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),60000,'LocalSend did not show Selection, one file, and '+controlSizeLabel);
  await snap('selected-one-file',selected);await manualInputComparison();await addFavorite();
  const metricsBefore=r.status();
+ r.beginMeasurement('Original '+controlName+' favorite-touch through Finished and verified save');
  // Favorite selection registers again and then startSession sends the already selected file.
  const favorite=await wd('POST',base()+'/element',{using:'-android uiautomator',value:'new UiSelector().descriptionContains("issue3556-cloud-receiver")'});
  const favoriteRect=await wd('GET',base()+'/element/'+elementId(favorite)+'/rect');
@@ -361,12 +401,13 @@ try{
   const anr=/isn.t responding|not responding/i.test(names.join('\n'));
   const finished=names.some(v=>v==='Finished'||v==='100, Finished'||v.startsWith('Finished\n'))&&!names.some(v=>v.includes('Finished with error'));
   await snap('transfer-'+String(report.observations.length).padStart(3,'0'),xml);
-  if(finished)androidFinished=true;
+  if(finished){androidFinished=true;report.uploadStateAtAndroidFinished??={utc:new Date(now).toISOString(),transport:r.status()};}
   const result=receiverResult();
   if(result?.status==='saved-file-verified'&&!verifiedAt){
    verifiedAt=Number.isFinite(Date.parse(result.finishedUtc))?Date.parse(result.finishedUtc):now;
    report.verifiedUtc=new Date(verifiedAt).toISOString();report.elapsedSendToVerifiedMs=verifiedAt-sendStart;
    report.verificationObservationLagMs=now-verifiedAt;
+   report.uploadStateAtVerifiedSave={observedUtc:new Date(now).toISOString(),transport:r.status(),destination:result.destination};
   }
   report.observations.push({utc:new Date(now).toISOString(),elapsedMs:now-sendStart,anr,androidFinished:finished,receiverStatus:result?.status,transport:r.status()});
   save('transfer-progress.json',report);
@@ -391,6 +432,13 @@ try{
     windowsToAndroidBytes:metricsAfter.fromSender-metricsBefore.fromSender,
     androidToWindowsBytes:metricsAfter.fromDevice-metricsBefore.fromDevice,
     scope:'Transport counts include TLS and protocol traffic. Elapsed time starts immediately before the favorite touch and includes registration, approval, network and saving; observation lag is recorded separately. '+controlName+' only.'};
+   // A registration socket may be reused for upload; the explicit window excludes synthetic traffic even on an existing peer.
+   const realPeers=Object.entries(metricsAfter.measurement.peerChunks);
+   report.transport.realPeers=realPeers.map(([id,chunks])=>{
+    const upload=chunks.fromDevice,span=upload.lastElapsedMs-upload.firstElapsedMs;
+    return {id,...chunks,upload:r.status().uploads[id]||null,uploadSpanMs:span,wireBytesPerSecond:span>0?upload.bytes/(span/1000):null};
+   });
+   report.transport.wireRateScope='Per-peer relay byte rate covers only the explicit favorite-touch measurement window, including reused registration sockets, and excludes all earlier synthetic traffic. It includes TLS/protocol overhead and differs from file payload / send-to-verified-save elapsed time.';
    await snap('android-finished',xml);break;
   }
   await sleep(5000);
@@ -398,9 +446,19 @@ try{
  assert.equal(report.status,'passed','Ten-minute app-to-app control did not reach Android Finished and verified Windows save');
  report.controlSizeBytes=bytes;
  report.endToEndBytesPerSecond=bytes/(report.elapsedSendToVerifiedMs/1000);
+ if(transportMode!=='legacy'){
+  await activate('org.localsend.cloudtransport');await click('Show transport status');
+  const helperXml=await snap('helper-after-real-transfer');
+  const helperStatus=labels(helperXml).find(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n'));
+  assert(helperStatus,'Real-transfer helper metrics not observed');
+  report.realTransferHelper=JSON.parse(helperStatus.slice('HELPER_TRANSPORT_STATUS\n'.length));
+  assert.equal(report.realTransferHelper.transport,report.selectedTransport);
+  assert(Object.values(report.realTransferHelper.peers).every(p=>p.peakQueuedBytes<=(report.selectedTransport==='stream'?65536:1048576)),'Helper real-transfer buffer exceeded configured bound');
+  save('helper-after-real-transfer.json',report.realTransferHelper);
+ }
  save('app-control-results.json',report);
  console.log(controlName+' Android-to-Windows app control passed; no 16GB claim.');
- if(process.env.SHARE_AFTER_CONTROL==='1'&&controlBytes===1048576){
+ if(transportMode==='legacy'&&process.env.SHARE_AFTER_CONTROL==='1'&&controlBytes===1048576){
   report.shareScenario=await shareScenario({session,wd,output});
  }
 }catch(error){
