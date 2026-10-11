@@ -497,7 +497,9 @@ if($FallbackControl) {
   $after | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-sockets-after.json"
   $new=@($after | Where-Object {$before.LocalPort -notcontains $_.LocalPort})
   $new | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-new-sockets.json"
-  if(@($new | Where-Object {$_.LocalAddress -eq "10.0.20.3" -and $_.RemoteAddress -eq "10.0.20.3"}).Count -lt 1) {throw "Actual reverse transfer did not use source address 10.0.20.3; no new-IP claim"}
+  # Register from Add Favorite may open the same pooled connection used by the actual transfer.
+  # Preserve before/after ports; require the actual .3 source route together with the fresh receive/hash below.
+  if(@($after | Where-Object {$_.LocalAddress -eq "10.0.20.3" -and $_.RemoteAddress -eq "10.0.20.3"}).Count -lt 1) {throw "Actual reverse transfer did not use source address 10.0.20.3; no new-IP claim"}
   AcceptControl "sender" $prefix "$EvidenceDirectory/sender-received" $oldPaths
   [Desktop2381]::SetForegroundWindow($apps[$from].MainWindowHandle) | Out-Null
   Screenshot "$prefix-sender-completed"
@@ -512,9 +514,10 @@ if($FallbackControl) {
   Start-Sleep -Seconds 3
   Screenshot "$prefix-send-requested"
   $after=@(ControlSockets "sender" $port)
+  $after | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-sockets-after.json"
   $new=@($after | Where-Object {$before.LocalPort -notcontains $_.LocalPort})
   $new | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-new-sockets.json"
-  if(@($new | Where-Object {$_.RemoteAddress -eq "10.0.20.3"}).Count -lt 1) {throw "Actual control transfer did not select the new address"}
+  if(@($after | Where-Object {$_.RemoteAddress -eq "10.0.20.3"}).Count -lt 1) {throw "Actual control transfer did not select the new address"}
   AcceptControl $to $prefix $destination $oldPaths
   [Desktop2381]::SetForegroundWindow($apps.sender.MainWindowHandle) | Out-Null
   Screenshot "$prefix-sender-completed"
