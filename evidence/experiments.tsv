@@ -15,3 +15,4 @@ E12	observedAcceptbounds	5-file directory→send→Options→save	saved5, byte-e
 E13	5000 count prepared	5-file prerequisite	Home tooltip covers fixture label; no selection, 5000neverstarted	38107209480	no
 E14	5000 ordinaryfiles	real selection→send→Options	Optionsvisible3.765s, RSSHWM1170088kB, noOSOOM; Acceptmiss causedzero saved	38107406174	yes-options-only
 E15	normalizedreceiverapproval	5000Options→realAccept→save	Options5.483s;507savedin180s;continuedprogressatteardown;saveintervalshort	38107835899	yes-partial-transfer
+E16	external sender; ordinary 2CPU/2GiB receiver guest	5-file control then 5000 Options/input/save	active; no artifacts retained yet; observation pending	38108292337	pending

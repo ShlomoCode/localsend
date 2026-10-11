@@ -17,7 +17,10 @@ disk_type=$(findmnt -n -o FSTYPE --target "$vm_disk_root")
 test "$disk_type" != tmpfs
 test "$disk_type" != ramfs
 disk_available=$(df -B1 --output=avail "$vm_disk_root" | tail -n 1 | tr -d " ")
-test "$disk_available" -ge 30000000000
+# qcow2 allocates physical storage as the guest writes. The 24 GiB virtual
+# capacity below is not an upfront reservation on the standard hosted runner.
+# This guest installs only desktop/runtime packages, not a source build.
+test "$disk_available" -ge 8000000000
 curl --fail --location --retry 3 --max-time 300 -o "$vm_disk_root/ubuntu.img" https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 sha256sum "$vm_disk_root/ubuntu.img" > evidence/vm/cloud-image-sha256.txt
 { qemu-system-x86_64 --version; ls -l /dev/kvm || true; } > evidence/vm/hypervisor.txt
@@ -54,6 +57,7 @@ cleanup() {
   printf '{"stage":"%s","exit_code":%s,"classification":"%s"}\n' "$vm_pair_stage" "$scenario_exit" "$classification" > evidence/setup-result.json
   timeout 20 ssh "${opts[@]}" probe@127.0.0.1 "sudo journalctl -k --no-pager; free -m; ip addr; ip route; ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm" > evidence/vm/kernel-final.txt 2>&1 || true
   timeout 90 scp -r "${copy_opts[@]}" probe@127.0.0.1:/home/probe/evidence evidence/vm/guest || true
+  { df -B1 "$vm_disk_root"; du -B1 "$vm_disk_root"/*; } > evidence/vm/disk-final.txt 2>&1 || true
   if test -f "$vm_root/qemu.pid"; then sudo kill "$(cat "$vm_root/qemu.pid")" || true; fi
   sudo ip link delete tap2414 || true
 }

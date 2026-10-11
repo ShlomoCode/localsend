@@ -1,0 +1,7 @@
+autoreview findings: 1
+[P2] P2: Match the disk-space guard to the selected hosted runner
+support/diagnostics/2414-vm-pair.sh:20
+The VM workflow selects the standard `ubuntu-24.04` runner, but this guard requires 30 GB free after installing packages, without any disk reclamation step. GitHub documents only 14 GB of available SSD storage for this runner class, so supported runner allocations fail here before guest boot or either GUI case. This is an infrastructure failure, not reproduction evidence. The 24 GiB qcow2 virtual capacity does not require that much physical space upfront; size the guard for the experiment's actual disk consumption, reclaim sufficient space, or select a runner that guarantees the requirement. See [GitHub's runner specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+overall: patch is incorrect (0.9)
+The VM experiment requires more free disk space than its selected runner guarantees and can terminate before producing application evidence. No additional concrete defects in the paired-build controls or GUI interactions were established from the bundle.
