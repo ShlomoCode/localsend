@@ -303,6 +303,7 @@ async function gateImprovedTransport(){
   r.closePeers('Owned streaming route discriminator ended');
   const deadline=Date.now()+10000;
   while(r.status().peers||r.status().activeUploads){assert(Date.now()<deadline,'Owned stream peers failed bounded cleanup');await sleep(100);}
+  r.retireStoppedHelper('Observed stream helper stopped before coalesced startup');
   r.setTransport('coalesced');
   await click('Relay from LocalSend (coalesced)');
   report.fallbackHelperState=await waitHelperState({ready:true,mode:'coalesced',previousInstance,name:'coalesced-ready'});
@@ -439,6 +440,7 @@ try{
   await activate('org.localsend.cloudtransport');await click('Stop helper');await waitHelperState({ready:false,name:'moderate-stopped'});
   r.closePeers('Moderate completion before fresh large instance');
   const resetEnd=Math.min(Date.now()+10000,phaseDeadline);while(r.status().peers||r.status().activeUploads){assert(Date.now()<resetEnd,'Moderate peers failed cleanup');await sleep(100);}
+  r.retireStoppedHelper('Observed moderate helper stopped before fresh large startup');
   r.setPeerLimit(90*minute);
   await click(r.status().transport==='coalesced'?'Relay from LocalSend (coalesced large)':'Relay from LocalSend (large)');
   report.largeHelperState=await waitHelperState({ready:true,mode:r.status().transport,previousInstance:(report.fallbackHelperState||report.initialHelperState).instance,name:'fresh-ready'});

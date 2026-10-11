@@ -22,7 +22,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     if(measurement){const measuredPeer=measurement.peerChunks[id]??={fromSender:emptyChunks(),fromDevice:emptyChunks()};counters.push(measurement.chunks[direction],measuredPeer[direction]);}
     for(const c of counters){c.count++;c.bytes+=length;c.min=c.min===null?length:Math.min(c.min,length);c.max=Math.max(c.max,length);c.firstElapsedMs??=now;c.lastElapsedMs=now;}
   }
-  const status=()=>({...metrics,transport,queued,peak,peers:peers.size,activeUploads:activeUploads.size,traceDropped,
+  const status=()=>({...metrics,transport,queued,peak,peers:peers.size,activeUploads:activeUploads.size,pendingPull:waiter!==null,traceDropped,
     uploadLimits:{progressTimeoutMs:uploadProgressTimeoutMs,absoluteTimeoutMs:uploadAbsoluteTimeoutMs,binaryLimit,peerAbsoluteTimeoutMs},
     earliestPeerExpiryUtc:peerDeadlines.size?new Date(Math.min(...peerDeadlines.values())).toISOString():null,
     uploads:structuredClone(uploads),chunks:structuredClone(chunks),peerChunks:structuredClone(peerChunks),measurement:structuredClone(measurement)});
@@ -54,7 +54,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(401);res.end();return;}
     res.setHeader('content-type','application/json');
     if(req.method==='GET' && req.url==='/pull') {
-      if(waiter){res.writeHead(409);res.end();return;}
+      if(waiter){record('poll-conflict',null,{status:409});res.writeHead(409);res.end();return;}
       if(events.length){res.end(JSON.stringify(dequeue()));return;}
       const w={res,timer:setTimeout(()=>{record('poll-renewal');if(waiter===w)waiter=null;res.end('[]');},15000)};
       waiter=w;res.on('close',()=>{if(waiter===w){clearTimeout(w.timer);waiter=null;}});return;
@@ -135,6 +135,14 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     setPeerLimit:milliseconds=>{if(![15*60000,90*60000].includes(milliseconds)||peers.size||activeUploads.size)throw new Error('Peer limit change requires empty owned peers');peerAbsoluteTimeoutMs=milliseconds;record('logical-peer-limit',null,{milliseconds});},
     beginMeasurement:label=>{measurement={label,startedElapsedMs:Number(process.hrtime.bigint()-started)/1e6,chunks:{fromSender:emptyChunks(),fromDevice:emptyChunks()},peerChunks:Object.create(null)};},
     closePeers,
+    retireStoppedHelper:reason=>{
+      if(peers.size||activeUploads.size)throw new Error('Stopped helper retirement requires empty owned peers and uploads');
+      // A tunnel may retain the old HTTP poll after Android disconnects. Retire only at the observed stopped-helper boundary.
+      const retired=waiter;waiter=null;
+      if(retired){clearTimeout(retired.timer);retired.res.end('[]');}
+      const discardedEvents=events.length;events.length=0;queued=0;
+      record('stopped-helper-retired',null,{reason,endedPendingPull:retired!==null,discardedEvents});
+    },
     setTransport:mode=>{if(!['legacy','stream','coalesced'].includes(mode)||peers.size||activeUploads.size)throw new Error('Transport change requires no live peers');transport=mode;record('transport-mode',null,{mode});},
     start:async()=>{if(!reverseTargetPort)await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
     stop:async()=>{record('relay-stop');if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}closePeers('Owned relay stopped');server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),...(reverseTargetPort?[]:[new Promise(r=>tcp.close(r))])]);}};

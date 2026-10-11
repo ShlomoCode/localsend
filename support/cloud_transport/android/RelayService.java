@@ -237,7 +237,8 @@ public final class RelayService extends Service {
     try{
       if(pull&&(!running||activeService!=this))throw new IOException("Owned pull cancelled before request");
       if(body!=null){byte[] data=body.getBytes("UTF-8");c.setDoOutput(true);c.setFixedLengthStreamingMode(data.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream out=c.getOutputStream()){out.write(data);}}
-      if(c.getResponseCode()!=200)throw new IOException("Relay response "+c.getResponseCode());
+      int responseCode=c.getResponseCode();
+      if(responseCode!=200){trace("http-response:"+method+":"+path+":"+responseCode,"-");throw new IOException("Relay response "+responseCode);}
       return read(c.getInputStream());
     }catch(Exception e){trace("http-failure:"+method+":"+path+":"+e.getClass().getSimpleName(),"-");throw e;}
     finally{if(pull&&pullConnection==c)pullConnection=null;c.disconnect();}
