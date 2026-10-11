@@ -46,6 +46,10 @@ jobs:
           Copy-Item lib/pages/web_send_page.dart "$evidence/baseline-source.dart"
           flutter pub get
           if ($LASTEXITCODE -ne 0) { throw 'Historical dependency resolution failed' }
+          # gal 2.3.0 requires this system import library with the hosted runner SDK.
+          # Apply the same build prerequisite to both sides; navigation differs only by the guard.
+          Add-Content windows/CMakeLists.txt 'target_link_libraries(gal_plugin PRIVATE windowsapp)'
+          git diff -- windows/CMakeLists.txt > "$evidence/build-compatibility.diff"
           Copy-Item pubspec.lock "$evidence/resolved-pubspec.lock"
           flutter build windows --release
           if ($LASTEXITCODE -ne 0) { throw 'Historical baseline build failed' }
@@ -87,3 +91,10 @@ jobs:
           path: |
             ${{ runner.temp }}/evidence2277
             !${{ runner.temp }}/evidence2277/**/*-app/**
+      - uses: actions/upload-artifact@v6
+        if: ${{ inputs.causal && always() }}
+        with:
+          name: matched-builds2277
+          path: |
+            ${{ runner.temp }}/baseline2277
+            ${{ runner.temp }}/guard2277
