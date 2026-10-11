@@ -34,7 +34,7 @@ def snapshot(name):
 
 def click(label, name, optional=False):
     rows = snapshot(name)
-    hits = [r for r in rows if r['text'].strip().lower() == label.lower()]
+    hits = [r for r in rows if r['text'].strip().strip('.,:').lower() == label.lower()]
     if app_bounds and label in ('Send', 'File', 'Linux'):
         left, top, width, height = app_bounds
         hits = [r for r in hits if left <= int(r['left']) <= left + width and top <= int(r['top']) <= top + height]
@@ -113,6 +113,8 @@ else:
             command('xdotool', 'key', 'ctrl+l')
             command('xdotool', 'type', '--clearmodifiers', '--delay', '30', str(fixture / filename))
             command('xdotool', 'key', 'Return')
+            time.sleep(2)
+            click('OK', case + '-confirm-picker', optional=True)
             time.sleep(5)
             rows = snapshot(case + '-selection')
             log('selection', case=case, visible_text=' '.join(r['text'] for r in rows if r['text']))
