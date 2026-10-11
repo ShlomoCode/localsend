@@ -3,6 +3,8 @@
 set -euo pipefail
 mkdir -p evidence/host-peer /home/runner/issue1310-peer/bundle /home/runner/Downloads
 peerroot=/home/runner/issue1310-peer
+test ! -e /home/runner/control.txt
+test ! -e /home/runner/Downloads/control.txt
 sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgl1-mesa-dri network-manager at-spi2-core
 sudo systemctl start NetworkManager
 { systemctl status NetworkManager --no-pager; busctl --system list; } > evidence/host-peer/desktop-services.txt
@@ -18,9 +20,14 @@ openbox > evidence/host-peer/openbox.log 2>&1 &
 receiver=$!
 trap 'kill "$receiver" 2>/dev/null || true' EXIT
 for n in $(seq 1 120); do
-  if test -f /home/runner/Downloads/control.txt; then
-    sha256sum /home/runner/Downloads/control.txt > evidence/host-peer/saved-sha256.txt
-    cp /home/runner/Downloads/control.txt evidence/host-peer/saved-control.txt
+  saved_path=
+  for candidate in /home/runner/Downloads/control.txt /home/runner/control.txt; do
+    if test -f "$candidate"; then saved_path=$candidate; break; fi
+  done
+  if test -n "$saved_path"; then
+    printf '%s\n' "$saved_path" > evidence/host-peer/actual-save-path.txt
+    sha256sum "$saved_path" > evidence/host-peer/saved-sha256.txt
+    cp "$saved_path" evidence/host-peer/saved-control.txt
     printf 'Issue 1310 real file selection control\n' > evidence/host-peer/expected-control.txt
     cmp evidence/host-peer/expected-control.txt evidence/host-peer/saved-control.txt
     sha256sum evidence/host-peer/expected-control.txt evidence/host-peer/saved-control.txt > evidence/host-peer/content-comparison.txt
@@ -32,7 +39,9 @@ for n in $(seq 1 120); do
   # explicit unique frame and update the OCR input to these current pixels.
   scrot "evidence/host-peer/frame-$n.png"
   cp "evidence/host-peer/frame-$n.png" evidence/host-peer/current.png
-  tesseract evidence/host-peer/current.png evidence/host-peer/current --psm 11 tsv >/dev/null 2>&1
+  convert evidence/host-peer/current.png -colorspace Gray -resize 200% -threshold 70% -negate evidence/host-peer/current-ocr.png
+  tesseract evidence/host-peer/current-ocr.png evidence/host-peer/current-ocr --psm 11 tsv >/dev/null 2>&1
+  awk -F '\t' -v OFS='\t' 'NR>1{for(i=7;i<=10;i++)$i=$i/2}{print}' evidence/host-peer/current-ocr.tsv > evidence/host-peer/current.tsv
   confirm=$(awk -F '\t' '$12=="Confirm" && $11>60 {print int($7+$9/2),int($8+$10/2);exit}' evidence/host-peer/current.tsv)
   if test -n "$confirm"; then
     cp evidence/host-peer/current.png evidence/host-peer/first-launch-confirm.png
