@@ -19,7 +19,7 @@ jobs:
       - name: Prepare released applications and desktop
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool scrot python3-pyatspi at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0
+          sudo apt-get install -y xvfb openbox xdotool scrot python3-pyatspi at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgl1-mesa-dri
           mkdir -p evidence released
           curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o released/linux.tar.gz
           curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-android-x64.apk -o released/android.apk

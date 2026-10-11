@@ -5,7 +5,10 @@ gsettings set org.gnome.desktop.interface toolkit-accessibility true
 openbox > evidence/openbox.log 2>&1 &
 desktop_app=$(find released -type f -name localsend_app | head -n1)
 "$desktop_app" > evidence/desktop.log 2>&1 &
+desktop_pid=$!
 sleep 8
+kill -0 "$desktop_pid"
+xdotool search --name LocalSend > evidence/desktop-windows.txt
 scrot evidence/desktop-initial.png
 /usr/bin/python3 support/diagnostics/2007-desktop-tree.py > evidence/desktop-initial-tree.txt
 adb install released/android.apk
