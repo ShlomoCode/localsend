@@ -1,0 +1,54 @@
+name: Issue 1591 iOS byte proxy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue1591-ios-proxy
+  cancel-in-progress: false
+jobs:
+  helper:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build the source-defined helper
+        shell: bash
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
+          XCODEGEN_VERSION: 2.44.1
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/support/diagnostics/issue1591-ios-proxy"
+          OUT="$RUNNER_TEMP/issue1591-ios-proxy"
+          mkdir -p "$OUT" "$RUNNER_TEMP/xcodegen"
+          xcodebuild -version | tee "$OUT/xcode-version.txt"
+          sw_vers > "$OUT/runner-os.txt"
+          printf 'source_commit=%s\nxcodegen_version=%s\n' "$GITHUB_SHA" "$XCODEGEN_VERSION" > "$OUT/provenance.txt"
+          URL="https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          printf 'xcodegen_url=%s\n' "$URL" >> "$OUT/provenance.txt"
+          curl --fail --location --retry 3 "$URL" -o "$OUT/xcodegen.zip"
+          shasum -a 256 "$OUT/xcodegen.zip" >> "$OUT/provenance.txt"
+          unzip -q "$OUT/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          GENERATOR="$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen"
+          "$GENERATOR" --version | tee "$OUT/xcodegen-version.txt"
+          "$GENERATOR" generate --spec "$ROOT/project.yml" --project "$ROOT"
+          xcodebuild -project "$ROOT/Issue1591ByteProxy.xcodeproj" -scheme Issue1591ByteProxy \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/proxy-derived" CODE_SIGNING_ALLOWED=NO build \
+            2>&1 | tee "$OUT/build.log"
+          mkdir -p "$OUT/Payload"
+          cp -R "$RUNNER_TEMP/proxy-derived/Build/Products/Release-iphoneos/Issue1591ByteProxy.app" "$OUT/Payload/"
+          (cd "$OUT" && zip -qr Issue1591ByteProxy.ipa Payload)
+          shasum -a 256 "$OUT/Issue1591ByteProxy.ipa" >> "$OUT/provenance.txt"
+          cp "$ROOT/project.yml" "$ROOT/Info.plist" "$OUT/"
+          rm -rf "$OUT/Payload" "$OUT/xcodegen.zip"
+      - name: Retain helper and build provenance
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: issue1591-ios-proxy-${{ github.run_id }}
+          path: ${{ runner.temp }}/issue1591-ios-proxy/
+          if-no-files-found: error
+          retention-days: 14

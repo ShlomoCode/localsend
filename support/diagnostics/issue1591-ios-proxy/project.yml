@@ -1,0 +1,29 @@
+name: Issue1591ByteProxy
+options:
+  minimumXcodeGenVersion: 2.44.1
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGNING_ALLOWED: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  Issue1591ByteProxy:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.shlomocode.diagnostics.issue1591.byteproxy
+        PRODUCT_NAME: Issue1591ByteProxy
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+schemes:
+  Issue1591ByteProxy:
+    build:
+      targets:
+        Issue1591ByteProxy: all
