@@ -14,8 +14,12 @@ sha256sum /tmp/localsend2230.deb | tee "$evidence/linux-release-sha256.txt"
 apt-get install -y /tmp/localsend2230.deb
 dpkg-query -W localsend | tee "$evidence/linux-package.txt"
 id tester >/dev/null 2>&1 || useradd --create-home --shell /bin/bash tester
-executable=$(dpkg -L localsend | grep '/localsend_app$' | head -1)
-test -x "$executable"
+executable=''
+while IFS= read -r candidate; do
+  if test -f "$candidate" && test -x "$candidate"; then executable=$candidate; break; fi
+done < <(dpkg -L localsend | grep '/localsend_app$')
+test -n "$executable"
+test -f "$executable" && test -x "$executable"
 # A supported portable preferences file is the only writable file in the release directory.
 touch "$(dirname "$executable")/settings.json"
 chown tester:tester "$(dirname "$executable")/settings.json"
