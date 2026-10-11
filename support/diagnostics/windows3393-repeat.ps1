@@ -27,5 +27,5 @@ if(-not $selected.Success){
 }
 & "$PSScriptRoot/windows3393-ui.ps1" -Action snapshot -Label "windows-$Case-file-selected"
 }
-& "$PSScriptRoot/windows3393-ui.ps1" -Action click -X 246 -Y 266 -Label "windows-$Case-favorites"
-& "$PSScriptRoot/windows3393-ui.ps1" -Action click -X 145 -Y 225 -Label "windows-$Case-start-send"
+& "$PSScriptRoot/windows3393-ui.ps1" -Action click -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseControlSequence
+& "$PSScriptRoot/windows3393-ui.ps1" -Action click -X 145 -Y 225 -Label "windows-$Case-start-send" -RequireForeground -UseControlSequence
