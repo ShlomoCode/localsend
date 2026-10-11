@@ -50,7 +50,7 @@ def metrics(pid,stop,path):
             except FileNotFoundError: f.write('PROCESS_EXIT\n'); break
             stop.wait(.25)
 results=[]
-for count in [5,5000]:
+for count in [5]:
     case='files-'+str(count); fixture=Path('/tmp/issue2414')/case; fixture.mkdir(parents=True,exist_ok=True)
     content=b'LocalSend issue 2414 fixed ordinary file content\n'
     for n in range(count): (fixture/('file-%05d.txt'%n)).write_bytes(content)
@@ -63,17 +63,17 @@ for count in [5,5000]:
             (bundle/'settings.json').write_text(json.dumps(settings))
             log=(out/(case+'-'+role+'.log')).open('w')
             command=[str(bundle/'localsend_app')]
-            if role=='Sender2414': command=['sudo','-E','ip','netns','exec','issue2414-sender','runuser','-u',pwd.getpwuid(os.getuid()).pw_name,'--preserve-environment','--','dbus-run-session','--']+command
+            if role=='Receiver2414': command=['sudo','-E','ip','netns','exec','issue2414-sender','runuser','-u',pwd.getpwuid(os.getuid()).pw_name,'--preserve-environment','--','dbus-run-session','--']+command
             p=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
             time.sleep(1)
             actual_pid=int(run('pgrep','-f','^'+str(bundle/'localsend_app')+'$').split()[0])
-            apps.append((p,window(actual_pid)))
-        receiver,rwin=apps[0]; sender,swin=apps[1]
-        stop=threading.Event(); sampler=threading.Thread(target=metrics,args=(receiver.pid,stop,out/(case+'-metrics.jsonl'))); sampler.start()
+            apps.append((p,window(actual_pid),actual_pid))
+        receiver,rwin,rpid=apps[0]; sender,swin,spid=apps[1]
+        stop=threading.Event(); sampler=threading.Thread(target=metrics,args=(rpid,stop,out/(case+'-metrics.jsonl'))); sampler.start()
         focus(swin); screen(case+'-send-observed'); click(96,188); screen(case+'-folder-observed'); click(514,150)
         locate('Recent',case+'-picker-ready',10); chooser=run('xdotool','search','--onlyvisible','--name','Choose Directory').split()[-1]; focus(chooser);
         (out/(case+'-namespace-fixture.txt')).write_text(run('sudo','ip','netns','exec','issue2414-sender','find',str(fixture.parent),'-maxdepth','2','-type','f'))
-        with (out/(case+'-picker-tree-before.txt')).open('w') as tree: subprocess.run(['timeout','10','/usr/bin/python3','support/diagnostics/2414-desktop-tree.py'],stdout=tree,stderr=subprocess.STDOUT); screen(case+'-picker'); run('xdotool','key','ctrl+l'); run('xdotool','type','--clearmodifiers',str(fixture.parent)+'/'); run('xdotool','key','Return'); time.sleep(2)
+        screen(case+'-picker'); run('xdotool','key','ctrl+l'); time.sleep(.5); screen(case+'-picker-location-entry'); run('xdotool','type','--clearmodifiers',str(fixture.parent)+'/'); screen(case+'-picker-location-typed'); run('xdotool','key','Return'); time.sleep(2)
         with (out/(case+'-picker-tree-after.txt')).open('w') as tree: subprocess.run(['timeout','10','/usr/bin/python3','support/diagnostics/2414-desktop-tree.py'],stdout=tree,stderr=subprocess.STDOUT)
         click(*locate(case,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(1048,772); time.sleep(1)
         # GTK directory picker enters the directory; select its Open button.
@@ -102,7 +102,8 @@ for count in [5,5000]:
         if count==5 and not result.get('content_valid'): raise RuntimeError('Small directory control failed; do not interpret large case')
     finally:
         if 'stop' in locals(): stop.set()
-        for p,w in apps:
+        for p,w,pid in apps:
+            subprocess.run(['kill',str(pid)],check=False)
             p.terminate()
             try:p.wait(timeout=5)
             except subprocess.TimeoutExpired:p.kill()

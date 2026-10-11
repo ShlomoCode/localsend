@@ -7,3 +7,4 @@ E04	actual Folder control	5-file real picker	picker opened and path typed; GTK c
 E05	picker readiness and Return	5-file actual directory control	chooser remains in fixture dir with no subdirs and disabled Open; no app send	38104458684	no
 E06	parent directory navigation	5-file chooser row selection	chooser stays Recent with location entry; fixture row not reached	38104757974	no
 E07	chooser native inspection	focus and namespace file listing	all five fixture files visible; GTK remains Recent; AT-SPI query times out	38105053406	no
+E08	separate sender D-Bus session	5-file directory control	Recent remains; later receiver foreground; selection never proven	38105399609	no
