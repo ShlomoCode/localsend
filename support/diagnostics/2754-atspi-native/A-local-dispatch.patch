@@ -1,8 +1,8 @@
 diff --git a/atk-adaptor/adaptors/socket-adaptor.c b/atk-adaptor/adaptors/socket-adaptor.c
-index 91a5f103..1dd5fd09 100644
+index 91a5f103..ea6f18dd 100644
 --- a/atk-adaptor/adaptors/socket-adaptor.c
 +++ b/atk-adaptor/adaptors/socket-adaptor.c
-@@ -24,13 +24,208 @@
+@@ -24,13 +24,224 @@
  
  #include <atk/atk.h>
  #include <droute/droute.h>
@@ -198,10 +198,26 @@ index 91a5f103..1dd5fd09 100644
 +  reason = "local";
 +  g_object_unref (plug);
 +out:
-+  g_debug ("socket geometry method=%d coord=%d id=%s result=%s target=%p thread=%p x=%d y=%d w=%d h=%d",
-+           method, coord_type, id ? id : "(none)", reason, (void *) target,
-+           (void *) g_thread_self (), x ? *x : -1, y ? *y : -1,
-+           width ? *width : -1, height ? *height : -1);
++  {
++    const gchar *target_type = target ? G_OBJECT_TYPE_NAME (target) : "(none)";
++    const gchar *parent_type = "not-queried";
++    AtkObject *parent = NULL;
++    /* Only the native socket's inherited parent getter is queried, after the
++     * public geometry call, while target is held on its owner thread. Never
++     * introduce get_parent callbacks for a custom socket subtype. */
++    if (target && g_str_equal (reason, "local") && G_OBJECT_TYPE (target) == ATK_TYPE_SOCKET)
++      {
++        parent = atk_object_get_parent (ATK_OBJECT (target));
++        parent_type = parent ? G_OBJECT_TYPE_NAME (parent) : "(none)";
++      }
++    /* plug may have lost its external owner during dispatch. Print its pointer
++     * value only: no dereference after releasing our temporary plug ref. */
++    g_debug ("socket geometry method=%d coord=%d id=%s result=%s plug=%p target=%p target-type=%s parent=%p parent-type=%s thread=%p x=%d y=%d w=%d h=%d",
++             method, coord_type, id ? id : "(none)", reason, (void *) plug,
++             (void *) target, target_type, (void *) parent, parent_type,
++             (void *) g_thread_self (), x ? *x : -1, y ? *y : -1,
++             width ? *width : -1, height ? *height : -1);
++  }
 +  g_clear_object (&target);
 +  g_free (copy);
 +  g_free (id);
@@ -211,7 +227,7 @@ index 91a5f103..1dd5fd09 100644
  static DBusMessage *
  new_socket_call_message (AtkComponent *component, const char *member)
  {
-@@ -54,13 +249,14 @@ new_socket_call_message (AtkComponent *component, const char *member)
+@@ -54,13 +265,14 @@ new_socket_call_message (AtkComponent *component, const char *member)
        g_free (bus_parent);
        return message;
      }
@@ -227,7 +243,7 @@ index 91a5f103..1dd5fd09 100644
    DBusMessage *reply;
    dbus_uint32_t coord_type_dbus = coord_type;
    DBusError error;
-@@ -68,6 +264,11 @@ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gin
+@@ -68,6 +280,11 @@ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gin
    DBusMessageIter iter, iter_struct;
    dbus_int32_t tmp;
  
@@ -239,7 +255,7 @@ index 91a5f103..1dd5fd09 100644
    dbus_error_init (&error);
    dbus_message_append_args (message, DBUS_TYPE_UINT32, &coord_type_dbus, DBUS_TYPE_INVALID);
    reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
-@@ -111,12 +312,17 @@ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gin
+@@ -111,12 +328,17 @@ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gin
  static void
  atspi_plug_component_get_position (AtkComponent *component, gint *x, gint *y, AtkCoordType coord_type)
  {
@@ -258,7 +274,7 @@ index 91a5f103..1dd5fd09 100644
    dbus_error_init (&error);
    dbus_message_append_args (message, DBUS_TYPE_UINT32, &coord_type_dbus, DBUS_TYPE_INVALID);
    reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
-@@ -149,11 +355,16 @@ atspi_plug_component_get_size (AtkComponent *component,
+@@ -149,11 +371,16 @@ atspi_plug_component_get_size (AtkComponent *component,
                                 gint *width,
                                 gint *height)
  {
@@ -276,7 +292,7 @@ index 91a5f103..1dd5fd09 100644
    dbus_error_init (&error);
    reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
                                                       message, -1, &error);
-@@ -193,8 +404,11 @@ impl_Embedded (DBusConnection *bus,
+@@ -193,8 +420,11 @@ impl_Embedded (DBusConnection *bus,
      {
        return droute_invalid_arguments_error (message);
      }
@@ -288,7 +304,7 @@ index 91a5f103..1dd5fd09 100644
  
    if (ATK_IS_COMPONENT (object))
      {
-@@ -221,6 +435,7 @@ static DRouteMethod methods[] = {
+@@ -221,6 +451,7 @@ static DRouteMethod methods[] = {
  void
  spi_initialize_socket (DRoutePath *path)
  {
@@ -297,7 +313,7 @@ index 91a5f103..1dd5fd09 100644
                               ATSPI_DBUS_INTERFACE_SOCKET,
                               spi_org_a11y_atspi_Socket,
 diff --git a/tests/at-spi2-atk/meson.build b/tests/at-spi2-atk/meson.build
-index 4caf5d92..b8011262 100644
+index 4caf5d92..e82f742a 100644
 --- a/tests/at-spi2-atk/meson.build
 +++ b/tests/at-spi2-atk/meson.build
 @@ -80,3 +80,13 @@ foreach t: tests
@@ -307,8 +323,8 @@ index 4caf5d92..b8011262 100644
 +
 +# Experimental private tests; do not install the binary or expose test APIs.
 +socket_local_experiment = executable('socket-local-experiment',
-+  'socket-local-experiment.c',
-+  include_directories: [root_inc, include_directories('../../atk-adaptor')],
++  ['socket-local-experiment.c', introspection_generated[1]],
++  include_directories: [root_inc, include_directories('../../atk-adaptor'), include_directories('../../xml')],
 +  dependencies: [glib_dep, gobject_dep, libatk_dep, libdbus_dep,
 +                 libdroute_dep, libatk_bridge_dep, atspi_dep])
 +test('socket-local-experiment', find_program('dbus-run-session'),

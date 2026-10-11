@@ -20,7 +20,7 @@ dpkg-query -W > "$NATIVE_OUTPUT/packages.tsv"
 git rev-parse HEAD > "$NATIVE_OUTPUT/diagnostic-head.txt"
 cp "$NATIVE_ASSETS/A-local-dispatch.patch" "$NATIVE_OUTPUT/"
 sha256sum "$NATIVE_ASSETS/A-local-dispatch.patch" "$NATIVE_ASSETS/stock-self-query.c" > "$NATIVE_OUTPUT/diagnostic-assets.sha256"
-printf '%s  %s\n' 5b78c54b04dcdff9e3c778cca118bac901ed5e6f65ed84b2b16f63262379a0d2 "$NATIVE_ASSETS/A-local-dispatch.patch" | sha256sum -c -
+printf '%s  %s\n' e09038c6105700a89f14facbb423ae77a26c226111def4934f338cad2334df07 "$NATIVE_ASSETS/A-local-dispatch.patch" | sha256sum -c -
 for NATIVE_PACKAGE in libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64; do
   test "$(dpkg-query -W -f='${Version}' "$NATIVE_PACKAGE")" = 2.52.0-1build1
 done
@@ -61,7 +61,9 @@ meson setup "$NATIVE_WORK/build-A" "$NATIVE_CANDIDATE" -Ddocs=false -Dintrospect
 meson compile -C "$NATIVE_WORK/build-A" socket-local-experiment 2>&1 | tee "$NATIVE_OUTPUT/build-A.log"
 
 NATIVE_STOCK_BUILD="$NATIVE_WORK/build-stock"
-cc -std=c99 -I"$NATIVE_STOCK" -I"$NATIVE_STOCK_BUILD" -I"$NATIVE_STOCK/atk-adaptor" -I"$NATIVE_STOCK/droute" \
+test -f "$NATIVE_STOCK_BUILD/xml/introspection.h"
+sha256sum "$NATIVE_STOCK_BUILD/xml/introspection.h" > "$NATIVE_OUTPUT/stock-introspection-header.sha256"
+cc -std=c99 -I"$NATIVE_STOCK" -I"$NATIVE_STOCK_BUILD" -I"$NATIVE_STOCK_BUILD/xml" -I"$NATIVE_STOCK/atk-adaptor" -I"$NATIVE_STOCK/droute" \
   "$NATIVE_ASSETS/stock-self-query.c" \
   -L"$NATIVE_STOCK_BUILD/atk-adaptor" -L"$NATIVE_STOCK_BUILD/atspi" -L"$NATIVE_STOCK_BUILD/atk" \
   -Wl,-rpath,"$NATIVE_STOCK_BUILD/atk-adaptor" -Wl,-rpath,"$NATIVE_STOCK_BUILD/atspi" -Wl,-rpath,"$NATIVE_STOCK_BUILD/atk" \
