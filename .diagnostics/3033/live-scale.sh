@@ -17,7 +17,7 @@ for scale in 1 1.5 2; do
   cat "$root/trial-$trial-scale-$scale-state.json"
   ps -eo pid,ppid,lstart,comm,args | grep -E "localsend|bwrap" | grep -v grep
   printf "LAUNCHER_ALIVE="; if kill -0 "$launcher" 2>/dev/null; then printf "yes\n"; else printf "no\n"; fi
-  grep -E "wl_output.*scale|logical_size|buffer_scale|create_immed|wl_surface.*attach|wl_display.*error|Protocol error" "$log" | tail -45 || true
+  grep -E "wl_output.*scale|logical_size|buffer_scale|create_immed|wl_display.*error|Protocol error" "$log" | tail -45 || true
   printf "PROTOCOL_ERROR_COUNT="; grep -c "wl_display.*error\|Protocol error" "$log" || true
   cp "$log" "$root/trial-$trial-scale-$scale.log"
   gnome-screenshot -f "$root/trial-$trial-scale-$scale.png"
