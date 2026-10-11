@@ -20,17 +20,22 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Prepare release and emulators
         run: |
-          mkdir -p evidence
+          export ANDROID_USER_HOME="$RUNNER_TEMP/issue2051-android"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p evidence "$ANDROID_AVD_HOME"
+          trap 'adb devices > evidence/adb-devices.txt; tail -100 evidence/*-emulator.log || true' EXIT
           curl -fL https://github.com/localsend/localsend/releases/download/v1.16.1/LocalSend-1.16.1-android-x64.apk -o /tmp/localsend.apk
           sha256sum /tmp/localsend.apk > evidence/artifact-sha256.txt
           sudo chmod 666 /dev/kvm
           sdkmanager "platform-tools" "emulator" "system-images;android-30;google_apis;x86_64"
           echo no | avdmanager create avd -n receiver -k "system-images;android-30;google_apis;x86_64" --force
           echo no | avdmanager create avd -n sender -k "system-images;android-30;google_apis;x86_64" --force
+          avdmanager list avd > evidence/avds.txt
+          find "$ANDROID_USER_HOME" -maxdepth 3 -type f > evidence/avd-files.txt
           "$ANDROID_HOME/emulator/emulator" -avd receiver -port 5554 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 2048 -no-snapshot > evidence/receiver-emulator.log 2>&1 &
           "$ANDROID_HOME/emulator/emulator" -avd sender -port 5556 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 2048 -no-snapshot > evidence/sender-emulator.log 2>&1 &
           for serial in emulator-5554 emulator-5556; do
-            adb -s "$serial" wait-for-device
+            timeout 180 adb -s "$serial" wait-for-device
             timeout 180 bash -c "until adb -s $serial shell getprop sys.boot_completed | tr -d \"\\r\" | grep -q 1; do sleep 2; done"
             adb -s "$serial" shell input keyevent 82
             adb -s "$serial" install /tmp/localsend.apk
