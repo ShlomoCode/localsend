@@ -12,6 +12,19 @@ click_word() {
   local wid=$1 label=$2 name=$3 count point
   capture_window "$wid" "$name"
   count=$(awk -F '\t' -v text="$label" '$12==text && $11>=30 {n++} END {print n+0}' "evidence/$name.tsv")
+  if [[ "$count" == 0 && "$label" == Accept ]]; then
+    # Full-window OCR misses the actual white Accept label in the retained
+    # 1.11.1 approval view. Use exact OCR of its observed label rectangle.
+    [[ $(identify -format '%wx%h' "evidence/$name.png") == 1000x700 ]]
+    convert "evidence/$name.png" -crop 80x30+548+635 -resize 400% -negate "evidence/$name-label.png"
+    tesseract "evidence/$name-label.png" "evidence/$name-label" --psm 7 >/dev/null 2>&1
+    if [[ $(tr -d '[:space:]' < "evidence/$name-label.txt") == Accept ]]; then
+      printf '%s window=%s click=585,650 exact-cropped-label=Accept\n' "$(date --iso-8601=ns)" "$wid" >> evidence/input-timings.txt
+      xdotool mousemove --window "$wid" 585 650 click 1
+      sleep 2
+      return
+    fi
+  fi
   if [[ "$count" != 1 ]]; then
     printf 'HARNESS_CONTROL_NOT_UNIQUE %s count=%s\n' "$label" "$count" >> evidence/harness-errors.txt
     return 1
@@ -34,6 +47,23 @@ select_fixture() {
   xdotool key --clearmodifiers Return
   sleep 4
   capture_window "$sender_wid" "$label-file-selected"
+}
+restart_receiver() {
+  local label=$1
+  flatpak kill org.localsend.localsend_app
+  sleep 2
+  flatpak run --user org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
+  sleep 8
+  receiver_pid=$(pgrep -u mint -n -x localsend_app || pgrep -u mint -n -x localsend)
+  receiver_wid=''
+  for wid in $(xdotool search --onlyvisible --name '^LocalSend$'); do
+    [[ "$wid" == "$sender_wid" ]] || receiver_wid=$wid
+  done
+  test -n "$receiver_wid"
+  xdotool windowmove "$receiver_wid" 0 0
+  xdotool windowsize "$receiver_wid" 1000 700
+  sudo cat "/proc/$receiver_pid/root/.flatpak-info" > "evidence/$label-process-flatpak-info.txt"
+  printf '%s\n' "$receiver_pid" > "evidence/$label-receiver-pid.txt"
 }
 send_and_approve() {
   local filename=$1 label=$2 alias_word=$3 record_pid

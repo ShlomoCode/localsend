@@ -90,8 +90,52 @@ receiver_alias=$(jq -r 'to_entries[]|select(.key|endswith("ls_alias"))|.value' "
 test -n "$receiver_alias"
 receiver_alias_word=${receiver_alias%% *}
 source /home/mint/transfer.sh
+test ! -e /home/mint/Downloads/733-control.txt
 select_fixture 733-control.txt normal
 send_and_approve 733-control.txt normal "$receiver_alias_word"
 sudo cmp /home/sender/Downloads/733-control.txt /home/mint/Downloads/733-control.txt
 sudo sha256sum /home/mint/Downloads/733-control.txt > evidence/normal-host-sha256.txt
 echo ACTUAL_TWO_APP_NORMAL_DOWNLOADS_HASH_PASS > evidence/result.txt
+click_word "$receiver_wid" Done normal-receiver-done
+observe_history normal
+# Same live receiver first: a supported override changes future launches;
+# observe its actual currently mounted destination without assuming effect.
+sudo flatpak override --nofilesystem=xdg-download org.localsend.localsend_app
+sudo flatpak override --show org.localsend.localsend_app > evidence/system-revocation.txt
+flatpak override --user --show org.localsend.localsend_app > evidence/user-revocation.txt
+sudo cp /home/sender/Downloads/733-control.txt /home/sender/Downloads/733-live-denial.txt
+sudo chown sender:sender /home/sender/Downloads/733-live-denial.txt
+test ! -e /home/mint/Downloads/733-live-denial.txt
+restart_sender
+select_fixture 733-live-denial.txt live-revocation
+send_and_approve 733-live-denial.txt live-revocation "$receiver_alias_word"
+sudo cmp /home/sender/Downloads/733-live-denial.txt /home/mint/Downloads/733-live-denial.txt
+echo LIVE_RECEIVER_EXISTING_MOUNT_CONTROL_PASS >> evidence/result.txt
+click_word "$receiver_wid" Done live-revocation-receiver-done
+observe_history live-revocation
+for repetition in 1 2 3; do
+  label="revoked-$repetition"
+  filename="733-revoked-$repetition.txt"
+  sudo cp /home/sender/Downloads/733-control.txt "/home/sender/Downloads/$filename"
+  sudo chown sender:sender "/home/sender/Downloads/$filename"
+  test ! -e "/home/mint/Downloads/$filename"
+  restart_receiver "$label"
+  restart_sender
+  select_fixture "$filename" "$label"
+  send_and_approve "$filename" "$label" "$receiver_alias_word"
+  click_word "$receiver_wid" Done "$label-receiver-done"
+  observe_history "$label"
+  sudo find /home/mint /run/user -name "$filename" -exec sha256sum {} \; > "evidence/$label-host-search-while-alive.txt" 2>&1
+  flatpak kill org.localsend.localsend_app
+  sleep 2
+  sudo find /home/mint /run/user -name "$filename" -exec sha256sum {} \; > "evidence/$label-host-search-after-exit.txt" 2>&1
+  if [[ -e "/home/mint/Downloads/$filename" ]]; then
+    echo "$label HOST_FILE_PRESENT_REVIEW_UI_AND_HASH" >> evidence/result.txt
+  else
+    echo "$label HOST_FILE_ABSENT_REVIEW_ACTUAL_UI_PRIVATE_FILE_AND_HISTORY" >> evidence/result.txt
+  fi
+  # The next receiver restart helper handles an already stopped instance.
+  flatpak run --user org.localsend.localsend_app >> evidence/receiver.log 2>&1 &
+  sleep 8
+  receiver_wid=$(xdotool search --onlyvisible --name '^LocalSend$' | grep -v "^$sender_wid$" | head -n 1)
+done
