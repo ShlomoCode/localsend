@@ -40,7 +40,7 @@ capture 03-downloads-drag-overlay
 button false
 sleep 8
 capture 04-downloads-drop
-move 910 126
+move 600 705
 button true
 button false
 sleep 2
@@ -67,7 +67,7 @@ capture 06-documents-drag-overlay
 button false
 sleep 8
 capture 07-documents-drop
-move 920 100
+move 600 705
 button true
 button false
 sleep 2
@@ -93,3 +93,30 @@ for repetition in 2 3; do
   button false
   capture "repeat-$repetition-result"
 done
+# Supported file chooser path: same Documents file, without filesystem overrides.
+move 140 285
+button true
+button false
+sleep 2
+capture 08-empty-send
+move 380 225
+button true
+button false
+sleep 4
+capture 09-file-chooser
+key ctrl-l
+for character in / h o m e / p r o b e / D o c u m e n t s / 5 1 3 - c o n t r o l . t x t; do
+  case "$character" in
+    /) code=slash;;
+    -) code=minus;;
+    .) code=dot;;
+    D) code=shift-d;;
+    *) code=$character;;
+  esac
+  qevent "{\"execute\":\"human-monitor-command\",\"arguments\":{\"command-line\":\"sendkey $code 50\"}}"
+done
+capture 10-chooser-path
+key ret
+sleep 5
+capture 11-documents-chooser-result
+/home/runner/513-vm/ssh 'export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus; flatpak run --command=sh org.localsend.localsend_app -c '\''ls -l /home/probe/Documents/513-control.txt; find /run/user/$(id -u)/doc -maxdepth 3 -type f -name 513-control.txt -exec sha256sum {} \; '\''' > evidence/vm/chooser-access-control.txt 2>&1
