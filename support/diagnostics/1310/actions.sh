@@ -13,10 +13,14 @@ click_label() {
   point=$(awk -F '\t' -v label="$word" '$12==label && $11>35 {print int($7+$9/2), int($8+$10/2);exit}' "evidence/$snap.tsv")
   if test -z "$point" && test "$word" = Send; then
     # In the reviewed desktop sidebar, Send is exactly between the adjacent
-    # Receive and Settings rows. Anchor to both observed labels if sparse OCR
-    # misses the short grey Send label; never guess from a screen coordinate.
+    # Receive and Settings rows. Anchor to the observed labels if sparse OCR
+    # misses the short grey Send label. The reviewed sidebar has 44px rows.
     point=$(awk -F '\t' '$12=="Receive" && $11>60{rx=$7+$9/2;ry=$8+$10/2} $12=="Settings" && $11>60{sx=$7+$9/2;sy=$8+$10/2} END{if(ry && sy>ry && sy-ry<120) print int((rx+sx)/2),int((ry+sy)/2)}' "evidence/$snap.tsv")
     if test -n "$point"; then printf 'Send anchored between observed Receive and Settings rows\n' >> evidence/input.log; fi
+    if test -z "$point"; then
+      point=$(awk -F '\t' '$12=="Settings" && $11>60 && $7<350 {print int($7+$9/2),int($8+$10/2-44);exit}' "evidence/$snap.tsv")
+      if test -n "$point"; then printf 'Send anchored one reviewed sidebar row above observed Settings label\n' >> evidence/input.log; fi
+    fi
   fi
   test -n "$point"
   printf '%s %s %s\n' "$(date --iso-8601=ns)" "$word" "$point" >> evidence/input.log
