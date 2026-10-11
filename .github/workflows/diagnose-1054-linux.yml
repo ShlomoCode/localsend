@@ -1,0 +1,56 @@
+name: Diagnose1054Linux file edit
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-1054-reselection-diagnostic]
+    paths: [.github/workflows/diagnose-1054-linux.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-1054-linux
+  cancel-in-progress: false
+jobs:
+  real-app-pair:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate cloud-only harness syntax
+        run: |
+          bash -n support/diagnostics/1054-linux.sh
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          path = Path('support/diagnostics/1054-ui.py')
+          ast.parse(path.read_text(), filename=str(path))
+          PY
+      - name: Download immutable unmodified c1ce source build
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: 11700370485
+          run-id: 38132747719
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: source-artifact
+      - name: Install ordinary Linux desktop runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr imagemagick iproute2 dbus-x11 libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0t64 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 jq
+      - name: Run initial, edited and reselected ordinary transfers twice
+        run: bash support/diagnostics/1054-linux.sh
+      - name: Restore evidence access
+        if: always()
+        run: |
+          if test -d evidence; then
+            sudo chown -R "$(id -u):$(id -g)" evidence
+            sudo chmod -R u+rwX evidence
+          fi
+      - name: Retain original pixels, logs, provenance and received bytes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue1054-linux-pair-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
