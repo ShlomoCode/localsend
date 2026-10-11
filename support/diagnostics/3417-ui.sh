@@ -16,16 +16,39 @@ qevent() {
   { printf '%s\n' '{"execute":"qmp_capabilities"}'; sleep .1; printf '%s\n' "$1"; sleep .1; } | timeout 2 sudo socat - UNIX-CONNECT:"$qmp" >> evidence/vm/input-qmp.log
 }
 key() { qevent "{\"execute\":\"human-monitor-command\",\"arguments\":{\"command-line\":\"sendkey $1\"}}"; sleep 2; }
-guest() { "$vm/ssh" "env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WAYLAND_DISPLAY=wayland-0 $*"; }
-tree() { guest python3 /home/probe/3417-accessibility.py > "evidence/vm/$1-tree.json" 2>&1; }
+guest() { timeout 25 "$vm/ssh" "env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WAYLAND_DISPLAY=wayland-0 $*"; }
+tree() { guest timeout 20 python3 /home/probe/3417-accessibility.py dump > "evidence/vm/$1-tree.json" 2>&1; }
 action() {
   local label=$1; shift
-  # Labels are shell quoted by callers; output records exact acted element/bounds.
-  guest python3 /home/probe/3417-accessibility.py "$@" > "evidence/vm/$label-action.txt" 2>&1
+  local status=0
+  # Conditional callers suppress errexit; preserve the actual guest status.
+  guest timeout 20 python3 /home/probe/3417-accessibility.py "$@" > "evidence/vm/$label-action.txt" 2>&1 || status=$?
+  if [[ "$status" != 0 ]]; then return "$status"; fi
   sleep 3
+  return 0
+}
+visual_row() {
+  local label=$1 mode=$2 geometry
+  capture "$label"
+  [[ "$(identify -format '%wx%h' "evidence/vm/$label.png")" == 1280x800 ]]
+  guest timeout 20 python3 /home/probe/3417-accessibility.py bounds > "evidence/vm/$label-bounds.json"
+  geometry=$(node support/diagnostics/3417-visual.cjs crop "evidence/vm/$label-bounds.json")
+  convert "evidence/vm/$label.png" -crop "$geometry" +repage "evidence/vm/$label-dialog.png"
+  timeout 15 tesseract "evidence/vm/$label-dialog.png" "evidence/vm/$label-ocr" --psm 6 tsv > "evidence/vm/$label-ocr.log" 2>&1
+  node support/diagnostics/3417-visual.cjs "$mode" "evidence/vm/$label-bounds.json" \
+    "evidence/vm/$label-ocr.tsv" evidence/vm/installed-appnames.json "evidence/vm/$label-visual.json" > "evidence/vm/$label-point.txt"
+}
+click_row() {
+  local label=$1 x y kind extra
+  read -r x y kind extra < "evidence/vm/$label-point.txt"
+  [[ -z "$extra" && "$x" =~ ^[0-9]+$ && "$y" =~ ^[0-9]+$ && "$x" -lt 1280 && "$y" -lt 800 ]]
+  qevent "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":$((x * 32767 / 1279))}},{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":$((y * 32767 / 799))}}]}}"
+  qevent '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
+  qevent '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
+  sleep 1
 }
 identity() {
-  "$vm/ssh" 'sudo bash -s' > "evidence/vm/$1-live-identity.txt" <<'GUEST'
+  timeout 25 "$vm/ssh" 'sudo bash -s' > "evidence/vm/$1-live-identity.txt" <<'GUEST'
 date -u
 flatpak ps --columns=instance,pid,application,runtime
 for pid in $(pgrep -x localsend || true); do
@@ -35,18 +58,36 @@ for pid in $(pgrep -x localsend || true); do
   base64 -w0 "/proc/$pid/cmdline"; echo
   sha256sum "/proc/$pid/exe"
   cat "/proc/$pid/mountinfo"
-  find "/proc/$pid/root/run/user/1000/doc" -maxdepth 5 -type f -name '3417-control.txt' -exec sha256sum {} \; 2>&1 || true
+  # Document-portal FUSE access belongs to the app user, including observation
+  # through that live app's mount namespace.
+  runuser -u probe -- find "/proc/$pid/root/run/user/1000/doc" -maxdepth 5 -type f -name '3417-control.txt' -exec sha256sum {} \; 2>&1 || true
 done
-flatpak documents
 sudo auditctl -s
 sudo ausearch -k localsend3417 --raw
 GUEST
+  guest flatpak documents > "evidence/vm/$1-probe-documents.txt" 2>&1
 }
+record_pid=
 record() {
-  ffmpeg -y -loglevel warning -f x11grab -video_size 1280x800 -framerate 15 -i :99.0 -t 30 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "evidence/vm/$1.mp4" > "evidence/vm/$1-record.log" 2>&1 &
+  # The UI step is bounded at 300 seconds; stop only after its final state.
+  ffmpeg -y -loglevel warning -f x11grab -video_size 1280x800 -framerate 15 -i :99.0 -t 330 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "evidence/vm/$1.mp4" > "evidence/vm/$1-record.log" 2>&1 &
   record_pid=$!
   sleep 1
 }
+finish() {
+  local status=$?
+  trap - EXIT
+  capture 99-final-state || true
+  if [[ -n "$record_pid" ]]; then
+    kill -INT "$record_pid" 2>/dev/null || true
+    if ! timeout 15 tail --pid="$record_pid" -f /dev/null; then kill -KILL "$record_pid" 2>/dev/null || true; fi
+    wait "$record_pid" || true
+  fi
+  exit "$status"
+}
+trap finish EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 capture 00-desktop
 key esc
 guest "nohup flatpak run org.localsend.localsend_app /home/probe/Downloads/3417-control.txt >/home/probe/3417-control.log 2>&1 </dev/null &"
@@ -70,30 +111,49 @@ record running-open-with
 key shift-f10
 capture 04-context-menu
 tree 04-context-menu
-if ! action 05-open-with "'Open With…'" "'Open With...'" "'Open With'" "'Open With Other Application…'" "'Open With Other Application...'"; then
+if ! action 05-open-with menu "'Open With…'"; then
   capture 05-open-with-unavailable
   echo 'HARNESS_OPEN_WITH_ACTION_UNAVAILABLE' > evidence/vm/verdict.txt
-  wait "$record_pid"
   exit 2
 fi
 capture 05-open-with-dialog
 tree 05-open-with-dialog
-# Older and newer GNOME labels are retained as separately observed action candidates.
-action 06-all-apps "'View All Applications'" "'Show All Applications'" "'Show All'" || true
-capture 06-all-apps
-tree 06-all-apps
-if ! action 07-localsend "'LocalSend'"; then
-  capture 07-localsend-unavailable
-  echo 'HARNESS_LOCALSEND_SELECTION_UNAVAILABLE' > evidence/vm/verdict.txt
-  wait "$record_pid"
-  exit 2
+action 05-dialog-gate dialog
+# Nautilus 46.4 exposes other apps directly in Open File; it has no reported
+# View All Applications step. This is an explicitly recorded sequence variant.
+printf 'Nautilus 46.4 native variant: Open With -> Open File; no View All Applications control.\n' > evidence/vm/native-sequence-boundary.txt
+guest timeout 20 python3 /home/probe/3417-accessibility.py appnames > evidence/vm/installed-appnames.json
+visual_row 06-visible-app row
+click_row 06-visible-app
+action 06-focused-dialog-gate dialog
+action 06-selected-app-open-ready button "'Open'"
+if [[ "$(awk '{print $3}' evidence/vm/06-visible-app-point.txt)" == focus ]]; then
+  # A single click on the observed app row focuses GtkTreeView. Its supported
+  # name search selects/scrolls without activation. Never press Return here.
+  search_start=$(date +%s%N)
+  qevent '{"execute":"human-monitor-command","arguments":{"command-line":"sendkey ctrl-f"}}'
+  for letter in l o c a l s e n d; do
+    qevent "{\"execute\":\"human-monitor-command\",\"arguments\":{\"command-line\":\"sendkey $letter\"}}"
+  done
+  # Keep the whole input sequence below the popup's five-second lifetime.
+  # Continuous original video, not a blocking mid-search capture, retains it.
+  [[ $(( $(date +%s%N) - search_start )) -lt 4000000000 ]]
+  qevent '{"execute":"human-monitor-command","arguments":{"command-line":"sendkey esc"}}'
+  [[ $(( $(date +%s%N) - search_start )) -lt 5000000000 ]]
+  sleep 1
 fi
+# Re-observe a unique rendered LocalSend row inside the still-open native
+# dialog, then click once. AT-SPI cannot expose this GTK backend's app rows.
+visual_row 07-localsend target
+click_row 07-localsend
 capture 07-localsend-selected
 tree 07-localsend-selected
-action 08-open "'Open'" "'Select'" || key ret
+action 07-still-open-dialog-gate dialog
+action 07-open-ready button "'Open'"
+printf 'REVIEW_REQUIRED: visible LocalSend selection, native dialog/search state, and single-click input. No selected-row accessibility assertion is available.\n' > evidence/vm/07-selection-review-required.txt
+action 08-open chooser "'Open'"
 sleep 7
 capture 08-running-open-with-result
 tree 08-running-open-with-result
 identity 08-running-open-with-result
-wait "$record_pid"
-printf 'RUNNING_OPEN_WITH_REACHED_REVIEW_SCREENSHOTS_AND_ARGV\n' > evidence/vm/verdict.txt
+printf 'NATIVE_ACTIONS_REACHED_FINAL_OBSERVATION_REVIEW_RAW_UI_AND_ARGV\n' > evidence/vm/verdict.txt

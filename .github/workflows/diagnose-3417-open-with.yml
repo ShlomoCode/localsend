@@ -29,10 +29,12 @@ jobs:
         run: |
           set -euo pipefail
           Xvfb :99 -screen 0 1280x800x24 -ac > evidence/vm/record-xvfb.log 2>&1 &
+          echo "$!" > /home/runner/3417-vm/xvfb.pid
           DISPLAY=:99 xdpyinfo >/dev/null 2>&1 || sleep 2
           DISPLAY=:99 vncviewer -FullScreen -ViewOnly -RemoteResize=0 127.0.0.1:5901 > evidence/vm/record-viewer.log 2>&1 &
+          echo "$!" > /home/runner/3417-vm/viewer.pid
           sleep 3
-          bash support/diagnostics/3417-ui.sh
+          timeout --signal=TERM --kill-after=25s 300s bash support/diagnostics/3417-ui.sh
       - name: Collect guest, package, process, audit, and portal evidence
         if: always()
         run: bash support/diagnostics/3417-vm.sh collect
@@ -42,3 +44,6 @@ jobs:
           name: issue3417-ubuntu-wayland-${{ github.run_id }}
           path: evidence/vm/
           if-no-files-found: error
+      - name: Stop owned diagnostic VM and recording processes
+        if: always()
+        run: bash support/diagnostics/3417-vm.sh cleanup
