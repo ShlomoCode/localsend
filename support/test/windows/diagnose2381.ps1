@@ -37,6 +37,11 @@ function Click([int]$x,[int]$y) {
  [Desktop2381]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 800
 }
+function Paste([string]$value) {
+ [System.Windows.Forms.Clipboard]::SetText($value)
+ [System.Windows.Forms.SendKeys]::SendWait("^v")
+ Start-Sleep -Milliseconds 600
+}
 function Word([string]$word,[string]$snap) {
  $rows = Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"
  $row = $rows | Where-Object { $_.text -eq $word } | Select-Object -First 1
@@ -71,7 +76,7 @@ $apps = @{}
 foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="sender";port=53318;alias="SourceBeta"})) {
  $folder = "$EvidenceDirectory/$($item.name)-app"
  Copy-Item (Split-Path $Executable) $folder -Recurse
- $settings = @{"flutter.ls_port"=$item.port;"flutter.ls_alias"=$item.alias;"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false}
+ $settings = @{"flutter.ls_port"=$item.port;"flutter.ls_alias"=$item.alias;"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false;"flutter.ls_network_whitelist"=@("10.0.20.2","100.95.193.205")}
  $settings | ConvertTo-Json | Set-Content -Encoding UTF8 "$folder/settings.json"
  $p = Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
  Start-Sleep -Seconds 12
@@ -95,19 +100,25 @@ foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205"
  PrimaryButton $snapshot
  Screenshot "add-$($favorite.ip)"
  Click 500 400
- [System.Windows.Forms.SendKeys]::SendWait($favorite.ip)
+ Paste $favorite.ip
  Click 500 490
  [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 12}")
  Start-Sleep -Milliseconds 200
  [System.Windows.Forms.SendKeys]::SendWait("53317")
  Click 500 310
- [System.Windows.Forms.SendKeys]::SendWait($favorite.alias)
+ Paste $favorite.alias
  Screenshot "filled-$($favorite.ip)"
  PrimaryButton "filled-$($favorite.ip)"
  Start-Sleep -Seconds 3
  Screenshot $(if ($favorite.ip -eq "10.0.20.2") {"favorites-first"} else {"favorites-second"})
 }
+$stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+$favorites = @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
+$favorites | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/favorites-before-scan.json"
+if ($favorites.Count -ne 2 -or $favorites[0].alias -ne "Home LAN" -or $favorites[1].alias -ne "NetBird LAN") {throw "UI input did not store the intended favorite names"}
+if ($favorites[0].fingerprint -ne $favorites[1].fingerprint) {throw "Favorites do not refer to the same real peer identity"}
 Word "Cancel" "favorites-second"
+
 Click 497 212
 Start-Sleep -Seconds 8
 Screenshot "nearby-after-add"
