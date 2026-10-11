@@ -7,7 +7,7 @@ from PIL import Image
 directory = Path(sys.argv[1])
 rows = []
 for path in sorted(directory.glob("*.png")):
-    if path.name == "desktop-ready.png":
+    if path.name == "desktop-ready.png" or path.stem.endswith(("-icon", "-tray")):
         continue
     image = Image.open(path).convert("RGB")
     assert image.size == (3840, 2160), image.size
@@ -28,6 +28,9 @@ for path in sorted(directory.glob("*.png")):
             groups.append([])
         groups[-1].append(x)
     groups = [group for group in groups if group[-1] - group[0] >= 6 and sum(len(hits[x]) for x in group) > 20]
+    # A volume icon can appear left of LocalSend after panel replacement. Its
+    # white mask is taller than it is wide; LocalSend's circular logo is square.
+    groups = [group for group in groups if 0.9 <= (group[-1] - group[0] + 1) / (max(y for x in group for y in hits[x]) - min(y for x in group for y in hits[x]) + 1) <= 1.1]
     assert groups, path
     group = groups[0]
     ys = [y for x in group for y in hits[x]]
