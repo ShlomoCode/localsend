@@ -1,0 +1,39 @@
+name: Inspect 513 retained native plugin identities
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-513-fedora-diagnostics]
+    paths: [.github/workflows/diagnose-513-native-identity.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  identity:
+    if: "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[native-identity]')"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y flatpak ostree
+      - name: Inspect original retained packages without executing them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 38163717100 --repo ShlomoCode/localsend --name issue513-causal-source-packages-38163717100 --dir source-packages
+          mkdir -p evidence/identity
+          for condition in normal negative positive; do
+            flatpak build-import-bundle "repo-$condition" "source-packages/$condition.flatpak"
+            ref=$(ostree --repo="repo-$condition" refs | head -n 1)
+            ostree --repo="repo-$condition" checkout "$ref" "extracted-$condition"
+            plugin=$(find "extracted-$condition/files" -name '*desktop_drop*.so' -print -quit)
+            cp "$plugin" "evidence/identity/$condition-desktop-drop.so"
+            sha256sum "$plugin" > "evidence/identity/$condition-sha256.txt"
+            strings "$plugin" > "evidence/identity/$condition-strings.txt"
+            nm -D "$plugin" > "evidence/identity/$condition-symbols.txt"
+            sha256sum "source-packages/$condition.flatpak" > "evidence/identity/$condition-package-sha256.txt"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue513-native-identity-${{ github.run_id }}
+          path: evidence/identity/
