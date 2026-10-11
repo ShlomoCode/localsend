@@ -19,7 +19,15 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await new Promise(r=>setTimeout(r,500));
   }
  }
- await snapshot('initial');
+ writeFileSync('evidence/browserstack-session.json',JSON.stringify({session,device:'Vivo Y21',os:'Android 11'},null,2));
+ let receiverReady=false;
+ for(let attempt=0;attempt<20;attempt++){
+  await snapshot('initial-'+attempt);
+  const source=readFileSync(`evidence/android-initial-${attempt}.xml`,'utf8');
+  if(source.includes('Receive')){receiverReady=true;break;}
+  await new Promise(r=>setTimeout(r,2000));
+ }
+ assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
  const desktop=spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh']);
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
  let proxy;

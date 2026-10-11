@@ -29,7 +29,7 @@ jobs:
       - name: Prepare original desktop release and supported runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr network-manager libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
           sudo systemctl start NetworkManager
           mkdir -p evidence released
           curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o released/linux.tar.gz
