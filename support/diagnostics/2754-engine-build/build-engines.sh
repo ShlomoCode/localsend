@@ -21,6 +21,15 @@ bounded() {
   timeout --foreground "$remaining" "$@"
 }
 
+require_release_input() {
+  local variant=$1 predicate=$2 path=$3
+  if ! test "$predicate" "$path"; then
+    printf 'MISSING_ENGINE_CONSUMER_INPUT variant=%s predicate=%s path=%s\n' "$variant" "$predicate" "$path" >&2
+    return 1
+  fi
+  printf 'verified predicate=%s path=%s\n' "$predicate" "$path"
+}
+
 release_build() {
   local variant=$1 directory="$output/$1" release="$engine_root/engine/src/out/host_release"
   mkdir -p "$directory/provenance"
@@ -32,6 +41,7 @@ release_build() {
   cp "$release/args.gn" "$directory/provenance/args.gn"
   bounded "$ninja" -C "$release" -j2 -l2 \
     flutter/shell/platform/linux:flutter_gtk \
+    flutter/lib/snapshot:generate_snapshot_bins \
     flutter/sky flutter/build/dart:dart_sdk \
     flutter/flutter_frontend_server:frontend_server \
     flutter/tools/font_subset flutter/tools/const_finder flutter/impeller/compiler:impellerc \
@@ -40,11 +50,20 @@ release_build() {
   # These are the complete local-engine consumer inputs, not arbitrary object files.
   local required=(libflutter_linux_gtk.so flutter_linux gen_snapshot icudtl.dat dart-sdk \
     flutter_patched_sdk gen font-subset impellerc)
-  for entry in "${required[@]}"; do [[ -e "$release/$entry" ]]; done
-  [[ -e "$release/gen/dart-pkg/sky_engine/lib" ]]
-  [[ -f "$release/flutter_patched_sdk/platform_strong.dill" ]]
-  [[ -f "$release/dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot" ]]
-  [[ -x "$release/gen_snapshot" ]]
+  {
+    for entry in "${required[@]}"; do require_release_input "$variant" -e "$release/$entry"; done
+    require_release_input "$variant" -d "$release/gen/dart-pkg/sky_engine/lib"
+    require_release_input "$variant" -f "$release/flutter_patched_sdk/platform_strong.dill"
+    require_release_input "$variant" -f "$release/flutter_patched_sdk/vm_outline_strong.dill"
+    require_release_input "$variant" -f "$release/gen/frontend_server_aot.dart.snapshot"
+    require_release_input "$variant" -f "$release/gen/const_finder.dart.snapshot"
+    require_release_input "$variant" -f "$release/dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot"
+    require_release_input "$variant" -x "$release/dart-sdk/bin/dart"
+    require_release_input "$variant" -x "$release/dart-sdk/bin/dartaotruntime"
+    require_release_input "$variant" -x "$release/gen_snapshot"
+    require_release_input "$variant" -x "$release/font-subset"
+    require_release_input "$variant" -x "$release/impellerc"
+  } 2>&1 | tee "$directory/provenance/consumer-input-check.txt"
   # ELF inspection establishes artifact identity. GTK dependency resolution belongs to the guest gate.
   readelf -h -d -n "$release/libflutter_linux_gtk.so" > "$directory/provenance/engine-elf.txt"
   ldd "$release/libflutter_linux_gtk.so" > "$directory/provenance/engine-build-host-ldd.txt" 2>&1 || true
