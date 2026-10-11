@@ -18,7 +18,7 @@ for(const start of timings.filter(e=>e.type==='recording' && e.action==='start')
   const filters=["fps=30", "drawtext=text='Controller input log - approximate video offset':x=20:y=h-110:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.8"];
   for(const event of events) {
     const t=(event.time-start.time)/1000;
-    const text=event.type==='mouse' ? `Mouse primary at ${event.x} ${event.y}` : `${event.type==='dpad' ? 'D-pad' : 'Keyboard'} ${labels[event.key] ?? event.key}`;
+    const text=event.type==='mouse' ? `Mouse tap at ${event.x} ${event.y}` : `${event.type==='dpad' ? 'D-pad' : 'Keyboard'} ${labels[event.key] ?? event.key}`;
     const enable=`between(t,${t.toFixed(3)},${(t+.8).toFixed(3)})`;
     filters.push(`drawtext=text='${text}':x=20:y=h-70:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.85:enable='${enable}'`);
     if(event.type==='mouse') filters.push(`drawbox=x=${event.x-24}:y=${event.y-24}:w=48:h=48:color=white@0.8:t=3:enable='${enable}'`);
