@@ -64,8 +64,10 @@ jobs:
           [[ "$APP_ROUTE" =~ ^(nix|official)$ ]]
           [[ "$RUNTIME_ONLY" =~ ^(true|false)$ ]]
           [[ "$KILLALL_PACKAGE" =~ ^(psmisc|busybox)$ ]]
-          for variant in baseline; do
+          for variant in baseline panel-fix; do
             mkdir -p "evidence/$variant"
+            git rev-parse HEAD > "evidence/$variant/diagnostic-head.txt"
+            sha256sum support/diagnostics/2751/mate.nix support/diagnostics/2751/mate-file-icon-scale.patch support/diagnostics/2751/measure.py > "evidence/$variant/diagnostic-code-sha256.txt"
             printf '%s\n' "$NIXPKGS_REVISION" > "evidence/$variant/nixpkgs-revision.txt"
             if [ "$NIXPKGS_REVISION" = 11cb3517b3af6af300dd6c055aeda73c9bf52c48 ]; then
               nix-instantiate --eval --strict --json support/diagnostics/2751/cache.nix --argstr revision "$NIXPKGS_REVISION" > "evidence/$variant/cache-paths.json"

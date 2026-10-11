@@ -43,11 +43,7 @@ in {
     nixpkgs.overlays = if panelFix then [ (final: prev: {
       mate = prev.mate.overrideScope (mateFinal: matePrev: {
         mate-panel = matePrev.mate-panel.overrideAttrs (old: {
-          postPatch = (old.postPatch or "") + ''
-            substituteInPlace applets/notification_area/status-notifier/sn-item-v0.c \
-              --replace-fail 'pixbuf, icon_size-2, icon_size-2,' \
-                'pixbuf, (icon_size-2)*scale, (icon_size-2)*scale,'
-          '';
+          patches = (old.patches or []) ++ [ ./mate-file-icon-scale.patch ];
         });
       });
     }) ] else [];
@@ -93,6 +89,8 @@ in {
     machine.succeed("${pkgs.coreutils}/bin/readlink /proc/" + daemon_pid + "/exe > /tmp/evidence/daemon-executable.txt")
     machine.succeed("${pkgs.coreutils}/bin/tr '\\0' '\\n' < /proc/" + daemon_pid + "/environ | ${pkgs.gnused}/bin/sed -n '/^PATH=/p;/^XDG_DATA_DIRS=/p' > /tmp/evidence/daemon-environment.txt")
     machine.succeed("${pkgs.coreutils}/bin/cat ${pkgs.mate.mate-settings-daemon}/libexec/mate-settings-daemon > /tmp/evidence/daemon-wrapper.txt")
+    machine.succeed("${pkgs.coreutils}/bin/sha256sum /proc/" + daemon_pid + "/exe > /tmp/evidence/daemon-executable-sha256.txt")
+    machine.succeed("${pkgs.coreutils}/bin/cat /proc/" + daemon_pid + "/maps > /tmp/evidence/daemon-maps.txt")
     daemon_path = machine.succeed("${pkgs.coreutils}/bin/tr '\\0' '\\n' < /proc/" + daemon_pid + "/environ | ${pkgs.gnused}/bin/sed -n 's/^PATH=//p'").strip()
     assert daemon_path, "The actual daemon PATH was not recovered"
     user_command("${pkgs.coreutils}/bin/env PATH=" + shlex.quote(daemon_path) + " ${pkgs.bash}/bin/bash -c 'command -v killall > /tmp/evidence/daemon-resolved-killall.txt; ${pkgs.coreutils}/bin/readlink -f $(command -v killall) >> /tmp/evidence/daemon-resolved-killall.txt; killall --help >> /tmp/evidence/daemon-resolved-killall.txt 2>&1 || true'")
@@ -110,6 +108,8 @@ in {
             raise
         finally:
             machine.copy_from_vm("/tmp/evidence", "guest-startup-evidence")
+        original_app_pid = machine.succeed("${pkgs.procps}/bin/pgrep -u alice -f '[l]ocalsend_app$'").strip()
+        previous_gui_panel_pid = None
         for label, scale, restart in [
             ("100-live-first", 1, False), ("200-gui", 2, False), ("100-gui", 1, False),
             ("200-live", 2, False),
@@ -158,6 +158,13 @@ in {
                 machine.wait_for_window("LocalSend", 60)
                 machine.wait_for_open_port(53317)
             machine.sleep(8)
+            if label in ["100-live-first", "200-gui", "100-gui"]:
+                current_app_pid = machine.succeed("${pkgs.procps}/bin/pgrep -u alice -f '[l]ocalsend_app$'").strip()
+                current_panel_pid = machine.succeed("${pkgs.procps}/bin/pgrep -u alice mate-panel").strip()
+                assert current_app_pid == original_app_pid, (label, original_app_pid, current_app_pid)
+                if ${if killallPackage == "busybox" then "True" else "False"} and previous_gui_panel_pid is not None:
+                    assert current_panel_pid != previous_gui_panel_pid, (label, current_panel_pid)
+                previous_gui_panel_pid = current_panel_pid
             user_command("xwininfo -root -tree > /tmp/evidence/" + label + "-windows.txt")
             user_command("dconf dump /org/mate/ > /tmp/evidence/" + label + ".dconf")
             user_command("busctl --user list > /tmp/evidence/" + label + "-bus.txt")
@@ -168,7 +175,7 @@ in {
                 user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
             machine.screenshot(label)
             machine.succeed("${pkgs.procps}/bin/ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
-            machine.succeed("for pid in $(${pkgs.procps}/bin/pgrep -f 'mate-panel|localsend_app'); do echo $pid; ${pkgs.coreutils}/bin/readlink /proc/$pid/exe || true; ${pkgs.coreutils}/bin/cat /proc/$pid/comm || true; ${pkgs.coreutils}/bin/tr '\\0' '\\n' < /proc/$pid/cmdline || true; done > /tmp/evidence/" + label + "-executables.txt")
+            machine.succeed("for pid in $(${pkgs.procps}/bin/pgrep -u alice -f 'mate-panel$|localsend_app$'); do echo $pid; ${pkgs.coreutils}/bin/readlink /proc/$pid/exe; ${pkgs.coreutils}/bin/sha256sum /proc/$pid/exe; ${pkgs.coreutils}/bin/cat /proc/$pid/comm; ${pkgs.coreutils}/bin/tr '\\0' '\\n' < /proc/$pid/cmdline; ${pkgs.coreutils}/bin/cat /proc/$pid/maps > /tmp/evidence/" + label + "-$pid-maps.txt; ${pkgs.findutils}/bin/find $(${pkgs.coreutils}/bin/dirname $(${pkgs.coreutils}/bin/dirname $(${pkgs.coreutils}/bin/readlink /proc/$pid/exe))) -type f -exec ${pkgs.coreutils}/bin/sha256sum {} \\; > /tmp/evidence/" + label + "-$pid-package-sha256.txt; done > /tmp/evidence/" + label + "-executables.txt")
             machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';

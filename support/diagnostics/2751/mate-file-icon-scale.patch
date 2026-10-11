@@ -1,0 +1,8 @@
+diff --git a/applets/notification_area/status-notifier/sn-item-v0.c b/applets/notification_area/status-notifier/sn-item-v0.c
+--- a/applets/notification_area/status-notifier/sn-item-v0.c
++++ b/applets/notification_area/status-notifier/sn-item-v0.c
+@@ -292,3 +292,3 @@ update (SnItemV0 *v0)
+-              scaled_pixbuf = gdk_pixbuf_scale_simple (pixbuf, icon_size-2, icon_size-2, GDK_INTERP_BILINEAR);
++              scaled_pixbuf = gdk_pixbuf_scale_simple (pixbuf, (icon_size-2)*scale, (icon_size-2)*scale, GDK_INTERP_BILINEAR);
+               g_object_unref (pixbuf);
+               pixbuf = scaled_pixbuf;
