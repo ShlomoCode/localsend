@@ -7,6 +7,11 @@ on:
         description: Install the verified Windows evaluation and observe official LocalSend after capability gates
         type: boolean
         default: false
+      install_acceleration:
+        description: Explicit installation route; TCG is the bounded fallback for the observed HVF Windows boot hang
+        type: choice
+        options: [hvf, tcg]
+        default: hvf
   push:
     branches: [codex/bug-1054-reselection-diagnostic]
     paths: [.github/workflows/diagnose-1054-win10-capability.yml]
@@ -29,6 +34,7 @@ jobs:
         env:
           EVIDENCE_DIR: ${{ runner.temp }}/issue1054-win10-capability
           ISSUE1054_INSTALL_GUEST: ${{ inputs.install_guest && '1' || '0' }}
+          ISSUE1054_INSTALL_ACCELERATION: ${{ inputs.install_acceleration || 'hvf' }}
         run: bash support/diagnostics/1054-win10-capability.sh
       - name: Preserve every reached gate
         if: always()

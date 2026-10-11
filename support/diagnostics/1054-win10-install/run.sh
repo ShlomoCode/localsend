@@ -7,10 +7,17 @@ OUT="${EVIDENCE_DIR:?Separate allowlisted evidence directory required}"
 CAP="${CAPABILITY_DIR:?Original capability evidence required}"
 ISO="${WINDOWS_ISO:?Verified original Microsoft ISO path required}"
 [[ ${EVALUATION_TERMS_ACCEPTED:-} == true ]] || { echo 'Evaluation terms must be accepted before installation'; exit 2; }
-[[ -f "$CAP/hvf-status.json" && -f "$CAP/frame-results.json" ]] || exit 2
-# Require the already initialized HVF route. Do not spend an install on unmeasured TCG.
-[[ "$(head -n 1 "$CAP/acceleration.txt")" == hvf ]] || exit 2
+[[ -f "$CAP/frame-results.json" ]] || exit 2
+# Preserve measured HVF capability separately from the explicitly chosen guest
+# route. HVF initialized but Windows boot froze in run 38172255709.
+INSTALL_ACCELERATION="${ISSUE1054_INSTALL_ACCELERATION:-hvf}"
+case "$INSTALL_ACCELERATION" in
+  hvf) [[ -f "$CAP/hvf-status.json" && "$(head -n 1 "$CAP/acceleration.txt")" == hvf ]] || exit 2 ;;
+  tcg) ;;
+  *) echo 'Expected explicit hvf or tcg installation route'; exit 2 ;;
+esac
 mkdir -p "$OUT"
+printf '%s\n' "$INSTALL_ACCELERATION" > "$OUT/install-acceleration.txt"
 FREE_KB="$(df -k "$OUT" | awk 'END {print $4}')"
 df -k "$OUT" > "$OUT/disk-install-before.txt"
 [[ "$FREE_KB" -ge 36700160 ]] || { echo 'Installation requires 35 GiB remaining free'; exit 1; }
@@ -30,5 +37,6 @@ cp "$BASE/Bootstrap.ps1" "$PRIVATE/seed/Bootstrap.ps1"
 # Read-only auxiliary media is in Microsoft's implicit answer-file search order.
 hdiutil makehybrid -iso -joliet -o "$PRIVATE/seed.iso" "$PRIVATE/seed" > "$OUT/seed-build.txt" 2>&1
 qemu-img create -f qcow2 "$PRIVATE/windows.qcow2" 64G > "$OUT/disk-create.txt"
-/usr/bin/ruby "$BASE/install.rb" "$OUT" "$PRIVATE" "$ISO"
+swiftc "$BASE/setup-ocr.swift" -o "$PRIVATE/setup-ocr"
+INSTALL_ACCELERATION="$INSTALL_ACCELERATION" /usr/bin/ruby "$BASE/install.rb" "$OUT" "$PRIVATE" "$ISO"
 df -k "$OUT" > "$OUT/disk-install-after.txt"

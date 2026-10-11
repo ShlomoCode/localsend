@@ -17,3 +17,21 @@ The bootstrap installs the untouched official 1.15.3 EXE through its normal Inno
 For subsequent ordinary console control, `vnc.rb` supports `capture PATH`, `click X Y`, `text ASCII_TEXT`, `key KEYSYM_INTEGER`, and `run`. Use visible state gates and input logs before selecting/sending files. These controls send real RFB keyboard/pointer messages; they do not synthesize protocol transfers. An optional `AFTER_GUEST_READY_SCRIPT` runs a parent-owned script in the same Actions job while the real VM remains alive. Without that callback, the VM closes after this preparation stage and the private disk is discarded. The callback must finish the Mac receiver's real approval/save and saved-file hash verification before claiming app-to-app coverage.
 
 Not run or established: answer-file schema acceptance by this media, activation availability, actual installation duration/free-space sufficiency, Windows inbox NIC/VGA usability, LocalSend rendering, Mac connectivity, or a transfer. Those are cloud evidence gates, not assumptions. If Setup stops, retain the visible setup frames and diagnose its ordinary error before changing the app.
+# Observed boot preparation and fallback
+
+Run 38172255709 initialized HVF but remained at a Windows boot logo for the
+45-minute guest deadline. Guest records and QEMU stderr were empty. This was a
+preparation failure before Windows Setup or LocalSend, not a transfer experiment.
+
+The manual workflow now exposes `install_acceleration`. Explicit `tcg` uses
+QEMU's supported `tcg,thread=multi` with the emulated `max` CPU; `hvf` retains
+the original `host` CPU. This compares both accelerator and its CPU route and
+does not isolate HVF alone. Preserve both the capability and installation route.
+
+Both routes now require an observed setup caption or a guest bootstrap record
+within 12 minutes. Native Vision OCR reads retained original framebuffers;
+logo pixels, a spinner, or a changed image hash do not satisfy this gate. Frames
+have UTC records and are captured every 15 seconds before setup, then every
+minute. A reached setup gate permits the same process to continue to the
+existing 45-minute OS activation and real app-window deadline. No local runs
+validate this preparation code; the next fork Actions job remains its control.

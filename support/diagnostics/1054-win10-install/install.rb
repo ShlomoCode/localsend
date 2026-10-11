@@ -7,7 +7,10 @@ serial = File.join(out, 'guest-serial.txt')
 frames = File.join(out, 'frames')
 Dir.mkdir(frames)
 qemu = ENV.fetch('QEMU', 'qemu-system-x86_64')
-args = [qemu, '-machine', 'pc', '-accel', 'hvf', '-cpu', 'host', '-smp', '2', '-m', '4096',
+acceleration = ENV.fetch('INSTALL_ACCELERATION', 'hvf')
+raise 'Unsupported installation acceleration' unless %w[hvf tcg].include?(acceleration)
+accelerator_args = acceleration == 'hvf' ? ['-accel', 'hvf', '-cpu', 'host'] : ['-accel', 'tcg,thread=multi', '-cpu', 'max']
+args = [qemu, '-machine', 'pc', *accelerator_args, '-smp', '2', '-m', '4096',
   '-drive', "file=#{private_dir}/windows.qcow2,format=qcow2,if=ide,index=0",
   '-drive', "file=#{iso},media=cdrom,if=ide,index=2,readonly=on",
   '-drive', "file=#{private_dir}/seed.iso,media=cdrom,if=ide,index=3,readonly=on",
@@ -26,8 +29,23 @@ def frame(path)
   png = path.sub(/\.bmp$/, '.png')
   raise 'PNG conversion failed' unless system('sips', '-s', 'format', 'png', path, '--out', png, out: File::NULL)
 end
+def observed_text(path, private_dir)
+  output = path.sub(/\.png$/, '.ocr.raw.json')
+  error = path.sub(/\.png$/, '.ocr.stderr.txt')
+  pid = Process.spawn(File.join(private_dir, 'setup-ocr'), path, out: output, err: error)
+  begin
+    _, status = Timeout.timeout(20) { Process.waitpid2(pid) }
+    raise "Setup OCR failed; inspect #{File.basename(error)}" unless status.success?
+    JSON.parse(File.read(output))
+  ensure
+    begin; Process.kill('KILL', pid); rescue Errno::ESRCH; end
+    begin; Process.wait(pid); rescue Errno::ECHILD; end
+  end
+end
 begin
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2700
+  boot_deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 720
+  setup_observed = false
   count = 0
   next_capture = 0
   ready = nil
@@ -49,12 +67,26 @@ begin
     end
     if now >= next_capture
       begin
-        frame(File.join(frames, format('setup-%03d.bmp', count)))
+        path = File.join(frames, format('setup-%03d.bmp', count))
+        File.open(File.join(out, 'frame-times.jsonl'), 'a') { |file| file.puts JSON.generate(utc: Time.now.utc.iso8601, frame: File.basename(path)) }
+        frame(path)
+        lines = observed_text(path.sub(/\.bmp$/, '.png'), private_dir)
+        File.write(path.sub(/\.bmp$/, '.ocr.json'), JSON.pretty_generate(lines))
+        if !setup_observed && lines.any? { |line| line.match?(/Windows Setup|Installing Windows|Getting files ready|Copying Windows files|Getting ready|Just a moment/i) }
+          setup_observed = true
+          File.write(File.join(out, 'boot-progress.json'), JSON.pretty_generate(utc: Time.now.utc.iso8601,
+            acceleration: acceleration, frame: File.basename(path), lines: lines,
+            scope: 'Observed installation UI only; not proof of completed OS or app preparation.'))
+        end
       rescue StandardError => error
         File.open(File.join(out, 'capture-errors.txt'), 'a') { |file| file.puts "#{Time.now.utc.iso8601} #{error.class}: #{error.message}" }
       end
       count += 1
-      next_capture = now + 60
+      next_capture = now + (setup_observed ? 60 : 15)
+    end
+    identity_observed = records.any? { |record| record['stage'] == 'windows-identity' }
+    if !setup_observed && !identity_observed && Process.clock_gettime(Process::CLOCK_MONOTONIC) > boot_deadline
+      raise 'No observed Windows installation UI or guest identity within 12 minutes; stop before another blind installation wait'
     end
     sleep 2
   end
