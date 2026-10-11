@@ -21,3 +21,5 @@ The VM uses QEMU virtio/virgl and Mesa. GPU and driver are absent from the Local
 Obtain a failing artifact, profile or trace from the original host: exact package revision and app/engine identity; GPU and driver; physical monitor modes, logical scale and compositor state; launch backend and environment; complete Wayland trace showing buffer creation, scale and failure; and repeatable actions including relevant profile state. Preserve a failing baseline before testing a candidate. A fix requires a causal experiment and the same failing scenario passing afterward, followed by cloud validation and required independent review.
 
 No additional workload is authorized until new reproduction evidence arrives. Only the issue 3033 VM/job is being finished; sibling infrastructure is outside this shutdown.
+
+Shutdown completed: the owned Actions job `114459162170` reports `completed/success` after the round 38 finish command, published in diagnostic commit `969b2041`. The [final evidence artifact](https://github.com/ShlomoCode/localsend/actions/runs/38135756388/artifacts/11706186302) is retained and unexpired (228,343,189 bytes). No sibling VM/job was changed.

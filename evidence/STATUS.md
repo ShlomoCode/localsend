@@ -30,7 +30,7 @@ Three live100%→150%→200% sequences passed in unchanged app processes. PIDs76
 
 Actions run: https://github.com/ShlomoCode/localsend/actions/runs/38135756388.
 
-Diagnostic branch: codex/bug-3033-wayland-scale-diagnostics. Source and full threads were read on 2026-10-11. Raw logs and captures remain in the live guest and are uploaded at job completion; per-round evidence is available immediately.
+Diagnostic branch: codex/bug-3033-wayland-scale-diagnostics. Source and full threads were read on 2026-10-11. The owned VM/job completed successfully after round 38 finish. Final evidence artifact 11706186302 and per-round evidence are retained; see FINAL.md.
 
 ## Hardware provenance and renderer
 
