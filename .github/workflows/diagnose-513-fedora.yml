@@ -42,6 +42,7 @@ jobs:
             - flatpak
             - openssh-server
             - dbus-tools
+            - acl
           runcmd:
             - [sh, -c, "printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm/custom.conf"]
             - [systemctl, set-default, graphical.target]
