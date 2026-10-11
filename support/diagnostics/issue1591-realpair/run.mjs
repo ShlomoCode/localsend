@@ -174,7 +174,12 @@ async function prepareWindowsUI() {
 async function gallery(desired, label) {
   stage = label + '-settings';
   await click('Settings'); await capture(label + '-settings-entry');
-  const locator = '//XCUIElementTypeSwitch[contains(@name,"Save media to gallery") or contains(@label,"Save media to gallery")]';
+  // The unchanged iPad app exposes the Receive card's labels as one native
+  // element and six unnamed sibling switches. Retained XML and the original
+  // image from run 38179175479 identify gallery as the fourth switch.
+  const cardName = 'Receive Quick Save Quick Save for "Favorites" Require PIN Save media to gallery Auto Finish Save to history';
+  const card = '//XCUIElementTypeOther[normalize-space(@name)=\'' + cardName + '\']';
+  const locator = card + '/following-sibling::XCUIElementTypeSwitch[4]';
   let matches;
   for (let attempt = 0; attempt < 5; attempt++) {
     matches = await elements('xpath', locator);
@@ -183,13 +188,14 @@ async function gallery(desired, label) {
     await capture(label + '-settings-scroll-' + attempt);
   }
   if (matches.length !== 1) throw new Error('Gallery switch is absent or ambiguous; inspect retained native source before adjusting locators');
+  if ((await elements('xpath', card + '/following-sibling::XCUIElementTypeSwitch')).length !== 6) throw new Error('Receive card switch order differs from retained native UI; no gallery action admitted');
   const id = eid(matches[0]), getValue = () => wd('GET', prefix() + '/element/' + id + '/attribute/value');
   const before = await getValue();
   if (!['0','1',0,1,true,false].includes(before)) throw new Error('Gallery switch value is not an observed boolean');
   if ((before === '1' || before === 1 || before === true) !== desired) await wd('POST', prefix() + '/element/' + id + '/click', {});
   const after = await getValue();
   if ((after === '1' || after === 1 || after === true) !== desired) throw new Error('Gallery setting did not change');
-  save(label + '-gallery.json', {desired, before, after, selectionTiming:'Global Settings before real transfer'});
+  save(label + '-gallery.json', {desired, before, after, locator, cardName, nativeLayoutAuthority:'Original run 38179175479 settings-entry XML and image: six Receive switches, gallery fourth', selectionTiming:'Global Settings before real transfer'});
   await capture(label + '-settings-selected');
   await click('Receive'); await capture(label + '-receive-ready');
 }
