@@ -295,7 +295,9 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await snapshot('files-A-selected');
    let remove;
    if(samsungFiles){
-    remove=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Delete" or @content-desc="Delete"]',label:'samsung-files-delete-action'});
+    const selectedSource=await wd('GET',prefix+'/source');
+    assert(selectedSource.includes('text="1 selected"')&&selectedSource.includes('content-desc="Checked, A.txtDocuments"'),'Samsung selection is not exactly our received A.txt');
+    remove=await waitForNativeControl({wd,prefix,using:'id',value:'com.sec.android.app.myfiles:id/menu_delete',label:'samsung-files-delete-action'});
    }else if(requestedDeletionAction==='trash'){
     const options=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'More options',label:'file-manager-more-options'});
     await wd('POST',prefix+'/element/'+options['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
