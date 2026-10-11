@@ -5,7 +5,6 @@
 name: at-spi2-core-254-source
 buildsystem: meson
 config-opts:
-  - -Dlibdir=lib
   - -Ddocs=false
   - -Dintrospection=disabled
   - -Dgtk2_atk_adaptor=false
@@ -13,6 +12,7 @@ config-opts:
 sources:
   - type: archive
     url: https://codeload.github.com/GNOME/at-spi2-core/tar.gz/2b2085e3bb98c35cfeaf33a9b2852c610c3a9b7b
+    dest-filename: at-spi2-core-254.tar.gz
     sha256: ef4f2a528f76edc7cb37b70d0143a51fa5e049ae93198c4426befd2c250c3b03
 # For A, add an explicitly hashed, reviewed source patch here before compilation.
 # Do not copy a prebuilt .so, alter runtime files, or configure a custom launch loader.

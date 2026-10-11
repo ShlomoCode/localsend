@@ -20,6 +20,8 @@ sudo flatpak update -y --commit="$runtime_commit" org.freedesktop.Platform//25.0
 [[ $(flatpak info --show-commit org.freedesktop.Platform//25.08) == "$runtime_commit" ]]
 flatpak info org.freedesktop.Sdk//25.08
 flatpak info org.freedesktop.Platform//25.08
+flatpak info org.freedesktop.Sdk.Extension.vala//25.08 > "$output/vala-extension-info.txt"
+flatpak info --show-commit org.freedesktop.Sdk.Extension.vala//25.08 > "$output/vala-extension-commit.txt"
 flatpak-builder --version
 git clone --recurse-submodules https://github.com/flathub/org.localsend.localsend_app.git "$output/flathub"
 git -C "$output/flathub" checkout e6a71e097895dcab75ab2f961eac6b816c108e80
@@ -45,7 +47,7 @@ sha256sum "$output/flathub/A-production.patch" > "$output/A-source-patch.sha256"
     %w[stock A].each do |bridge|
       m = Marshal.load(Marshal.dump(base))
       a = {"name"=>"at-spi2-core-254-source", "buildsystem"=>"meson",
-        "config-opts"=>["-Dlibdir=lib","-Ddocs=false","-Dintrospection=disabled","-Dgtk2_atk_adaptor=false","-Duse_systemd=false"],
+        "config-opts"=>["-Ddocs=false","-Dintrospection=disabled","-Dgtk2_atk_adaptor=false","-Duse_systemd=false"],
         "sources"=>[{"type"=>"archive", "url"=>"https://codeload.github.com/GNOME/at-spi2-core/tar.gz/2b2085e3bb98c35cfeaf33a9b2852c610c3a9b7b",
           "dest-filename"=>"at-spi2-core-254.tar.gz",
           "sha256"=>"ef4f2a528f76edc7cb37b70d0143a51fa5e049ae93198c4426befd2c250c3b03"}]}
@@ -65,7 +67,7 @@ for engine in control B; do
     cp "$output/flathub/matrix-$case_name.yml" "$output/$case_name/manifest.yml"
     (
       cd "$output/flathub"
-      timeout --foreground 2400 flatpak-builder --force-clean --repo="$output/$case_name/repo" \
+      timeout --foreground 2400 flatpak-builder --verbose --force-clean --repo="$output/$case_name/repo" \
         "$output/$case_name/build" "matrix-$case_name.yml"
     ) 2>&1 | tee "$output/$case_name/build.log"
     flatpak build-export "$output/$case_name/repo" "$output/$case_name/build" diagnostic \
