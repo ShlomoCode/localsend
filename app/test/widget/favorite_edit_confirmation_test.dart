@@ -71,6 +71,7 @@ void main() {
     save.complete();
     await tester.pumpAndSettle();
     expect(find.text('Keep open'), findsOneWidget);
+    expect(tester.element(find.text('Keep open')).ref.read(favoritesProvider).single.alias, 'Changed');
     expect(tester.takeException(), isNull);
   });
 }
