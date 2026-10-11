@@ -34,7 +34,7 @@ def snapshot(name):
 
 
 def click(label, name, optional=False):
-    if label in ('Accept', 'Done'):
+    if label in ('Accept', 'Done') or label.endswith('.txt'):
         matches = []
         def visit(node, depth=0):
             if depth > 18:
