@@ -34,6 +34,15 @@ key esc
 sleep 10
 key esc
 capture 01-windows
+if [[ "${SOURCE_ADDRESS:-ip}" == hashtag ]]; then
+  # Match the fresh-process geometry used by the Documents cases.
+  /home/runner/513-vm/ssh 'flatpak kill org.localsend.localsend_app; export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0; nohup flatpak run org.localsend.localsend_app >>/home/probe/513-app.log 2>&1 </dev/null &'
+  sleep 10
+  capture 01b-normalized-app
+  move 400 55
+  button true
+  button false
+fi
 # Select the sole file using the file manager's actual selection action.
 key ctrl-a
 capture 02-downloads-selected
@@ -107,6 +116,7 @@ done
 if [[ "${SOURCE_DROP_SEND:-0}" == 1 ]]; then
   # Candidate sends the selection produced by the actual final Documents drop.
   capture 11-documents-drop-send-selection
+  /home/runner/513-vm/ssh 'export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus; flatpak run --command=sh org.localsend.localsend_app -c '\''if test -e /home/probe/Documents/513-control.txt; then echo RAW_DOCUMENTS_PATH_VISIBLE; else echo RAW_DOCUMENTS_PATH_NOT_VISIBLE; fi; find /run/user/$(id -u)/doc -maxdepth 3 -type f -name 513-control.txt -exec sha256sum {} \; '\''' > evidence/vm/drop-access-state.txt 2>&1
 else
 move 140 285
 button true
