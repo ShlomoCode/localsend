@@ -1,0 +1,37 @@
+name: LocalSend Flatpak font-cache reproduction
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/repro-flatpak-fontcache-3553
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+      - name: Install diagnostic dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox dbus-x11 flatpak imagemagick xdotool x11-utils iproute2 gdb strace fontconfig libgtk-3-0t64 libayatana-appindicator3-1 libgl1-mesa-dri libegl1 libgles2 curl procps
+      - name: Run reproduction harness in a D-Bus session
+        shell: bash
+        env:
+          EXPECTED_APP_COMMIT: a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
+          EXPECTED_RUNTIME_COMMIT: 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
+          OUT: ${{ github.workspace }}/evidence
+        run: dbus-run-session -- bash support/diagnostics/repro-flatpak-3553.sh
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: localsend-flatpak-font-cache-reproduction
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
