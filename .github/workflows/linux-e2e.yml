@@ -3,15 +3,16 @@ on:
   workflow_dispatch:
 jobs:
   plasma:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
+    container: debian:trixie
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - name: Install Plasma 6 and official release
         run: |
-          sudo apt-get update
-          sudo apt-get install -y plasma-desktop plasma-workspace openbox xvfb dbus-x11 xdotool imagemagick qdbus-qt6 libgtk-3-0 libayatana-appindicator3-1 libcanberra-gtk3-module
-          if apt-cache show plasma-workspace-x11 >/dev/null 2>&1; then sudo apt-get install -y plasma-workspace-x11; fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y ca-certificates curl git plasma-desktop plasma-workspace kwin-x11 systemsettings xvfb xauth dbus-x11 xdotool imagemagick qdbus-qt6 libgtk-3-0 libayatana-appindicator3-1 libcanberra-gtk3-module libgl1-mesa-dri libegl-mesa0
           mkdir -p evidence release
           curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o release.tar.gz
           echo '287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16  release.tar.gz' | sha256sum -c -

@@ -5,8 +5,8 @@ export XDG_RUNTIME_DIR="${RUNNER_TEMP}/runtime-3546"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 dbus-update-activation-environment --all
-openbox > evidence/wm.log 2>&1 &
-plasmashell --no-respawn > evidence/plasma.log 2>&1 &
+export KDE_SKIP_SYSTEMD_BOOT=1
+startplasma-x11 > evidence/plasma.log 2>&1 &
 sleep 30
 qdbus_bin=$(command -v qdbus6 || command -v qdbus || echo /usr/lib/qt6/bin/qdbus)
 "$qdbus_bin" org.kde.plasmashell /PlasmaShell > evidence/plasma-dbus.txt
@@ -17,6 +17,7 @@ cd "$(dirname "$app")"
 "$app" > "$GITHUB_WORKSPACE/evidence/app.log" 2>&1 &
 cd "$GITHUB_WORKSPACE"
 sleep 15
+import -window root evidence/desktop.png
 busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > evidence/items.txt
 xdotool search --onlyvisible --name . getwindowname > evidence/windows.txt || true
 import -window root evidence/desktop.png
@@ -25,3 +26,7 @@ xdotool mousemove 1100 775 click 3
 sleep 2
 import -window root evidence/tray-context.png
 cp "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" evidence/plasma-config.txt
+xdotool key Escape
+"$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels();for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){if(ws[j].type=="org.kde.plasma.systemtray") ws[j].showConfigurationInterface();}}'
+sleep 3
+import -window root evidence/tray-settings.png
