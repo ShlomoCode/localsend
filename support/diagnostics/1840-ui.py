@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import time
 from PIL import Image
@@ -46,6 +47,17 @@ def snap(name):
         row['width'] = str(int(row['width'])//3)
         row['height'] = str(int(row['height'])//3)
     rows.extend(sidebar_rows)
+    center = out/(name+'-center.png')
+    original.crop((350, 200, 850, 650)).resize((1500, 1350)).save(center)
+    center_result = run('tesseract', str(center), 'stdout', '--psm', '6', 'tsv')
+    (out/(name+'-center.tsv')).write_text(center_result)
+    center_rows = [r for r in csv.DictReader(io.StringIO(center_result), delimiter='\t') if r['text'].strip()]
+    for row in center_rows:
+        row['left'] = str(int(row['left'])//3+350)
+        row['top'] = str(int(row['top'])//3+200)
+        row['width'] = str(int(row['width'])//3)
+        row['height'] = str(int(row['height'])//3)
+    rows.extend(center_rows)
     record('screenshot', stage=stage, name=name, labels=[r['text'] for r in rows])
     return rows
 
@@ -81,6 +93,7 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
     executable = next(pathlib.Path(location).rglob('localsend_app'))
     record('executable', stage=stage, source=str(executable))
     processes = []
+    recorder = subprocess.Popen(['ffmpeg', '-y', '-video_size', '1280x900', '-framerate', '10', '-f', 'x11grab', '-i', os.environ['DISPLAY'], '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', str(out/'replay.mp4')], stdout=(out/'video.log').open('w'), stderr=subprocess.STDOUT)
     try:
         for name, port in [('peer', 53317), ('sender', 53318)]:
             directory = pathlib.Path('/tmp/1840-'+stage+'-'+name)
@@ -106,23 +119,26 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
         rows = snap('sender-initial')
         click_word(rows, 'Send')
         rows = snap('send-ready')
-        # Locate the icon through its actual Favorites tooltip. Search the
-        # rendered Nearby row, without assuming the icon's screenshot pixels.
+        # The Run4 screenshot shows the Favorites tooltip over the actual heart
+        # at x680/y241. Anchor to rendered Nearby devices and the established
+        # row layout (scan, manual address, favorite, each 40 pixels wide).
         nearby = word(rows, 'Nearby')
         y = xy(nearby)[1]
-        found = False
-        for x in range(150, 1110, 20):
-            run('xdotool', 'mousemove', str(x), str(y))
-            time.sleep(0.8)
-            probe = snap('tooltip-'+str(x))
-            if any(r['text'].lower()=='favorites' for r in probe):
-                record('favorites-tooltip', stage=stage, x=x, y=y)
-                click(x, y)
-                found = True
-                break
-        if not found:
-            raise RuntimeError('Favorites icon tooltip not found on the Nearby row')
+        devices = word(rows, 'devices')
+        x = int(devices['left'])+int(devices['width'])+110
+        run('xdotool', 'mousemove', str(x), str(y))
+        time.sleep(1)
+        snap('favorites-tooltip-before-click')
+        record('favorites-icon', stage=stage, x=x, y=y, evidence='Run4 tooltip-670.png and actual row labels')
+        click(x, y)
         rows = snap('favorites-empty')
+        click_word(rows, 'Add')
+        rows = snap('add-cancel-control-open')
+        click_word(rows, 'Cancel')
+        rows = snap('add-cancel-control-closed')
+        if favorites():
+            raise RuntimeError('Cancel unexpectedly persisted a favorite')
+        record('add-cancel-control', stage=stage, persisted_count=0)
         click_word(rows, 'Add')
         rows = snap('add-empty')
         # Fields lie immediately below their visible labels.
@@ -164,6 +180,9 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
             rows = snap('edit-'+str(index)+'-reopened-list')
         record('stage-complete', stage=stage)
     finally:
+        recorder.send_signal(signal.SIGINT)
+        try: recorder.wait(timeout=10)
+        except subprocess.TimeoutExpired: recorder.kill()
         for process in processes:
             process.terminate()
         for process in processes:
