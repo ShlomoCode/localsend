@@ -5,6 +5,9 @@ on:
       build_run:
         description: Reuse an exact-source recording-app artifact from this run (optional)
         default: ''
+      group:
+        description: Scenario group (all or remaining errors and scrolling)
+        default: all
 permissions:
   contents: read
 jobs:
@@ -59,6 +62,8 @@ jobs:
           if (git diff ac81c35d3c623df398ded2704f06b7a5401dec86 -- app packages) {throw 'Production source changed'}
       - name: Capture actual desktop apps
         shell: powershell
+        env:
+          RECORD_GROUP: ${{ inputs.group }}
         run: |
           $ffmpeg = (Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName
           if (!$ffmpeg) { throw 'ffmpeg missing' }

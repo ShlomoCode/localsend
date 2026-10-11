@@ -262,6 +262,7 @@ try {
  Click 576 212
  Snap 'empty'
  AssertCount 0
+ if($env:RECORD_GROUP -ne 'remaining') {
  Chapter 'Add a favorite through a real HTTP registration to the peer app'
  PrimaryButton 'empty'
  Snap 'add'
@@ -307,13 +308,15 @@ try {
  PrimaryButton 'delete-confirmation'
  Snap 'deleted'
  AssertCount 0
+ }
  Chapter 'Failed addition to closed localhost port - open error details'
- PrimaryButton 'deleted'
+ $addStart=if($env:RECORD_GROUP -eq 'remaining'){'empty'}else{'deleted'}
+ PrimaryButton $addStart
  Snap 'failed-add'
  Field 'Address' 'failed-add' '127.0.0.1'
- Field 'Port' 'failed-add' '1'
+ Field 'Port' 'failed-add' '53319'
  Snap 'failed-add-filled'
- RequireText 'failed-add-filled' '1'
+ RequireText 'failed-add-filled' '53319'
  PrimaryButton 'failed-add-filled'
  Start-Sleep -Seconds 2
  Snap 'failed-add-error'
@@ -421,7 +424,7 @@ try {
  RequireText 'large-text-error-details' 'Close'
  Esc
  Chapter 'Recording complete - actual app UI, real HTTP peer, seeded long list'
- @{sourceCommit='ac81c35d3c623df398ded2704f06b7a5401dec86';recordingBranchCommit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;network='Two actual LocalSend Windows apps, plaintext loopback HTTP, ports 53317 and 53318; closed port 1 for failure';diagnosticSetup='11 persisted offline favorites plus one UI-created real peer; native window resize; Windows Accessibility TextScaleFactor=150';mocks=$false;completed=$true} | ConvertTo-Json | Set-Content "$EvidenceDirectory/coverage.json"
+ @{sourceCommit='ac81c35d3c623df398ded2704f06b7a5401dec86';recordingBranchCommit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;scenarioGroup=$env:RECORD_GROUP;network='Two actual LocalSend Windows apps, plaintext loopback HTTP, ports 53317 and 53318; closed ports 53319 and 1 for failure';diagnosticSetup='11 persisted offline favorites plus one UI-created real peer; native window resize; Windows Accessibility TextScaleFactor=150';mocks=$false;completed=$true} | ConvertTo-Json | Set-Content "$EvidenceDirectory/coverage.json"
 } finally {
  $duration=((Get-Date)-$started).TotalSeconds
  $capture.StandardInput.WriteLine('q')
