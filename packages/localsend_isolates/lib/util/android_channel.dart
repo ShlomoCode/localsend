@@ -9,9 +9,11 @@ final _logger = Logger('AndroidSaf');
 ///
 /// Returns whether Android reported a URI, or false if scanning timed out.
 Future<bool> scanFileAndroid({required String path}) async {
-  final scanned = await _methodChannel.invokeMethod<bool>('scanFile', {
-    'path': path,
-  }).timeout(const Duration(seconds: 30), onTimeout: () => false);
+  final scanned = await _methodChannel
+      .invokeMethod<bool>('scanFile', {
+        'path': path,
+      })
+      .timeout(const Duration(seconds: 30), onTimeout: () => false);
   return scanned ?? false;
 }
 
