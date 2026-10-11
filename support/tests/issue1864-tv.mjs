@@ -27,7 +27,7 @@ async function snapshot(name) {
   return fs.readFileSync(`${out}/${name}.xml`, 'utf8');
 }
 function nodes(xml) {
-  return [...xml.matchAll(/<node\s+([^>]+)>?/g)].map(m => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a => [a[1], a[2]])));
+  return [...xml.matchAll(/<[\w.$-]+\s+([^>]+)>?/g)].map(m => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a => [a[1], a[2]])));
 }
 async function mouseNode(label, name) {
   const xml = await snapshot(`${name}-before`);
@@ -66,8 +66,33 @@ adb('shell', 'am', 'start', '-n', 'org.localsend.localsend_app/.MainActivity');
 await pause(2500);
 await mouseNode('Send', 'open-send');
 await mouseNode('Media', 'open-media');
-await snapshot('media-initial');
-// Inspect this screenshot before choosing a photo's actual mouse target.
-// The D-pad experiment follows only after successful mouse selection control.
-fs.writeFileSync(`${out}/pending-control.txt`, 'Review media-initial.png; mouse photo selection control is still pending.\n');
+const media = await snapshot('media-initial');
+const photo = nodes(media).find(n => n['content-desc']?.startsWith('Image1,'));
+if (!photo) throw new Error('First seeded photo is absent; inspect media-initial.png');
+const bounds = [...photo.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
+// The original picker's selection indicator occupies the thumbnail's top end.
+// Read the actual semantic bounds rather than substitute an accessibility click.
+const width = bounds[2] - bounds[0];
+const x = Math.round(bounds[2] - width / 4), y = Math.round(bounds[1] + width / 4);
+async function mousePhoto() {
+  log({ type: 'mouse', action: 'tap', target: 'photo-1-selection-indicator', x, y });
+  adb('shell', 'input', 'mouse', 'tap', String(x), String(y));
+  await pause(900);
+}
+await record('mouse-photo-control', mousePhoto);
+const selected = await snapshot('mouse-photo-selected');
+const selectedPhoto = nodes(selected).find(n => n['content-desc']?.startsWith('Image1,'));
+if (selectedPhoto?.selected !== 'true') throw new Error('Mouse control did not select the first photo');
+await mousePhoto();
+await snapshot('media-reset-before-dpad');
+await record('media-dpad-original', async () => {
+  await remote(20); await remote(20); await remote(22); await remote(23);
+});
+const after = await snapshot('media-after-dpad');
+fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
+  mouseSelected: true,
+  selectedPhotosAfterDpad: nodes(after).filter(n => n['content-desc']?.startsWith('Image') && n.selected === 'true'),
+  focusedNodesAfterDpad: nodes(after).filter(n => n.focused === 'true'),
+  boundary: 'Original 1.15.4 APK, supplementary compatible emulator; not physical Sony Android TV 10',
+}, null, 2));
 await fetch(`http://127.0.0.1:4723/session/${session}`, { method: 'DELETE' });
