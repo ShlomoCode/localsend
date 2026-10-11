@@ -17,10 +17,11 @@ export function storageObserver({wd,prefix,session}) {
   const report=JSON.parse(Buffer.from(encoded,'base64').toString());
   assert(report.readOnly&&report.allFilesAccess,'Observer lacks declared read-only mode or storage visibility permission');
   const identities=[];
-  for(const appId of ['org.localsend.localsend_app','com.google.android.providers.media.module','com.sec.android.app.myfiles']){
-   const command='dumpsys meminfo '+appId;
-   const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({error:String(error)}));
-   identities.push({command,result});
+  for(const appId of new Set(['org.localsend.localsend_app','com.google.android.providers.media.module','com.sec.android.app.myfiles',report.mediaProvider?.packageName].filter(Boolean))){
+   for(const command of ['dumpsys meminfo '+appId,'pidof '+appId]){
+    const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({error:String(error)}));
+    identities.push({command,result});
+   }
   }
   writeFileSync(`evidence/storage-${stage}.json`,JSON.stringify({session,stage,collectedUtc:new Date().toISOString(),previousPackage:previous,report,identities},null,2));
   await activate(previous);
@@ -44,6 +45,7 @@ export function storageObserver({wd,prefix,session}) {
   return observe('before-baseline');
  }
  async function finalize(fixtureName){
+  assert.notEqual(process.env.ISSUE_2007_SOURCE_COMPARISON,'1','Helper scanning is forbidden during source-build comparison');
   const previous=await wd('GET',prefix+'/appium/device/current_package');
   await activate('org.localsend.cloudtransport');
   const input=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Owned scan filename',label:'owned-scan-filename'});

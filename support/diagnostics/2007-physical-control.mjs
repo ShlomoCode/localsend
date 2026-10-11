@@ -11,6 +11,16 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  assert(/^[A-Za-z0-9_-]+\.txt$/.test(fixtureName),'Fixture name must be a safe owned text-file basename');
  const numberedName=fixtureName.replace(/\.txt$/,'-2.txt');
  const repeatResend=process.env.ISSUE_2007_REPEAT_RESEND==='1';
+ const sourceComparison=process.env.ISSUE_2007_SOURCE_COMPARISON==='1';
+ if(sourceComparison){
+  assert.equal(process.env.ISSUE_2007_FINALIZE_INTERVENTION||'','', 'Source comparison must never invoke helper scanner');
+  assert.equal(process.env.ISSUE_2007_SCAN_COMPARISON,'0');
+  assert.equal(process.env.ISSUE_2007_POST_DELETE_WAIT,'0');
+  assert.equal(process.env.ISSUE_2007_RESTART_RECEIVER,'0');
+  assert.equal(process.env.ISSUE_2007_DELETE_ACTION,'trash');
+  assert.equal(process.env.ISSUE_2007_DESTINATION,'downloads');
+  assert.equal(repeatResend,false);
+ }
  const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
  const requestedDeletionAction=process.env.ISSUE_2007_DELETE_ACTION||'permanent';
  const purgeTrash=requestedDeletionAction==='trash-purge';
@@ -255,8 +265,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+fixtureName});
   const actual=Buffer.from(encoded,'base64');
   writeFileSync('evidence/android-saved-'+fixtureName,actual);
+  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:actual.equals(expected),transport:transportStatus()},null,2));
   assert.deepEqual(actual,expected,'Saved Android file differs from selected desktop file');
-  writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
   if(storage){
@@ -456,7 +466,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await waitFile(`evidence/${stage}-requested`,90000);
    const resendInput=JSON.parse(readFileSync(`evidence/${stage}-input.json`,'utf8'));
    const resendExpected=readFileSync(resendInput.path);
-   if(repeatResend||process.env.ISSUE_2007_FINALIZE_INTERVENTION){
+   if(repeatResend||sourceComparison||process.env.ISSUE_2007_FINALIZE_INTERVENTION){
     assert.equal(resendInput.name,fixtureName,'Each same-session resend must use this arm\'s owned filename');
     assert.deepEqual(resendExpected,expected,'Each same-session resend must use the unchanged baseline bytes');
    }
@@ -511,7 +521,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     if(errorRow){
      await wd('POST',prefix+'/element/'+errorRow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
      await snapshot(stage+'-file-error-details');
-     if(repeatResend){
+     if(repeatResend||sourceComparison){
       const postTapSource=readFileSync(`evidence/android-${stage}-file-error-details.xml`,'utf8');
       const doneVisible=(postTapSource.match(/<[^>]+>/g)||[]).some(tag=>tag.includes('content-desc="Done"')&&tag.includes('clickable="true"'));
       if(!doneVisible)await wd('POST',prefix+'/back',{});
@@ -519,11 +529,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
      }
     }
    }
-   if(saved&&!numberedByteExact)assert(byteExact,'Resaved file differs from selected original file');
+   if(saved&&!numberedByteExact&&!sourceComparison)assert(byteExact,'Resaved file differs from selected original file');
    return result;
    }
    const firstResult=await receiveResend('resend');
-   if(storage&&process.env.ISSUE_2007_FINALIZE_INTERVENTION)await storage.observe('after-resend');
+   if(storage&&(process.env.ISSUE_2007_FINALIZE_INTERVENTION||sourceComparison))await storage.observe('after-resend');
    if(repeatResend){
     assert(firstResult.receiverFailed&&!firstResult.resendSucceeded&&firstResult.observedResultUtc,'Matched intervention requires the immediate resend to fail in the receiver UI');
     const intervention=process.env.ISSUE_2007_RETRY_INTERVENTION;
