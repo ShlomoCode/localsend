@@ -1,6 +1,6 @@
 # Issue 3033: original-scenario matrix
 
-The reported failure has not occurred in the tested environments. No production patch or PR is justified. These twelve conditions exclude repeated starts and infrastructure repairs.
+The reported failure has not occurred in the tested environments. No production patch or PR is justified. These thirteen conditions exclude repeated starts and infrastructure repairs.
 
 ## Report provenance
 
@@ -16,7 +16,9 @@ Full source: `/tmp/localsend-sprint-triage/thread-3033-metadata.json`, `thread-3
 
 All rows run unchanged official LocalSend 1.17.0. Flatpak commit: `df68d5e6649a894643f4bff68711e52ad86c2f26c93470139f2ff1e2b38e4418`; runtime 25.08.17. Its manifest copies the official TAR. The native DEB 1.17.0+58 was installed with apt dependencies.
 
-Flatpak and DEB app SHA-256 match: `e4d336ec735105cbf8bdd9ee11eb57afc1aa8d9341b56a53f83f7ededbd1f0f8`. Their Flutter engine SHA-256 match: `854bf421539fa8572d7d61469eeb78c017c10754a8748cf00788deb6db8887b8`. Flutter 3.24.5 is the report attribution for this release. A newer Flutter build is not tested here.
+Flatpak, DEB and Snap revision 32 app SHA-256 match: `e4d336ec735105cbf8bdd9ee11eb57afc1aa8d9341b56a53f83f7ededbd1f0f8`. Their Flutter engine SHA-256 match: `854bf421539fa8572d7d61469eeb78c017c10754a8748cf00788deb6db8887b8`. Flutter 3.24.5 is the report attribution for this release. A newer Flutter build is not tested here.
+
+Snap Store currently offers 1.18.2 revision 38. The historical official 1.17.0 revision 32 was selected through `snap refresh --revision=32`, tracking latest/stable. Publisher is Tien Do Nam (tienisto), Snap ID `LPXqUIl39iWujwwZs3VtbdROHqGGKngl`. Package SHA-256: `04f8fe0af5a7cfa361d7d617e50714f16a753e048b48f7a4bb21a89189c96b16`. Its Canonical-signed revision assertion is preserved. Ordinary dependencies and interfaces are installed and connected: core24 revision 2124, gnome-46-2404 revision 168, mesa-2404 25.2.8-snap288 revision 1839, gtk-common-themes revision 1535. Original LocalSend 3033 specifies no Snap revision; revision 32 comes from the separate comment and contains the same official 1.17 app/engine bytes.
 
 The guest uses Debian 13 / GNOME 48.7, QEMU virtio-vga-gl, native GTK 3.24.49-3 and Mesa 25.0.7-2+deb13u1. App maps prove Mesa EGL; protocol traces name its surface queue. An independent native Wayland EGL control reports `virgl (LLVMPIPE (LLVM 21.1.8, 256 bits))`. This identifies the native EGL environment, not an in-process LocalSend GL_RENDERER measurement. Flatpak's exact GL_RENDERER was not captured.
 
@@ -40,6 +42,7 @@ Every condition rendered the application and produced zero reported Wayland prot
 | 10. Native DEB 4K 200%, 3 starts | Wayland / M, native libraries / N | 3840×2160 / 1920×1080; 2 | Initial 904×1198; 1904×1398 after startup, scale 2 | [round 29](https://github.com/ShlomoCode/localsend/actions/runs/38135756388/artifacts/11703403654), native-deb4k200/trial-1..3.log |
 | 11. Native DEB 4K 150%, 3 starts | Wayland / M, native libraries / N | 3840×2160 / 2560×1440; 2 | Initial 904×1198; 1904×1398 after startup, scale 2 | [round 30](https://github.com/ShlomoCode/localsend/actions/runs/38135756388/artifacts/11703877011), native-deb4k150/trial-1..3.log |
 | 12. Three maximize/restore cycles at 4K 150% | Wayland / M, native libraries / same N and PID 10036 | 3840×2160 / 2560×1440; 2 | 5120×2816 maximized ↔ 1904×1398 restored; surface 34 stable | [round 31](https://github.com/ShlomoCode/localsend/actions/runs/38135756388/artifacts/11704027406), native-deb4k150/trial-3.log |
+| 13. Official Snap 1.17.0 revision 32, native 200%, 3 starts | Wayland / Mesa EGL via gpu-2404 provider / normal Snap profile | 1920×1080 / 960×540; 2 | 904×1198 at scale 2; transient 904×1120; surface 34. Each app process confirms revision 32, Wayland display and backend | [round 36](https://github.com/ShlomoCode/localsend/actions/runs/38135756388/artifacts/11705252456), [round 37](https://github.com/ShlomoCode/localsend/actions/runs/38135756388/artifacts/11705392445), snap32-native200/trial-1..3.log |
 
 Calculator rendered at 200% with 964×1476 buffers; it is a harness control. Initial XWayland attempts failed before rendering because Flatpak exported empty DISPLAY while Wayland remained available; they are invalid controls. Round 24 ignored the attempted XDG overrides and proves existing-profile startup only. Round 25 verifies the corrected profile control.
 
@@ -49,4 +52,6 @@ Results and inspected native screenshots: `/tmp/localsend-bug-3033/evidence/roun
 
 The tested path correctly scales odd logical height 599 to physical 1198 at buffer scale 2. This does not explain the reporter's physical 452×599 at scale 2 or establish a fix.
 
-Uncovered leads: supplemental NVIDIA EGL/driver environment from Flutter 185326; Snap packaging from the original report; a newer Flutter build for the original reproduction/check request; the separate comment's mixed-monitor layout. No evidence restricts the defect to NVIDIA or identifies a newer Flutter correction. Root review determines further experiments or an exact blocker; twelve rows do not automatically end the investigation.
+The updated full archive, including Snap installation, assertion, connections, runtime revisions and traces, is `/tmp/localsend-bug-3033/evidence/raw-traces-3033-snap.tar.gz`, SHA-256 `da9162dc2b81506c6b4cc5e8b97c5daedcf5b36e30ff995ba40db88c1facdeef`, matching the guest checksum. Round 37 preserves its base64 payload. It is extracted in the same raw-full directory.
+
+Uncovered leads: supplemental NVIDIA EGL/driver environment from Flutter 185326 and the separate comment's mixed-monitor layout. The live VM exposes only connected `card0-Virtual-1`; Mutter likewise reports one monitor (round 35). Mixed outputs require a normal two-output VM configuration, not invented entries in ApplyMonitorsConfig. A newer Flutter build without a failing baseline would not prove a correction and is deferred under root guidance. No evidence restricts the defect to NVIDIA or identifies a newer Flutter correction. Root review determines further experiments or an exact blocker; thirteen rows do not automatically end the investigation.

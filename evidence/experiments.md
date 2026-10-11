@@ -49,3 +49,9 @@ The4K150% condition covers the single4K monitor aspect of the separate Ubuntu/Sn
 | Three native maximize/restore cycles at 4K 150% | Recreating large buffers during window geometry changes could expose an allocation/scale mismatch. | PID 10036 and surface 34 remained stable. Maximized buffers 5120×2816; restored 1904×1398; buffer scale 2. All stages rendered. Complete trace has zero protocol errors. | round-31/result.txt and six native screenshots; round-32/result.txt; native-deb4k150/trial-3.log. |
 
 An independent native Wayland EGL control reports virgl (LLVMPIPE (LLVM 21.1.8, 256 bits)). App maps prove Mesa EGL, not an in-process GL_RENDERER value. Flatpak's exact GL_RENDERER remains unmeasured. See original-scenario-matrix.md for the twelve distinct conditions and precise report provenance.
+
+| Snap packaging condition | Prediction | Actual result | Evidence |
+|---|---|---|---|
+| Official Snap 1.17.0 revision 32, normal content/runtime interfaces, native Wayland 200%, three startups | If Snap runtime/packaging exposes a mismatch masked by Flatpak and Debian native libraries, this installation may reproduce it. | Three starts rendered; PIDs 14483/14691/14819 each confirm revision 32, GDK_BACKEND=wayland and WAYLAND_DISPLAY=wayland-0. Output scale 2, logical size 960×540, physical buffers 904×1198 at scale 2 on surface 34. Zero protocol errors. App and engine SHA match Flatpak/DEB exactly. | round-36/result.txt and three native screenshots; round-37/result.txt; snap32-native200/trial-1..3.log and maps. |
+
+This is condition 13. Snap latest/stable currently points to 1.18.2 revision 38; it was installed only to establish normal dependencies, then switched through the official revision mechanism to 1.17.0 revision 32 before any reproduction. No 1.18.2 app result is used. Package SHA-256 and signed revision assertion, runtime revisions, interfaces and normal strict-confinement configuration are preserved in the updated raw archive.
