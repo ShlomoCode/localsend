@@ -94,7 +94,7 @@ function inspectWindow(actor, tracker) {
 function inspect() {
     const tracker = Shell.WindowTracker.get_default();
     const installed = Shell.AppSystem.get_default().get_installed().find(app => app.get_name().toLowerCase().includes('localsend'));
-    const installedInfo = installed?.get_app_info() ?? null;
+    const installedInfo = installed ?? null;
     const actors = inspectTree(global.stage);
     return JSON.stringify({
         backend: Meta.is_wayland_compositor() ? 'wayland' : 'x11',
