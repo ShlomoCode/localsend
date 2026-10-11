@@ -11,12 +11,16 @@ on:
         description: Build the isolated native-name candidate and compare real hover
         type: boolean
         default: false
+      reuse_candidate:
+        description: Reuse the verified successful candidate artifact without rebuilding
+        type: boolean
+        default: false
 concurrency:
   group: issue3484-tray-diagnostic
   cancel-in-progress: false
 jobs:
   build-candidate:
-    if: inputs.candidate
+    if: inputs.candidate && !inputs.reuse_candidate
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -52,7 +56,7 @@ jobs:
           path: /tmp/issue3484-candidate-build/
   arch-tray:
     needs: build-candidate
-    if: ${{ !cancelled() && (!inputs.candidate || needs.build-candidate.result == 'success') }}
+    if: ${{ !cancelled() && (!inputs.candidate || inputs.reuse_candidate || needs.build-candidate.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -61,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v6
-        if: inputs.candidate
+        if: inputs.candidate && !inputs.reuse_candidate
         with:
           name: issue3484-candidate-build
           path: /tmp/issue3484-candidate-build
@@ -70,6 +74,7 @@ jobs:
           ARCH_DATE: ${{ inputs.archive_date || 'latest' }}
           GH_TOKEN: ${{ github.token }}
           WITH_CANDIDATE: ${{ inputs.candidate }}
+          REUSE_CANDIDATE: ${{ inputs.reuse_candidate }}
         run: |
           bash support/diagnostics/3484/vm.sh
       - name: Preserve evidence

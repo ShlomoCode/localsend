@@ -36,6 +36,7 @@ collect_evidence() {
   exit "$host_status"
 }
 trap collect_evidence EXIT
+if [ "${REUSE_CANDIDATE:-false}" = true ]; then test "${WITH_CANDIDATE:-false}" = true; fi
 sudo apt-get update
 sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client imagemagick unzip jq
 gh api repos/ShlomoCode/localsend/actions/artifacts/11700370485/zip > /tmp/tray3484/baseline.zip
@@ -46,6 +47,13 @@ test ! -s /tmp/tray3484/baseline/provenance/source-status-before.txt
 test ! -s /tmp/tray3484/baseline/provenance/source-status-after.txt
 cp -a /tmp/tray3484/baseline/provenance evidence/cloud/current-base-provenance
 if [ "${WITH_CANDIDATE:-false}" = true ]; then
+  if [ "${REUSE_CANDIDATE:-false}" = true ]; then
+    mkdir -p /tmp/issue3484-candidate-build
+    gh api repos/ShlomoCode/localsend/actions/artifacts/11713726416/zip > /tmp/tray3484/candidate.zip
+    unzip -q /tmp/tray3484/candidate.zip -d /tmp/issue3484-candidate-build
+    printf '9ae0712a86d40042c4b3912d062fb643f386c393d7806415e6daa077dbc81c87  /tmp/issue3484-candidate-build/source-bundle.tar.gz\n' | sha256sum -c -
+    printf 'run=38169123718 artifact=11713726416\n' > evidence/cloud/candidate-artifact-origin.txt
+  fi
   (cd /tmp/issue3484-candidate-build && sha256sum -c source-bundle.tar.gz.sha256)
   grep -qx 9e228bb4facc2d4677afe1e6e21828adb7b83dba /tmp/issue3484-candidate-build/provenance/source-sha.txt
   test ! -s /tmp/issue3484-candidate-build/provenance/source-status-before.txt

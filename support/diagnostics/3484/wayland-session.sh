@@ -148,11 +148,14 @@ for x in 12 24 36 48 60 72 84 96 108 120; do
   if grep -Eiq 'LocalSend|org[.]localsend' "$out/$app_case/hover-1-$x.txt"; then hover_x=$x; break; fi
 done
 if [ -z "$hover_x" ]; then
-  printf 'No OCR-located LocalSend hover; manual original screenshot review required before recording coordinates can be accepted.\n' > "$out/$app_case/recording-observation.txt"
-  kill -0 "$app_pid"
-  exit 0
+  # Both real slots are visible in the original completed hover scans. OCR can
+  # miss the short LocalSend label; preserve an actual sweep for manual review.
+  hover_points=(72 48)
+  printf 'OCR missed the label; record both real tray slots. Manual original screenshot and video review required.\n' > "$out/$app_case/recording-observation.txt"
+else
+  hover_points=("$hover_x")
 fi
-printf '%s\t16\n' "$hover_x" > "$out/$app_case/recorded-hover-point.tsv"
+for hover_point in "${hover_points[@]}"; do printf '%s\t16\n' "$hover_point"; done > "$out/$app_case/recorded-hover-point.tsv"
 move_pointer 1000 700
 wf-recorder --no-dmabuf -c libx264 -f "$out/$app_case/actual-hover.mp4" > "$out/$app_case/recording.log" 2>&1 &
 record_pid=$!
@@ -168,8 +171,10 @@ if [ "$record_ready" = 0 ]; then
   exit 0
 fi
 sleep 1
-move_pointer "$hover_x" 16
-sleep 3
+for hover_point in "${hover_points[@]}"; do
+  move_pointer "$hover_point" 16
+  sleep 3
+done
 move_pointer 1000 700
 sleep 3
 stop_recording
