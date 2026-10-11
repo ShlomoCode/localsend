@@ -6,7 +6,9 @@ mxroot=/home/runner/issue1310-mx
 sudo apt-get update
 sudo apt-get install -y qemu-system-x86 qemu-utils sshpass python3-pip imagemagick
 pip install vncdotool
-curl -fL --retry 3 --max-time 900 -o "$mxroot/mx.iso" https://downloads.sourceforge.net/project/mx-linux/Old/MX-23.2/Xfce/MX-23.2_x64.iso
+if ! test -f "$mxroot/mx.iso"; then
+  curl -fL --retry 3 --max-time 900 -o "$mxroot/mx.iso" https://downloads.sourceforge.net/project/mx-linux/Old/MX-23.2/Xfce/MX-23.2_x64.iso
+fi
 curl -fL --retry 3 -o "$mxroot/MX-23.2_x64.iso.sha256" https://downloads.sourceforge.net/project/mx-linux/Old/MX-23.2/Xfce/MX-23.2_x64.iso.sha256
 sha256sum "$mxroot/mx.iso" > evidence/mx/iso-sha256.txt
 cat "$mxroot/MX-23.2_x64.iso.sha256" > evidence/mx/published-sha256.txt
@@ -19,10 +21,11 @@ cleanup() {
   printf '%s\n' "$?" > evidence/mx/host-exit-code.txt
   timeout 120 sshpass -p demo scp -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" -r demo@127.0.0.1:/home/demo/evidence evidence/mx/guest || true
   vncdo -s localhost::5900 capture evidence/mx/final.png || true
-  if test -f "$mxroot/qemu.pid"; then kill "$(cat "$mxroot/qemu.pid")" || true; fi
+  if test -f "$mxroot/qemu.pid"; then sudo kill "$(sudo cat "$mxroot/qemu.pid")" || true; fi
+  sudo chown -R "$(id -u):$(id -g)" evidence
 }
 trap cleanup EXIT
-qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -drive file="$mxroot/disk.qcow2",if=virtio,format=qcow2 -cdrom "$mxroot/mx.iso" -boot d -device virtio-vga -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 -vnc 127.0.0.1:0 -serial file:evidence/mx/serial.log -pidfile "$mxroot/qemu.pid" -daemonize
+sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -drive file="$mxroot/disk.qcow2",if=virtio,format=qcow2 -cdrom "$mxroot/mx.iso" -boot d -device virtio-vga -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 -vnc 127.0.0.1:0 -serial file:evidence/mx/serial.log -pidfile "$mxroot/qemu.pid" -daemonize
 sleep 20
 vncdo -s localhost::5900 capture evidence/mx/boot-menu.png key enter
 sleep 120

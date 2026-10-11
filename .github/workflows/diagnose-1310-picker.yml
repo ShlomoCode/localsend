@@ -18,6 +18,11 @@ jobs:
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        if: inputs.desktop == 'mx'
+        with:
+          path: /home/runner/issue1310-mx/mx.iso
+          key: issue1310-mx-968f9d6b01bb966cac025b6971cdcdb9dad39bb74a2600162f9f4bd7e6ab9eae
       - name: Normal XFCE release controls
         env:
           PACKAGE_FORMAT: ${{ inputs.package_format || 'tar' }}
