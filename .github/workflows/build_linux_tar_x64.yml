@@ -39,7 +39,23 @@ jobs:
         if: inputs.evidence_run != ''
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg squashfs-tools binutils
+          if [[ -f evidence/cloud/repacked-new-client.AppImage ]]; then
+            chmod u+x evidence/cloud/repacked-new-client.AppImage
+            offset=$(evidence/cloud/repacked-new-client.AppImage --appimage-offset)
+            unsquashfs -o "$offset" -d /tmp/issue2690-packed evidence/cloud/repacked-new-client.AppImage > evidence/cloud/packed-extract.log
+            (cd /tmp/issue2690-packed && find . -type f -print0 | sort -z | xargs -0 sha256sum) > evidence/cloud/inventory-packed-new-client.txt
+            for library in libwayland-client.so.0 libffi.so.8; do
+              target="/tmp/issue2690-packed/usr/lib/x86_64-linux-gnu/$library"
+              {
+                readlink -f "$target"
+                sha256sum "$target"
+                readelf -d "$target"
+                readelf -V "$target"
+                readelf --dyn-syms --wide "$target"
+              } > "evidence/cloud/packed-$library.txt"
+            done
+          fi
           shopt -s nullglob
           for screenshot in evidence/cloud/launch/*.xwd; do
             ffmpeg -loglevel error -y -f xwd_pipe -i "$screenshot" -frames:v 1 "${screenshot%.xwd}.png"
