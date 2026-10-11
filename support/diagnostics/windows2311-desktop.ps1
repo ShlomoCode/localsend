@@ -15,6 +15,17 @@ function PageSignature($pane){
  $all=$pane.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
  return (@($all|ForEach-Object {try{"$($_.Current.Name)|$($_.Current.IsOffscreen)|$($_.Current.BoundingRectangle)"}catch{}})-join "`n")
 }
+# The first snapshot can expose the account host before its web content loads.
+# Wait for the setup pane rather than treating that loading state as readiness.
+$loadDeadline=[DateTime]::UtcNow.AddSeconds(45)
+do{
+ $initial=SetupPane
+ $hosts=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+ $account=@($hosts|Where-Object {$_.Current.Name -eq 'Microsoft account'})
+ if($initial.Count -or !$account.Count){break}
+ Start-Sleep -Milliseconds 500
+}while([DateTime]::UtcNow -lt $loadDeadline)
+if(!$initial.Count -and $account.Count){Capture 'setup-not-accessible';throw 'Windows account host remains, but setup content did not become accessible'}
 for($attempt=0;$attempt -lt 10;$attempt++){
  [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)|ForEach-Object {try{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;offscreen=$_.Current.IsOffscreen;bounds=$_.Current.BoundingRectangle.ToString()}}catch{}}|ConvertTo-Json -Depth 5|Set-Content "evidence/desktop-setup-tree-$attempt.json"
  $setup=SetupPane

@@ -13,8 +13,14 @@ export default async function({session,wd,senderPort,transportStatus}){
   const settings=await waitForNativeControl({wd,prefix,label:label+'-settings',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Settings") and @clickable="true"]'});
   await wd('POST',prefix+'/element/'+settings['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   await capture(label+'-settings-before-scroll');
-  await wd('POST',prefix+'/element',{using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description("Save media to gallery"))'});
-  const locator={using:'xpath',value:'//*[@package="org.localsend.localsend_app" and @content-desc="Save media to gallery"]/following::android.widget.Switch[1]'};
+  const scroll=await waitForNativeControl({wd,prefix,label:label+'-settings-scroll-view',using:'xpath',value:'//android.widget.ScrollView[@package="org.localsend.localsend_app" and @scrollable="true"]',requireClickable:false});
+  const rect=await wd('GET',prefix+'/element/'+scroll['element-6066-11e4-a52e-4f735466cecf']+'/rect');
+  const x=Math.round(rect.x+rect.width/2),bottom=Math.round(rect.y+rect.height*0.8),top=Math.round(rect.y+rect.height*0.4);
+  await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'settings-scroll',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x,y:bottom},{type:'pointerDown',button:0},{type:'pointerMove',duration:500,x,y:top},{type:'pointerUp',button:0}]}]});
+  await capture(label+'-settings-after-scroll');
+  // Release 1.17 merges Receive labels into one parent. Its observed child index 4
+  // is the gallery switch, following three Quick Save/PIN switches and folder.
+  const locator={using:'xpath',value:'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Save media to gallery")]/android.widget.Switch[@index="4"]'};
   let toggle=await waitForNativeControl({wd,prefix,label:label+'-global-gallery-switch',...locator,sourceIncludes:['Save media to gallery']});
   const id=toggle['element-6066-11e4-a52e-4f735466cecf'];
   const before=await wd('GET',prefix+'/element/'+id+'/attribute/checked');
