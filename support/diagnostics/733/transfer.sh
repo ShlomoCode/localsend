@@ -54,3 +54,28 @@ send_and_approve() {
     sudo find "/proc/$receiver_pid/root/home/mint/Downloads" /home/mint/Downloads -maxdepth 2 -name "$filename" -exec sha256sum {} \; -exec stat -Lc '%d:%i %s %n' {} \;;
   } > "evidence/$label-destination-while-alive.txt" 2>&1 || true
 }
+restart_sender() {
+  sudo pkill -u sender -x localsend_app || true
+  sudo pkill -u sender -x localsend || true
+  sleep 2
+  nohup sudo ip netns exec issue733sender runuser -l sender -c "env DISPLAY=$DISPLAY XDG_RUNTIME_DIR=/run/user/$(id -u sender) dbus-run-session -- /home/sender/app/localsend_app" >> evidence/sender.log 2>&1 < /dev/null &
+  sleep 8
+  sender_wid=''
+  for wid in $(xdotool search --onlyvisible --name '^LocalSend$'); do
+    [[ "$wid" == "$receiver_wid" ]] || sender_wid=$wid
+  done
+  test -n "$sender_wid"
+  xdotool windowmove "$sender_wid" 0 0
+  xdotool windowsize "$sender_wid" 1000 700
+}
+observe_history() {
+  local label=$1
+  jq 'with_entries(select(.key|test("alias|destination|receive_history|quick_save")))' "$prefs" > "evidence/$label-receiver-settings.json"
+  capture_window "$receiver_wid" "$label-home"
+  # Observed history icon in the original1.11.1 1000x700 receiver.
+  xdotool mousemove --window "$receiver_wid" 920 40 click 1
+  sleep 2
+  capture_window "$receiver_wid" "$label-history"
+  xdotool key --clearmodifiers Escape
+  sleep 1
+}

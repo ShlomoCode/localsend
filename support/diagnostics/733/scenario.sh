@@ -60,9 +60,12 @@ sleep 10
 xdotool search --onlyvisible --name '^LocalSend$' > evidence/windows.txt
 import -window root evidence/two-apps-prepared.png
 for wid in $(cat evidence/windows.txt); do
-  xdotool getwindowpid "$wid" >> evidence/windows-pid.txt
+  # Historical Flatpak11.1 lacks _NET_WM_PID; retain this observation and use
+  # independent OS user/process identities below instead of inventing a PID.
+  xdotool getwindowpid "$wid" >> evidence/windows-pid.txt 2>&1 || printf 'WINDOW_PID_UNAVAILABLE wid=%s\n' "$wid" >> evidence/windows-pid.txt
   import -window "$wid" "evidence/window-$wid.png"
 done
+ps -eo pid,uid,comm,args | grep -E '[l]ocalsend|[i]ssue733sender' > evidence/app-process-identities.txt
 # Preserve destination namespace before any experiment. Private contents alone
 # do not constitute the bug; control and actual UI outcomes must be observed.
 receiver_pid=$(pgrep -u mint -n -x localsend_app || pgrep -u mint -n -x localsend)
