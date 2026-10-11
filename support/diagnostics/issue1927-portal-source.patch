@@ -1,0 +1,94 @@
+diff --git a/app/lib/util/native/autostart_helper.dart b/app/lib/util/native/autostart_helper.dart
+index ddbf47d7..41e5d113 100644
+--- a/app/lib/util/native/autostart_helper.dart
++++ b/app/lib/util/native/autostart_helper.dart
+@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
+ import 'package:localsend_app/util/native/macos_channel.dart';
+ import 'package:logging/logging.dart';
+ import 'package:package_info_plus/package_info_plus.dart';
++import 'package:shared_preferences/shared_preferences.dart';
+ import 'package:win32_registry/win32_registry.dart';
++import 'package:xdg_desktop_portal/xdg_desktop_portal.dart';
+ 
+ const startHiddenFlag = '--hidden';
+ 
+@@ -15,6 +17,9 @@ Future<bool> enableAutoStart({required bool startHidden}) async {
+     final packageInfo = await PackageInfo.fromPlatform();
+     switch (defaultTargetPlatform) {
+       case TargetPlatform.linux:
++        if (await File('/.flatpak-info').exists()) {
++          return _setFlatpakAutoStart(enabled: true, startHidden: startHidden);
++        }
+         String contents =
+             '''
+ [Desktop Entry]
+@@ -57,6 +62,9 @@ Future<bool> disableAutoStart() async {
+     final packageInfo = await PackageInfo.fromPlatform();
+     switch (defaultTargetPlatform) {
+       case TargetPlatform.linux:
++        if (await File('/.flatpak-info').exists()) {
++          return _setFlatpakAutoStart(enabled: false);
++        }
+         File(_getLinuxFilePath(packageInfo.packageName)).deleteSync();
+         break;
+       case TargetPlatform.macOS:
+@@ -79,6 +87,9 @@ Future<bool> isAutoStartEnabled() async {
+   final packageInfo = await PackageInfo.fromPlatform();
+   switch (defaultTargetPlatform) {
+     case TargetPlatform.linux:
++      if (await File('/.flatpak-info').exists()) {
++        return (await SharedPreferences.getInstance()).getBool(_flatpakAutoStartKey) ?? false;
++      }
+       return File(_getLinuxFilePath(packageInfo.packageName)).existsSync();
+     case TargetPlatform.macOS:
+       return await getLaunchAtLogin();
+@@ -93,6 +104,9 @@ Future<bool> isAutoStartHidden() async {
+   final packageInfo = await PackageInfo.fromPlatform();
+   switch (defaultTargetPlatform) {
+     case TargetPlatform.linux:
++      if (await File('/.flatpak-info').exists()) {
++        return (await SharedPreferences.getInstance()).getBool(_flatpakAutoStartHiddenKey) ?? false;
++      }
+       final file = File(_getLinuxFilePath(packageInfo.packageName));
+       if (!file.existsSync()) {
+         return false;
+@@ -108,6 +122,27 @@ Future<bool> isAutoStartHidden() async {
+ }
+ 
+ const _windowsRegistryKeyValue = 'LocalSend';
++const _flatpakAutoStartKey = 'ls_flatpak_auto_start';
++const _flatpakAutoStartHiddenKey = 'ls_flatpak_auto_start_hidden';
++
++// Diagnostic portal prototype. The portal has no public enabled-state getter;
++// these preferences record its accepted response, not externally changed state.
++Future<bool> _setFlatpakAutoStart({required bool enabled, bool startHidden = false}) async {
++  final portal = XdgDesktopPortalClient();
++  try {
++    final result = await portal.background.requestBackground(
++      autostart: enabled,
++      commandLine: enabled ? [Platform.resolvedExecutable, if (startHidden) startHiddenFlag] : null,
++      dBusActivatable: false,
++    ).first.timeout(const Duration(minutes: 2));
++    final prefs = await SharedPreferences.getInstance();
++    await prefs.setBool(_flatpakAutoStartKey, result.autostart);
++    await prefs.setBool(_flatpakAutoStartHiddenKey, result.autostart && startHidden);
++    return result.autostart == enabled;
++  } finally {
++    await portal.close();
++  }
++}
+ 
+ RegistryKey _getWindowsRegistryKey() {
+   return Registry.openPath(
+diff --git a/app/pubspec.yaml b/app/pubspec.yaml
+index d41d4f0d..eec903f6 100644
+--- a/app/pubspec.yaml
++++ b/app/pubspec.yaml
+@@ -57,6 +57,7 @@ dependencies:
+   screen_retriever: 0.2.2
+   share_handler: 0.0.22
+   shared_preferences: 2.5.5
++  xdg_desktop_portal: 0.1.14
+   shared_preferences_platform_interface: any
+   slang: 4.19.0
+   slang_flutter: 4.19.0

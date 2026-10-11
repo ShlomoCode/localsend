@@ -9,13 +9,30 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Exercise normal Flatpak and Cinnamon login on Mint 22.2
-        run: bash support/diagnostics/issue1927-mint.sh
-      - name: Preserve VM files after every outcome
+        with:
+          fetch-depth: 0
+      - name: Install pinned source build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev pkg-config binutils
+          rustup toolchain install 1.97.1 --profile minimal
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+      - name: Install FVM
+        run: |
+          dart pub global activate fvm
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+      - name: Build same-source baseline and portal prototype
+        env:
+          RUSTUP_TOOLCHAIN: 1.97.1
+        run: bash support/diagnostics/issue1927-build.sh
+      - name: Preserve files after every outcome
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" evidence && chmod -R a+rX evidence
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: issue1927-mint-${{ github.run_id }}
+          name: issue1927-source-${{ github.run_id }}
           path: evidence/
