@@ -213,6 +213,8 @@ for stage, location in stages:
                 raise RuntimeError('Confirm did not persist requested alias')
             if stage=='candidate' and still_open:
                 raise RuntimeError('Candidate still retains edit modal after saving')
+            if stage=='candidate' and (not any(r['text']=='Favorites' for r in confirmed) or not any(r['text']==new_alias for r in confirmed)):
+                raise RuntimeError('Candidate Confirm did not visibly return to the saved favorite list')
             if stage!='candidate' and not still_open:
                 raise RuntimeError('Untouched baseline did not reproduce expected retained edit modal')
             if still_open:
@@ -255,6 +257,8 @@ for stage, location in stages:
         restarted_edit = snap('restart-edit-reopened')
         if not any(r['text'].lower()=='port' for r in restarted_edit):
             raise RuntimeError('Restart did not reopen the actual saved favorite edit dialog')
+        if not any(r['text']=='ChangedAgain1840' for r in restarted_edit):
+            raise RuntimeError('Restart edit dialog does not visibly show the persisted alias')
         record('restart-reopen-control', stage=stage, saved_alias=favorites()[0]['alias'])
         record('stage-complete', stage=stage)
     finally:

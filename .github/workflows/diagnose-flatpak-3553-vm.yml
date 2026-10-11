@@ -70,6 +70,7 @@ jobs:
           export PROBE_FLUTTER="$(command -v flutter)"
           bash support/diagnostics/1840-build.sh
           cd candidate-source/app
+          dart format --output=none --set-exit-if-changed lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
           flutter test test/unit/provider/favorites_provider_test.dart test/widget/favorite_edit_confirmation_test.dart
           flutter analyze lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
           cd ../..
