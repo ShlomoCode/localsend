@@ -1,0 +1,37 @@
+name: Issue 3556 fixture and storage diagnosis
+on:
+  workflow_dispatch:
+jobs:
+  storage-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Build separate public API fixture helper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          bash support/diagnose_3556/build-helper.sh
+      - name: Upload helper and unmodified released application
+        run: |
+          curl --fail --silent --show-error -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" https://api-cloud.browserstack.com/app-automate/upload -F file=@/tmp/fixture3556/helper.apk -o /tmp/fixture3556/helper-upload.json
+          curl --fail --silent --show-error -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" https://api-cloud.browserstack.com/app-automate/upload -F url=https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-android-arm64v8.apk -o /tmp/fixture3556/baseline-upload.json
+          node --input-type=module -e 'import fs from "node:fs";for(const [key,file] of [["HELPER_APP","helper"],["BASELINE_APP","baseline"]]){const app=JSON.parse(fs.readFileSync("/tmp/fixture3556/"+file+"-upload.json")).app_url;if(!app)throw Error("Upload missing URL");fs.appendFileSync(process.env.GITHUB_ENV,key+"="+app+"\n");}'
+      - name: Physical S20 capacity and small fixture control
+        run: node support/diagnose_3556/storage-control.mjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue3556-storage-evidence
+          path: evidence/

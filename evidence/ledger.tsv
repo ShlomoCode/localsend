@@ -1,0 +1,5 @@
+id	kind	hypothesis	changed_variable	action	actual_result	evidence	substantive
+I01	infrastructure	S20 baseline device is available	device catalog	Read saved BrowserStack catalog	Samsung Galaxy S20 Android 10 available	/tmp/localsend-browserstack-devices.json	no
+I02	infrastructure	Capacity permits one session	live plan	Authenticated plan GET	0 running; maximum 5	STATUS.md	no
+S01	source	File selection copies all bytes	baseline source	Read File path in tag v1.18.2	SAF metadata/content URI; full copy not established	source/file_picker-1.18.2.dart	no
+S02	source	Media/share can differ from File	baseline source and PR3395	Read converter and PR body/comments	Distinct originFile/share paths; runtime evidence pending	source/converters-1.18.2.dart	no
