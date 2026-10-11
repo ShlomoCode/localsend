@@ -1,6 +1,15 @@
 name: Diagnose 402 Linux picker symlink
 on:
   workflow_dispatch:
+    inputs:
+      picker_backend:
+        type: choice
+        default: zenity
+        options: [zenity, kdialog]
+      selection_mode:
+        type: choice
+        default: path
+        options: [path, row]
 concurrency:
   group: issue402-diagnostic
   cancel-in-progress: false
@@ -14,12 +23,12 @@ jobs:
         run: |
           mkdir -p evidence/cloud
           chmod 777 evidence/cloud
-          docker build -f support/diagnostics/402-desktop.Dockerfile -t issue402-desktop .
+          docker build --build-arg PICKER_BACKEND=${{ inputs.picker_backend || 'zenity' }} -f support/diagnostics/402-desktop.Dockerfile -t issue402-desktop .
           docker network create --subnet 172.29.40.0/24 issue402-net
       - name: Select and transfer through actual applications
         run: |
           docker run -d --name issue402-receiver --network issue402-net -e ROLE=receiver -v "$PWD/evidence/cloud:/evidence" issue402-desktop
-          docker run -d --name issue402-sender --network issue402-net -e ROLE=sender -v "$PWD/evidence/cloud:/evidence" issue402-desktop
+          docker run -d --name issue402-sender --network issue402-net -e ROLE=sender -e SELECTION_MODE=${{ inputs.selection_mode || 'path' }} -v "$PWD/evidence/cloud:/evidence" issue402-desktop
           result=0
           for name in issue402-sender issue402-receiver; do
             status=$(timeout 600 docker wait "$name") || status=124

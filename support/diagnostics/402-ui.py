@@ -7,6 +7,7 @@ import os
 import pathlib
 import subprocess
 import time
+import pyatspi
 
 role = os.environ['ROLE']
 out = pathlib.Path('/evidence') / role
@@ -33,8 +34,44 @@ def snapshot(name):
 
 
 def click(label, name, optional=False):
+    if label in ('Accept', 'Done'):
+        matches = []
+        def visit(node, depth=0):
+            if depth > 18:
+                return
+            try:
+                if node.name == label and node.getState().contains(pyatspi.STATE_SHOWING):
+                    action = node.queryAction()
+                    if action.nActions:
+                        matches.append((node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS).y, action))
+                for child in node:
+                    visit(child, depth + 1)
+            except (NotImplementedError, RuntimeError):
+                pass
+        visit(pyatspi.Registry.getDesktop(0))
+        if matches:
+            matches.sort(key=lambda item: item[0])
+            log('semantic-click', label=label)
+            matches[-1][1].doAction(0)
+            time.sleep(2)
+            return True
     rows = snapshot(name)
     hits = [r for r in rows if r['text'].strip().strip('.,:').lower() == label.lower()]
+    if not hits and label in ('Accept', 'Done') and app_bounds:
+        left, top, width, height = app_bounds
+        crop_top = top + int(height * .7)
+        crop_height = int(height * .3)
+        crop = out / (name + '-footer.png')
+        command('convert', str(out / (name + '.png')), '-crop', f'{width}x{crop_height}+{left}+{crop_top}', '+repage', '-resize', '300%', '-colorspace', 'Gray', str(crop))
+        text = command('tesseract', str(crop), 'stdout', '--psm', '6', 'tsv').stdout
+        (out / (name + '-footer.tsv')).write_text(text)
+        for row in csv.DictReader(io.StringIO(text), delimiter='\t'):
+            if row['text'].strip().strip('.,:').lower() == label.lower():
+                row['left'] = str(left + int(row['left']) // 3)
+                row['top'] = str(crop_top + int(row['top']) // 3)
+                row['width'] = str(int(row['width']) // 3)
+                row['height'] = str(int(row['height']) // 3)
+                hits.append(row)
     if app_bounds and label in ('Send', 'File', 'Linux'):
         left, top, width, height = app_bounds
         hits = [r for r in hits if left <= int(r['left']) <= left + width and top <= int(r['top']) <= top + height]
@@ -42,7 +79,7 @@ def click(label, name, optional=False):
         if optional:
             return False
         raise RuntimeError('UI label absent: ' + label)
-    hit = hits[0]
+    hit = max(hits, key=lambda row: int(row['top'])) if label in ('Accept', 'Done') else hits[0]
     x = int(hit['left']) + int(hit['width']) // 2
     y = int(hit['top']) + int(hit['height']) // 2
     log('click', label=label, x=x, y=y)
@@ -71,7 +108,7 @@ def start():
 
 
 pathlib.Path('/home/probe/Downloads').mkdir(exist_ok=True)
-log('start', role=role)
+log('start', role=role, selection_mode=os.environ.get('SELECTION_MODE', 'path'))
 if role == 'receiver':
     app = start()
     for preferences in pathlib.Path('/home/probe').rglob('shared_preferences.json'):
@@ -94,8 +131,17 @@ if role == 'receiver':
                 data = path.read_bytes()
                 saved_versions[str(path)] = path.stat().st_mtime_ns
                 receipts.append(dict(name=path.name, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
+                archive = out / 'saved' / str(len(receipts))
+                archive.mkdir(parents=True, exist_ok=True)
+                (archive / path.name).write_bytes(data)
                 (out / 'receipts.json').write_text(json.dumps(receipts, indent=2))
                 log('saved-file', **receipts[-1])
+        if receipts and pathlib.Path('/evidence/sender/ack-' + str(len(receipts))).exists():
+            # Reset only this test's archived fixture after a confirmed GUI transfer.
+            for path in pathlib.Path('/home/probe/Downloads').glob('*.txt'):
+                if path.name in ('whatever.txt', 'another.txt'):
+                    path.unlink()
+            (out / ('cleared-' + str(len(receipts)))).touch()
         time.sleep(2)
     files = []
     for path in pathlib.Path('/home/probe/Downloads').rglob('*'):
@@ -126,9 +172,13 @@ else:
             click('File', case + '-file')
             snapshot(case + '-picker')
             command('xdotool', 'key', 'ctrl+l')
-            command('xdotool', 'type', '--clearmodifiers', '--delay', '30', str(fixture / filename))
+            mode = os.environ.get('SELECTION_MODE', 'path')
+            location = str(fixture) + '/' if mode == 'row' else str(fixture / filename)
+            command('xdotool', 'type', '--clearmodifiers', '--delay', '30', location)
             command('xdotool', 'key', 'Return')
             time.sleep(2)
+            if mode == 'row':
+                click(filename, case + '-picker-row')
             click('OK', case + '-confirm-picker', optional=True)
             time.sleep(5)
             rows = snapshot(case + '-selection')
@@ -146,9 +196,15 @@ else:
                 received = json.loads(receipt_path.read_text()) if receipt_path.exists() else []
                 if len(received) > receipt_count:
                     result = received[-1]
-                    if result['sha256'] != hashlib.sha256(payload).hexdigest() or not result['name'].startswith(filename.split('.')[0]):
+                    if result['sha256'] != hashlib.sha256(payload).hexdigest() or result['name'] != filename or result['size'] != len(payload):
                         raise RuntimeError('Saved filename or contents differ: ' + str(result))
                     log('verified-transfer', case=case, **result)
+                    (out / ('ack-' + str(len(received)))).touch()
+                    clear_deadline = time.monotonic() + 20
+                    while not pathlib.Path('/evidence/receiver/cleared-' + str(len(received))).exists():
+                        if time.monotonic() > clear_deadline:
+                            raise RuntimeError('Receiver fixture cleanup deadline')
+                        time.sleep(1)
                     break
                 time.sleep(2)
             else:
