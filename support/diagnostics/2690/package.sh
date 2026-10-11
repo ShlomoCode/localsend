@@ -2,7 +2,7 @@
 set -euxo pipefail
 docker pull appimagecrafters/appimage-builder:1.1.0
 docker image inspect appimagecrafters/appimage-builder:1.1.0 > evidence/cloud/builder-image.json
-for variant in baseline candidate cursor-egl; do
+for variant in baseline candidate cursor-egl client-only cursor-only egl-only; do
   task_dir="$PWD/evidence/cloud/package-$variant"
   mkdir -p "$task_dir"
   cp -a evidence/cloud/CurrentDir "$task_dir/AppDir"
@@ -13,6 +13,11 @@ for variant in baseline candidate cursor-egl; do
   if [[ $variant == cursor-egl ]]; then
     sed -i '/      - librsvg2-common:amd64/a\      - libwayland-cursor0:amd64\n      - libwayland-egl1:amd64' "$task_dir/AppImageBuilder.yml"
   fi
+  case "$variant" in
+    client-only) sed -i '/      - librsvg2-common:amd64/a\      - libwayland-client0:amd64' "$task_dir/AppImageBuilder.yml" ;;
+    cursor-only) sed -i '/      - librsvg2-common:amd64/a\      - libwayland-cursor0:amd64' "$task_dir/AppImageBuilder.yml" ;;
+    egl-only) sed -i '/      - librsvg2-common:amd64/a\      - libwayland-egl1:amd64' "$task_dir/AppImageBuilder.yml" ;;
+  esac
   cp "$task_dir/AppImageBuilder.yml" "evidence/cloud/recipe-$variant.txt"
   docker run --rm --privileged -v "$task_dir:/work" -w /work appimagecrafters/appimage-builder:1.1.0 appimage-builder --recipe AppImageBuilder.yml --skip-test > "evidence/cloud/package-$variant.log" 2>&1
   cp "$task_dir"/*.AppImage "evidence/cloud/repacked-$variant.AppImage"

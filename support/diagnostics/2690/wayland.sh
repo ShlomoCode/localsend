@@ -52,6 +52,9 @@ run_window current /evidence/current.AppImage
 run_window repacked-baseline /evidence/repacked-baseline.AppImage
 run_window candidate /evidence/repacked-candidate.AppImage
 run_window cursor-egl /evidence/repacked-cursor-egl.AppImage
+run_window client-only /evidence/repacked-client-only.AppImage
+run_window cursor-only /evidence/repacked-cursor-only.AppImage
+run_window egl-only /evidence/repacked-egl-only.AppImage
 run_window current-after /evidence/current.AppImage
 mkdir -p /tmp/candidate-dir
 cd /tmp/candidate-dir
