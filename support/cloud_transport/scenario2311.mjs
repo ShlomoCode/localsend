@@ -9,6 +9,26 @@ export default async function({session,wd,senderPort,transportStatus}){
  const target=label=>({using:'accessibility id',value:label});
  async function click(label){const e=await waitForNativeControl({wd,prefix,label:'2311-'+label,...target(label)});await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});}
  async function capture(label){writeFileSync(`evidence/${label}.xml`,await wd('GET',prefix+'/source'));writeFileSync(`evidence/${label}.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));}
+ async function globalGallery(desired,label){
+  const settings=await waitForNativeControl({wd,prefix,label:label+'-settings',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Settings") and @clickable="true"]'});
+  await wd('POST',prefix+'/element/'+settings['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  await capture(label+'-settings-before-scroll');
+  await wd('POST',prefix+'/element',{using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description("Save media to gallery"))'});
+  const locator={using:'xpath',value:'//*[@package="org.localsend.localsend_app" and @content-desc="Save media to gallery"]/following::android.widget.Switch[1]'};
+  let toggle=await waitForNativeControl({wd,prefix,label:label+'-global-gallery-switch',...locator,sourceIncludes:['Save media to gallery']});
+  const id=toggle['element-6066-11e4-a52e-4f735466cecf'];
+  const before=await wd('GET',prefix+'/element/'+id+'/attribute/checked');
+  await capture(label+'-global-gallery-before');
+  if((before===true||before==='true')!==desired)await wd('POST',prefix+'/element/'+id+'/click',{});
+  toggle=await waitForNativeControl({wd,prefix,label:label+'-global-gallery-after',using:'xpath',value:locator.value+`[@checked="${desired}"]`,sourceIncludes:['Save media to gallery']});
+  const after=await wd('GET',prefix+'/element/'+toggle['element-6066-11e4-a52e-4f735466cecf']+'/attribute/checked');
+  if((after===true||after==='true')!==desired)throw new Error('Global gallery switch did not match requested state');
+  await capture(label+'-global-gallery-selected');
+  writeFileSync(`evidence/${label}-global-gallery.json`,JSON.stringify({desired,before,after,selectionTiming:'Global Settings before transfer'},null,2));
+  const receive=await waitForNativeControl({wd,prefix,label:label+'-receive-tab',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Receive") and @clickable="true"]'});
+  await wd('POST',prefix+'/element/'+receive['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+  await capture(label+'-receive-ready');
+ }
  async function shell(command,label){
   const attempts=[];
   for(const script of ['browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),'mobile: shell']){
@@ -49,18 +69,15 @@ export default async function({session,wd,senderPort,transportStatus}){
   results.push({case:'known-working-control',byteExact:true,sha256:createHash('sha256').update(bytes).digest('hex')});
   await click('Done');
   for(const [index,gallery] of ['on','off','on-repeat','off-repeat'].entries()){
+   const desired=gallery.startsWith('on');
+   await globalGallery(desired,gallery);
    await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,...(index?['-CompletePrevious']:[])]);
    await waitForNativeControl({wd,prefix,label:gallery+'-pending',...target('Accept')});
    await click('Options');await capture(gallery+'-options-before');
-   const desired=gallery.startsWith('on');
    const e=await waitForNativeControl({wd,prefix,label:gallery+'-gallery',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and (@content-desc="On" or @content-desc="Off") and @clickable="true"]'});
    const id=e['element-6066-11e4-a52e-4f735466cecf'];
    const selected=await wd('GET',prefix+'/element/'+id+'/attribute/content-desc');
-   if(selected!==(desired?'On':'Off')){
-    await wd('POST',prefix+'/element/'+id+'/click',{});
-    const choice=await waitForNativeControl({wd,prefix,label:gallery+'-gallery-choice',using:'xpath',value:`(//*[@package="org.localsend.localsend_app" and @content-desc="${desired?'On':'Off'}" and @clickable="true"])[last()]`});
-    await wd('POST',prefix+'/element/'+choice['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
-   }
+   if(selected!==(desired?'On':'Off'))throw new Error('Receive Options did not inherit the global gallery setting');
    await waitForNativeControl({wd,prefix,label:gallery+'-gallery-verified',using:'xpath',value:`//*[@package="org.localsend.localsend_app" and @content-desc="${desired?'On':'Off'}" and @clickable="true"]`,sourceIncludes:['Save media to gallery']});
    await capture(gallery+'-options-selected');await wd('POST',prefix+'/back',{});
    await click('Accept');await waitForNativeControl({wd,prefix,label:gallery+'-complete',...target('Done')});

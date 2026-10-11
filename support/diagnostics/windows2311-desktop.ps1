@@ -9,13 +9,14 @@ function Capture([string]$label){
 Capture 'before-setup'
 function SetupPane {
  $all=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
- return @($all|Where-Object {try{$_.Current.Name -eq 'Windows Setup' -and $_.Current.ControlType -eq [Windows.Automation.ControlType]::Pane -and !$_.Current.IsOffscreen}catch{$false}}|Select-Object -First 1)
+ return @($all|Where-Object {try{$_.Current.Name -eq 'Windows Setup' -and $_.Current.ControlType.ProgrammaticName -eq 'ControlType.Pane'}catch{$false}}|Select-Object -First 1)
 }
 function PageSignature($pane){
  $all=$pane.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
  return (@($all|ForEach-Object {try{"$($_.Current.Name)|$($_.Current.IsOffscreen)|$($_.Current.BoundingRectangle)"}catch{}})-join "`n")
 }
 for($attempt=0;$attempt -lt 10;$attempt++){
+ [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)|ForEach-Object {try{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;offscreen=$_.Current.IsOffscreen;bounds=$_.Current.BoundingRectangle.ToString()}}catch{}}|ConvertTo-Json -Depth 5|Set-Content "evidence/desktop-setup-tree-$attempt.json"
  $setup=SetupPane
  if(!$setup.Count){break}
  $all=$setup[0].FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
