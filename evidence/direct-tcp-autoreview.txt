@@ -1,0 +1,3 @@
+autoreview clean: no accepted/actionable findings reported
+overall: patch is correct (0.84)
+The bundle introduces no concrete P0–P2 defect identified in this review. The isolated diagnostic checks native byte counts, hashes and EOF behavior, records failures, and performs bounded session and listener cleanup. Review was limited to the supplied diff; runtime validation was not performed.

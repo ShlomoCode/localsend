@@ -1,0 +1,6 @@
+{
+  "findings": [],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "The bundle introduces no concrete P0\u2013P2 defect identified in this review. The isolated diagnostic checks native byte counts, hashes and EOF behavior, records failures, and performs bounded session and listener cleanup. Review was limited to the supplied diff; runtime validation was not performed.",
+  "overall_confidence": 0.84
+}

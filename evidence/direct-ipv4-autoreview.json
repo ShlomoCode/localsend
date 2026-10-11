@@ -1,0 +1,6 @@
+{
+  "findings": [],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "The bundle consistently uses the selected private IPv4 address for the helper and both listeners, validates the address against recorded adapter evidence, and captures process exit events for cleanup. No actionable P0\u2013P2 defects were found in the provided changes.",
+  "overall_confidence": 0.9
+}

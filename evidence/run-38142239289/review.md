@@ -1,0 +1,13 @@
+# Tiny hostname transport discriminator
+
+Run [38142239289](https://github.com/ShlomoCode/localsend/actions/runs/38142239289), head `9c0f63ee415c6c1b24abd9a30ed0aaabc721ef45`, built the separate native helper and passed cloud Node syntax checks. No LocalSend app was launched and no large transfer was performed.
+
+The HTTP control to `bs-local.com:8080` reached the owned Windows listener and returned the correct fresh marker. Native DNS returned only `127.0.0.1`. A Java Socket to that answer on port 53317 failed with `ECONNREFUSED` at `native-connect-start`, before any byte-case payload. Runner cases are empty. The device's recorded connect-start/finished timestamps differ by 1 ms; the exception's "after 10000ms" text reports the configured timeout, not an observed ten-second delay. This proves failure of this hostname mapping in this profile, not all native TCP routes.
+
+I independently viewed `after.png`: it shows the helper's HTTP marker, loopback DNS answer, connect exception and failed phase, matching `android-result.json`. Controller trace records the authenticated HTTP hit at 13:13:29.655Z. No 0/1/65537-byte transport case completed, and no product experiment is added to the accepted count of four.
+
+The owned BrowserStack session `acfe4ce7574168ea45c09b1901beb1709f558fa0` received a successful DELETE at 13:13:31.848Z. A subsequent ordinary provider read confirms `done`, reason `CLIENT_STOPPED_SESSION`, duration 15 seconds and build `a0981d291510e7f826088b943d5e8c6814714420`; raw metadata is retained separately with private artifact URLs.
+
+The Local process cleanup report is inconsistent: it says no exit within ten seconds, but the result finished only 10 ms after DELETE. The old code awaited an exit-event/ten-second race, then classified `exitCode === null` as alive; signal termination legitimately leaves that property null. Its event branch can account for this immediate return, but the old code did not retain event code/signal or an independent PID liveness result. PID 3112 belonged to the now-finished disposable runner and cannot be queried after teardown. Retrieved job logs show orphan cleanup with no named BrowserStack orphan termination. Do not claim stronger historical process proof. The next discriminator captures actual exit code/signal/time and checks only the owned PID if an event is absent.
+
+The next authorized condition targets one actual nonloopback IPv4 selected from the Windows runner's active default-gateway adapter. HTTP and TCP bind and target that identical owned address; adapter/listener/native-resolution evidence is required. Only failure there after a passed HTTP marker supports moving to the helper streaming/coalescing route. Original app bytes and TLS remain unchanged.
