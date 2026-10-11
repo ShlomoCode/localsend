@@ -36,7 +36,7 @@ try {
  const caps={platformName:'Android','appium:deviceName':process.env.BS_DEVICE||'Vivo Y21','appium:platformVersion':process.env.BS_OS||'11.0','appium:automationName':'UiAutomator2','appium:app':process.env.BASELINE_APP,'appium:otherApps':[process.env.HELPER_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend issue2311',buildName:'issue2311-'+process.env.GITHUB_RUN_ID,sessionName:'issue2311 Windows1.17 Android15 direct-accept control',idleTimeout:300,debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
- assert(session,'Session ID missing');writeFileSync('/tmp/helper/session-id',session);
+ assert(session,'Session ID missing');writeFileSync(process.platform==='win32'?'C:/tmp/helper/session-id':'/tmp/helper/session-id',session);
  await wd('POST',`/session/${session}/appium/settings`,{settings:{waitForIdleTimeout:0}});
  writeFileSync('evidence/appium-settings.json',JSON.stringify(await wd('GET',`/session/${session}/appium/settings`),null,2));
  console.log('BrowserStack control session created for '+caps['appium:deviceName']);
