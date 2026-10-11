@@ -8,10 +8,11 @@ chmod 700 "$XDG_RUNTIME_DIR"
 dwm > /evidence/launch/dwm-$phase.log 2>&1 &
 wm_pid=$!
 trap 'kill "$wm_pid" 2>/dev/null || true' EXIT
-xterm -title issue2690-known-working-X11 > /evidence/launch/xterm-$phase.log 2>&1 &
+xterm -title issue2690-known-working-X11 -e sleep 60 > /evidence/launch/xterm-$phase.log 2>&1 &
 term_pid=$!
 sleep 3
 if ! xdotool search --name issue2690-known-working-X11 > /evidence/launch/x11-control-$phase.txt; then
+  xdotool search --onlyvisible --class '.' getwindowname %@ || true
   cat /evidence/launch/xterm-$phase.log /evidence/launch/dwm-$phase.log /evidence/xvfb.log
   exit 1
 fi
