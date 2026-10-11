@@ -83,6 +83,14 @@ for version in 1.14.0 1.18.2; do
   sleep 15
   window=$(xdotool search --onlyvisible --name '^LocalSend$' | head -1)
   xprop -id "$window" _NET_WM_PID WM_CLASS >> evidence/app-window-identity.txt
+  window_pid=$(xprop -id "$window" _NET_WM_PID | awk '{print $NF}')
+  if test -r "/proc/$window_pid/environ"; then
+    tr '\0' '\n' < "/proc/$window_pid/environ" > "evidence/$version-app-environment.txt"
+  fi
+  if test -r "/proc/$window_pid/maps"; then
+    cat "/proc/$window_pid/maps" > "evidence/$version-app-maps.txt"
+    readlink "/proc/$window_pid/exe" > "evidence/$version-app-executable.txt" || true
+  fi
   read -r display_width display_height < <(xdotool getdisplaygeometry)
   window_width=$((display_width - 100))
   window_height=$((display_height - 100))
