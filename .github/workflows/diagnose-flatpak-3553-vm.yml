@@ -68,6 +68,8 @@ jobs:
           dart format lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
           cp test/widget/favorite_edit_confirmation_test.dart /tmp/evidence1840/formatted-favorite_edit_confirmation_test.dart
           git diff --exit-code -- lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
+          flutter test test/unit/provider/favorites_provider_test.dart test/widget/favorite_edit_confirmation_test.dart
+          flutter analyze lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
       - name: Build accepted immutable candidate and run focused checks
         if: inputs.candidate_sha != ''
         env:
@@ -78,9 +80,6 @@ jobs:
           export PROBE_FLUTTER="$(command -v flutter)"
           bash support/diagnostics/1840-build.sh
           cd candidate-source/app
-          dart format --output=none --set-exit-if-changed lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
-          flutter test test/unit/provider/favorites_provider_test.dart test/widget/favorite_edit_confirmation_test.dart
-          flutter analyze lib/widget/dialogs/favorite_edit_dialog.dart test/widget/favorite_edit_confirmation_test.dart
           cd ../..
           mkdir -p /tmp/candidate1840/app
           tar -xzf /tmp/candidate1840/source-bundle.tar.gz -C /tmp/candidate1840/app
