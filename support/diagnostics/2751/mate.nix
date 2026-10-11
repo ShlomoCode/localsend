@@ -61,8 +61,8 @@ in {
     machine.wait_for_x()
     machine.wait_for_file("${user.home}/.Xauthority")
     machine.succeed("xauth merge ${user.home}/.Xauthority")
-    machine.wait_until_succeeds("pgrep mate-panel && pgrep -f mate-settings-daemon", timeout=120)
-    session_data = machine.succeed("tr '\\0' '\\n' < /proc/$(pgrep -u alice -f mate-session | head -1)/environ | sed -n 's/^XDG_DATA_DIRS=//p'").strip()
+    machine.wait_until_succeeds("${pkgs.procps}/bin/pgrep mate-panel && ${pkgs.procps}/bin/pgrep -f mate-settings-daemon", timeout=120)
+    session_data = machine.succeed("tr '\\0' '\\n' < /proc/$(${pkgs.procps}/bin/pgrep -u alice -f mate-session | head -1)/environ | sed -n 's/^XDG_DATA_DIRS=//p'").strip()
     assert session_data, "MATE session XDG_DATA_DIRS was not recovered"
     def user_command(command):
         return machine.succeed("su - alice -c " + shlex.quote("${env} XDG_DATA_DIRS=" + shlex.quote(session_data) + " " + command))
@@ -75,7 +75,7 @@ in {
     user_command("dconf write /org/mate/panel/toplevels/top/size ${toString panelSize}")
     user_command("dconf write /org/mate/panel/toplevels/bottom/size ${toString panelSize}")
     machine.sleep(8)
-    machine.wait_until_succeeds("pgrep nm-applet")
+    machine.wait_until_succeeds("${pkgs.procps}/bin/pgrep nm-applet")
     machine.succeed("install -d -o alice -g users /tmp/evidence")
     machine.succeed("nixos-version > /tmp/evidence/environment.txt")
     machine.succeed("readlink -f $(command -v localsend_app) >> /tmp/evidence/environment.txt")
@@ -88,7 +88,7 @@ in {
     user_command("xrandr --verbose > /tmp/evidence/xrandr.txt")
     assert "3840x2160" in user_command("xrandr | grep 'current 3840 x 2160\\|3840x2160.*\\*'"), "The display is not running at 4K"
     user_command("dconf dump /org/mate/ > /tmp/evidence/mate-initial.dconf")
-    daemon_pid = machine.succeed("pgrep -u alice -f 'libexec/mate-settings-daemon$' | head -1").strip()
+    daemon_pid = machine.succeed("${pkgs.procps}/bin/pgrep -u alice -f 'libexec/mate-settings-daemon$' | head -1").strip()
     assert daemon_pid, "The actual settings daemon process was not found"
     machine.succeed("readlink /proc/" + daemon_pid + "/exe > /tmp/evidence/daemon-executable.txt")
     machine.succeed("tr '\\0' '\\n' < /proc/" + daemon_pid + "/environ | sed -n '/^PATH=/p;/^XDG_DATA_DIRS=/p' > /tmp/evidence/daemon-environment.txt")
@@ -106,7 +106,7 @@ in {
             machine.wait_for_open_port(53317)
         except Exception:
             machine.succeed("cat /tmp/evidence/localsend.log")
-            machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/startup-processes.txt")
+            machine.succeed("${pkgs.procps}/bin/ps -eo pid,lstart,args > /tmp/evidence/startup-processes.txt")
             raise
         finally:
             machine.copy_from_vm("/tmp/evidence", "guest-startup-evidence")
@@ -149,10 +149,10 @@ in {
             if label.endswith("panel-replace"):
                 user_command("sh -c 'mate-panel --replace > /tmp/evidence/" + label + "-panel.log 2>&1 &' ")
                 machine.sleep(10)
-                machine.wait_until_succeeds("pgrep mate-panel")
-            machine.wait_until_succeeds("pgrep mate-panel")
+                machine.wait_until_succeeds("${pkgs.procps}/bin/pgrep mate-panel")
+            machine.wait_until_succeeds("${pkgs.procps}/bin/pgrep mate-panel")
             if restart:
-                machine.succeed("pkill -u alice -f '[l]ocalsend_app'")
+                machine.succeed("${pkgs.procps}/bin/pkill -u alice -f '[l]ocalsend_app'")
                 machine.sleep(3)
                 user_command("sh -c 'localsend_app >> /tmp/evidence/localsend.log 2>&1 &' ")
                 machine.wait_for_window("LocalSend", 60)
@@ -167,8 +167,8 @@ in {
                 service, path = item.split("/", 1)
                 user_command("busctl --user introspect " + shlex.quote(service) + " " + shlex.quote("/" + path) + " org.kde.StatusNotifierItem >> /tmp/evidence/" + label + "-properties.txt")
             machine.screenshot(label)
-            machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
-            machine.succeed("for pid in $(pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; tr '\\0' '\\n' < /proc/$pid/cmdline || true; done > /tmp/evidence/" + label + "-executables.txt")
+            machine.succeed("${pkgs.procps}/bin/ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
+            machine.succeed("for pid in $(${pkgs.procps}/bin/pgrep -f 'mate-panel|localsend_app'); do echo $pid; readlink /proc/$pid/exe || true; cat /proc/$pid/comm || true; tr '\\0' '\\n' < /proc/$pid/cmdline || true; done > /tmp/evidence/" + label + "-executables.txt")
             machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';
