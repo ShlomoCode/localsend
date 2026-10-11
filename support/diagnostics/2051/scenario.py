@@ -69,6 +69,12 @@ def choose_saf_destination():
         if "Download" in labels(xml):
             if "List view" in labels(xml):
                 click(R, "List view", "saf-before-list")
+            for attempt in range(6):
+                visible = snapshot(R, "saf-download-visible-" + str(attempt))
+                if "Download" in labels(visible):
+                    break
+                request("POST", "/session/" + sessions[R] + "/actions", {"actions": [{"type": "pointer", "id": "folderscroll", "parameters": {"pointerType": "touch"}, "actions": [{"type": "pointerMove", "duration": 0, "x": 160, "y": 500}, {"type": "pointerDown", "button": 0}, {"type": "pointerMove", "duration": 600, "x": 160, "y": 350}, {"type": "pointerUp", "button": 0}]}]})
+                time.sleep(1)
             click(R, "Download", "saf-before-download-folder")
         else:
             click(R, "Show roots", "saf-before-roots")
