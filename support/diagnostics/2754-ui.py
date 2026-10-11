@@ -10,7 +10,8 @@ def log(name,**data):
 def snap(name):
     path=out/(name+".png"); run("scrot",str(path))
     log("screenshot",file=path.name)
-    res=run("tesseract",str(path),"stdout","tsv")
+    # Sparse UI labels can be dropped by automatic page-layout segmentation.
+    res=run("tesseract",str(path),"stdout","--psm","11","tsv")
     (out/(name+".tsv")).write_text(res.stdout)
     return list(csv.DictReader(io.StringIO(res.stdout),delimiter="\t"))
 def click_word(word,name):
