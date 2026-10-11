@@ -77,6 +77,8 @@ jobs:
             fi
             fixed=false
             if [ "$variant" = panel-fix ]; then fixed=true; fi
+            helpers=$(nix-build support/diagnostics/2751/helpers.nix --argstr revision "$NIXPKGS_REVISION" --no-out-link)
+            cp -R "$helpers" "evidence/$variant/helper-preflight"
             nix-build support/diagnostics/2751/mate.nix -A driver --arg panelFix "$fixed" --arg panelSize "$PANEL_SIZE" --arg minIconSize "$MIN_ICON_SIZE" --argstr revision "$NIXPKGS_REVISION" --argstr appRoute "$APP_ROUTE" --arg runtimeOnly "$RUNTIME_ONLY" --argstr killallPackage "$KILLALL_PACKAGE" --no-out-link | tee "evidence/$variant/driver-path.txt"
             driver=$(tail -1 "evidence/$variant/driver-path.txt")
             "$driver/bin/nixos-test-driver" --no-interactive --global-timeout 900 -o "$PWD/evidence/$variant" 2>&1 | tee "evidence/$variant/test-driver.log"
