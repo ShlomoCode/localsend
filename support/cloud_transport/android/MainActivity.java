@@ -15,6 +15,10 @@ public final class MainActivity extends Activity {
     control.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("control",true));text.setText("Socket control running");});
     actual.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("control",false));text.setText("Relaying to LocalSend localhost:53317");});
     stop.setOnClickListener(v->{stopService(new Intent(this,RelayService.class));text.setText("Stopped");});
+    Button permission=new Button(this);permission.setText("Observer storage access");permission.setContentDescription("Observer storage access");layout.addView(permission);
+    permission.setOnClickListener(v->startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.parse("package:"+getPackageName()))));
+    Button observe=new Button(this);observe.setText("Observe owned storage");observe.setContentDescription("Observe owned storage");layout.addView(observe);
+    observe.setOnClickListener(v->{try {org.json.JSONObject report=StorageObserver.collect(this);text.setText("Observer complete; allFilesAccess="+report.getBoolean("allFilesAccess"));}catch(Exception error){text.setText("Observer failed: "+error);}});
     setContentView(layout);
   }
 }

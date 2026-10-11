@@ -21,6 +21,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const samsungFiles=(process.env.BS_DEVICE||'').startsWith('Samsung ');
  const fileManagerPackage=samsungFiles?'com.sec.android.app.myfiles':'com.google.android.apps.nbu.files';
  const fileManagerName=samsungFiles?'Samsung My Files':'Google Files';
+ const storage=process.env.ISSUE_2007_STORAGE_OBSERVER==='1'?(await import('./2007-storage-observer.mjs')).storageObserver({wd,prefix,session}):null;
  await wd('POST',prefix+'/appium/settings',{settings:{waitForIdleTimeout:0}});
  async function snapshot(stage){
   writeFileSync(`evidence/android-${stage}.xml`,await wd('GET',prefix+'/source'));
@@ -175,6 +176,10 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await new Promise(r=>setTimeout(r,2000));
  }
  assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
+ if(storage){
+  if(process.env.ISSUE_2007_OBSERVER_PREPARED==='1')await storage.observe('before-baseline');
+  else await storage.prepare();
+ }
  if(persistentSaf&&process.env.ISSUE_2007_PRESERVE_DESTINATION!=='1')await chooseSafDocuments('settings');
  const fileManagerInventory=[];
  for(const appId of ['com.vivo.filemanager','com.android.filemanager','com.google.android.apps.nbu.files','com.sec.android.app.myfiles']){
@@ -206,7 +211,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  });
  assert.equal(beforeNumbered,null,`Baseline ${numberedName} already exists; numbered-path observation would be ambiguous`);
  writeFileSync('evidence/baseline-path-absence.json',JSON.stringify({path:deviceFolder+'/'+fixtureName,absent:true,utc:new Date().toISOString()},null,2));
- const desktop=windows?spawn('pwsh',['-NoProfile','-File','support/diagnostics/2007-windows-sender.ps1'],{env:{...process.env,TRANSPORT_SENDER_PORT:String(senderPort)}}):spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
+ const desktop=windows?spawn('pwsh',['-NoProfile','-File','support/diagnostics/2007-windows-sender.ps1'],{env:{...process.env,TRANSPORT_SENDER_PORT:String(senderPort)}}):spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:process.env.ISSUE_2007_BASELINE_ONLY==='1'?'':'1'}});
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
  let proxy;
  const ownedProxySockets=new Set();
@@ -254,6 +259,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
+  if(storage)await storage.observe('before-trash');
+  if(process.env.ISSUE_2007_BASELINE_ONLY==='1'){
+   await closeReceiverFinished();
+   if(desktop.exitCode===null)await new Promise(r=>desktop.once('exit',r));
+   assert.equal(desktop.exitCode,0,'Fresh-name sender control did not complete');
+   return;
+  }
   if(deletionTiming!=='absence'){
    await snapshot('receiver-finished-before-files');
    await closeReceiverFinished();
@@ -366,7 +378,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(deletionTiming==='acknowledged')assert(firstToastObservedUtc||firstEmptyListObservedUtc,'Native UI never acknowledged deletion');
    const pathAbsenceUtc=absent===null?absenceObservations.at(-1).pathObservedUtc:null;
    writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:fileManagerName,package:fileManagerPackage,deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:deviceFolder+'/'+fixtureName,pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
-   if(samsungFiles&&purgeTrash){
+   async function purgeOwnedTrash(){
+    assert(samsungFiles,'Owned Trash purge requires Samsung My Files');
     assert.equal(deletionTiming,'absence','Permanent trash purge control requires observed path absence before opening Trash');
     async function nativeClick(using,value,label){
      const element=await waitForNativeControl({wd,prefix,using,value,label});
@@ -394,6 +407,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     await snapshot('trash-after-owned-A-purge');
     writeFileSync('evidence/actual-trash-purge.json',JSON.stringify({package:fileManagerPackage,ownedFile:fixtureName,retainedFileObserved:true,oneSelected:true,permanentConfirmation:true,purgeUtc,emptyTrashObserved:true,confirmation:'android-trash-permanent-delete-dialog.xml'},null,2));
    }
+   if(storage)await storage.observe('after-trash');
+   if(samsungFiles&&purgeTrash)await purgeOwnedTrash();
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    if(deletionTiming==='absence'){
     await closeReceiverFinished();
@@ -486,7 +501,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(repeatResend){
     assert(firstResult.receiverFailed&&!firstResult.resendSucceeded&&firstResult.observedResultUtc,'Matched intervention requires the immediate resend to fail in the receiver UI');
     const intervention=process.env.ISSUE_2007_RETRY_INTERVENTION;
-    assert(['wait','restart'].includes(intervention),'Retry intervention must be wait or restart');
+    assert(['wait','restart','purge'].includes(intervention),'Retry intervention must be wait, restart, or purge');
     const failureMs=Date.parse(firstResult.observedResultUtc);
     const targetMs=failureMs+45000;
     const interventionRecord={intervention,matchedDelayMs:45000,firstFailureObservedUtc:firstResult.observedResultUtc,targetRetryUtc:new Date(targetMs).toISOString(),filesystemMutation:false};
@@ -500,8 +515,17 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
      writeFileSync(`evidence/${stage}-provider-store-probes.json`,JSON.stringify({session,fixtureName,readOnly:true,observations},null,2));
     }
     await probes('first-failure');
+    if(storage)await storage.observe('first-failure');
     await closeReceiverFinished();
     await snapshot('receiver-ready-before-retry-intervention');
+    if(intervention==='purge'){
+     await wd('POST',prefix+'/appium/device/activate_app',{appId:fileManagerPackage});
+     await purgeOwnedTrash();
+     interventionRecord.filesystemMutation=true;
+     interventionRecord.purge=JSON.parse(readFileSync('evidence/actual-trash-purge.json','utf8'));
+     if(storage)await storage.observe('after-permanent-delete');
+     await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+    }
     if(intervention==='restart'){
      interventionRecord.terminateRequestedUtc=new Date().toISOString();
      await wd('POST',prefix+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});
@@ -526,6 +550,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
     interventionRecord.actualFailureToSubmissionMs=Date.parse(retryResult.submissionUtc)-failureMs;
     writeFileSync('evidence/retry-intervention.json',JSON.stringify(interventionRecord,null,2));
     await probes('after-retry');
+    if(storage)await storage.observe('after-retry');
     await closeReceiverFinished();
     await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"Receive")]',label:'same-session-next-arm-ready'});
     await snapshot('receiver-ready-for-next-arm');
