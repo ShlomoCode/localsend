@@ -10,13 +10,18 @@ on:
         type: choice
         default: official-deb
         options: [official-deb, c1ce]
+      bundle_run_id:
+        description: 'Optional completed diagnostic run containing the exact c1ce build artifact'
+        type: string
+        required: false
+        default: ''
 # Serialize the build and VM as one owned diagnostic run, including across dispatches.
 concurrency:
   group: issue2754-cinnamon-diagnostic
   cancel-in-progress: false
 jobs:
   build-c1ce:
-    if: inputs.app_source == 'c1ce'
+    if: inputs.app_source == 'c1ce' && inputs.bundle_run_id == ''
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -56,17 +61,32 @@ jobs:
           if-no-files-found: warn
   cinnamon-vm:
     needs: build-c1ce
-    if: ${{ !cancelled() && ((inputs.app_source || 'official-deb') == 'official-deb' || needs.build-c1ce.result == 'success') }}
+    if: ${{ !cancelled() && ((inputs.app_source || 'official-deb') == 'official-deb' || inputs.bundle_run_id != '' || needs.build-c1ce.result == 'success') }}
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+      - name: Validate explicitly selected completed build run
+        if: inputs.app_source == 'c1ce' && inputs.bundle_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+        run: |
+          [[ "$BUNDLE_RUN_ID" =~ ^[0-9]+$ ]]
+          mkdir -p evidence/cloud/build
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUNDLE_RUN_ID" > evidence/cloud/build/reused-run.json
+          jq -e '.status == "completed" and .path == ".github/workflows/diagnose-flatpak-3553-vm.yml"' evidence/cloud/build/reused-run.json
       - name: Download exact source bundle and build provenance
         if: inputs.app_source == 'c1ce'
         uses: actions/download-artifact@v4
         with:
           name: issue2754-c1ce-flutter3419-linux-x64
           path: /tmp/issue2754-build
+          run-id: ${{ inputs.bundle_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Run ordinary Cinnamon graphical VM
         env:
           PROBE_ENVIRONMENT: ${{ inputs.environment || 'mint' }}
@@ -79,6 +99,11 @@ jobs:
             mkdir -p evidence/cloud/build
             cp -a /tmp/issue2754-build/provenance evidence/cloud/build/
             cp /tmp/issue2754-build/source-bundle.tar.gz.sha256 evidence/cloud/build/
+            test "$(cat /tmp/issue2754-build/provenance/source-sha.txt)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+            jq -e '.frameworkVersion == "3.41.9" and .frameworkRevision == "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694"' /tmp/issue2754-build/provenance/flutter-version.json
+            grep -qx 'exit_status=0' /tmp/issue2754-build/provenance/build-result.txt
+            cmp /tmp/issue2754-build/provenance/lock-hashes-before.txt /tmp/issue2754-build/provenance/lock-hashes-after.txt
+            test ! -s /tmp/issue2754-build/provenance/source-diff-after.patch
           fi
           if [ "$PROBE_ENVIRONMENT" = mint ]; then
             bash support/diagnostics/2754-mint-vm.sh

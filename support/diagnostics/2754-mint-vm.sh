@@ -114,6 +114,9 @@ case "$probe_app_source" in
   test -f "${PROBE_BUNDLE_TAR:?Missing pinned source bundle}"
   bundle_directory=$(dirname "$PROBE_BUNDLE_TAR")
   (cd "$bundle_directory" && sha256sum -c source-bundle.tar.gz.sha256)
+  test "$(cat "$bundle_directory/provenance/source-sha.txt")" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+  grep -q '"frameworkVersion": "3.41.9"' "$bundle_directory/provenance/flutter-version.json"
+  grep -q '^exit_status=0$' "$bundle_directory/provenance/build-result.txt"
   scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known "$bundle_directory" mint@127.0.0.1:/home/mint/source-artifact
   ;;
  *) echo "Unsupported diagnostic source: $probe_app_source" >&2; exit 1 ;;
@@ -130,12 +133,17 @@ if [ "$PROBE_APP_SOURCE" = c1ce ]; then
  mkdir -p /home/mint/source-bundle
  tar -xzf source-bundle.tar.gz -C /home/mint/source-bundle
  cp -a /home/mint/source-artifact /home/mint/evidence/source-artifact
- ldd /home/mint/source-bundle/localsend_app > /home/mint/evidence/source-ldd.txt
- for library in /home/mint/source-bundle/lib/*.so; do ldd "$library" >> /home/mint/evidence/source-ldd.txt; done
- if grep -q 'not found' /home/mint/evidence/source-ldd.txt; then
-  echo "Pinned bundle runtime dependencies missing; no app scenario attempted" >&2
+ ldd /home/mint/source-bundle/localsend_app > /home/mint/evidence/source-main-ldd.txt
+ if grep -q 'not found' /home/mint/evidence/source-main-ldd.txt; then
+  echo "Pinned executable runtime dependencies missing; no app scenario attempted" >&2
   exit 1
  fi
+ # Standalone plugin ldd lacks the executable's RPATH. Preserve these reports separately;
+ # unused JNI native assets can require libjvm without being dependencies of the Linux app.
+ for library in /home/mint/source-bundle/lib/*.so; do
+  printf '\nFILE %s\n' "$library" >> /home/mint/evidence/source-library-ldd.txt
+  LD_LIBRARY_PATH=/home/mint/source-bundle/lib ldd "$library" >> /home/mint/evidence/source-library-ldd.txt || true
+ done
  printf '/home/mint/source-bundle/localsend_app\n' > /home/mint/evidence/app-executable.txt
 else
  curl -fL --connect-timeout 20 --max-time 180 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
