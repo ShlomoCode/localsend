@@ -474,24 +474,25 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await wd('POST',prefix+'/element/'+secondAccept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    let saved;
    let receiverSource='';
+   const finishedSource=source=>/content-desc="100%?, Finished"/.test(source)&&[...source.matchAll(/content-desc="([^"]*)"/g)].some(match=>match[1].startsWith(resendInput.name+'&#10;')&&match[1].endsWith('&#10;Done'));
    let observedResultUtc=null;
    for(let attempt=0;attempt<10;attempt++){
     await new Promise(r=>setTimeout(r,1000));
     await snapshot(`after-${stage}-accept-`+attempt);
     receiverSource=readFileSync(`evidence/android-after-${stage}-accept-${attempt}.xml`,'utf8');
-    if(!observedResultUtc&&(receiverSource.includes('Finished with error')||receiverSource.includes('100%, Finished')))observedResultUtc=new Date().toISOString();
+    if(!observedResultUtc&&(receiverSource.includes('Finished with error')||finishedSource(receiverSource)))observedResultUtc=new Date().toISOString();
     const value=await wd('POST',prefix+'/appium/device/pull_file',{path:resendDestination}).catch(error=>{
      if(!String(error).includes('No such file or directory'))throw error;
      return null;
     });
     if(value!==null){
      saved=Buffer.from(value,'base64');
-     if(saved.equals(resendExpected)&&receiverSource.includes('100%, Finished')&&receiverSource.includes('&#10;Done'))break;
+     if(saved.equals(resendExpected)&&finishedSource(receiverSource))break;
     }
     if(repeatResend&&receiverSource.includes('Finished with error'))break;
    }
    const byteExact=saved?.equals(resendExpected)??false;
-   const receiverFileDone=receiverSource.includes('100%, Finished')&&receiverSource.includes('&#10;Done');
+   const receiverFileDone=finishedSource(receiverSource);
    const numberedEncoded=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/'+numberedName}).catch(error=>{
     if(!String(error).includes('No such file or directory'))throw error;
     return null;
