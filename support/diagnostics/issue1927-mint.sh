@@ -31,6 +31,13 @@ cp /mnt/scenario.sh /home/mint/scenario.sh
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
+# Give the normal user Flatpak installation real ext4 storage instead of the
+# live ISO's small RAM overlay. App code, permissions, HOME and session stay stock.
+mkfs.ext4 -F -L FLATPAK /dev/vda
+mkdir -p /home/mint/.local/share/flatpak
+mount /dev/vda /home/mint/.local/share/flatpak
+chown mint:mint /home/mint/.local/share/flatpak
+df -Th / /home/mint/.local/share/flatpak > /home/mint/evidence/installation-storage.txt
 cp -a /etc/apt /home/mint/evidence/apt-before
 for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
   test -f "$source" || continue
@@ -42,7 +49,8 @@ systemctl start ssh
 touch /home/mint/evidence/bootstrap-complete
 BOOT
 genisoimage -quiet -o /home/runner/issue1927-mint/probe.iso -V PROBE -r /tmp/issue1927-mint/seed
-sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -boot d -drive file=/home/runner/issue1927-mint/mint.iso,media=cdrom,readonly=on -drive file=/home/runner/issue1927-mint/probe.iso,media=cdrom,readonly=on -device virtio-vga -usb -device usb-tablet -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2277-:22 -device virtio-net-pci,netdev=net0 -display none -monitor unix:/tmp/issue1927-mint/monitor,server,nowait -serial file:evidence/cloud/serial.log -daemonize
+qemu-img create -f qcow2 /home/runner/issue1927-mint/flatpak.qcow2 12G
+sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -boot d -drive file=/home/runner/issue1927-mint/mint.iso,media=cdrom,readonly=on -drive file=/home/runner/issue1927-mint/probe.iso,media=cdrom,readonly=on -drive file=/home/runner/issue1927-mint/flatpak.qcow2,if=virtio,format=qcow2 -device virtio-vga -usb -device usb-tablet -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2277-:22 -device virtio-net-pci,netdev=net0 -display none -monitor unix:/tmp/issue1927-mint/monitor,server,nowait -serial file:evidence/cloud/serial.log -daemonize
 ready=0
 for n in $(seq 1 18); do
   sleep 15
