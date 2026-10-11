@@ -13,7 +13,7 @@ cleanup() {
   printf '{"stage":"%s","exit_code":%s,"note":"Inspect case results; setup/timeout is not proof of app OOM."}\n' "$stage" "$status" > evidence/setup-result.json
   if test -s "$vm_root/qemu.pid"; then
     timeout 25 ssh "${opts[@]}" probe@127.0.0.1 'sudo cloud-init status --long; sudo tail -n 160 /var/log/cloud-init-output.log; sudo journalctl -u cloud-final -o short-monotonic --no-pager' > evidence/vm/cloud-init-final.txt 2>&1 || true
-    timeout 25 ssh "${opts[@]}" probe@127.0.0.1 'sudo journalctl -k -o short-monotonic --no-pager; free -m; swapon --show --bytes; cat /proc/pressure/memory; ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm' > evidence/vm/kernel-final.txt 2>&1 || true
+    timeout 25 ssh "${opts[@]}" probe@127.0.0.1 'sudo journalctl -k -o short-monotonic --no-pager; free -m; /sbin/swapon --show --bytes; cat /proc/pressure/memory; ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm' > evidence/vm/kernel-final.txt 2>&1 || true
     timeout 90 scp -r "${copy_opts[@]}" probe@127.0.0.1:/home/probe/evidence evidence/vm/guest || true
     # VM shutdown is harness cleanup, not an application failure observation.
     date --iso-8601=ns > evidence/vm/harness-shutdown-utc.txt
@@ -101,13 +101,13 @@ tar xf baseline.tar.gz -C released/base
 sha256sum baseline.tar.gz > evidence/artifact-sha256.txt
 dpkg-query -W > evidence/package-inventory.txt
 /sbin/ldconfig -p > evidence/library-inventory.txt
-{ uname -a; lscpu; free -m; swapon --show --bytes; cat /proc/meminfo; cat /proc/sys/vm/swappiness; findmnt --target /swap.img; cat /etc/os-release; } > evidence/environment.txt
-test "$(swapon --show --noheadings --output=NAME | wc -l)" = 1
-test "$(swapon --show --noheadings --output=NAME)" = /swap.img
+{ uname -a; lscpu; free -m; /sbin/swapon --show --bytes; cat /proc/meminfo; cat /proc/sys/vm/swappiness; findmnt --target /swap.img; cat /etc/os-release; } > evidence/environment.txt
+test "$(/sbin/swapon --show --noheadings --output=NAME | wc -l)" = 1
+test "$(/sbin/swapon --show --noheadings --output=NAME)" = /swap.img
 # The swap header consumes one page; the on-disk allocation remains 2 GiB.
 test "$(stat --format=%s /swap.img)" = 2147483648
 expected_swap_bytes=$((2147483648 - $(getconf PAGESIZE)))
-test "$(swapon --show --noheadings --bytes --output=SIZE | tr -d '[:space:]')" = "$expected_swap_bytes"
+test "$(/sbin/swapon --show --noheadings --bytes --output=SIZE | tr -d '[:space:]')" = "$expected_swap_bytes"
 swap_type=$(findmnt -n -o FSTYPE --target /swap.img)
 test "$swap_type" != tmpfs
 test "$swap_type" != ramfs
@@ -189,7 +189,7 @@ for n in $(seq 1 20); do
   sleep 1
 done
 test "$desktop_ready" = 1
-{ uname -a; lscpu; free -m; swapon --show; ip addr; ip route; cat /etc/os-release; } > evidence/host-environment.txt
+{ uname -a; lscpu; free -m; /sbin/swapon --show; ip addr; ip route; cat /etc/os-release; } > evidence/host-environment.txt
 timeout 90 scp -r "${copy_opts[@]}" probe@127.0.0.1:/home/probe/evidence evidence/vm/preflight-guest
 stage=real-app-memory-cases
 # No process memory caps, pressure injection, synthetic metadata, or OOM tuning.
