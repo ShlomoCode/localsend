@@ -7,7 +7,12 @@ import android.widget.*;
 public final class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
+    if(getActionBar()!=null)getActionBar().hide();
     LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);
+    layout.setOnApplyWindowInsetsListener((view,insets)->{
+      view.setPadding(0,insets.getSystemWindowInsetTop(),0,insets.getSystemWindowInsetBottom());
+      return insets;
+    });
     TextView text=new TextView(this);text.setText("Cloud transport helper\nSeparate diagnostic app. LocalSend is unchanged.");layout.addView(text);
     Button control=new Button(this);control.setText("Start socket control");control.setContentDescription("Start socket control");control.setAllCaps(false);layout.addView(control);
     Button actual=new Button(this);actual.setText("Relay to LocalSend");actual.setContentDescription("Relay to LocalSend");actual.setAllCaps(false);layout.addView(actual);
@@ -18,5 +23,6 @@ public final class MainActivity extends Activity {
     reverse.setOnClickListener(v->{startForegroundService(new Intent(this,RelayService.class).putExtra("reverse",true));text.setText("Receiving LocalSend connections at localhost:53318");});
     stop.setOnClickListener(v->{stopService(new Intent(this,RelayService.class));text.setText("Stopped");});
     setContentView(layout);
+    layout.requestApplyInsets();
   }
 }
