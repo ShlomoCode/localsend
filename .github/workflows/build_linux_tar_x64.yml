@@ -35,12 +35,35 @@ jobs:
           path: evidence/main-source
           github-token: ${{ github.token }}
           run-id: 38132747719
+      - uses: actions/download-artifact@v6
+        with:
+          name: issue2690-evidence-38150744622
+          path: evidence/history
+          github-token: ${{ github.token }}
+          run-id: 38150744622
       - name: Inspect official artifact and prepare Gentoo
+        # Historical binaries are controls only; the final candidate uses production files.
         if: inputs.evidence_run == '' && inputs.old_libc_run == '' && inputs.wayland_run == ''
         env:
           USE_C1CE: ${{ inputs.use_c1ce }}
           SOURCE_FIRST: ${{ inputs.source_first }}
         run: bash support/diagnostics/2690/inspect.sh
+      - name: Require all four runtime gates and retain PNGs
+        run: |
+          for scenario in new-client control-new-client old-libc-new-client; do
+            test "$(awk -v scenario="$scenario" '$1 == scenario && $3 == "running" { n++ } END { print n+0 }' evidence/cloud/launch/results.tsv)" = 3
+          done
+          test "$(awk '$1 == "baseline-repacked" && $3 == "127" { n++ } END { print n+0 }' evidence/cloud/launch/results.tsv)" = 3
+          grep -Fx $'new-client\trunning' evidence/cloud/launch/wayland-results.tsv
+          grep -Fx $'candidate\t134' evidence/cloud/launch/wayland-results.tsv
+          grep -F 'libwayland-client.so.0.26.0' evidence/cloud/launch/maps-new-client.txt
+          grep -F 'libffi.so.8.1.0' evidence/cloud/launch/maps-new-client.txt
+          grep -F '/usr/lib64/libEGL_mesa.so.0.0.0' evidence/cloud/launch/maps-new-client.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          for screenshot in evidence/cloud/launch/*.xwd; do
+            ffmpeg -loglevel error -y -f xwd_pipe -i "$screenshot" -frames:v 1 "${screenshot%.xwd}.png"
+          done
       - uses: actions/download-artifact@v6
         if: inputs.evidence_run != '' || inputs.old_libc_run != '' || inputs.wayland_run != ''
         with:
@@ -128,6 +151,7 @@ jobs:
         with:
           name: issue2690-evidence-${{ github.run_id }}
           path: |
+            evidence/cloud/*.patch
             evidence/cloud/*.txt
             evidence/cloud/*.log
             evidence/cloud/*.sha256

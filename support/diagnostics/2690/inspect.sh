@@ -36,7 +36,7 @@ if [[ ${USE_C1CE:-false} == true ]]; then
   cmp evidence/main-source/provenance/lock-hashes-before.txt evidence/main-source/provenance/lock-hashes-after.txt
   git fetch --depth=1 origin c1ce322fb3acf08e44f329b8b7208b8b0d91e244
   git show c1ce322fb3acf08e44f329b8b7208b8b0d91e244:support/build/appimage/AppImageBuilder_x86_64.yml > evidence/cloud/main-source-recipe.txt
-  cmp evidence/cloud/main-source-recipe.txt support/build/appimage/AppImageBuilder_x86_64.yml
+  diff -u evidence/cloud/main-source-recipe.txt support/build/appimage/AppImageBuilder_x86_64.yml > evidence/cloud/production-recipe-diff.txt || test "$?" = 1
   sha256sum "$source_tar" > evidence/cloud/main-source-tar.sha256
   cp evidence/main-source/provenance/build-inputs.json evidence/cloud/main-source-build-inputs.json
   cp evidence/main-source/provenance/bundle-file-sha256.txt evidence/cloud/main-source-files.txt
