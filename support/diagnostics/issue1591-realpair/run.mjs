@@ -22,6 +22,11 @@ let windowsUI, windowsReady, windowsSeq = 0;
 const windowsRequests = new Map();
 const healthMaxAgeMs = 5000;
 const results = [], cleanup = [], backgroundWindows = [];
+const basicReceiveCardName = 'Receive Quick Save Quick Save for "Favorites" Require PIN Save media to gallery Auto Finish Save to history';
+const advancedReceiveCardName = basicReceiveCardName + ' Verify checksums when receiving files';
+const receiveCard = '//XCUIElementTypeOther[normalize-space(@name)=\'' + basicReceiveCardName + '\' or normalize-space(@name)=\'' + advancedReceiveCardName + '\']';
+let initialReceiveChecksum;
+const receiveChecksumObservations = [];
 const eid = element => element['element-6066-11e4-a52e-4f735466cecf'];
 const prefix = () => '/session/' + session;
 
@@ -171,19 +176,60 @@ async function prepareWindowsUI() {
   });
   await pendingReady;
 }
+async function receiveInventory() {
+  const cards = await elements('xpath', receiveCard);
+  if (cards.length !== 1) throw new Error('Exact basic/advanced Receive card is absent or ambiguous');
+  const cardName = (await wd('GET', prefix() + '/element/' + eid(cards[0]) + '/attribute/name')).replace(/\s+/g, ' ').trim();
+  const count = cardName === basicReceiveCardName ? 6 : cardName === advancedReceiveCardName ? 7 : 0;
+  const switches = await elements('xpath', receiveCard + '/following-sibling::XCUIElementTypeSwitch');
+  if (!count || switches.length !== count) throw new Error('Receive card switch inventory does not match its full exact labels');
+  return {cardName, count, switches};
+}
+async function observeReceiveChecksum(label, milestone) {
+  // Advanced adds this seventh Receive control without changing its value.
+  const locator = receiveCard + '/following-sibling::XCUIElementTypeSwitch[7]';
+  let inventory = await receiveInventory();
+  if (inventory.count !== 7) throw new Error('Advanced Receive checksum control is unavailable');
+  const visible = async () => await wd('GET', prefix() + '/element/' + eid(inventory.switches[6]) + '/displayed') &&
+    await wd('GET', prefix() + '/element/' + eid(inventory.switches[3]) + '/displayed');
+  if (!await visible()) {
+    for (let attempt = 0; attempt < 6; attempt++) await wd('POST', prefix() + '/execute/sync', {script:'mobile: swipe', args:[{direction:'down'}]});
+    await capture(label + '-checksum-' + milestone + '-top-reset');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      inventory = await receiveInventory();
+      if (inventory.count !== 7) throw new Error('Advanced Receive inventory changed during checksum observation');
+      if (await visible()) break;
+      await wd('POST', prefix() + '/execute/sync', {script:'mobile: swipe', args:[{direction:'up'}]});
+    }
+  }
+  const checksum = await unique('xpath', locator);
+  inventory = await receiveInventory();
+  if (inventory.count !== 7 || !await visible()) throw new Error('Gallery/checksum controls are not visibly observed together');
+  const value = await wd('GET', prefix() + '/element/' + eid(checksum) + '/attribute/value');
+  const observation = {case:label, milestone, value, initialValue:initialReceiveChecksum, locator, cardName:inventory.cardName,
+    visible:true, mutations:'none; checksum control is read only', baselineAuthority:'First visible advanced Receive checksum observation in this owned session'};
+  await capture(label + '-checksum-' + milestone);
+  receiveChecksumObservations.push(observation);
+  save('receive-checksum-observations.json', receiveChecksumObservations);
+  if (!['0','1'].includes(value)) throw new Error('Receive checksum value is not an observed boolean');
+  if (initialReceiveChecksum === undefined) {
+    initialReceiveChecksum = value;
+    observation.initialValue = value;
+    save('receive-checksum-observations.json', receiveChecksumObservations);
+  } else if (value !== initialReceiveChecksum) throw new Error('Receive checksum setting changed from its first observed value');
+}
 async function gallery(desired, label) {
   stage = label + '-settings';
   await click('Settings'); await capture(label + '-settings-entry');
   // The unchanged iPad app exposes the Receive card's labels as one native
-  // element and six unnamed sibling switches. Retained XML and the original
-  // image from run 38179175479 identify gallery as the fourth switch.
-  const cardName = 'Receive Quick Save Quick Save for "Favorites" Require PIN Save media to gallery Auto Finish Save to history';
-  const card = '//XCUIElementTypeOther[normalize-space(@name)=\'' + cardName + '\']';
+  // element and six/seven unnamed sibling switches. Original 38179175479
+  // basic XML and 38185385547 advanced XML identify gallery as the fourth.
+  const card = receiveCard;
   const locator = card + '/following-sibling::XCUIElementTypeSwitch[4]';
   let matches = await elements('xpath', locator);
   if (matches.length > 1) throw new Error('Gallery switch is ambiguous');
   if (matches.length !== 1 || !await wd('GET', prefix() + '/element/' + eid(matches[0]) + '/displayed')) {
-    // Advanced restoration can leave Settings below Receive on later cases.
+    // Network observations can leave Settings below Receive on later cases.
     // Normalize toward the top, then discover downward using visible controls.
     for (let attempt = 0; attempt < 6; attempt++) {
       await wd('POST', prefix() + '/execute/sync', {script:'mobile: swipe', args:[{direction:'down'}]});
@@ -199,9 +245,9 @@ async function gallery(desired, label) {
   }
   matches = await elements('xpath', locator);
   if (matches.length !== 1) throw new Error('Gallery switch is absent or ambiguous; inspect retained native source before adjusting locators');
-  if ((await elements('xpath', card)).length !== 1) throw new Error('Receive card is absent or ambiguous');
-  if ((await elements('xpath', card + '/following-sibling::XCUIElementTypeSwitch')).length !== 6) throw new Error('Receive card switch order differs from retained native UI; no gallery action admitted');
-  const id = eid(matches[0]);
+  const inventory = await receiveInventory(), cardName = inventory.cardName;
+  if (inventory.count === 7) await observeReceiveChecksum(label, 'before-gallery');
+  const id = eid(await unique('xpath', locator));
   if (!await wd('GET', prefix() + '/element/' + id + '/displayed')) throw new Error('Gallery switch is not visibly observed before selection');
   await capture(label + '-gallery-before');
   const getValue = () => wd('GET', prefix() + '/element/' + id + '/attribute/value');
@@ -209,12 +255,14 @@ async function gallery(desired, label) {
   if (!['0','1',0,1,true,false].includes(before)) throw new Error('Gallery switch value is not an observed boolean');
   if ((before === '1' || before === 1 || before === true) !== desired) await wd('POST', prefix() + '/element/' + id + '/click', {});
   const refreshed = await unique('xpath', locator);
-  if ((await elements('xpath', card)).length !== 1 || (await elements('xpath', card + '/following-sibling::XCUIElementTypeSwitch')).length !== 6) throw new Error('Receive card inventory changed after gallery selection');
+  const afterInventory = await receiveInventory();
+  if (afterInventory.cardName !== cardName || afterInventory.count !== inventory.count) throw new Error('Receive card inventory changed after gallery selection');
   const after = await wd('GET', prefix() + '/element/' + eid(refreshed) + '/attribute/value');
   if (!['0','1',0,1,true,false].includes(after)) throw new Error('Gallery switch after-value is not an observed boolean');
   if ((after === '1' || after === 1 || after === true) !== desired) throw new Error('Gallery setting did not change');
-  save(label + '-gallery.json', {desired, before, after, locator, cardName, visiblyObservedBefore:true, visiblyObservedAfter:true, nativeLayoutAuthority:'Original run 38179175479 settings-entry XML and image: six Receive switches, gallery fourth', selectionTiming:'Global Settings before real transfer'});
+  save(label + '-gallery.json', {desired, before, after, locator, cardName, switchCount:inventory.count, visiblyObservedBefore:true, visiblyObservedAfter:true, nativeLayoutAuthority:'Original 38179175479 basic six-switch XML/image and 38185385547 exact advanced seven-switch XML: gallery fourth', selectionTiming:'Global Settings before real transfer'});
   await capture(label + '-settings-selected');
+  if (afterInventory.count === 7) await observeReceiveChecksum(label, 'after-gallery');
   await receiverNetworkSettings(label);
   await click('Receive'); await capture(label + '-receive-ready');
 }
@@ -245,7 +293,7 @@ async function receiverNetworkSettings(label) {
   if(current.length!==1||(await elements('xpath',footer)).length!==1)throw new Error('Advanced settings readback is absent or ambiguous');
   const after=await wd('GET',prefix()+'/element/'+eid(current[0])+'/attribute/value');
   if(after!=='1')throw new Error('Advanced settings did not reveal its controls');
-  save(label+'-advanced-toggle.json',{before,after,footer,toggle,nativeAuthority:'Original 38179175479 scroll-4 XML: unique Advanced settings StaticText, immediate sibling Switch; source LabeledCheckbox labelFirst=true'});
+  save(label+'-advanced-toggle.json',{before,after,footer,toggle,visibilityPolicy:'Leave Advanced on in this isolated diagnostic session; no restore action',nativeAuthority:'Original 38179175479 scroll-4 XML: unique Advanced settings StaticText, immediate sibling Switch; source LabeledCheckbox labelFirst=true'});
   await capture(label+'-advanced-revealed');
   // The app source orders Network plain TextFieldTv controls as Device model,
   // Port, Discovery Timeout, Multicast address; alias uses a separate button.
@@ -274,19 +322,9 @@ async function receiverNetworkSettings(label) {
     sourceAuthority:'Current unchanged settings_tab.dart: advanced plain TextFieldTv order; Encryption sole Network BooleanEntry',mutations:'Only Advanced settings visibility checkbox; port/encryption controls read without edits'});
   if(encryptionValue!=='1'||portValue!=='53317')throw new Error('Actual receiver settings do not admit the expected encrypted port 53317 control');
   if(/Offline|Restart the server to apply the settings/i.test(cardName))throw new Error('Receiver Network UI does not establish an active server with applied settings');
-  if(before==='0'){
-    for(let attempt=0;attempt<6;attempt++){
-      const choices=await elements('xpath',toggle);
-      if(choices.length===1&&await wd('GET',prefix()+'/element/'+eid(choices[0])+'/displayed'))break;
-      await wd('POST',prefix()+'/execute/sync',{script:'mobile: swipe',args:[{direction:'up'}]});
-    }
-    const restore=await unique('xpath',toggle);
-    if(await wd('GET',prefix()+'/element/'+eid(restore)+'/attribute/value')!=='1')throw new Error('Advanced visibility checkbox changed unexpectedly');
-    await wd('POST',prefix()+'/element/'+eid(restore)+'/click',{});
-    const restored=await unique('xpath',toggle);
-    if(await wd('GET',prefix()+'/element/'+eid(restored)+'/attribute/value')!=='0')throw new Error('Advanced visibility did not restore its prior state');
-    await capture(label+'-advanced-restored');
-  }
+  // Keep Advanced visible in this isolated session; no restore tap is needed.
+  // First basic case acquires its checksum baseline here, after Network proof.
+  await observeReceiveChecksum(label, 'after-network');
 }
 async function configureProxy(label) {
   stage = label + '-proxy-start';
