@@ -72,18 +72,26 @@ if(!$exactShellSelection -or [Explorer2311]::GetForegroundWindow() -ne $hwnd){th
 @{method='Native Windows Context Menu key';virtualKey='VK_APPS 0x5D';fixture=$fixture}|ConvertTo-Json|Set-Content "evidence/context-$Case-request.json"
 Start-Sleep 1
 function Snapshot([string]$phase){
- $all=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
- @($all|ForEach-Object {try{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}}catch{}})|ConvertTo-Json -Depth 4|Set-Content "evidence/context-$Case-$phase.json"
  $bounds=[Windows.Forms.Screen]::PrimaryScreen.Bounds;$image=[Drawing.Bitmap]::new($bounds.Width,$bounds.Height);$g=[Drawing.Graphics]::FromImage($image)
  try{$g.CopyFromScreen($bounds.Location,[Drawing.Point]::Empty,$bounds.Size);$image.Save((Join-Path $PWD "evidence/context-$Case-$phase.png"))}finally{$g.Dispose();$image.Dispose()}
+ try{$all=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)}
+ catch{@{error="$_";utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content "evidence/context-$Case-$phase-uia-error.json";return @()}
+ @($all|ForEach-Object {try{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}}catch{}})|ConvertTo-Json -Depth 4|Set-Content "evidence/context-$Case-$phase.json"
  return $all
 }
 function WaitMenuItem([string]$name,[string]$phase){
  $deadline=[DateTime]::UtcNow.AddSeconds(10);$observations=@()
  do{
-  $all=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
-  $matches=@($all|Where-Object {$_.Current.ControlType.ProgrammaticName -eq 'ControlType.MenuItem' -and $_.Current.Name -eq $name}|Select-Object -Last 1)
-  $observations+=@{utc=[DateTime]::UtcNow.ToString('o');count=$matches.Count}
+  $matches=@();$errors=@()
+  try{
+   $children=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+   $menus=@($children|Where-Object {try{$_.Current.ControlType.ProgrammaticName -eq 'ControlType.Menu' -or $_.Current.ClassName -eq '#32768'}catch{$false}})
+   foreach($menu in $menus){
+    try{$all=$menu.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition);$matches+=@($all|Where-Object {$_.Current.ControlType.ProgrammaticName -eq 'ControlType.MenuItem' -and $_.Current.Name -eq $name})}catch{$errors+="$_"}
+   }
+  }catch{$errors+="$_"}
+  $matches=@($matches|Select-Object -Last 1)
+  $observations+=@{utc=[DateTime]::UtcNow.ToString('o');count=$matches.Count;menuRoots=$menus.Count;errors=$errors}
   if($matches.Count){break}
   Start-Sleep -Milliseconds 250
  }while([DateTime]::UtcNow -lt $deadline)
