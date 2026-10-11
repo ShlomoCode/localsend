@@ -242,8 +242,23 @@ async function manualInputComparison(){
  await click('Cancel');
  await snap('manual-input-canceled',await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),30000,'Selection did not return with '+controlSizeLabel+' after canceling Manual input'));
 }
+async function openFavorites(){
+ const xml=await source();
+ if(labels(xml).includes('Favorites')){await click('Favorites');return;}
+ assert.equal(report.release,'1.17.0','Unlabeled Favorite fallback is historical-only');
+ const nearby=nodes(xml).find(n=>n['content-desc']==='Nearby devices');
+ assert(nearby,'Historical Nearby devices heading must be observed');
+ const bounds=n=>[...n.bounds.matchAll(/\d+/g)].map(m=>Number(m[0]));
+ const heading=bounds(nearby),mid=(heading[1]+heading[3])/2;
+ const icons=nodes(xml).filter(n=>n.class==='android.widget.Button'&&!n['content-desc']&&n.bounds)
+  .filter(n=>{const b=bounds(n);return b[0]>=heading[2]&&b[1]<=mid&&b[3]>=mid;})
+  .sort((a,b)=>bounds(a)[0]-bounds(b)[0]);
+ assert.equal(icons.length,3,'Historical Nearby toolbar must match the inspected three-icon screenshot');
+ const b=bounds(icons[2]);await snap('historical-favorites-observed',xml);
+ await touch({x:b[0],y:b[1],width:b[2]-b[0],height:b[3]-b[1]},'Observed historical Favorite heart');
+}
 async function addFavorite(){
- await click('Favorites');await snap('favorites-before-add');await click('Add');
+ await openFavorites();await snap('favorites-before-add');await click('Add');
  const editor=await waitFor(favoriteEditorPresent,30000,'Favorite Add did not expose Add to favorites and Confirm');
  await snap('favorite-edit-before-keyboard-action',editor);
  const shown=await wd('GET',base()+'/appium/device/is_keyboard_shown');
@@ -320,7 +335,7 @@ async function renameAlias(value){
  report.aliasConfirmed=value;
 }
 async function refreshRegistration(label){
- await click('Send\nTab 2 of 3');await click('Favorites');
+ await click('Send\nTab 2 of 3');await openFavorites();
  const xml=await snap(label+'-favorites');
 
  const before=r.status();
