@@ -65,9 +65,18 @@ function Screenshot([string]$name) {
  $scaled = New-Object System.Drawing.Bitmap(1984,1440)
  $sg = [System.Drawing.Graphics]::FromImage($scaled)
  $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
- $sg.DrawImage($bmp,0,0,1984,1440)
+ # OCR-only grayscale/threshold transformation; original screenshot is untouched.
+ $matrix=New-Object System.Drawing.Imaging.ColorMatrix
+ $matrix.Matrix00=0.299; $matrix.Matrix01=0.299; $matrix.Matrix02=0.299
+ $matrix.Matrix10=0.587; $matrix.Matrix11=0.587; $matrix.Matrix12=0.587
+ $matrix.Matrix20=0.114; $matrix.Matrix21=0.114; $matrix.Matrix22=0.114
+ $attributes=New-Object System.Drawing.Imaging.ImageAttributes
+ $attributes.SetColorMatrix($matrix)
+ $attributes.SetThreshold(0.85)
+ $rect=New-Object System.Drawing.Rectangle -ArgumentList 0,0,1984,1440
+ $sg.DrawImage($bmp,$rect,0,0,992,720,[System.Drawing.GraphicsUnit]::Pixel,$attributes)
  $scaled.Save("$EvidenceDirectory/$name-ocr.png",[System.Drawing.Imaging.ImageFormat]::Png)
- $sg.Dispose(); $scaled.Dispose(); $bmp.Dispose()
+ $attributes.Dispose(); $sg.Dispose(); $scaled.Dispose(); $bmp.Dispose()
 
  # Tesseract emits benign clipping warnings for content at a scroll viewport edge.
  $previousPreference=$ErrorActionPreference
@@ -215,7 +224,7 @@ function Field([string]$label,[string]$snapshot,[string]$value) {
  $row=Import-Csv "$EvidenceDirectory/$snapshot.tsv" -Delimiter "`t" | Where-Object {$_.text -eq $label} | Select-Object -First 1
  if(!$row) {throw "Field label $label unavailable in $snapshot"}
  Click 500 (([int]$row.top+[int]$row.height)/2+32)
- [System.Windows.Forms.SendKeys]::SendWait('^a')
+ [System.Windows.Forms.SendKeys]::SendWait('{HOME}{DELETE 80}')
  Paste $value
 }
 function Scroll([bool]$down,[int]$count=16) {
