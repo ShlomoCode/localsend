@@ -70,14 +70,13 @@ def host_frame(name):
     return ocr(OUT/(name+'.png'))
 
 
-def approval_button(count, label, words):
+def approval_button(count, label, words, source):
     match = next((word for word in words if word['text'].strip()==label), None)
     if match is None:
         # Full-frame PSM 11 misses the action labels. Whole-button PSM 7 also
         # includes the icon/rounded border on the retained Debian Back frame;
         # inspect only its observed text bounds, still requiring the exact label.
         left, top, width, height = (558,658,60,24) if label=='Accept' else (420,658,66,24)
-        source = OUT/f'files-{count}-back.png'
         crop = OUT/f'files-{count}-back-{label.lower()}-ocr.png'
         run(['convert',str(source),'-crop',f'{width}x{height}+{left}+{top}','+repage','-resize','300%',str(crop)])
         tsv = run(['tesseract',str(crop),'stdout','--psm','7','tsv'])
@@ -319,13 +318,17 @@ def run_case(count):
             raise RuntimeError('Options list not observed after nominal ten-second hold; cause unknown')
         result['stage']='return'
         guest('stage','before-cancel')
-        click('guest',(28,28),rwin)
-        returned,_=guest_frame('back')
-        if 'wants' not in {word['text'].strip() for word in returned}:
-            raise RuntimeError('Back to approval not observed')
+        result['back_click']=click('guest',(28,28),rwin)
+        # The retained 5000-file frame is still Options around input+1.2s,
+        # then approval by+3.4s. Observe the normal transition with a bounded
+        # wait rather than declaring failure from one early screenshot.
+        returned,return_capture=check_guest('back',['wants','Sender2414',str(count),'Options'],30)
+        result['back_approval_capture']=return_capture
+        result['back_approval_guest_offset_from_input_seconds']=return_capture['completed']-result['back_click']['started']
+        return_source=OUT/Path(return_capture['path']).name
         if count==5:
             result['stage']='control-save'
-            click('guest',approval_button(count,'Accept',returned))
+            click('guest',approval_button(count,'Accept',returned,return_source))
             end=time.monotonic()+120
             while time.monotonic()<end:
                 saved=guest('verify')
@@ -341,9 +344,11 @@ def run_case(count):
             result['stage']='cancel'
             # The released UI labels normal rejection Decline. Resolve its
             # actual bounds from the post-hold Back screenshot before clicking.
-            click('guest',approval_button(count,'Decline',returned))
+            result['decline_click']=click('guest',approval_button(count,'Decline',returned,return_source))
             guest('capture','cancel')
-            cancelled,_=guest_frame('cancel-observed')
+            cancelled,cancel_capture=check_guest('cancel-observed',['Receiver2414','Receive','Send'],30)
+            result['cancel_home_capture']=cancel_capture
+            result['cancel_home_guest_offset_from_input_seconds']=cancel_capture['completed']-result['decline_click']['started']
             cancel_tokens={word['text'].strip() for word in cancelled}
             result['cancel_tokens']=sorted(cancel_tokens)
             if 'wants' in cancel_tokens or not {'Receive','Send'}.issubset(cancel_tokens):
