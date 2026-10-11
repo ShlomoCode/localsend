@@ -1,0 +1,3 @@
+autoreview clean: no accepted/actionable findings reported
+overall: patch is correct (0.9)
+The shared preflight preserves the existing VM assertions, and container mode skips only swap configuration checks. The new workflow installs the required tools, verifies the release artifact, and exercises the diagnostic contracts without executing LocalSend. No concrete P0–P2 defects were found in the supplied bundle.

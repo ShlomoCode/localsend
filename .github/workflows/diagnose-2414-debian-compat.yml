@@ -16,6 +16,10 @@ jobs:
     container: debian:12
     timeout-minutes: 15
     steps:
+      - name: Prepare minimal image for checkout
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates libstdc++6
       - uses: actions/checkout@v4
       - name: Install Debian tools and runtime providers
         run: |
