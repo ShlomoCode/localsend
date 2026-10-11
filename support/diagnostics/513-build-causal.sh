@@ -62,10 +62,13 @@ for condition in normal negative positive; do
   cp "$packaged_plugin" "$diagnostic_root/evidence/causal/$condition-packaged-desktop-drop.so"
   # Supported Flatpak packaging strips debug sections and adds .gnu_debuglink.
   # Compare executable/data content after removing those non-runtime sections.
-  objcopy --strip-all --remove-section=.gnu_debuglink "$native_plugin" "$build_root/compiled-$condition.canonical.so"
-  objcopy --strip-all --remove-section=.gnu_debuglink "$packaged_plugin" "$build_root/packaged-$condition.canonical.so"
+  # Binary output contains all allocated sections at their load addresses;
+  # nonallocated compiler comments/debug metadata do not enter the comparison.
+  objcopy -O binary "$native_plugin" "$build_root/compiled-$condition.canonical.so"
+  objcopy -O binary "$packaged_plugin" "$build_root/packaged-$condition.canonical.so"
   cmp "$build_root/compiled-$condition.canonical.so" "$build_root/packaged-$condition.canonical.so"
   sha256sum "$build_root"/{compiled,packaged}-"$condition".canonical.so >> "$diagnostic_root/evidence/causal/native-provenance-$condition.txt"
   readelf -n "$native_plugin" "$packaged_plugin" > "$diagnostic_root/evidence/causal/native-build-id-$condition.txt"
+  readelf -l -S "$native_plugin" "$packaged_plugin" > "$diagnostic_root/evidence/causal/native-load-layout-$condition.txt"
 done
 sha256sum "$diagnostic_root"/evidence/causal/*.flatpak > "$diagnostic_root/evidence/causal/package-sha256.txt"
