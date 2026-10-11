@@ -22,4 +22,4 @@ file evidence/cloud/AppDir/AppRun
 find evidence/cloud/AppDir -maxdepth 2 -type f -name "*.env" -o -name "*.json"
 docker pull gentoo/stage3:latest
 docker image inspect gentoo/stage3:latest > evidence/cloud/gentoo-image.json
-docker run --name issue2690-gentoo -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" gentoo/stage3:latest bash /diagnostic/gentoo.sh
+docker run --privileged --name issue2690-gentoo -v "$PWD/evidence/cloud:/evidence" -v "$PWD/support/diagnostics/2690:/diagnostic:ro" gentoo/stage3:latest bash /diagnostic/gentoo.sh
