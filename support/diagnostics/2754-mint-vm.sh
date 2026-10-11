@@ -1,6 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
+[[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_OS:-} == Linux ]] || { echo "Requires the authorized Linux cloud Actions runner" >&2; exit 8; }
 mkdir -p evidence/cloud /home/runner/issue2754-mint /tmp/issue2754-mint/seed
+probe_bridge_variant=${PROBE_BRIDGE_VARIANT:-system}
+probe_capture_geometry=${PROBE_CAPTURE_GEOMETRY:-0}
+case "$probe_capture_geometry" in
+ 0) ;;
+ 1) [[ "$probe_bridge_variant" == stock || "$probe_bridge_variant" == A ]] || { echo "Geometry capture requires a stock or A bridge run" >&2; exit 2; } ;;
+ *) echo "Unsupported geometry capture flag: $probe_capture_geometry" >&2; exit 2 ;;
+esac
+case "$probe_bridge_variant" in
+ system) ;;
+ stock|A)
+  test "${PROBE_APP_SOURCE:-official-deb}" = c1ce
+  bridge_artifact=${PROBE_BRIDGE_ARTIFACT:?Missing accepted native bridge artifact}
+  grep -qx 'exit_status=0' "$bridge_artifact/result.txt"
+  grep -qx 'stock_self_wait_detected=true' "$bridge_artifact/gates.txt"
+  grep -qx 'candidate_native_suite_passed=true' "$bridge_artifact/gates.txt"
+  cmp support/diagnostics/2754-atspi-native/A-local-dispatch.patch "$bridge_artifact/A-local-dispatch.patch"
+  bridge_expected=$(awk 'NR==1 {print $1}' "$bridge_artifact/bridge-$probe_bridge_variant.sha256")
+  [[ "$bridge_expected" =~ ^[0-9a-f]{64}$ ]]
+  printf '%s  %s\n' "$bridge_expected" "$bridge_artifact/libatk-bridge-$probe_bridge_variant.so.0" | sha256sum -c -
+  mkdir -p /tmp/issue2754-mint/diagnostic-bridge
+  cp "$bridge_artifact/libatk-bridge-$probe_bridge_variant.so.0" /tmp/issue2754-mint/diagnostic-bridge/libatk-bridge-2.0.so.0
+  printf '%s  libatk-bridge-2.0.so.0\n' "$bridge_expected" > /tmp/issue2754-mint/diagnostic-bridge/library.sha256
+  printf '%s\n' "$probe_bridge_variant" > /tmp/issue2754-mint/diagnostic-bridge/variant.txt
+  cp "$bridge_artifact/source.sha256" "$bridge_artifact/tested-source.sha256" "$bridge_artifact/gates.txt" "$bridge_artifact/result.txt" "$bridge_artifact/A-local-dispatch.patch" /tmp/issue2754-mint/diagnostic-bridge/
+  cp "$bridge_artifact/bridge-build-id-$probe_bridge_variant.txt" /tmp/issue2754-mint/diagnostic-bridge/native-build-id.txt
+  cp evidence/cloud/bridge/selection.txt evidence/cloud/bridge/native-run.json /tmp/issue2754-mint/diagnostic-bridge/
+  ;;
+ *) echo "Unsupported bridge variant: $probe_bridge_variant" >&2; exit 1 ;;
+esac
 free -m > evidence/cloud/resources.txt
 df -Th /home/runner /tmp >> evidence/cloud/resources.txt
 test "$(df -Pk /home/runner | awk "NR==2 {print \$4}")" -ge 12582912
@@ -13,6 +43,9 @@ printf "759c9b5a2ad26eb9844b24f7da1696c705ff5fe07924a749f385f435176c2306  /home/
 ssh-keygen -q -t ed25519 -N "" -f /tmp/issue2754-mint/id
 cp /tmp/issue2754-mint/id.pub /tmp/issue2754-mint/seed/id.pub
 sed "s@/home/probe@/home/mint@g" support/diagnostics/2754-ui.py > /tmp/issue2754-mint/seed/ui.py
+if [ "$probe_capture_geometry" = 1 ]; then
+ cp -a support/diagnostics/2754-accessibility /tmp/issue2754-mint/seed/
+fi
 cat > /tmp/issue2754-mint/seed/bootstrap.sh <<"BOOT"
 #!/bin/bash
 set -euxo pipefail
@@ -23,6 +56,9 @@ trap 'status=$?; echo "BOOTSTRAP_EXIT phase=$phase status=$status"; if [ -n "$mo
 mkdir -p /home/mint/.ssh /home/mint/evidence /home/mint/support/diagnostics
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/ui.py /home/mint/support/diagnostics/2754-ui.py
+if [ -d /mnt/2754-accessibility ]; then
+ cp -a /mnt/2754-accessibility /home/mint/support/diagnostics/
+fi
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/support
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
@@ -121,12 +157,21 @@ case "$probe_app_source" in
   ;;
  *) echo "Unsupported diagnostic source: $probe_app_source" >&2; exit 1 ;;
 esac
+if [ "$probe_bridge_variant" != system ]; then
+ scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known /tmp/issue2754-mint/diagnostic-bridge mint@127.0.0.1:/home/mint/diagnostic-bridge
+fi
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
-timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace
+geometry_packages=()
+if [ "$PROBE_CAPTURE_GEOMETRY" = 1 ]; then
+ geometry_packages=(build-essential pkg-config libatspi2.0-dev libglib2.0-dev jq)
+ test -f support/diagnostics/2754-accessibility/capture-geometry.sh
+fi
+timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}"
+printf 'capture_geometry=%s\n' "$PROBE_CAPTURE_GEOMETRY" > evidence/geometry-capture-setting.txt
 if [ "$PROBE_APP_SOURCE" = c1ce ]; then
  cd /home/mint/source-artifact
  sha256sum -c source-bundle.tar.gz.sha256 > /home/mint/evidence/source-bundle-verified.txt
@@ -151,6 +196,62 @@ else
  timeout 120 sudo apt-get install -y /tmp/localsend.deb
  printf 'localsend_app\n' > /home/mint/evidence/app-executable.txt
 fi
+printf 'bridge_variant=%s\n' "$PROBE_BRIDGE_VARIANT" > /home/mint/evidence/bridge-variant.txt
+if [ "$PROBE_BRIDGE_VARIANT" != system ]; then
+ for package in libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64; do
+  test "$(dpkg-query -W -f='${Version}' "$package")" = 2.52.0-1build1
+ done
+ (cd /home/mint/diagnostic-bridge && sha256sum -c library.sha256) > /home/mint/evidence/bridge-library-verified.txt
+ cp -a /home/mint/diagnostic-bridge /home/mint/evidence/diagnostic-bridge
+ ldd /home/mint/diagnostic-bridge/libatk-bridge-2.0.so.0 > /home/mint/evidence/bridge-library-ldd.txt
+ ! grep -q 'not found' /home/mint/evidence/bridge-library-ldd.txt
+ readelf -n /home/mint/diagnostic-bridge/libatk-bridge-2.0.so.0 > /home/mint/evidence/bridge-library-build-id.txt
+ cp /home/mint/evidence/app-executable.txt /home/mint/evidence/app-real-executable.txt
+ cat > /home/mint/support/diagnostics/2754-bridge-app <<'LAUNCH'
+#!/bin/bash
+set -euo pipefail
+real_executable=$(cat /home/mint/evidence/app-real-executable.txt)
+variant=$(cat /home/mint/diagnostic-bridge/variant.txt)
+case "$variant" in stock|A) ;; *) exit 2 ;; esac
+app_pid=$$
+printf '%s\n' "$app_pid" > /home/mint/evidence/bridge-app-pid.txt
+printf 'launcher=%s\nreal_executable=%s\nbridge_variant=%s\n' "$0" "$real_executable" "$variant" > /home/mint/evidence/bridge-launch.txt
+# Observe the same PID after exec; no library override leaks to the UI harness.
+(
+ set -euo pipefail
+ trap 'observer_status=$?; if [ "$observer_status" != 0 ]; then printf "observer_exit_status=%s\n" "$observer_status" >> /home/mint/evidence/bridge-process-map-check.txt; kill "$app_pid" 2>/dev/null || true; fi' EXIT
+ mapped_library=
+ for attempt in $(seq 1 100); do
+  if [ "$(readlink "/proc/$app_pid/exe" 2>/dev/null || true)" = "$real_executable" ]; then
+   mapped_library=$(awk '$6 ~ /libatk-bridge-2[.]0/ { print $6; exit }' "/proc/$app_pid/maps" 2>/dev/null || true)
+   [ -n "$mapped_library" ] && break
+  fi
+  sleep 0.1
+ done
+ if [ "$mapped_library" != /home/mint/diagnostic-bridge/libatk-bridge-2.0.so.0 ]; then
+  printf 'mapped_bridge_mismatch=%s\n' "$mapped_library" > /home/mint/evidence/bridge-process-map-check.txt
+  cat "/proc/$app_pid/maps" > /home/mint/evidence/bridge-process-maps.txt 2>/dev/null || true
+  kill "$app_pid" 2>/dev/null || true
+  exit 1
+ fi
+ cat "/proc/$app_pid/maps" > /home/mint/evidence/bridge-process-maps.txt
+ readlink "/proc/$app_pid/exe" > /home/mint/evidence/bridge-process-executable.txt
+ tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(LD_LIBRARY_PATH|G_MESSAGES_DEBUG)=' > /home/mint/evidence/bridge-process-loader-env.txt
+ expected=$(awk 'NR==1 {print $1}' /home/mint/diagnostic-bridge/library.sha256)
+ printf '%s  %s\n' "$expected" "$mapped_library" | sha256sum -c - > /home/mint/evidence/bridge-process-hash-check.txt
+ sha256sum "$mapped_library" > /home/mint/evidence/bridge-process-library.sha256
+ readelf -n "$mapped_library" > /home/mint/evidence/bridge-process-build-id.txt
+ printf 'mapped_selected_bridge=true\nactual_app_pid=%s\n' "$app_pid" > /home/mint/evidence/bridge-process-map-check.txt
+) > /home/mint/evidence/bridge-map-observer.log 2>&1 &
+if [ "$variant" = A ]; then
+ exec env LD_LIBRARY_PATH=/home/mint/diagnostic-bridge:/home/mint/source-bundle/lib G_MESSAGES_DEBUG=all "$real_executable"
+else
+ exec env -u G_MESSAGES_DEBUG LD_LIBRARY_PATH=/home/mint/diagnostic-bridge:/home/mint/source-bundle/lib "$real_executable"
+fi
+LAUNCH
+ chmod +x /home/mint/support/diagnostics/2754-bridge-app
+ printf '/home/mint/support/diagnostics/2754-bridge-app\n' > /home/mint/evidence/app-executable.txt
+fi
 cd /home/mint
 # Use the actual Cinnamon login bus, which need not equal the systemd user bus.
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
@@ -159,14 +260,14 @@ while IFS= read -r assignment; do export "$assignment"; done < evidence/session-
 uname -a > evidence/environment.txt
 cat /etc/os-release >> evidence/environment.txt
 cinnamon --version >> evidence/environment.txt
-dpkg-query -W cinnamon cinnamon-settings-daemon caribou libgtk-3-0t64 libatk1.0-0t64 libatspi2.0-0t64 dbus >> evidence/environment.txt || true
+dpkg-query -W cinnamon cinnamon-settings-daemon caribou libgtk-3-0t64 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 dbus >> evidence/environment.txt || true
 loginctl list-sessions >> evidence/environment.txt
 xrandr >> evidence/environment.txt
 echo UI_PROVISION_READY
 GUEST
 status=$?
 if [ "$status" = 0 ]; then
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout 1500 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -175,8 +276,13 @@ screen_size=$(xrandr | sed -n "s/.*current \([0-9]*\) x \([0-9]*\),.*/\1x\2/p")
 ffmpeg -nostdin -y -f x11grab -framerate 10 -video_size "$screen_size" -i :0 -c:v libx264 -preset ultrafast evidence/scenario.mp4 > evidence/video.log 2>&1 &
 video_pid=$!
 set +e
-python3 support/diagnostics/2754-ui.py
+# Optional geometry validity is retained by the UI driver separately from causal timing.
+# A quick query or capture exit cannot establish valid geometry or correction success.
+PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" python3 support/diagnostics/2754-ui.py
 status=$?
+if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ]; then
+ grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1
+fi
 kill -INT "$video_pid"
 wait "$video_pid"
 sudo journalctl -b --no-pager > evidence/journal.txt

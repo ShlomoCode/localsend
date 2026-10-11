@@ -83,6 +83,56 @@ def text_case(label):
     if trace:
         run("sudo","kill","-INT",str(trace.pid))
     run("xdotool","key","Escape"); time.sleep(2)
+def capture_geometry_phase():
+    # Optional accessibility queries occur only after every original timing case.
+    # Capture completion is process evidence, not a geometry or speech pass.
+    phase=out/"geometry-post-timing"; phase.mkdir(exist_ok=True)
+    status=dict(phase="post-timing-text",status="started",app_pid=app.pid,window_id=w[-1],rendered_modal_observed=False,screen_reader_speech_tested=False,editing_actions_tested=False)
+    cloud_ready=False
+    log("geometry-phase-start",pid=app.pid,window_id=w[-1])
+    try:
+        if (os.uname().sysname != "Linux" or not pathlib.Path("/proc").is_dir()
+                or out.resolve() != pathlib.Path("/home/mint/evidence")
+                or pathlib.Path(__file__).resolve().parent != pathlib.Path("/home/mint/support/diagnostics")
+                or not (out/"bootstrap-complete").is_file()
+                or "ID=linuxmint" not in pathlib.Path("/etc/os-release").read_text().splitlines()):
+            raise RuntimeError("Geometry phase requires the staged cloud Mint UI driver")
+        fixture=pathlib.Path(__file__).resolve().parent/"2754-accessibility"/"capture-geometry.sh"
+        if not fixture.is_file(): raise RuntimeError("Cloud geometry fixture was not staged")
+        cloud_ready=True
+        click_word("Text","geometry-fresh-text-before")
+        deadline=time.monotonic()+60
+        attempt=0
+        while True:
+            rows=snap("geometry-modal-wait-"+str(attempt))
+            labels={r["text"].lower().strip() for r in rows}
+            if {"type","message"}.issubset(labels):
+                status["rendered_modal_observed"]=True
+                log("geometry-modal-rendered",attempt=attempt)
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Fresh Text dialog did not render Type message before geometry deadline")
+            attempt+=1; time.sleep(2)
+        env=os.environ.copy(); env["PROBE_CLOUD_GEOMETRY"]="1"
+        label=os.environ.get("PROBE_BRIDGE_VARIANT","system")+"-post-timing-text"
+        command=["timeout","--kill-after=5s","450s","bash",str(fixture),str(app.pid),label,str(phase),w[-1]]
+        status["capture_command"]=command
+        with (phase/"capture.stdout").open("w") as stdout, (phase/"capture.stderr").open("w") as stderr:
+            captured=subprocess.run(command,env=env,stdout=stdout,stderr=stderr,text=True,timeout=465)
+        status.update(status="capture-finished",returncode=captured.returncode,deadline_hit=captured.returncode in (124,137))
+        log("geometry-capture-finished",returncode=captured.returncode,deadline_hit=status["deadline_hit"])
+    except Exception as error:
+        status.update(status="capture-failed",error=type(error).__name__+": "+str(error),deadline_hit=isinstance(error,subprocess.TimeoutExpired))
+        log("geometry-phase-failed",error=status["error"],deadline_hit=status["deadline_hit"])
+    finally:
+        (phase/"phase-status.json").write_text(json.dumps(status,indent=2))
+        if cloud_ready:
+            try:
+                escaped=run("xdotool","key","Escape")
+                log("geometry-phase-escape",returncode=escaped.returncode)
+            except Exception as error:
+                log("geometry-phase-escape-failed",error=type(error).__name__+": "+str(error))
+        log("geometry-phase-ended",status=status["status"])
 log("start")
 executable=os.environ.get("APP_EXECUTABLE","localsend_app")
 app=subprocess.Popen([executable],stdin=subprocess.DEVNULL,stdout=open(out/"app.log","w"),stderr=subprocess.STDOUT)
@@ -139,5 +189,7 @@ if run("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboa
     raise RuntimeError("UI failed to enable virtual keyboard for stack capture")
 run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-on-stack")
+if os.environ.get("PROBE_CAPTURE_GEOMETRY","0") == "1":
+    capture_geometry_phase()
 log("completed")
 settings.terminate(); app.terminate()
