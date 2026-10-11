@@ -1,0 +1,37 @@
+name: Diagnose 2230 original Windows Ubuntu file transfer
+on:
+  workflow_dispatch:
+jobs:
+  original-app-pair:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create retained evidence directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force evidence/2230 | Out-Null
+      - name: Install supported Ubuntu 24.04 WSL2
+        uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          use-cache: true
+      - name: Install original releases and prove receiver readiness
+        shell: pwsh
+        run: ./support/diagnose_2230/prepare.ps1
+      - name: Run actual Windows file selection and Ubuntu acceptance
+        shell: powershell
+        run: ./support/diagnose_2230/sender.ps1
+      - name: Collect guest environment and process logs
+        if: always()
+        shell: pwsh
+        run: |
+          wsl --list --verbose 2>&1 | Out-File evidence/2230/wsl-inventory.txt
+          wsl --status 2>&1 | Out-File evidence/2230/wsl-status.txt
+          Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsArchitecture | ConvertTo-Json | Out-File evidence/2230/windows-environment.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2230-original-pair-${{ github.run_id }}
+          path: evidence/2230
+          retention-days: 30
