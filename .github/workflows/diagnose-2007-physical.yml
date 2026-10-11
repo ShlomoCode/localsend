@@ -9,7 +9,7 @@ on:
         description: Official historical release at both endpoints
       scenario:
         type: choice
-        options: [unchanged, changed, renamed]
+        options: [unchanged, changed, renamed, provider-probe]
         default: unchanged
         description: Actual resend file variant after permanent deletion
       deletion_timing:
@@ -52,6 +52,7 @@ jobs:
         run: |
           node --check support/diagnostics/2007-physical-control.mjs
           node --check support/diagnostics/native-readiness.mjs
+          node --check support/diagnostics/2007-provider-probe.mjs
       - uses: actions/setup-java@v5
         with:
           distribution: temurin

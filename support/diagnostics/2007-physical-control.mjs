@@ -176,6 +176,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  writeFileSync('evidence/installed-file-managers.json',JSON.stringify({method:'Read-only Appium isAppInstalled for normal preinstalled file managers',apps:fileManagerInventory},null,2));
  const installedPackages=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'pm list packages'}}),args:[]}).catch(error=>({error:String(error)}));
  writeFileSync('evidence/installed-packages.json',JSON.stringify({method:'Read-only BrowserStack adbShell pm list packages',result:installedPackages},null,2));
+ if(process.env.ISSUE_2007_VARIANT==='provider-probe'){
+  const {probeInstalledProviders}=await import('./2007-provider-probe.mjs');
+  await probeInstalledProviders({wd,prefix});
+  return;
+ }
  const before=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A.txt'}).catch(error=>{
   if(!String(error).includes('No such file or directory'))throw error;
   return null;
