@@ -1,0 +1,28 @@
+name: Diagnose 2380 actual FancyZones startup
+on:
+  workflow_dispatch:
+jobs:
+  observe:
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install official ARM PowerToys and untouched historical LocalSend
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/microsoft/PowerToys/releases/download/v0.100.2/PowerToysUserSetup-0.100.2-arm64.exe -OutFile "$env:RUNNER_TEMP/PowerToys.exe"
+          $install = Start-Process "$env:RUNNER_TEMP/PowerToys.exe" -ArgumentList '/install','/quiet','/norestart',"/log $env:RUNNER_TEMP/powertoys-install.log" -Wait -PassThru
+          "Installer exit $($install.ExitCode)"
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerToys installation failed' }
+          Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
+          Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
+      - name: Observe genuine desktop and applications
+        shell: powershell
+        run: ./support/diagnostics/2380/observe.ps1 -ReleaseRoot "$env:RUNNER_TEMP/localsend" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2380"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: evidence2380
+          path: |
+            ${{ runner.temp }}/evidence2380
+            ${{ runner.temp }}/powertoys-install.log
