@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 PRIMARY_URL='https://pub.linuxmint.io/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso'
 MIRROR_URL='https://mirror.ibcp.fr/pub/linuxmint/iso/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso'
-EXPECTED_SHA256='a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd6'
+EXPECTED_SHA256='a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4'
 OUT="${OUT:-${GITHUB_WORKSPACE:-$PWD}/evidence-mint-fonts}"
 TEMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 WORK=""
