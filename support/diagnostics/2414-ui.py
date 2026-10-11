@@ -63,7 +63,7 @@ for count in [5,5000]:
             (bundle/'settings.json').write_text(json.dumps(settings))
             log=(out/(case+'-'+role+'.log')).open('w')
             command=[str(bundle/'localsend_app')]
-            if role=='Sender2414': command=['sudo','-E','ip','netns','exec','issue2414-sender','runuser','-u',pwd.getpwuid(os.getuid()).pw_name,'--preserve-environment','--']+command
+            if role=='Sender2414': command=['sudo','-E','ip','netns','exec','issue2414-sender','runuser','-u',pwd.getpwuid(os.getuid()).pw_name,'--preserve-environment','--','dbus-run-session','--']+command
             p=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
             time.sleep(1)
             actual_pid=int(run('pgrep','-f','^'+str(bundle/'localsend_app')+'$').split()[0])
