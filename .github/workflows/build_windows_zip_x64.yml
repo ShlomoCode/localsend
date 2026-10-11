@@ -1,78 +1,66 @@
-name: Diagnose 1461 Windows source handle
+name: Diagnose 1461 direct Windows WSL peer TCP
 on:
   workflow_dispatch:
 jobs:
   original-apps:
     if: github.repository == 'ShlomoCode/localsend'
-    runs-on: windows-2022
-    timeout-minutes: 40
+    runs-on: windows-2025
+    timeout-minutes: 45
     concurrency:
       group: issue1461-owned-diagnostic
       cancel-in-progress: false
-    env:
-      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
-      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
-      BS_LOCAL_ID: issue1461-${{ github.run_id }}-${{ github.run_attempt }}
-      INTERRUPTION_MODE: wifi-ui
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-          log-accepted-android-sdk-licenses: false
-      - name: Check diagnostic source and build separate transport helper
+      - name: Preserve supported WSL NAT configuration
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force evidence | Out-Null
-          node --check support/diagnose_1461/control.mjs
-          if($LASTEXITCODE){throw 'Controller syntax failed'}
-          node --check support/cloud_transport/relay.mjs
-          if($LASTEXITCODE){throw 'Relay syntax failed'}
-          foreach($name in @('windows_sender.ps1','build-helper.ps1','step.ps1')){
+          New-Item -ItemType Directory -Force evidence/issue1461 | Out-Null
+          @('[wsl2]', 'networkingMode=nat', 'localhostForwarding=false') | Set-Content "$env:USERPROFILE/.wslconfig" -Encoding ascii
+          Copy-Item "$env:USERPROFILE/.wslconfig" evidence/issue1461/wslconfig.txt
+          netsh interface ipv4 show excludedportrange protocol=tcp | Out-File evidence/issue1461/windows-excluded-tcp-ports.txt
+      - name: Install supported pinned Ubuntu 24.04 WSL2
+        timeout-minutes: 8
+        uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          use-cache: true
+      - name: Source syntax and desktop observation dependencies
+        shell: pwsh
+        run: |
+          foreach($name in @('windows_sender.ps1','direct_wsl.ps1')){
             $tokens=$null;$errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD "support/diagnose_1461/$name"),[ref]$tokens,[ref]$errors)
             if($errors.Count){throw ($errors|Out-String)}
           }
-          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");fs.writeFileSync(process.env.RUNNER_TEMP+"/relay-token",token);'
-          $env:RELAY_TOKEN=Get-Content (Join-Path $env:RUNNER_TEMP 'relay-token') -Raw
-          Remove-Item (Join-Path $env:RUNNER_TEMP 'relay-token')
-          ./support/diagnose_1461/build-helper.ps1
-      - name: Original release apps and observed OS network interruption
-        shell: pwsh
-        run: |
-          if(-not(Get-Command ffmpeg -ErrorAction SilentlyContinue)){
-            choco install ffmpeg --yes --no-progress --limit-output
-            if($LASTEXITCODE){throw 'Windows desktop recorder provisioning failed'}
+          choco install ffmpeg --yes --no-progress --limit-output
+          if($LASTEXITCODE){throw 'Desktop observation dependency provisioning failed'}
+          $env:PATH += ';C:\ProgramData\chocolatey\bin'
+          $ffmpeg=(Get-Command ffmpeg -ErrorAction Stop).Source
+          "FFMPEG_PATH=$ffmpeg" | Out-File -Append $env:GITHUB_ENV
+          $linuxRoot=(& wsl -d Ubuntu-24.04 -u root -- wslpath -a $PWD.Path.Replace('\','/')).Trim()
+          foreach($name in @('wsl_prepare.sh','wsl_receiver.sh','wsl_control.sh')){
+            & wsl -d Ubuntu-24.04 -u root -- bash -n "$linuxRoot/support/diagnose_1461/$name"
+            if($LASTEXITCODE){throw 'Guest source syntax failed'}
           }
-          $recorder=Get-Command ffmpeg -ErrorAction Stop
-          $recorderPath=$recorder.Source
-          $env:FFMPEG_PATH=$recorderPath
-          New-Item -ItemType Directory -Force C:/tmp/bs-local-bin | Out-Null
-          Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile (Join-Path $env:RUNNER_TEMP 'bs-local.zip')
-          Expand-Archive (Join-Path $env:RUNNER_TEMP 'bs-local.zip') C:/tmp/bs-local-bin -Force
-          ./support/diagnose_1461/step.ps1
-      - name: Verify real cloud recordings decode and retain capture timestamps
+      - name: Original apps, hashed control, owned peer socket and guest interface loss
+        shell: pwsh
+        run: ./support/diagnose_1461/direct_wsl.ps1
+      - name: Preserve environment and verify real recordings
         if: always()
         shell: pwsh
         run: |
-          foreach($name in @('windows/windows-continuous.mkv','android-session.mp4')){
-            $path=Join-Path 'evidence/issue1461' $name
-            if(Test-Path -LiteralPath $path){
-              & ffprobe -v error -select_streams v:0 -show_entries 'stream=codec_name,width,height,nb_frames,duration:format=duration' -of json $path | Set-Content ($path+'.probe.json')
-              if($LASTEXITCODE){throw 'Cloud recording metadata verification failed'}
-              & ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp_time -of csv $path | Set-Content ($path+'.timestamps.csv')
-              if($LASTEXITCODE){throw 'Cloud capture timestamp extraction failed'}
-              & ffmpeg -v error -i $path -f null - 2> ($path+'.decode.stderr.txt')
-              if($LASTEXITCODE){throw 'Cloud recording decode failed'}
-              @{status='decoded';bytes=(Get-Item $path).Length;sha256=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();verifiedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content ($path+'.verified.json')
-            }
+          wsl --list --verbose 2>&1 | Out-File evidence/issue1461/wsl-inventory.txt
+          wsl --status 2>&1 | Out-File evidence/issue1461/wsl-status.txt
+          Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsArchitecture | ConvertTo-Json | Out-File evidence/issue1461/windows-environment.json
+          foreach($path in @(Get-ChildItem evidence/issue1461 -Recurse -File | Where-Object {$_.Extension -in @('.mkv','.mp4')})){
+            & ffprobe -v error -select_streams v:0 -show_entries 'stream=codec_name,width,height,nb_frames,duration:format=duration' -of json $path.FullName | Set-Content ($path.FullName+'.probe.json')
+            if($LASTEXITCODE){throw 'Cloud recording metadata failed'}
+            & ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp_time -of csv $path.FullName | Set-Content ($path.FullName+'.timestamps.csv')
+            if($LASTEXITCODE){throw 'Cloud recording timestamps failed'}
+            & ffmpeg -v error -i $path.FullName -f null - 2> ($path.FullName+'.decode.stderr.txt')
+            if($LASTEXITCODE){throw 'Cloud recording decode failed'}
+            @{status='decoded';bytes=$path.Length;sha256=(Get-FileHash $path.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} | ConvertTo-Json | Set-Content ($path.FullName+'.verified.json')
           }
       - uses: actions/upload-artifact@v6
         if: always()
@@ -82,4 +70,6 @@ jobs:
             evidence/
             !evidence/**/release/**
             !evidence/**/*.zip
-            !evidence/**/*.apk
+            !evidence/**/*.deb
+            !evidence/**/*.bin
+          retention-days: 30

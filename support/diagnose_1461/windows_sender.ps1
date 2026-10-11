@@ -1,4 +1,5 @@
-# Run only in an isolated cloud Windows desktop. No app binaries or profiles are changed.
+# Run only in an isolated cloud Windows desktop. App binaries stay unchanged;
+# explicitly requested ports use the release's supported portable preferences.
 # Atomically submit commands/<id>.json; wait for results/<id>.json before sending another.
 param([Parameter(Mandatory=$true)][string]$OutputDirectory,[int]$TimeoutSeconds=5400,[string]$ReceiverName='',[string]$FfmpegPath='')
 $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
@@ -10,6 +11,7 @@ $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 $report=[ordered]@{status='starting';startedUtc=[DateTime]::UtcNow.ToString('o');release='1.14.0';artifactUrl='https://github.com/localsend/localsend/releases/download/v1.14.0/LocalSend-1.14.0-windows-x86-64.zip';environmentScope='Actual OS is recorded below. Windows Server is supplementary to reported Windows 11. Loopback relay differs from LAN.';runner=$env:RUNNER_NAME;image=$env:ImageOS;os=$null;archive=$null;executable=$null;processId=$null;fixtures=@{};actions=@();errors=@();terminalError=$null;reporter10054Observed=$false;networkInterruption=$null;quit=$null}
 $statusPath=Join-Path $OutputDirectory 'status.json'; $readyPath=Join-Path $OutputDirectory 'ready.json'
 $app=$null; $appHwnd=[IntPtr]::Zero; $rule=$null; $sequence=0;$appStartedTicks=$null;$recorder=$null
+$receiverHost='127.0.0.1';$receiverPort=53318;$receptionPort=53317;$failedFixtureBytes=[long]268435456
 function Json($path,$value) { [IO.File]::WriteAllText("$path.tmp",(ConvertTo-Json -InputObject $value -Depth 15),[Text.UTF8Encoding]::new($false)); Move-Item -LiteralPath "$path.tmp" -Destination $path -Force }
 function Persist { Json $statusPath $report }
 function Remaining([int]$maximum=30000) { $r=[int][Math]::Min($maximum,($deadline-[DateTime]::UtcNow).TotalMilliseconds); if($r -le 0){throw 'Diagnostic deadline expired.'}; return $r }
@@ -278,7 +280,52 @@ function Fixture([string]$key){if($key -notin @('control','failed')){throw 'fixt
 function Handles([string]$label,$fixture){
  $raw=Join-Path $OutputDirectory ($label+'-handle.txt');$exe=Join-Path $OutputDirectory 'sysinternals/handle64.exe'
  $process=Start-Process $exe -ArgumentList @('-accepteula','-nobanner','-a',('"'+$fixture.path+'"')) -RedirectStandardOutput $raw -RedirectStandardError ($raw+'.stderr') -PassThru -WindowStyle Hidden
- try{if(-not $process.WaitForExit((Remaining 15000))){throw 'handle.exe exceeded deadline.'};return @{raw=$raw;stderr=$raw+'.stderr';exitCode=$process.ExitCode;processes=@(Get-Process -Name localsend_app,LocalSend -ErrorAction SilentlyContinue|Select-Object Id,ProcessName,StartTime);utc=[DateTime]::UtcNow.ToString('o')}}finally{if(-not $process.HasExited){$process.Kill()}}
+ try{
+  if(-not $process.WaitForExit((Remaining 15000))){throw 'handle.exe exceeded deadline.'}
+  $ownedMatches=@();$observedPid=$null
+  foreach($line in [IO.File]::ReadLines($raw)){
+   $pidMatch=[regex]::Match($line,'(?i)\bpid:\s*([0-9]+)(?:\s|$)');if($pidMatch.Success){$observedPid=[int]$pidMatch.Groups[1].Value}
+   $fileMatch=[regex]::Match($line,'(?i)\b(?:type:\s*)?File\s+(?:\([^)]*\)\s+)?(?:[0-9a-f]+:\s+)?(?<name>.+?)\s*$')
+   if($observedPid -eq $app.Id -and $fileMatch.Success -and [string]::Equals($fileMatch.Groups['name'].Value,$fixture.path,[StringComparison]::OrdinalIgnoreCase)){
+    $ownedMatches+=@{processId=$observedPid;type='File';path=$fileMatch.Groups['name'].Value;rawLine=$line}
+   }
+  }
+  $app.Refresh();$sameProcess=-not $app.HasExited -and $app.StartTime.ToUniversalTime().Ticks -eq $appStartedTicks
+  return @{raw=$raw;stderr=$raw+'.stderr';exitCode=$process.ExitCode;processes=@(Get-Process -Name localsend_app,LocalSend -ErrorAction SilentlyContinue|Select-Object Id,ProcessName,StartTime);utc=[DateTime]::UtcNow.ToString('o');ownedHandleConfirmed=$process.ExitCode -eq 0 -and $sameProcess -and $ownedMatches.Count -gt 0;ownedHandleMatches=$ownedMatches;ownerProcessIdentityCurrent=$sameProcess;matching='Human handle output must identify original sender PID and File type with exact full fixture path (Windows case-insensitive); unknown formats do not qualify.'}
+ }finally{if(-not $process.HasExited){$process.Kill()}}
+}
+function NetworkProof([string]$id){
+ $app.Refresh();if($app.HasExited -or $app.StartTime.ToUniversalTime().Ticks -ne $appStartedTicks){throw 'Network proof requires the original live sender process.'}
+ $proof=@{observedUtc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;processStartedUtc=$report.processStartedUtc;receiverHost=$receiverHost;receiverPort=$receiverPort;connections=@();paths=@();qualifiesDirectPeer=$false;scope='Actual app-owned established TCP and OS route observations only; no network mutations.'}
+ $path=Join-Path $OutputDirectory ($id+'-network-proof.json')
+ $owned=@(Get-NetTCPConnection -ErrorAction Stop | Where-Object {$_.OwningProcess -eq $app.Id -and $_.RemoteAddress -eq $receiverHost -and $_.RemotePort -eq $receiverPort -and $_.State -eq 'Established'})
+ $proof.connections=@($owned | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess,CreationTime)
+ Json $path $proof
+ if([Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($receiverHost)) -or $owned.Count -eq 0){throw 'Direct-peer proof needs a nonloopback receiver and an actual established app-owned TCP connection.'}
+ if(@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object {$_.IPAddress -eq $receiverHost}).Count -gt 0){throw 'Direct-peer receiver address belongs to the Windows sender itself.'}
+ foreach($connection in $owned){
+  $local=[Net.IPAddress]::Parse($connection.LocalAddress)
+  if([Net.IPAddress]::IsLoopback($local) -or $local.Equals([Net.IPAddress]::Any)){throw 'Actual sender TCP local address is loopback or unspecified.'}
+  $addresses=@(Get-NetIPAddress -IPAddress $connection.LocalAddress -ErrorAction Stop)
+  $indexes=@($addresses.InterfaceIndex | Select-Object -Unique)
+  if($indexes.Count -ne 1){throw 'Actual sender TCP address does not identify one interface.'}
+  $index=[int]$indexes[0]
+  $best=@(Find-NetRoute -RemoteIPAddress $receiverHost -LocalIPAddress $connection.LocalAddress -ErrorAction Stop)
+  if(@($best | Where-Object {$_.DestinationPrefix -and $_.InterfaceIndex -eq $index}).Count -eq 0){throw 'Receiver route did not match the actual app socket interface.'}
+  $proof.paths+=@{localAddress=$connection.LocalAddress;interfaceIndex=$index;observedUtc=[DateTime]::UtcNow.ToString('o');
+   addresses=@($addresses | Select-Object IPAddress,PrefixLength,InterfaceIndex,InterfaceAlias,AddressState);
+   selectedRoute=@($best | Select-Object IPAddress,DestinationPrefix,NextHop,InterfaceIndex,InterfaceAlias,RouteMetric);
+   interface=@(Get-NetIPInterface -InterfaceIndex $index -AddressFamily IPv4 -ErrorAction Stop | Select-Object InterfaceIndex,InterfaceAlias,ConnectionState,NlMtu,InterfaceMetric);
+   adapter=@(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object {$_.ifIndex -eq $index} | Select-Object Name,InterfaceDescription,ifIndex,Status,LinkSpeed,MacAddress)}
+  Json $path $proof
+ }
+ $app.Refresh();if($app.HasExited -or $app.StartTime.ToUniversalTime().Ticks -ne $appStartedTicks){throw 'Sender process changed during network observation.'}
+ $current=@(Get-NetTCPConnection -ErrorAction Stop | Where-Object {$_.OwningProcess -eq $app.Id -and $_.RemoteAddress -eq $receiverHost -and $_.RemotePort -eq $receiverPort -and $_.State -eq 'Established'})
+ $retained=@($current | Where-Object {$connection=$_;@($owned | Where-Object {$_.LocalAddress -eq $connection.LocalAddress -and $_.LocalPort -eq $connection.LocalPort}).Count -gt 0})
+ $proof['connectionsAtFinish']=@($retained | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess,CreationTime);Json $path $proof
+ if($retained.Count -eq 0){throw 'No observed app-owned peer TCP tuple remained established through network proof.'}
+ $proof.qualifiesDirectPeer=$true;$proof['finishedUtc']=[DateTime]::UtcNow.ToString('o');Json $path $proof
+ return $proof
 }
 function Probe($command){
  $f=Fixture $command.fixture;$phase=$command.phase
@@ -297,16 +344,23 @@ function Probe($command){
   if(-not $report.networkInterruption){throw 'Record controller interruption evidence before this probe.'}
  }
  if($phase -eq 'after-success'){$text=$view.ocr.text+' '+(($view.uia.tree.name)-join ' ');if($text -notmatch 'Finished' -or $text -match 'Finished with error'){throw 'Successful terminal sender state not observed.'}}
- $label=$command.id+'-'+$phase+'-'+$command.fixture;$before=Handles ($label+'-before') $f
- $hash=(Get-FileHash -LiteralPath $f.path -Algorithm SHA256).Hash.ToLowerInvariant();if($hash -ne $f.sha256){throw 'Source changed before probe.'}
- $out=@{phase=$phase;fixture=$command.fixture;processId=$app.Id;appAlive=$alive;sourceHash=$hash;handlesBefore=$before;rename=@{};delete=@{};restored=$false;senderUi=$view}
+ $label=$command.id+'-'+$phase+'-'+$command.fixture
+ $out=@{phase=$phase;fixture=$command.fixture;processId=$app.Id;appAlive=$alive;sourceHash=$null;expectedSourceHash=$f.sha256;handlesBefore=$null;rename=@{};delete=@{};restored=$false;senderUi=$view}
  if($phase -eq 'during-upload'){
   # A read-only exclusive open detects sharing without moving/deleting an active source.
   $out.rename=@{attempted=$false;reason='Active-transfer control preserves source pathname.'};$out.delete=$out.rename
   $exclusive=$null
+  $out['exclusiveOpenStartedUtc']=[DateTime]::UtcNow.ToString('o')
   try{$exclusive=[IO.File]::Open($f.path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None);$out.exclusiveOpen=@{success=$true}}catch{$out.exclusiveOpen=@{success=$false;error=$_.Exception.ToString();hresult=$_.Exception.HResult}}finally{if($exclusive){$exclusive.Dispose()}}
+  $out['exclusiveOpenFinishedUtc']=[DateTime]::UtcNow.ToString('o');$out['liveHashPerformed']=$false;$out['hashObservation']='Initial fixture hash is pinned expected evidence; no full-file hash during active upload.'
+  Json (Join-Path $OutputDirectory ($label+'-exclusive-open.json')) $out
+  $out.handlesBefore=Handles ($label+'-before') $f
+  $out['ownedHandleConfirmed']=$out.handlesBefore.ownedHandleConfirmed
   $out.restored=$true;return $out
  }
+ $out.handlesBefore=Handles ($label+'-before') $f
+ $hash=(Get-FileHash -LiteralPath $f.path -Algorithm SHA256).Hash.ToLowerInvariant();if($hash -ne $f.sha256){throw 'Source changed before probe.'}
+ $out.sourceHash=$hash;$out['liveHashPerformed']=$true
  $renamed=$f.path+'.probe-rename';$backup=$f.path+'.probe-backup'
  if((Test-Path $renamed) -or (Test-Path $backup)){throw 'Probe backup collision.'}
  Copy-Item -LiteralPath $f.path -Destination $backup
@@ -400,6 +454,7 @@ function Execute($c){
   'recorder-start' { return StartRecording }
   'recorder-stop' { return StopRecording }
   'error-details' { return ErrorDetails }
+  'network-proof' { return NetworkProof $c.id }
   'screenshot' { Focus; return Snapshot ('command-'+$c.id) }
   'click' { if(-not $c.label){throw 'click needs exact label.'};Click $c.label;return Snapshot ('after-'+$c.id) }
   'add-favorite' {
@@ -407,8 +462,8 @@ function Execute($c){
    [void](LabelBounds $s 'Add to favorites');[void](LabelBounds $s 'IP Address');[void](LabelBounds $s 'Port')
    # 1.14.0 FavoriteEditDialog autofocuses IP. Tab order is IP -> Port.
    # Retain the dialog and typed input; no profile injection or protocol registration replaces the UI.
-   [System.Windows.Forms.SendKeys]::SendWait('^a127.0.0.1{TAB}^a53318')
-   $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='favorite IP autofocus and source-defined Tab to Port';ip='127.0.0.1';port=53318;evidence=$s.screenshot}
+   [System.Windows.Forms.SendKeys]::SendWait('^a'+$receiverHost+'{TAB}^a'+$receiverPort)
+   $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='favorite IP autofocus and source-defined Tab to Port';ip=$receiverHost;port=$receiverPort;evidence=$s.screenshot}
    Click 'Confirm';Start-Sleep -Milliseconds 1200
    return Snapshot 'favorite-confirmed'
   }
@@ -437,10 +492,10 @@ function Execute($c){
    # Selecting the favorite recipient in single-recipient mode starts the real send request.
    if($label){try{Click $label}catch{Favorites;Click $label}}else{
     Favorites
-    # The manually added favorite was discovered through 127.0.0.1:53318. Its observed IP is stable even when the Android alias is generated.
-    try{Click '(127.0.0.1)';$label='(127.0.0.1)'}catch{Click '127.0.0.1';$label='127.0.0.1'}
+    # The actual favorite IP remains stable even when the receiver alias varies.
+    try{Click ('('+$receiverHost+')');$label='('+$receiverHost+')'}catch{Click $receiverHost;$label=$receiverHost}
    }
-   $send=@{started=$true;utc=[DateTime]::UtcNow.ToString('o');receiverName=$label;endpoint='127.0.0.1:53318';processId=$app.Id}
+   $send=@{started=$true;utc=[DateTime]::UtcNow.ToString('o');receiverName=$label;endpoint=$receiverHost+':'+$receiverPort;processId=$app.Id}
    Json (Join-Path $OutputDirectory 'send-started.json') $send;return $send
   }
   'record-interruption' {
@@ -465,25 +520,52 @@ function Execute($c){
 try {
  if(Test-Path $readyPath){throw 'Output directory already has ready.json; use a fresh isolated directory.'}
  if(@(Get-ChildItem $commands -Filter '*.json').Count -gt 0){throw 'Fresh output directory must have no queued commands.'}
+ if($env:RECEIVER_HOST){
+  $parsed=$null
+  if($env:RECEIVER_HOST -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$' -or -not [Net.IPAddress]::TryParse($env:RECEIVER_HOST,[ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsed.ToString() -cne $env:RECEIVER_HOST -or $parsed.Equals([Net.IPAddress]::Any) -or $parsed.Equals([Net.IPAddress]::Broadcast)){throw 'RECEIVER_HOST must be an explicit canonical unicast IPv4 address.'}
+  $receiverHost=$parsed.ToString()
+  if($parsed.GetAddressBytes()[0] -eq 0 -or $parsed.GetAddressBytes()[0] -ge 224){throw 'RECEIVER_HOST must be unicast IPv4, not unspecified, multicast or reserved space.'}
+ }
+ foreach($setting in @('RECEIVER_PORT','RECEPTION_PORT')){
+  $value=[Environment]::GetEnvironmentVariable($setting);$port=0
+  if($value){if($value -notmatch '^[0-9]+$' -or -not [int]::TryParse($value,[ref]$port) -or $port -lt 1 -or $port -gt 65535){throw "$setting must be a TCP port from 1 to 65535."};if($setting -eq 'RECEIVER_PORT'){$receiverPort=$port;$receptionPort=$port}else{$receptionPort=$port}}
+ }
+ if($env:FAILED_FIXTURE_BYTES){if($env:FAILED_FIXTURE_BYTES -notmatch '^[0-9]+$' -or -not [long]::TryParse($env:FAILED_FIXTURE_BYTES,[ref]$failedFixtureBytes) -or $failedFixtureBytes -lt 1 -or $failedFixtureBytes -gt 17179869184){throw 'FAILED_FIXTURE_BYTES must be decimal bytes from 1 to 16GiB.'}}
+ $report['receiverEndpoint']=@{host=$receiverHost;port=$receiverPort;receptionPort=$receptionPort;failedFixtureBytes=$failedFixtureBytes}
+ if(-not [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($receiverHost))){$report.environmentScope='Actual OS is recorded below. Windows Server differs from Windows11; direct peer target may be a Linux WSL virtual network. Actual app TCP/interface proof is required.';if($receptionPort -ne $receiverPort){throw 'Direct-peer trial requires matching sender reception and receiver ports.'}}
  $report.os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
  if([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -ne 'X64'){throw 'Official artifact requires x64 Windows.'}
  if(@(Get-Process -Name localsend_app,LocalSend -ErrorAction SilentlyContinue).Count -gt 0){throw 'Another LocalSend exists; require isolated job.'}
  $archive=Join-Path $OutputDirectory 'LocalSend-1.14.0-windows-x86-64.zip'
  Invoke-WebRequest $report.artifactUrl -OutFile $archive -TimeoutSec 120
  $report.archive=@{path=$archive;bytes=(Get-Item $archive).Length;sha256=(Get-FileHash $archive -Algorithm SHA256).Hash}
- if($report.archive.bytes -lt 1000000){throw 'Official ZIP unexpectedly small.'}
+ if($report.archive.bytes -ne 15368130 -or $report.archive.sha256.ToLowerInvariant() -ne 'e9c595bf3b83d6056e4f81c2867cbf2b65bb16c5cc3a9fc99ff2cd1ce4b45eb5'){throw 'Official Windows1.14 ZIP size/hash differs from the independently retained release asset; extraction withheld.'}
  $release=Join-Path $OutputDirectory 'release';Expand-Archive -LiteralPath $archive -DestinationPath $release
  $executables=@(Get-ChildItem $release -Recurse -File|Where-Object{$_.Name -in @('localsend_app.exe','LocalSend.exe')})
  if($executables.Count -ne 1){throw 'Expected one official executable.'};$exe=$executables[0]
  $report.executable=@{path=$exe.FullName;fileVersion=$exe.VersionInfo.FileVersion;sha256=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash}
+ if($env:RECEIVER_PORT -or $env:RECEPTION_PORT){
+  # Official1.14 SharedPreferencesPortable reads flutter-prefixed settings.json
+  # from the executable working directory. Explicit ordinary observation
+  # settings preserve English terminal UI and normal Quit, with encryption off.
+  $settingsPath=Join-Path $exe.DirectoryName 'settings.json';if(Test-Path -LiteralPath $settingsPath){throw 'Official archive already contains a portable preferences file; no overwrite permitted.'}
+  $initialPreferences=@{'flutter.ls_version'=1;'flutter.ls_port'=$receptionPort;'flutter.ls_locale'='en';'flutter.ls_minimize_to_tray'=$false;'flutter.ls_auto_finish'=$false;'flutter.ls_https'=$false}
+  Json $settingsPath $initialPreferences
+  $report['portablePreferences']=@{path=$settingsPath;port=$receptionPort;initialSettings=$initialPreferences;sha256BeforeAppStart=(Get-FileHash $settingsPath -Algorithm SHA256).Hash;scope='Supported1.14 port/English/normalQuit/terminalUI/encryption-off preferences; no app binary or selected-file injection.'}
+ }
  $sysZip=Join-Path $OutputDirectory 'Handle.zip';Invoke-WebRequest 'https://download.sysinternals.com/files/Handle.zip' -OutFile $sysZip -TimeoutSec 120
  Expand-Archive -LiteralPath $sysZip -DestinationPath (Join-Path $OutputDirectory 'sysinternals')
  $report.handleTool=@{url='https://download.sysinternals.com/files/Handle.zip';zipSha256=(Get-FileHash $sysZip -Algorithm SHA256).Hash;exeSha256=(Get-FileHash (Join-Path $OutputDirectory 'sysinternals/handle64.exe') -Algorithm SHA256).Hash;eula='-accepteula explicitly authorized diagnostic observation'}
- # A 1MiB deterministic block repeated yields separate 1MiB control and 256MiB failed fixtures.
+ $drive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($OutputDirectory));$requiredSpace=2*$failedFixtureBytes+2097152+1073741824
+ $report['fixtureStorage']=@{root=$drive.Name;fileSystem=$drive.DriveFormat;availableBytes=$drive.AvailableFreeSpace;requiredBytes=$requiredSpace;scope='Both fixtures, one failed-fixture probe backup, and1GiB reserve.'}
+ if($drive.DriveFormat -ne 'NTFS' -or $drive.AvailableFreeSpace -lt $requiredSpace){throw 'Fixture creation requires NTFS and enough measured space for source, probe backup and reserve.'}
+ # Ordinary deterministic files retain byte(i)=i mod256, including a final partial block.
  $block=[byte[]]::new(1048576);for($i=0;$i -lt $block.Length;$i++){$block[$i]=[byte]($i%256)}
- foreach($entry in @(@{key='control';blocks=1},@{key='failed';blocks=256})){
-  $path=Join-Path $OutputDirectory ('1461-'+$entry.key+'-'+$entry.blocks+'MiB.bin');$stream=[IO.File]::Create($path)
-  try{for($n=0;$n -lt $entry.blocks;$n++){$stream.Write($block,0,$block.Length)}}finally{$stream.Dispose()}
+ foreach($entry in @(@{key='control';bytes=[long]1048576},@{key='failed';bytes=$failedFixtureBytes})){
+  $sizeLabel=if($entry.bytes%1048576 -eq 0){[string]($entry.bytes/1048576)+'MiB'}else{[string]$entry.bytes+'bytes'}
+  $path=Join-Path $OutputDirectory ('1461-'+$entry.key+'-'+$sizeLabel+'.bin');$stream=[IO.File]::Create($path)
+  try{for([long]$written=0;$written -lt $entry.bytes;){$count=[int][Math]::Min([long]$block.Length,$entry.bytes-$written);$stream.Write($block,0,$count);$written+=$count}}finally{$stream.Dispose()}
+  if((Get-Item $path).Length -ne $entry.bytes){throw 'Fixture write did not produce the requested byte length.'}
   $report.fixtures[$entry.key]=@{path=$path;bytes=(Get-Item $path).Length;sha256=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();selected=$false;pattern='byte at offset i = i mod 256'}
  }
  $rule='LocalSend1461-'+[Guid]::NewGuid().ToString('N');New-NetFirewallRule -Name $rule -DisplayName $rule -Direction Inbound -Program $exe.FullName -Action Allow -Profile Any|Out-Null
