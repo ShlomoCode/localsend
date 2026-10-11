@@ -2,7 +2,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 void tracePicker(String stage, Map<String, Object?> details) {
   // Diagnostic release builds need this output outside assertions/debugPrint throttling.
@@ -136,7 +135,7 @@ class DiagnosticPickerFocusTrace {
       'intent': intent.runtimeType.toString(),
       'direction': intent is DirectionalFocusIntent ? intent.direction.name : null,
       'action': action.runtimeType.toString(),
-      if (enabled != null) 'enabled': enabled,
+      'enabled': ?enabled,
       'primaryFocus': _node(FocusManager.instance.primaryFocus),
     });
   }

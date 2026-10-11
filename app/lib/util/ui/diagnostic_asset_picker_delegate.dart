@@ -1,8 +1,8 @@
 // Temporary issue1864 causal probe. Both source builds use this delegate;
 // only ISSUE1864_FOCUS_PROBE changes thumbnail focus and activation behavior.
 import 'package:flutter/material.dart';
-import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:localsend_app/util/ui/diagnostic_picker_focus_trace.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
 Future<List<AssetEntity>?> pickDiagnosticMedia(BuildContext context, AssetPickerConfig config) async {
   final permission = await AssetPicker.permissionCheck();
