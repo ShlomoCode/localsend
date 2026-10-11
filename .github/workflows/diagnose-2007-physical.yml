@@ -1,117 +1,49 @@
-name: Diagnose issue 2007 physical original apps
+name: Diagnose 2007 source APK comparison
 on:
   workflow_dispatch:
     inputs:
-      video_only_run:
+      build_pair_run:
+        description: Successful source build-pair run ID; dispatch only after fresh capacity check
+        required: true
         type: string
-        default: ''
-        description: Archive an existing run video only, without allocating a device
-      device:
-        type: choice
-        options: ['Vivo Y21', 'Samsung Galaxy S21']
-        default: 'Vivo Y21'
-        description: Existing cloud Android 11 device, without replacing system apps
-      release:
-        type: choice
-        options: ['1.16.1', '1.17.0', 'current-c1ce']
-        default: '1.16.1'
-        description: Official historical release or exact unmodified current build at both endpoints
-      fixture_seed:
-        type: string
-        default: ''
-        description: Fixed fixture run seed for identical bytes across comparison arms
-      scenario:
-        type: choice
-        options: [unchanged, changed, renamed, provider-probe, same-session, storage-session, scan-session]
-        default: unchanged
-        description: Actual resend file variant after permanent deletion
-      deletion_timing:
-        type: choice
-        options: [absence, acknowledged, requested]
-        default: absence
-        description: Release resend after observed absence, native deletion acknowledgement, or Delete request
-      deletion_action:
-        type: choice
-        options: [permanent, trash, trash-purge]
-        default: permanent
-        description: Require native permanent deletion, trash retention, or trash then permanent purge
-      post_delete_wait_seconds:
-        type: choice
-        options: ['0', '45']
-        default: '0'
-        description: Fixed delay after verified deletion before actual same-name resend
-      restart_receiver:
-        type: boolean
-        default: false
-        description: Restart only the receiver after deletion without changing its filesystem
-      destination:
-        type: choice
-        options: [downloads, saf-documents, saf-documents-persistent]
-        default: downloads
-        description: Downloads, per-transfer SAF Documents, or persistent Settings SAF Documents
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-2007-source-device
+  cancel-in-progress: false
 jobs:
-  retain-video:
-    if: inputs.video_only_run != ''
+  source-session:
+    if: github.repository == 'ShlomoCode/localsend'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 60
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v5
-        with:
-          repository: ShlomoCode/localsend
-          run-id: ${{ inputs.video_only_run }}
-          name: issue-2007-original-app-control-${{ inputs.video_only_run }}
-          github-token: ${{ github.token }}
-          path: evidence
-      - name: Preserve recording and packet timestamps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          node --check support/diagnostics/2007-video-evidence.mjs
-          node support/diagnostics/2007-video-evidence.mjs evidence
-      - uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: issue-2007-video-${{ inputs.video_only_run }}
-          path: evidence/
-  original-app-control:
-    if: inputs.video_only_run == ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    env:
-      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
-      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
-      BS_LOCAL_ID: issue2007-${{ github.run_id }}
-      BASELINE_APP: ${{ inputs.release == 'current-c1ce' && 'bs://8a977c82af1e28db47132169c3e2cf0db7c13dc0' || inputs.release == '1.17.0' && 'bs://59b2370a166b5e36a4c948c50f22b70255046822' || 'bs://e0759f0fb2caac2dc8df57e2555514289dd2e043' }}
-      BASELINE_LINUX_SHA256: ${{ inputs.release == 'current-c1ce' && '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b' || inputs.release == '1.17.0' && '6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81' || '4082de313cc4f2cb123415aa8ed23146930c871b5d6bc14653e47375af46d332' }}
-      BASELINE_ANDROID_SHA256: ${{ inputs.release == 'current-c1ce' && '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea' || inputs.release == '1.17.0' && '2c7f5fd4872da25115bb8e5e62f92de94dda47b0f249ff387ac667b13871dc3e' || 'f575c642d1c9ee37475bf0d30e138d2672e0857216addaebc327041339aeb064' }}
-      ISSUE_2007_FIXTURE_SEED: ${{ inputs.fixture_seed }}
-      ISSUE_2007_RELEASE: ${{ inputs.release || '1.16.1' }}
-      BS_DEVICE: ${{ inputs.device || 'Vivo Y21' }}
+      BS_LOCAL_ID: issue2007-source-${{ github.run_id }}
+      BS_DEVICE: Samsung Galaxy S21
       BS_OS: '11.0'
-      ISSUE_2007_VARIANT: ${{ inputs.scenario || 'unchanged' }}
-      ISSUE_2007_DELETE_TIMING: ${{ inputs.deletion_timing || 'absence' }}
-      ISSUE_2007_DELETE_ACTION: ${{ inputs.deletion_action || 'permanent' }}
-      ISSUE_2007_POST_DELETE_WAIT: ${{ inputs.post_delete_wait_seconds || '0' }}
-      ISSUE_2007_RESTART_RECEIVER: ${{ inputs.restart_receiver && '1' || '0' }}
-      ISSUE_2007_DESTINATION: ${{ inputs.destination || 'downloads' }}
-      ISSUE_2007_SCAN_COMPARISON: ${{ inputs.scenario == 'scan-session' && '1' || '0' }}
-      SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/${{ (inputs.scenario == 'storage-session' || inputs.scenario == 'scan-session') && '2007-storage-session.mjs' || inputs.scenario == 'same-session' && '2007-same-session.mjs' || '2007-physical-control.mjs' }}
+      ISSUE_2007_RELEASE: current-c1ce
+      ISSUE_2007_SOURCE_COMPARISON: '1'
+      ISSUE_2007_SCAN_COMPARISON: '0'
+      ISSUE_2007_FINALIZE_INTERVENTION: ''
+      ISSUE_2007_BUILD_PAIR_DIR: ${{ github.workspace }}/source-pair
+      ISSUE_2007_BUILD_PAIR_JSON: ${{ github.workspace }}/source-pair/build-pair.json
+      SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-source-session.mjs
+      BASELINE_LINUX_SHA256: 98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b
+      PAIR_BUILD_RUN: ${{ inputs.build_pair_run }}
     steps:
       - uses: actions/checkout@v6
-      - name: Verify diagnostic JavaScript syntax before device allocation
+      - name: Static harness validation before device allocation
         run: |
+          [[ "$PAIR_BUILD_RUN" =~ ^[0-9]+$ ]]
+          node --check support/cloud_transport/mobile-control.mjs
+          node --check support/diagnostics/2007-source-session.mjs
+          node --check support/diagnostics/2007-source-pair-preflight.mjs
           node --check support/diagnostics/2007-physical-control.mjs
-          node --check support/diagnostics/native-readiness.mjs
-          node --check support/diagnostics/2007-provider-probe.mjs
-          node --check support/diagnostics/2007-same-session.mjs
-          node --check support/diagnostics/2007-storage-session.mjs
           node --check support/diagnostics/2007-storage-observer.mjs
-          node --check support/diagnostics/2007-video-evidence.mjs
-          python3 -m py_compile support/diagnostics/2007-ui.py
+          bash -n support/cloud_transport/build-helper.sh
+          mkdir -p evidence released
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -120,8 +52,19 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - name: Reuse verified current Linux artifact
-        if: inputs.release == 'current-c1ce'
+      - name: Install APK verification tools
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Reuse normal source baseline and candidate APK pair
+        uses: actions/download-artifact@v5
+        with:
+          repository: ShlomoCode/localsend
+          run-id: ${{ inputs.build_pair_run }}
+          name: 2007-source-build-pair-${{ inputs.build_pair_run }}
+          github-token: ${{ github.token }}
+          path: source-pair
+      - name: Verify immutable source APKs, package, architecture and common signer
+        run: node support/diagnostics/2007-source-pair-preflight.mjs
+      - name: Reuse existing unmodified c1ce Linux sender
         uses: actions/download-artifact@v5
         with:
           repository: ShlomoCode/localsend
@@ -129,29 +72,22 @@ jobs:
           name: issue2754-c1ce-flutter3419-linux-x64
           github-token: ${{ github.token }}
           path: current-reuse
-      - name: Prepare original desktop release and supported runtime
+      - name: Prepare normal Linux desktop runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr python3-pil ffmpeg network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
           sudo systemctl start NetworkManager
-          mkdir -p evidence released
-          if [ "$ISSUE_2007_RELEASE" = current-c1ce ]; then
-            test "$(cat current-reuse/provenance/source-sha.txt)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
-            cp current-reuse/source-bundle.tar.gz released/linux.tar.gz
-            cp -r current-reuse/provenance evidence/current-linux-provenance
-          else
-            curl -fL "https://github.com/localsend/localsend/releases/download/v${ISSUE_2007_RELEASE}/LocalSend-${ISSUE_2007_RELEASE}-linux-x86-64.tar.gz" -o released/linux.tar.gz
-          fi
+          test "$(cat current-reuse/provenance/source-sha.txt)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          cp current-reuse/source-bundle.tar.gz released/linux.tar.gz
+          cp -r current-reuse/provenance evidence/current-linux-provenance
           printf '%s  %s\n' "$BASELINE_LINUX_SHA256" released/linux.tar.gz | sha256sum -c -
-          sha256sum released/linux.tar.gz > evidence/artifact-sha256.txt
-          printf 'selected %s Android arm64 %s\n' "$ISSUE_2007_RELEASE" "$BASELINE_ANDROID_SHA256" >> evidence/artifact-sha256.txt
           tar xf released/linux.tar.gz -C released
       - name: Verify transparent transport control
         run: node support/cloud_transport/control.mjs
       - name: Generate isolated relay capability
         run: |
           node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
-      - name: Build separate transport helper
+      - name: Build separate read-only observer and transport helper
         run: bash support/cloud_transport/build-helper.sh
       - name: Connect BrowserStack Local
         run: |
@@ -159,19 +95,19 @@ jobs:
           node support/cloud_transport/local.mjs > /tmp/bs-local.log 2>&1 &
           for attempt in $(seq 1 30); do test -f /tmp/helper/local-ready && break; sleep 2; done
           test -f /tmp/helper/local-ready
-      - name: Upload isolated transport helper
+      - name: Upload separate transport helper
         run: |
           curl --fail --silent --show-error -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" https://api-cloud.browserstack.com/app-automate/upload -F file=@/tmp/helper/cloud-transport-helper.apk -o /tmp/helper/upload.json
           node --input-type=module -e 'import fs from "node:fs";const app=JSON.parse(fs.readFileSync("/tmp/helper/upload.json")).app_url;if(!app)throw new Error("Helper upload failed");fs.appendFileSync(process.env.GITHUB_ENV,"HELPER_APP="+app+"\n");'
-      - name: Real desktop picker and Android receive control
+      - name: One Samsung Android 11 session, candidate baseline candidate baseline
         run: node support/cloud_transport/mobile-control.mjs
-      - name: Retain actual continuous BrowserStack video
+      - name: Retain actual continuous session video
         if: always()
         run: node support/diagnostics/2007-video-evidence.mjs evidence
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: issue-2007-original-app-control-${{ github.run_id }}
+          name: issue-2007-source-session-${{ github.run_id }}
           path: |
             evidence/
             control-results.json
