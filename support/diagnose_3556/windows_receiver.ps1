@@ -394,6 +394,14 @@ function Get-DestinationCapacity([string]$Path) {
  if(-not $drive.IsReady){throw "Destination drive is not ready: $root"}
  return @{utc=[DateTime]::UtcNow.ToString('o');path=$Path;driveRoot=$root;availableFreeBytes=$drive.AvailableFreeSpace;totalFreeBytes=$drive.TotalFreeSpace;totalBytes=$drive.TotalSize;driveFormat=$drive.DriveFormat}
 }
+function Get-ValidatedExpectedHash([string]$Path,[long]$Bytes,[string]$Name,[string]$Uri) {
+ if(-not (Test-Path -LiteralPath $Path)) { return $null }
+ $receipt=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+ if($receipt.bytes -ne $Bytes -or $receipt.name -cne $Name -or $receipt.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or ($Uri -and $receipt.uri -cne $Uri)) {
+  throw 'Android post-completion hash receipt does not match the current fixture identity and SHA-256 format.'
+ }
+ return $receipt.sha256.ToLowerInvariant()
+}
 function Get-BoundedFileHash([string]$Path,[string]$Label) {
  $scriptPath=Join-Path $OutputDirectory 'hash-worker.ps1'
  if(-not (Test-Path $scriptPath)) {
@@ -514,11 +522,6 @@ try {
      }
     }
    }
-   if($large -and $completionAllowed -and (Test-Path $ExpectedHashFile)) {
-    $expected=Get-Content -LiteralPath $ExpectedHashFile -Raw | ConvertFrom-Json
-    if($expected.bytes -ne $ExpectedBytes -or $expected.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Android post-completion hash metadata is invalid.' }
-    $ExpectedSha256=$expected.sha256.ToLowerInvariant(); $report.expectedSha256=$ExpectedSha256
-   }
    if($boundedDiagnostic -and $completionAllowed -and -not $report.receiverCompletion -and [DateTime]::UtcNow -ge $nextUiProbe) {
     if($completionProbes -ge 4) { throw 'No observed Finished and Done after four bounded post-completion UI probes.' }
     $completionProbes++
@@ -558,7 +561,13 @@ try {
      $verifiedHashes[$cacheKey]=Get-BoundedFileHash $file.FullName 'saved-file'
     }
     $hash=$verifiedHashes[$cacheKey]
-    if($large -and -not (Test-Path $ExpectedHashFile)) { $report.stage='waiting-for-android-post-completion-hash'; continue }
+    if($large) {
+     # Android may publish its receipt while the Windows hash worker is running.
+     # Read it after that worker returns, rather than using a loop-entry snapshot.
+     $freshExpectedHash=Get-ValidatedExpectedHash $ExpectedHashFile $ExpectedBytes $ExpectedName $report.senderCompletion.uri
+     if(-not $freshExpectedHash) { $report.stage='waiting-for-android-post-completion-hash'; continue }
+     $ExpectedSha256=$freshExpectedHash; $report.expectedSha256=$freshExpectedHash
+    }
     if($hash -ne $ExpectedSha256.ToLowerInvariant()) { throw 'Saved Windows bytes disagree with the Android fixture hash.' }
     $afterHash=Get-Item -LiteralPath $file.FullName
     if($afterHash.Length -ne $ExpectedBytes -or $afterHash.LastWriteTimeUtc -ne $stable.LastWriteTimeUtc) { continue }

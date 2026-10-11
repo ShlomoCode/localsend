@@ -125,6 +125,12 @@ jobs:
         run: |
           node support/diagnose_3556/relay-stream-check.mjs
           exit $LASTEXITCODE
+      - name: Receiver hash receipt race negative control and candidate
+        shell: pwsh
+        run: |
+          git fetch --no-tags --depth=1 origin 1b14424098058239b003e5b8e1dabf843b687f51
+          if($LASTEXITCODE -ne 0){throw 'Race negative control source fetch failed'}
+          ./support/diagnose_3556/hash-receipt-check.ps1
       - name: Small real Android sender and Windows receiver control
         if: inputs.scenario != 'syntax-only'
         shell: pwsh
