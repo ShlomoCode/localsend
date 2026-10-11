@@ -1,0 +1,107 @@
+name: Diagnose 513 Fedora Wayland default Flatpak
+on:
+  workflow_dispatch:
+jobs:
+  fedora:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Fedora 38 guest
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick
+          mkdir -p evidence/vm /home/runner/513-vm
+          curl -fL --retry 3 -o /home/runner/513-vm/fedora.qcow2 https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/38/Cloud/x86_64/images/Fedora-Cloud-Base-38-1.6.x86_64.qcow2
+          sha256sum /home/runner/513-vm/fedora.qcow2 > evidence/vm/image-sha256.txt
+          qemu-img resize /home/runner/513-vm/fedora.qcow2 30G
+          ssh-keygen -q -t ed25519 -N '' -f /home/runner/513-vm/key
+          probe_key=$(cat /home/runner/513-vm/key.pub)
+          cat > /home/runner/513-vm/user-data <<EOF
+          #cloud-config
+          users:
+            - name: probe
+              groups: [wheel]
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              shell: /bin/bash
+              ssh_authorized_keys:
+                - $probe_key
+          bootcmd:
+            - [sh, -c, 'sed -i "s|^metalink=|#metalink=|; s|^#baseurl=http://download.example/pub/fedora/linux/releases/|baseurl=https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/|; s|^#baseurl=http://download.example/pub/fedora/linux/updates/|baseurl=https://archives.fedoraproject.org/pub/archive/fedora/linux/updates/|" /etc/yum.repos.d/fedora*.repo']
+          package_update: true
+          packages:
+            - gnome-shell
+            - gdm
+            - nautilus
+            - gnome-terminal
+            - xdg-desktop-portal-gnome
+            - xdg-desktop-portal-gtk
+            - flatpak
+            - openssh-server
+            - dbus-tools
+          runcmd:
+            - [sh, -c, "printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm/custom.conf"]
+            - [systemctl, set-default, graphical.target]
+            - [systemctl, enable, gdm]
+            - [systemctl, start, gdm]
+          EOF
+          printf 'instance-id: localsend-513\nlocal-hostname: localsend-513\n' > /home/runner/513-vm/meta-data
+          cloud-localds /home/runner/513-vm/seed.iso /home/runner/513-vm/user-data /home/runner/513-vm/meta-data
+          sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 6144 \
+            -drive file=/home/runner/513-vm/fedora.qcow2,if=virtio,format=qcow2 \
+            -drive file=/home/runner/513-vm/seed.iso,media=cdrom,readonly=on \
+            -device virtio-vga -display none -vnc 127.0.0.1:1 -usb -device usb-tablet \
+            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 \
+            -monitor unix:/home/runner/513-vm/monitor,server,nowait \
+            -qmp unix:/home/runner/513-vm/qmp,server,nowait \
+            -serial file:evidence/vm/serial.log -daemonize
+          cat > /home/runner/513-vm/ssh <<'SH'
+          #!/bin/bash
+          exec ssh -i /home/runner/513-vm/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/home/runner/513-vm/known_hosts -o ConnectTimeout=5 probe@127.0.0.1 "$@"
+          SH
+          chmod +x /home/runner/513-vm/ssh
+          ready=0
+          for i in $(seq 1 90); do
+            if timeout 10 /home/runner/513-vm/ssh 'systemctl is-active --quiet gdm && test -S /run/user/$(id -u)/wayland-0'; then ready=1; break; fi
+            sleep 20
+          done
+          /home/runner/513-vm/ssh 'sudo cat /var/log/cloud-init-output.log; systemctl status gdm --no-pager; cat /etc/yum.repos.d/fedora.repo' > evidence/vm/provision.txt 2>&1 || true
+          test "$ready" = 1
+      - name: Install unchanged Flathub package and preserve identities
+        run: |
+          set -euo pipefail
+          /home/runner/513-vm/ssh 'bash -s' > evidence/vm/install.log 2>&1 <<'GUEST'
+          set -euo pipefail
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.localsend.localsend_app
+          flatpak info org.localsend.localsend_app
+          flatpak info --show-metadata org.localsend.localsend_app
+          flatpak override --show org.localsend.localsend_app
+          flatpak override --user --show org.localsend.localsend_app
+          rpm -q gnome-shell nautilus flatpak xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk
+          for session in $(loginctl list-sessions --no-legend | awk '$3 == "probe" {print $1}'); do loginctl show-session "$session" -p Type -p Desktop -p State; done
+          mkdir -p /home/probe/Downloads /home/probe/Documents
+          printf 'LocalSend issue 513 same byte control\n' > /home/probe/Downloads/513-control.txt
+          cp /home/probe/Downloads/513-control.txt /home/probe/Documents/513-control.txt
+          sha256sum /home/probe/{Downloads,Documents}/513-control.txt
+          export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0
+          gsettings set org.gnome.desktop.session idle-delay 0
+          gsettings set org.gnome.desktop.screensaver lock-enabled false
+          gsettings set org.gnome.desktop.interface enable-animations false
+          nohup flatpak run org.localsend.localsend_app > /home/probe/513-app.log 2>&1 < /dev/null &
+          GUEST
+      - name: Drive real Files drag input and capture each transition
+        run: |
+          set -euo pipefail
+          bash support/diagnostics/513-ui.sh
+      - name: Collect raw guest logs
+        if: always()
+        run: |
+          /home/runner/513-vm/ssh 'cat /home/probe/513-app.log; ps -eo pid,comm,args | grep -E "localsend|nautilus|portal"; journalctl --user --no-pager -n 200; sudo journalctl -u gdm --no-pager -n 50' > evidence/vm/guest-logs.txt 2>&1 || true
+          sudo chown -R "$(id -u):$(id -g)" evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue513-fedora-wayland-${{ github.run_id }}
+          path: evidence/vm/
