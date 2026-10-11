@@ -1,0 +1,44 @@
+name: Diagnose 3417 Ubuntu Wayland Open With
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-3417-open-with-diagnostics]
+    paths:
+      - .github/workflows/diagnose-3417-open-with.yml
+      - support/diagnostics/3417-vm.sh
+      - support/diagnostics/3417-ui.sh
+      - support/diagnostics/3417-accessibility.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue3417-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare supported Ubuntu GNOME Wayland guest
+        run: bash support/diagnostics/3417-vm.sh prepare
+      - name: Inspect supported control and actual Nautilus Open With
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1280x800x24 -ac > evidence/vm/record-xvfb.log 2>&1 &
+          DISPLAY=:99 xdpyinfo >/dev/null 2>&1 || sleep 2
+          DISPLAY=:99 vncviewer -FullScreen -ViewOnly -RemoteResize=0 127.0.0.1:5901 > evidence/vm/record-viewer.log 2>&1 &
+          sleep 3
+          bash support/diagnostics/3417-ui.sh
+      - name: Collect guest, package, process, audit, and portal evidence
+        if: always()
+        run: bash support/diagnostics/3417-vm.sh collect
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue3417-ubuntu-wayland-${{ github.run_id }}
+          path: evidence/vm/
+          if-no-files-found: error
