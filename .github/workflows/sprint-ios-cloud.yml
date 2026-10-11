@@ -2,6 +2,11 @@ name: Build unsigned iOS device artifact
 
 on:
   workflow_dispatch:
+    inputs:
+      observe_share:
+        description: 'Apply the pinned observation-only share_handler_ios diagnostic'
+        type: boolean
+        default: false
   # Register this fork-only diagnostic workflow without allocating a build runner.
   push:
     branches: [codex/sprint-ios-cloud]
@@ -27,6 +32,14 @@ jobs:
           path: source
           persist-credentials: false
 
+      - name: Check out the pinned diagnostic harness
+        if: inputs.observe_share
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+
       - name: Select the SDK required by the locked iOS plugins
         shell: bash
         run: |
@@ -42,6 +55,8 @@ jobs:
           test "$(git rev-parse HEAD)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
           mkdir -p "$GITHUB_WORKSPACE/evidence/locks-before"
           git rev-parse HEAD > "$GITHUB_WORKSPACE/evidence/source-commit.txt"
+          printf '%s\n' '${{ github.sha }}' > "$GITHUB_WORKSPACE/evidence/harness-commit.txt"
+          printf '%s\n' '${{ inputs.observe_share }}' > "$GITHUB_WORKSPACE/evidence/share-observation-enabled.txt"
           git status --porcelain > "$GITHUB_WORKSPACE/evidence/source-status-before.txt"
           cp .fvmrc rust-toolchain.toml pubspec.lock Cargo.lock app/ios/Podfile.lock "$GITHUB_WORKSPACE/evidence/locks-before/"
           cp packages/localsend_isolates/rust-toolchain.toml "$GITHUB_WORKSPACE/evidence/locks-before/plugin-rust-toolchain.toml"
@@ -76,6 +91,31 @@ jobs:
           fvm flutter pub get --enforce-lockfile
           (cd packages/localsend_isolates/rust_builder/cargokit/build_tool && fvm flutter pub get)
 
+      - name: Apply only the pinned share observation patch
+        if: inputs.observe_share
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostic="$GITHUB_WORKSPACE/harness/support/diagnostics/3197-ios-share"
+          out="$GITHUB_WORKSPACE/evidence/share-observation"
+          mkdir -p "$out/plugin-before" "$out/plugin-after"
+          cp "$diagnostic/manifest.json" "$diagnostic/share-handler-observation.patch" "$diagnostic/apply-observation.mjs" "$diagnostic/README.md" "$out/"
+          package_directory="$(node --input-type=module - "$PWD/.dart_tool/package_config.json" <<'NODE'
+          import fs from 'node:fs';
+          import {fileURLToPath, pathToFileURL} from 'node:url';
+          const config = process.argv[2];
+          const packages = JSON.parse(fs.readFileSync(config, 'utf8')).packages;
+          const entry = packages.find(p => p.name === 'share_handler_ios');
+          if (!entry) throw new Error('share_handler_ios missing from pinned resolution');
+          console.log(fileURLToPath(new URL(entry.rootUri, pathToFileURL(config))));
+          NODE
+          )"
+          cp "$package_directory/ios/Models/Classes/ShareHandlerIosViewController.swift" "$package_directory/ios/Classes/SwiftShareHandlerIosPlatform.swift" "$out/plugin-before/"
+          node "$diagnostic/apply-observation.mjs" "$package_directory" | tee "$out/apply-result.json"
+          cp "$package_directory/ios/Models/Classes/ShareHandlerIosViewController.swift" "$package_directory/ios/Classes/SwiftShareHandlerIosPlatform.swift" "$out/plugin-after/"
+          shasum -a 256 "$out/plugin-before/"* "$out/plugin-after/"* > "$out/plugin-source.sha256"
+
       - name: Build an unsigned arm64 device application
         working-directory: source/app
         shell: bash
@@ -95,12 +135,16 @@ jobs:
           test -d "$app"
           test -d "$app/PlugIns/ShareExtension.appex"
           test "$(lipo -archs "$app/Runner")" = arm64
+          ipa="localsend-c1ce-unsigned-device.ipa"
+          if [ '${{ inputs.observe_share }}' = true ]; then
+            ipa="localsend-c1ce-share-observation-unsigned-device.ipa"
+          fi
           mkdir -p "$out/package/Payload" "$out/locks-after"
           ditto "$app" "$out/package/Payload/Runner.app"
-          (cd "$out/package" && ditto -c -k --keepParent Payload ../localsend-c1ce-unsigned-device.ipa)
+          (cd "$out/package" && ditto -c -k --keepParent Payload "../$ipa")
           rm -rf "$out/package"
-          printf '%s\n' 'Unsigned arm64 device build; not an App Store artifact. Admission does not prove installation.' > "$out/artifact-scope.txt"
-          shasum -a 256 "$out/localsend-c1ce-unsigned-device.ipa" > "$out/ipa.sha256"
+          printf '%s\n' 'Unsigned arm64 device build; not an App Store artifact. Admission does not prove installation.' 'Share-observation input: ${{ inputs.observe_share }}. Diagnostic timing must not be treated as uninstrumented reproduction.' > "$out/artifact-scope.txt"
+          shasum -a 256 "$out/$ipa" > "$out/ipa.sha256"
           plutil -p "$app/Info.plist" > "$out/runner-plist.txt"
           plutil -p "$app/PlugIns/ShareExtension.appex/Info.plist" > "$out/extension-plist.txt"
           cp app/ios/Runner/Runner.entitlements "$out/runner-requested.entitlements"
@@ -141,3 +185,4 @@ jobs:
           path: evidence/
           retention-days: 14
           if-no-files-found: error
+          include-hidden-files: true
