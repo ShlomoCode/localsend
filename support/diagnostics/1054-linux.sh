@@ -11,7 +11,13 @@ if [[ -n ${ISSUE1054_CONTROLLED_VARIANT:-} ]]; then
   if [[ $ISSUE1054_CONTROLLED_VARIANT == baseline ]]; then
     [[ ! -s source-artifact/provenance/source-diff-after.patch ]]
   else
-    cmp support/diagnostics/1054-source/refresh-size.patch source-artifact/provenance/source-diff-after.patch
+    # Git can abbreviate index hashes differently across clones. Keep raw
+    # provenance exact above; compare every file/hunk/content line here while
+    # excluding only these non-semantic index metadata lines.
+    sed '/^index [0-9a-f]*\.\.[0-9a-f]* [0-7]*$/d' support/diagnostics/1054-source/refresh-size.patch > evidence/expected-source-content.patch
+    sed '/^index [0-9a-f]*\.\.[0-9a-f]* [0-7]*$/d' source-artifact/provenance/source-diff-after.patch > evidence/actual-source-content.patch
+    cmp evidence/expected-source-content.patch evidence/actual-source-content.patch
+    sha256sum evidence/expected-source-content.patch evidence/actual-source-content.patch > evidence/source-content-sha256.txt
   fi
 else
   printf "%s  %s\n" 98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b source-artifact/source-bundle.tar.gz | sha256sum -c -
