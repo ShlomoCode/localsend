@@ -38,7 +38,8 @@ def click(serial, label, name):
 
 time.sleep(8)
 try:
-    snapshot(R, "receiver-start")
+    receiver_xml = snapshot(R, "receiver-start")
+    receiver_alias = next(n.get("content-desc") for n in ET.fromstring(receiver_xml).iter() if n.get("content-desc"))
     snapshot(S, "sender-start")
     adb(R, "forward", "tcp:53317", "tcp:53317")
     adb(R, "logcat", "-c")
@@ -46,23 +47,13 @@ try:
     local.write_text("ISSUE2051_CONTENT_A\n")
     adb(S, "push", str(local), "/sdcard/Download/a.txt")
     click(S, "Send", "sender-before-send")
-    click(S, "Files", "sender-before-files")
+    click(S, "File", "sender-before-files")
     snapshot(S, "picker-start")
     # Android DocumentsUI defaults to Recents; choose the Download root explicitly.
     click(S, "Show roots", "picker-before-roots")
     click(S, "Downloads", "picker-before-downloads")
     click(S, "a.txt", "picker-before-file")
-    click(S, "Manual sending", "sender-before-manual")
-    xml = snapshot(S, "address-dialog")
-    edits = [n for n in ET.fromstring(xml).iter() if n.get("class") == "android.widget.EditText"]
-    if not edits:
-        raise RuntimeError("No address field")
-    a,b,c,d = map(int, re.findall(r"\d+", edits[0].get("bounds")))
-    adb(S, "shell", "input", "tap", str((a+c)//2), str((b+d)//2))
-    adb(S, "shell", "input", "text", "10.0.2.2")
-    adb(S, "shell", "input", "keyevent", "4")
-    snapshot(S, "address-entered")
-    click(S, "Confirm", "address-before-confirm")
+    click(S, receiver_alias, "sender-before-target")
     time.sleep(4)
     snapshot(R, "receiver-request")
     click(R, "Accept", "receiver-before-accept")
