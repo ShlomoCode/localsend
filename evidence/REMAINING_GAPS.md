@@ -1,6 +1,6 @@
 # Issue 2830: remaining reproduction gaps
 
-Nine long-text conditions are parent accepted. Selection's corrected cloud run is green but its raw evidence is still being collected. No accepted condition reproduces the reported freeze, so there is no evidence-backed production patch or correcting-commit claim.
+Nine long-text conditions are parent accepted. Corrected selection cloud run and raw evidence pass; screenshots and exact clipboard equality await parent review. No accepted condition reproduces the reported freeze, so there is no evidence-backed production patch or correcting-commit claim.
 
 ## Exact report gaps
 

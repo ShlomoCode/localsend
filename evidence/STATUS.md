@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: Four fixtures passed on Galaxy S23 / Android 13. Xiaomi short, ASCII105000, and multiline105000 passed with discovery timeout 10000 ms. Unbroken105000 also passed. CJK/emoji previews contain the full source and Copy returns to Receive, while Appium clipboard reads time out. Supplementary scroll passes; long-press selection run 38124266718 is active. The reported Android freeze has not been reproduced. No production patch exists.
+Status: No reported freeze in ten exercised long-text conditions. Parent has accepted nine; corrected selection raw evidence awaits review. Last read-only MIUI diagnostic run 38134203137 is active. No production patch or PR exists.
 
 ## Report and evidence boundary
 
@@ -16,7 +16,7 @@ The reporter uses Dell Inspiron 3501, Windows 11 Pro, and Xiaomi Redmi Note 10 P
 
 ## Environment gaps
 
-- One owned job/session at a time is allowed for this issue; long-press selection run 38124266718 is the only owned active run/session.
+- One owned job/session at a time is allowed for this issue; firmware run 38134203137 is the only owned active run/session.
 - The shared transport and actual short-text app-to-app control have passed.
 - Windows 11 runner is ARM with original x64 release under emulation. Dell hardware and native x64 remain different.
 - Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 is the next comparison; its MIUI version is unknown. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
@@ -96,6 +96,6 @@ Selection 38124266718 / f026ca65 exercised its 1200 ms long-press: screenshots s
 
 Firmware UI run 38129498505 / 42c50598 opened ordinary Settings, with About phone visible in inspected screenshot and XML (TextView, text=About phone, bounds [204,639,489,706]). UiSelector lookup returned no such element, so the About page was not opened and MIUI remains unknown. The next read-only diagnostic uses that observed title bounds, not the separate Update control. This is not an additional long-text condition. Selection repeat 38132269475 / 9581f72c is active.
 
-Corrected selection repeat38132269475 / 9581f72c passed after diagnostic toolbar dismissal. Inspected highlight/handle/toolbar, dismissed overlay, and Receive after main Copy screenshots. Complete105000-byte source/readback SHA-25619d2eb39f3714bc4270a1e9aba5f85fb732af570947a65354a5dcc7e2949ab4b. It remains the tenth distinct condition and awaits parent raw review. Artifact download ultimately succeeded via bounded proxy retry; no repack cloud job ran (new workflow dispatch was404 before job creation), and the unused repack workflow is removed.
+Corrected selection repeat 38132269475 / 9581f72c passed after diagnostic toolbar dismissal. Inspected highlight/handle/toolbar, dismissed overlay, and Receive after main Copy screenshots. Complete 105000-byte source/readback SHA-256 19d2eb39f3714bc4270a1e9aba5f85fb732af570947a65354a5dcc7e2949ab4b. It remains the tenth distinct condition and awaits parent raw review. Artifact download ultimately succeeded via bounded proxy retry; no repack cloud job ran (new workflow dispatch was404 before job creation), and the unused repack workflow is removed.
 
-Firmware38132746719 / b7fff69d does not reveal MIUI: initial source has only Settings/Search settings while screenshot is Home. The previous firmware failure screenshot/source also Home. Appium activation200 and subsequent source/screenshot sequence retained; device logs do not establish Settings exit cause. Actual MIUI remains unknown. One last read-only attempt uses Android standard DEVICE_INFO_SETTINGS intent and captures screenshot before the slower source call, using documented UiAutomator2 mobile:startActivity action. No OS/ROM/settings writes.
+Firmware 38132746719 / b7fff69d does not reveal MIUI: initial source has only Settings/Search settings while screenshot is Home. The previous firmware failure screenshot/source also Home. Appium activation200 and subsequent source/screenshot sequence retained; device logs do not establish Settings exit cause. Actual MIUI remains unknown. One last read-only attempt uses Android standard DEVICE_INFO_SETTINGS intent and captures screenshot before the slower source call, using documented UiAutomator2 mobile:startActivity action. No OS/ROM/settings writes.
