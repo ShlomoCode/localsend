@@ -1,0 +1,54 @@
+name: Build 2051 historical control
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2051-open]
+    paths: [.github/workflows/diagnose-2051-build.yml]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1.16.1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.24.4
+          channel: stable
+          cache: true
+      - name: Record immutable source and toolchain
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-commit.txt
+          flutter --version > evidence/flutter-version.txt
+          sha256sum app/pubspec.lock > evidence/lockfile-sha256-before.txt
+          cp app/android/app/build.gradle evidence/original-build.gradle
+      - name: Prepare diagnostic release signing
+        run: |
+          keytool -genkeypair -keystore /tmp/issue2051-debug.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 30 -dname 'CN=Issue2051 Diagnostic,O=LocalSend,C=US'
+          cat > app/android/key.properties <<'PROPERTIES'
+          storeFile=/tmp/issue2051-debug.jks
+          storePassword=android
+          keyAlias=androiddebugkey
+          keyPassword=android
+          PROPERTIES
+      - name: Build unchanged historical application
+        working-directory: app
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --target-platform android-x64
+          sha256sum pubspec.lock > ../evidence/lockfile-sha256-after.txt
+          sha256sum build/app/outputs/flutter-apk/app-release.apk > ../evidence/apk-sha256.txt
+          git diff --exit-code > ../evidence/source-diff.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-2051-historical-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            app/build/app/outputs/flutter-apk/app-release.apk
