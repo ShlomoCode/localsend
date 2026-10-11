@@ -1,0 +1,33 @@
+name: Build 513 controlled source Flatpaks
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-513-fedora-diagnostics]
+    paths:
+      - support/diagnostics/513-build-causal.sh
+      - .github/workflows/diagnose-513-build-causal.yml
+jobs:
+  source-packages:
+    if: "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[causal-build]')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Prepare source build and supported packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev flatpak flatpak-builder ruby
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          dart pub global activate fvm
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+      - name: Build same source with normal and isolated portal dependencies
+        run: bash support/diagnostics/513-build-causal.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue513-causal-source-packages-${{ github.run_id }}
+          path: evidence/causal/
