@@ -29,7 +29,7 @@ let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=fals
 let sessionCreationAttempted=false;
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
 const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317});
-async function wd(method,url,body){
+async function wd(method,url,body,attempt=0){
  const started=Date.now();
  let response;
  try{
@@ -46,7 +46,12 @@ async function wd(method,url,body){
  }catch(error){
   appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
    utc:new Date(started).toISOString(),method,path:url,body:url==='/session'?'[private capability references omitted]':body,
-   status:response?.status||null,elapsedMs:Date.now()-started,error:String(error.message||error)}))+'\n');
+   status:response?.status||null,elapsedMs:Date.now()-started,attempt,error:String(error.message||error)}))+'\n');
+  // Provider gateway returned session-absent while its Appium log showed this GET succeeding.
+  // Retry only reads; never replay a touch, input, session creation or deletion.
+  if(method==='GET'&&response?.status===404&&/Session not started or terminated/i.test(error.message)&&attempt<2){
+   await sleep(1000);return wd(method,url,body,attempt+1);
+  }
   throw error;
  }
 }
