@@ -18,3 +18,30 @@ $source=$source.Replace('onPopInvokedWithResult: (_, __) async {',"onPopInvokedW
 $source=$source.Replace('          context.pop();',"          _trace('before context.pop');`n          context.pop();")
 [IO.File]::WriteAllText($path,$source)
 [IO.File]::WriteAllText("$EvidenceDirectory/instrumented-baseline.dart",$source)
+$mainPath="$SourceDirectory/app/lib/main.dart"
+$main=[IO.File]::ReadAllText($mainPath).Replace("`r`n","`n")
+$main="import 'dart:io' as diagnostic;`n"+$main
+$main=$main.Replace('navigatorKey: Routerino.navigatorKey,','navigatorKey: Routerino.navigatorKey, navigatorObservers: [Diagnostic2277Observer()],')
+$main+=@'
+
+class Diagnostic2277Observer extends NavigatorObserver {
+  void _write(String action, Route route, Route? previous) {
+    final path = diagnostic.Platform.environment['BUG2277_TRACE'];
+    if (path != null) {
+      diagnostic.File(path).writeAsStringSync('${DateTime.now().toUtc().toIso8601String()} NAV $action route=${route.settings.name} previous=${previous?.settings.name}\n', mode: diagnostic.FileMode.append);
+    }
+  }
+  @override
+  void didPush(Route route, Route? previousRoute) {
+    super.didPush(route, previousRoute);
+    _write('push', route, previousRoute);
+  }
+  @override
+  void didPop(Route route, Route? previousRoute) {
+    super.didPop(route, previousRoute);
+    _write('pop', route, previousRoute);
+  }
+}
+'@
+[IO.File]::WriteAllText($mainPath,$main)
+[IO.File]::WriteAllText("$EvidenceDirectory/instrumented-main.dart",$main)
