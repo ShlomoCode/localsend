@@ -50,7 +50,11 @@ Ui snapshot 0 0 windows-repeat-selected
 Ui click 246 266 windows-repeat-favorites
 New-Item evidence/resend-address-ready -ItemType File|Out-Null
 Wait-Milestone resend-ready
-Ui click 145 225 windows-resend-submission
+# The native file picker above requires foreground. This already-staged app
+# button accepts the same process-owned input without foreground ownership;
+# unrelated runner consoles may steal it while Android deletion is in progress.
+# The helper retains both the owning process and foreground observations.
+& "$PSScriptRoot/2007-windows-ui.ps1" -Action click -X 145 -Y 225 -Label windows-resend-submission -UseControlSequence
 $action=Get-Content evidence/windows-resend-submission-action.json|ConvertFrom-Json
 @{utc=$action.inputUtc;action='Actual click on pre-staged original Windows Favorite';timestamp='Immediately before native PostMessage input sequence'}|ConvertTo-Json|Set-Content evidence/resend-submission.json
 New-Item evidence/resend-requested -ItemType File|Out-Null
