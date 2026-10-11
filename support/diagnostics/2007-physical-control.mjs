@@ -19,17 +19,35 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  async function chooseSafDocuments(stage){
   if(!safDocuments)return;
   async function click(using,value){
-   const element=await wd('POST',prefix+'/element',{using,value});
+   let element;
+   const deadline=Date.now()+10000;
+   do{
+    element=await wd('POST',prefix+'/element',{using,value}).catch(error=>{
+     if(!String(error).includes('no such element'))throw error;
+     return null;
+    });
+    if(element)break;
+    await new Promise(r=>setTimeout(r,200));
+   }while(Date.now()<deadline);
+   assert(element,'Actual SAF control did not render: '+value);
    await wd('POST',prefix+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   }
   await click('accessibility id','Options');
   await snapshot(stage+'-options');
   await click('xpath','(//android.widget.Button[not(@content-desc) and @clickable="true"])[1]');
-  await snapshot(stage+'-native-picker');
-  assert(readFileSync(`evidence/android-${stage}-native-picker.xml`,'utf8').includes('com.google.android.documentsui'),'Real native SAF picker not observed');
+  let nativeSource;
+  const pickerDeadline=Date.now()+10000;
+  let pickerAttempt=0;
+  do{
+   await snapshot(stage+'-native-picker-'+pickerAttempt);
+   nativeSource=readFileSync(`evidence/android-${stage}-native-picker-${pickerAttempt++}.xml`,'utf8');
+   if(/com\.(google\.)?android\.documentsui/.test(nativeSource))break;
+   await new Promise(r=>setTimeout(r,200));
+  }while(Date.now()<pickerDeadline);
+  assert(/com\.(google\.)?android\.documentsui/.test(nativeSource),'Real native SAF picker not observed');
   await click('xpath','//*[@text="Documents"]');
   await snapshot(stage+'-native-documents');
-  await click('xpath','//*[@text="Use this folder"]');
+  await click('xpath','//*[@text="Use this folder" or @text="USE THIS FOLDER"]');
   await snapshot(stage+'-native-permission');
   const permissionPromptObserved=readFileSync(`evidence/android-${stage}-native-permission.xml`,'utf8').includes('text="Allow"');
   if(permissionPromptObserved)await click('xpath','//*[@text="Allow"]');
