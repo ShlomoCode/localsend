@@ -283,8 +283,9 @@ def run_case(count):
         click('host',target)
         time.sleep(3)
         focus('guest',rwin)
-        # No OCR/SCP runs in this measured interval. The retained 1000x700
-        # approval has Options at absolute (517,611). Inputs use
+        # No OCR/SCP runs in this measured interval. Retained 1000x700 source
+        # approval places Options at (560,512); release 1.17 uses (517,611).
+        # Inputs use
         # screenshot coordinates, avoiding the Openbox client/frame offset.
         approval=guest('capture','approval')
         guest('stage','approval')
@@ -292,7 +293,8 @@ def run_case(count):
         if SOURCE_PAIR:
             result['recording']=guest('record-start')
         result['stage']='options'
-        result['options_click']=click('guest',(517,611))
+        options_target=(560,512) if SOURCE_PAIR else (517,611)
+        result['options_click']=click('guest',options_target)
         start=time.monotonic()
         result['options_hold_origin_host_monotonic']=start
         options=guest('capture','options')
@@ -358,7 +360,7 @@ def run_case(count):
         return_source=OUT/Path(return_capture['path']).name
         if SOURCE_PAIR and count==5000:
             result['back_stage']=guest('stage','back')
-            result['reopen_click']=click('guest',(517,611))
+            result['reopen_click']=click('guest',options_target)
             time.sleep(10)
             result['reopen_capture']=guest('capture','reopen')
             result['reopen_stage']=guest('stage','reopen')
