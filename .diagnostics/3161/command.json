@@ -1,1 +1,1 @@
-{"round":8,"actions":[{"kind":"click","x":415,"y":407},{"kind":"wait","seconds":3},{"kind":"click","x":421,"y":363},{"kind":"wait","seconds":3},{"kind":"sample"}]}
+{"round":9,"actions":[{"kind":"key","value":"Super_L"},{"kind":"text","value":"calculator"},{"kind":"key","value":"Return"},{"kind":"wait","seconds":3},{"kind":"key","value":"Escape"},{"kind":"text","value":"7+8"},{"kind":"key","value":"Return"},{"kind":"wait","seconds":3}]}
