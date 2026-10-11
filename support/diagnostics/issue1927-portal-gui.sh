@@ -25,9 +25,10 @@ launch_settings() {
   done
   test -n "$wid"
   snapshot "$label-before-input"
+  wait_rendered_application "$label"
   pid=$(qualified_app_pid "$label")
   wid=$(qualified_visible_window "$label" "$pid")
-  stabilize_window
+  stabilize_window initialized
   xdotool mousemove --window "$wid" 105 211 click 1
   sleep 2
   import -window "$wid" "$OUT/$label-settings.png"

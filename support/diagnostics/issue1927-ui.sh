@@ -22,12 +22,43 @@ start_ui_recording() {
   kill -0 "$recording_pid"
 }
 stabilize_window() {
-  sleep 8
+  if [ "${1:-}" != initialized ]; then sleep 8; fi
   xdotool windowactivate --sync "$wid"
   xdotool windowmove "$wid" 0 0
   xdotool windowsize "$wid" 1000 700
   sleep 2
   xdotool getwindowgeometry --shell "$wid" > "$OUT/window-geometry.txt"
+}
+wait_rendered_application() {
+  # Replace the existing eight-second startup sleep with read-only observation.
+  # Rendered navigation proves a mature app shell, not ownership or Settings.
+  local identity_label=$1 transition_deadline=$((SECONDS+8)) attempt=0 label
+  while [ "$SECONDS" -lt "$transition_deadline" ]; do
+    attempt=$((attempt+1))
+    label="$identity_label-mature-attempt-$attempt"
+    identity_command "render-$attempt" import -window "$wid" "$OUT/$label.png" || return 1
+    identity_command "properties-$attempt" xprop -id "$wid" WM_CLASS _NET_WM_PID > "$OUT/$label-properties.txt" || return 1
+    # Retained mature 900/1000px renders place these labels in this crop.
+    # Exclude icons and body headings; full-frame OCR duplicates/misreads them.
+    identity_command "navigation-crop-$attempt" convert "$OUT/$label.png" -crop 170x170+70+90 +repage "$OUT/$label-navigation.png" || return 1
+    identity_command "ocr-$attempt" tesseract "$OUT/$label-navigation.png" "$OUT/$label" --psm 6 tsv > "$OUT/$label-ocr.log" 2>&1 || return 1
+    if identity_command "rendered-navigation-$attempt" awk -F '\t' '
+      NR>1 && $1==5 && $11>=50 {
+        key=$2 "/" $3 "/" $4 "/" $5; text[key]=text[key] " " $12
+      }
+      END {
+        for(key in text){sub(/^ /,"",text[key]); line=tolower(text[key]); if(line=="receive") receive++; if(line=="send") send++; if(line=="settings") settings++}
+        exit !(receive==1 && send==1 && settings==1)
+      }
+    ' "$OUT/$label.tsv" && [ "$SECONDS" -lt "$transition_deadline" ]; then
+      printf 'rendered_application=%s window=%s; ownership and Settings still unqualified\n' "$label" "$wid" > "$OUT/$identity_label-rendered-readiness.txt"
+      return 0
+    fi
+    [ "$SECONDS" -lt "$transition_deadline" ] || break
+    sleep 0.2
+  done
+  printf 'rendered application timeout; no input authorized\n' > "$OUT/$identity_label-rendered-readiness.txt"
+  return 1
 }
 run_ui_observer() {
   local budget=8 remaining
