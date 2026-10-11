@@ -1,6 +1,10 @@
 name: Record favorites dialog
 on:
   workflow_dispatch:
+    inputs:
+      build_run:
+        description: Reuse an exact-source recording-app artifact from this run (optional)
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -9,7 +13,10 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: subosito/flutter-action@v2
+        if: ${{ inputs.build_run == '' }}
         with:
           flutter-version: '3.41.9'
           channel: stable
@@ -18,16 +25,35 @@ jobs:
         shell: pwsh
         run: |
           choco install tesseract ffmpeg --no-progress -y
-          dart pub global activate fvm
-          fvm use 3.41.9 --force
           $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
           & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
           & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
       - name: Build exact candidate source
+        if: ${{ inputs.build_run == '' }}
         working-directory: app
         run: |
-          fvm flutter pub get
-          fvm flutter build windows --release
+          dart pub global activate fvm
+          dart pub global run fvm:fvm use 3.41.9 --force
+          dart pub global run fvm:fvm flutter pub get
+          dart pub global run fvm:fvm flutter build windows --release
+      - uses: actions/download-artifact@v6
+        if: ${{ inputs.build_run != '' }}
+        with:
+          name: recording-app
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: app/build/windows/x64/runner/Release
+      - uses: actions/upload-artifact@v6
+        with:
+          name: recording-app
+          path: app/build/windows/x64/runner/Release
+      - name: Source manifest
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/favorites-recording" | Out-Null
+          git rev-parse HEAD | Set-Content "$env:RUNNER_TEMP/favorites-recording/harness-commit.txt"
+          git diff --name-only ac81c35d3c623df398ded2704f06b7a5401dec86 | Set-Content "$env:RUNNER_TEMP/favorites-recording/changed-paths.txt"
+          if (git diff ac81c35d3c623df398ded2704f06b7a5401dec86 -- app packages) {throw 'Production source changed'}
       - name: Capture actual desktop apps
         shell: powershell
         run: |

@@ -349,7 +349,7 @@ try {
  Esc
  Chapter 'Shorter native window: scroll and fixed Cancel / Add actions'
  Click 576 212
- [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,1000,760,$true) | Out-Null
+ [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,883,610,$true) | Out-Null
  Start-Sleep -Seconds 2
  Snap 'small-top'
  Scroll $true 24
@@ -365,7 +365,7 @@ try {
  $apps.sender=$sender
  Start-Sleep -Seconds 8
  $sender.Refresh()
- [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,883,610,$true) | Out-Null
+ [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,1000,760,$true) | Out-Null
  [Desktop2381]::SetForegroundWindow($sender.MainWindowHandle) | Out-Null
  Snap 'large-text-home'
  Word 'Send' 'large-text-home'
