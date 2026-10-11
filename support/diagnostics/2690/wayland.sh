@@ -23,7 +23,8 @@ run_window() {
     export HOME="/tmp/wayland-home-$label"
     export XDG_CONFIG_HOME="$HOME/.config"
     export XDG_CACHE_HOME="$HOME/.cache"
-    mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+    export XDG_DATA_HOME="$HOME/.local/share"
+    mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
   fi
   set +e
   LD_DEBUG=libs,versions LD_DEBUG_OUTPUT=/evidence/launch/loader-$label "$executable" > /evidence/launch/wayland-$label.log 2>&1 &
@@ -58,6 +59,7 @@ run_window() {
 run_window gtk-control /tmp/gtk-control
 if [[ ${WAYLAND_FOCUSED:-0} == 1 ]]; then
   run_window current /evidence/current.AppImage
+  run_window repacked-baseline /evidence/repacked-baseline.AppImage
   run_window candidate /evidence/repacked-candidate.AppImage
   run_window new-client /evidence/repacked-new-client.AppImage
   run_window current-after /evidence/current.AppImage

@@ -63,7 +63,8 @@ jobs:
           printf '%s\n' '${{ inputs.wayland_run }}' > evidence/cloud/wayland-input-run.txt
           sha256sum -c evidence/cloud/repacked-new-client.sha256
           sha256sum -c evidence/cloud/repacked-candidate.sha256
-          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage
+          sha256sum -c evidence/cloud/repacked-baseline.sha256
+          chmod a+x evidence/cloud/repacked-new-client.AppImage evidence/cloud/repacked-candidate.AppImage evidence/cloud/repacked-baseline.AppImage
           mv evidence/cloud/launch/wayland-results.tsv evidence/cloud/launch/prior-wayland-results.tsv
           curl -fL --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage -o evidence/cloud/current.AppImage
           echo '19f21613d1834f6caa69517113670461a3f10b80a2a315f86548c0663d9c0aaf  evidence/cloud/current.AppImage' | sha256sum -c -
