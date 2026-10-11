@@ -107,11 +107,11 @@ build_source() (
   unzip -l "$output/app-arm64-v8a-release.apk" > "$output/apk-contents.txt"
   sha256sum "$output/app-arm64-v8a-release.apk" > "$output/apk-sha256.txt"
   git diff --exit-code HEAD
-  jq -n --arg label "$label" --arg sha "$source_sha" \
+  jq -n --arg build_label "$label" --arg sha "$source_sha" \
     --arg apk_sha "$(cut -d ' ' -f1 "$output/apk-sha256.txt")" \
     --arg rust "$rust_pin" --arg run_id "${GITHUB_RUN_ID:-}" \
     --arg runner_sha "${GITHUB_SHA:-}" --slurpfile flutter "$output/flutter-version.json" \
-    '{label: $label, source_sha: $sha, diagnostic_runner_sha: $runner_sha,
+    '{label: $build_label, source_sha: $sha, diagnostic_runner_sha: $runner_sha,
       github_run_id: $run_id, apk: "app-arm64-v8a-release.apk", apk_sha256: $apk_sha,
       flutter: $flutter[0], rust: $rust, java_major: 17, fvm: "4.0.0",
       build_command: "fvm flutter build apk --release --split-per-abi --target-platform android-arm64",
