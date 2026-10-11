@@ -1,8 +1,27 @@
 {
-  "round": 6,
+  "round": 7,
   "actions": [
-    {"kind": "capture"},
-    {"kind": "probe", "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/capture-round6; mkdir -p \"$out\"; ps -p 34063 -o pid,lstart,args; cat /proc/34063/stat; timeout 15 /usr/bin/python3 /home/probe/source-input/geometry-oracle/snapshot-guest.py > \"$out/compositor-oracle.json\" 2> \"$out/compositor-oracle.stderr\"; cat \"$out/compositor-oracle.json\" \"$out/compositor-oracle.stderr\"; if timeout 25 /usr/bin/python3 /home/probe/source-input/geometry-oracle/atspi-snapshot.py --pid 34063 --max-nodes 2000 --max-depth 8 > \"$out/shell-screenshot-ui-shallow.jsonl\" 2> \"$out/shell-screenshot-ui-shallow.stderr\"; then tree_rc=0; else tree_rc=$?; fi; cat \"$out/shell-screenshot-ui-shallow.jsonl\" \"$out/shell-screenshot-ui-shallow.stderr\"; printf 'ROUND6_SHELL_UI_SHALLOW_TREE_EXIT=%s\\n' \"$tree_rc\"; test \"$tree_rc\" -eq 0; printf 'ROUND6_SCREEN_STATE_READOUT_COMPLETE\\n'"},
-    {"kind": "capture"}
+    {
+      "kind": "key",
+      "value": "Return"
+    },
+    {
+      "kind": "wait",
+      "seconds": 2
+    },
+    {
+      "kind": "capture"
+    },
+    {
+      "kind": "probe",
+      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/capture-round7; mkdir -p \"$out\"; pictures=$(xdg-user-dir PICTURES); test -d \"$pictures\"; export CAPTURE_PICTURES=\"$pictures\"; /usr/bin/ruby <<'RUBY'\nrequire 'json'\nrequire 'digest'\nrequire 'base64'\nbaseline = '/home/probe/evidence/capture-round4-before-files.txt'\npictures = File.realpath(ENV.fetch('CAPTURE_PICTURES'))\nout = '/home/probe/evidence/capture-round7'\nseen = File.readlines(baseline, chomp: true).map do |line|\n  match = /\\A\\S+ \\d+ (.+)\\z/.match(line)\n  raise 'Invalid baseline inventory row' unless match\n  path = match[1]\n  File.exist?(path) ? File.realpath(path) : File.expand_path(path)\nend\ncandidates = Dir.glob(File.join(pictures, '**', '*'), File::FNM_DOTMATCH).select do |path|\n  File.file?(path) && !File.symlink?(path) && File.extname(path).downcase == '.png'\nend.reject { |path| seen.include?(File.realpath(path)) }\nraise \"Expected exactly one distinct new Pictures PNG, found #{candidates.length}\" unless candidates.length == 1\npath = File.realpath(candidates.fetch(0))\nraise 'PNG predates round4 baseline' if File.mtime(path) < File.mtime(baseline)\nsnapshot = lambda do |file|\n  s = File.stat(file)\n  {'dev'=>s.dev, 'inode'=>s.ino, 'size'=>s.size,\n   'mtimeSeconds'=>s.mtime.to_i, 'mtimeNs'=>s.mtime.nsec,\n   'ctimeSeconds'=>s.ctime.to_i, 'ctimeNs'=>s.ctime.nsec}\nend\nbefore = snapshot.call(path)\nbytes = File.binread(path)\nraise 'Invalid PNG signature or IHDR' unless bytes.bytesize >= 24 && bytes.byteslice(0, 8) == \"\\x89PNG\\r\\n\\x1a\\n\".b && bytes.byteslice(12, 4) == 'IHDR'\nwidth, height = bytes.byteslice(16, 8).unpack('N2')\nraise 'Invalid PNG dimensions' unless width > 0 && height > 0\nraise 'PNG changed while reading' unless snapshot.call(path) == before && bytes.bytesize == before['size']\ncopy = File.join(out, 'native-screen.png')\nFile.open(copy, File::WRONLY | File::CREAT | File::EXCL, 0600) { |io| io.write(bytes) }\ndigest = Digest::SHA256.hexdigest(bytes)\nraise 'Forensic copy hash differs' unless Digest::SHA256.file(copy).hexdigest == digest\nmetadata = {'originalPath'=>path, 'picturesPath'=>pictures,\n 'forensicCopyPath'=>copy, 'before'=>before,\n 'sha256'=>digest, 'headerHex'=>bytes.byteslice(0, 24).unpack1('H*'),\n 'width'=>width, 'height'=>height,\n 'baselineInventory'=>baseline, 'baselineInventoryMtime'=>File.mtime(baseline).to_r.to_s,\n 'sceneTime'=>'Frozen when ScreenshotUI opened in round4; save time is not scene time'}\nFile.write(File.join(out, 'native-screen-metadata.json'), JSON.pretty_generate(metadata))\nputs JSON.generate(metadata)\nputs 'ROUND7_NATIVE_PNG_BASE64_START'\nputs Base64.strict_encode64(bytes)\nputs 'ROUND7_NATIVE_PNG_BASE64_END'\nafter = snapshot.call(path)\nraise 'Original PNG changed during transfer' unless after == before\nraise 'Original PNG hash changed during transfer' unless Digest::SHA256.file(path).hexdigest == digest\nputs JSON.generate({'event'=>'after-transfer-stat', 'originalPath'=>path, 'after'=>after})\nputs 'ROUND7_NATIVE_PNG_TRANSFER_COMPLETE'\nRUBY"
+    },
+    {
+      "kind": "probe",
+      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/capture-round7; mkdir -p \"$out\"; ps -p 34918 -o pid,lstart,args; cat /proc/34918/stat; readlink /proc/34918/exe; timeout 15 /usr/bin/python3 /home/probe/source-input/geometry-oracle/snapshot-guest.py --pid 34918 --backend wayland > \"$out/editor-after-ui-oracle.json\" 2> \"$out/editor-after-ui-oracle.stderr\"; cat \"$out/editor-after-ui-oracle.json\" \"$out/editor-after-ui-oracle.stderr\"; if timeout 25 /usr/bin/python3 /home/probe/source-input/geometry-oracle/atspi-snapshot.py --pid 34918 --max-nodes 200 > \"$out/editor-after-ui-accessibility.jsonl\" 2> \"$out/editor-after-ui-accessibility.stderr\"; then tree_rc=0; else tree_rc=$?; fi; cat \"$out/editor-after-ui-accessibility.jsonl\" \"$out/editor-after-ui-accessibility.stderr\"; printf 'ROUND7_EDITOR_TREE_EXIT=%s\\n' \"$tree_rc\"; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings list-recursively org.gnome.desktop.a11y.magnifier; ps -eo pid,lstart,args | grep -E 'screencast|atspi-events|dbus-monitor|gdbus monitor' || :; test \"$tree_rc\" -eq 0; printf 'ROUND7_POST_UI_EDITOR_CONTEXT_COMPLETE\\n'"
+    },
+    {
+      "kind": "capture"
+    }
   ]
 }
