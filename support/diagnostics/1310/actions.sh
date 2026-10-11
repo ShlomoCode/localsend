@@ -37,12 +37,12 @@ for version in 1.14.0 1.18.2; do
     deb)
       curl -fL --retry 3 -o "releases/$version.deb" "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-linux-x86-64.deb"
       sha256sum "releases/$version.deb" >> evidence/release-hashes.txt
-      sudo apt-get install -y "$(pwd)/releases/$version.deb"
+      printf 'demo\n' | sudo -S apt-get install -y "$(pwd)/releases/$version.deb"
       dpkg -V localsend > "evidence/$version-package-verification.txt"
       binary=$(dpkg -L localsend | awk '/\/localsend_app$/{print;exit}')
       ;;
     flatpak)
-      sudo apt-get install -y flatpak
+      printf 'demo\n' | sudo -S apt-get install -y flatpak
       flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
       flatpak install --user --noninteractive flathub org.localsend.localsend_app
       flatpak info --user org.localsend.localsend_app > evidence/flatpak-info.txt
@@ -63,7 +63,13 @@ for version in 1.14.0 1.18.2; do
   sleep 15
   window=$(xdotool search --onlyvisible --name '^LocalSend$' | head -1)
   xprop -id "$window" _NET_WM_PID WM_CLASS >> evidence/app-window-identity.txt
-  xdotool windowsize "$window" 1050 780 windowmove "$window" 70 60 windowactivate --sync "$window"
+  read -r display_width display_height < <(xdotool getdisplaygeometry)
+  window_width=$((display_width - 100))
+  window_height=$((display_height - 100))
+  if (( window_width > 1050 )); then window_width=1050; fi
+  if (( window_height > 780 )); then window_height=780; fi
+  printf '%s display %s %s window %s %s\n' "$version" "$display_width" "$display_height" "$window_width" "$window_height" >> evidence/window-layout.txt
+  xdotool windowsize "$window" "$window_width" "$window_height" windowmove "$window" 50 50 windowactivate --sync "$window"
   sleep 3
   snapshot "$version-start"
   # Dismiss the ordinary first-start language prompt if the release shows it.
