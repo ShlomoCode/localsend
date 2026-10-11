@@ -29,6 +29,10 @@ on:
         description: 'Separate real speech/edit/action/lifecycle phase after timing and geometry'
         type: boolean
         default: false
+      capture_root_name_evidence:
+        description: 'Single AB diagnostic: observe an unresolved public root name call after an initial quiet wait'
+        type: boolean
+        default: false
       engine_run_id:
         description: 'Completed engine source build supplying immutable control/B artifacts for app-only retry'
         type: string
@@ -97,6 +101,7 @@ jobs:
         env:
           APP_RUN_ID: ${{ inputs.bundle_run_id }}
           PROBE_CAPTURE_INTERACTIONS: ${{ inputs.capture_interactions && '1' || '0' }}
+          PROBE_CAPTURE_ROOT_NAME_EVIDENCE: ${{ inputs.capture_root_name_evidence && '1' || '0' }}
         run: |
           bash support/diagnostics/2754-engine-build/run-packaged-comparison.sh \
             "$RUNNER_TEMP/issue2754-control-app" "$RUNNER_TEMP/issue2754-B-app" \
@@ -107,7 +112,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" evidence
           mkdir -p /tmp/issue2754-packaged-compact
           rsync -a --exclude='*.mp4' --exclude='*.ppm' --exclude='*.deb' --exclude='*.udeb' \
-            --exclude='*.tar.*' --exclude='*.so' --exclude='*.so.*' --exclude='work/' --exclude='target-root/' \
+            --exclude='*.tar.*' --exclude='*.so' --exclude='*.so.*' --exclude='*.debug' --exclude='work/' --exclude='target-root/' \
             evidence/ /tmp/issue2754-packaged-compact/
       - uses: actions/upload-artifact@v4
         if: always()

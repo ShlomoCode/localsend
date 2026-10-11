@@ -28,6 +28,11 @@ case "$probe_engine_variant" in
 esac
 probe_capture_geometry=${PROBE_CAPTURE_GEOMETRY:-0}
 probe_capture_interactions=${PROBE_CAPTURE_INTERACTIONS:-0}
+probe_capture_root_name_evidence=${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0}
+case "$probe_capture_root_name_evidence" in 0|1) ;; *) exit 2 ;; esac
+if [[ $probe_capture_root_name_evidence == 1 ]]; then
+ [[ $probe_capture_geometry == 1 && $probe_engine_variant == B && $probe_bridge_variant == A && $probe_bridge_delivery == package ]]
+fi
 case "$probe_capture_interactions" in 0|1) ;; *) exit 2 ;; esac
 if [[ $probe_capture_interactions == 1 ]]; then
  [[ $probe_capture_geometry == 1 && $probe_engine_variant != official ]]
@@ -241,7 +246,7 @@ elif [ "$probe_bridge_variant" != system ]; then
  scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known /tmp/issue2754-mint/diagnostic-bridge mint@127.0.0.1:/home/mint/diagnostic-bridge
 fi
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
@@ -257,17 +262,24 @@ if [ "$PROBE_ENGINE_VARIANT" != official ]; then
  test -f support/diagnostics/verify-loaded-engine.sh
 fi
 interaction_packages=()
+root_name_packages=()
+if [[ $PROBE_CAPTURE_ROOT_NAME_EVIDENCE == 1 ]]; then
+ root_name_packages=(curl ca-certificates)
+ test -f support/diagnostics/2754-accessibility/capture-root-name-evidence.sh
+ test -f support/diagnostics/2754-accessibility/prepare-root-name-symbols.sh
+fi
 if [[ $PROBE_CAPTURE_INTERACTIONS == 1 ]]; then
  interaction_packages=(orca python3-speechd speech-dispatcher speech-dispatcher-espeak-ng pulseaudio-utils)
  test -f support/diagnostics/2754-accessibility/capture-interactions.sh
  test -f support/diagnostics/2754-accessibility/interaction-client.c
 fi
 dpkg-query -W -f='${Package}\t${Version}\n' | sort > evidence/provision-packages-before.tsv
-timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}" "${engine_packages[@]}" "${interaction_packages[@]}"
+timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}" "${engine_packages[@]}" "${interaction_packages[@]}" "${root_name_packages[@]}"
 dpkg-query -W -f='${Package}\t${Version}\n' | sort > evidence/provision-packages-after.tsv
 diff -u evidence/provision-packages-before.tsv evidence/provision-packages-after.tsv > evidence/provision-package-diff.txt || test "$?" = 1
 printf 'capture_interactions=%s\n' "$PROBE_CAPTURE_INTERACTIONS" > evidence/interaction-capture-setting.txt
 printf 'capture_geometry=%s\n' "$PROBE_CAPTURE_GEOMETRY" > evidence/geometry-capture-setting.txt
+printf 'capture_root_name_evidence=%s\n' "$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" > evidence/root-name-evidence-setting.txt
 if [ "$PROBE_APP_SOURCE" = c1ce ]; then
  cd /home/mint/source-artifact
  sha256sum -c source-bundle.tar.gz.sha256 > /home/mint/evidence/source-bundle-verified.txt
@@ -470,6 +482,14 @@ LAUNCH
  printf '/home/mint/support/diagnostics/2754-bridge-app\n' > /home/mint/evidence/app-executable.txt
 fi
 cd /home/mint
+# Prepare exact debug files before any UI/public query. They are separate
+# evidence files; runtime packages and mapped libraries are not substituted.
+if [[ $PROBE_CAPTURE_ROOT_NAME_EVIDENCE == 1 ]]; then
+ symbol_status=0
+ bash support/diagnostics/2754-accessibility/prepare-root-name-symbols.sh /home/mint/evidence/root-name-symbols \
+  > evidence/root-name-symbols-prepare.stdout 2> evidence/root-name-symbols-prepare.stderr || symbol_status=$?
+ printf 'symbol_prepare_exit_status=%s\n' "$symbol_status" > evidence/root-name-symbols-prepare-status.txt
+fi
 # Use the actual Cinnamon login bus, which need not equal the systemd user bus.
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
 tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt
@@ -486,7 +506,7 @@ status=$?
 if [ "$status" = 0 ]; then
 scenario_deadline=1500
 if [[ $probe_capture_interactions == 1 ]]; then scenario_deadline=3000; fi
-timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -506,7 +526,7 @@ set +e
 # A quick query or capture exit cannot establish valid geometry or correction success.
 # This bash reads its commands from SSH stdin. UI subprocesses must not consume
 # that command stream; in particular FFmpeg otherwise reads interactive keys.
-PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" python3 support/diagnostics/2754-ui.py < /dev/null
+PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" python3 support/diagnostics/2754-ui.py < /dev/null
 status=$?
 if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ] || [ "$PROBE_ENGINE_VARIANT" != official ]; then
  grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1
