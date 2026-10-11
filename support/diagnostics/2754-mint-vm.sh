@@ -52,7 +52,8 @@ done
 phase=apt-update
 timeout 240 apt-get update
 phase=ssh-install
-timeout 600 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
+# A previous 600-second run remained at libc-bin triggers; this run diagnoses that stall.
+timeout 240 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
 phase=ssh-start
 systemctl start ssh
 systemctl show ssh -p ActiveState -p SubState
