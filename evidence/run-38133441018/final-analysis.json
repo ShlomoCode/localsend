@@ -1,0 +1,225 @@
+{
+  "runId": "38133441018",
+  "scope": "Read-only audit of all retained final progress/memory samples and screenshots; no app execution or harness changes.",
+  "classification": "save-deadline-with-ongoing-progress; full 5000-file success not established",
+  "artifactSha256": "6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81  released/baseline.tar.gz",
+  "caseResults": [
+    {
+      "count": 5,
+      "failure": null,
+      "classification": "completed-real-app-transfer",
+      "savedFiles": 5,
+      "verifiedCompleteFiles": 5,
+      "contentValid": true,
+      "optionsFirstObservedSeconds": 1.0365962970000027,
+      "backFirstObservedSeconds": 3.07470696499999,
+      "optionsInteractions": "wheel-and-editor-cancel-observed"
+    },
+    {
+      "count": 5000,
+      "failure": "Saved names or bytes differ from fixture",
+      "classification": "infrastructure-or-transfer-failure",
+      "stage": "save",
+      "savedFiles": 4660,
+      "verifiedCompleteFiles": 4660,
+      "contentValid": false,
+      "optionsFirstObservedSeconds": 5.038457289000007,
+      "backFirstObservedSeconds": 3.131343412999996,
+      "optionsInteractions": "wheel-and-editor-cancel-observed"
+    }
+  ],
+  "saveProgress": {
+    "source": "final/files-5000-save-progress.jsonl",
+    "samples": 231,
+    "intervalsAudited": 230,
+    "first": {
+      "host_monotonic": 277.24627877,
+      "saved_files": 8,
+      "verified_complete_files": 8,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 210.627314184,
+      "content_valid": false
+    },
+    "last": {
+      "host_monotonic": 2674.99399145,
+      "saved_files": 4660,
+      "verified_complete_files": 4660,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 2608.366081155,
+      "content_valid": false
+    },
+    "elapsedGuestSeconds": 2397.7387669709997,
+    "elapsedHostSeconds": 2397.74771268,
+    "savedCountMonotonic": true,
+    "verifiedCountMonotonic": true,
+    "intervalsWithNoSavedIncrease": [],
+    "intervalsWithNoVerifiedIncrease": [],
+    "minimumSavedIncrease": 15,
+    "maximumSavedIncrease": 28,
+    "largestSamplingGap": {
+      "from": 1385.893298874,
+      "to": 1396.926947643,
+      "seconds": 11.03364876899991,
+      "savedDelta": 20,
+      "verifiedDelta": 20
+    },
+    "samplesWithSavedNotYetHashVerified": [
+      {
+        "host_monotonic": 536.888465112,
+        "saved_files": 681,
+        "verified_complete_files": 680,
+        "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+        "guest_monotonic": 470.270402651,
+        "content_valid": false
+      },
+      {
+        "host_monotonic": 682.176361459,
+        "saved_files": 1028,
+        "verified_complete_files": 1027,
+        "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+        "guest_monotonic": 615.55407741,
+        "content_valid": false
+      },
+      {
+        "host_monotonic": 2204.393368115,
+        "saved_files": 3930,
+        "verified_complete_files": 3929,
+        "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+        "guest_monotonic": 2137.776150643,
+        "content_valid": false
+      }
+    ],
+    "distinctExpectedHashes": [
+      "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb"
+    ],
+    "averageFilesPerSecondAcrossObservedProgress": 1.9401613153532773,
+    "missingFromFullCount": 340,
+    "meaning": "Counts advanced between every retained sample, including the final interval. Interim file enumeration/hash races can yield one not-yet-verified file; they do not establish corruption. Final 4660 files are verified complete, but content_valid=false because the full 5000 name/content criterion is unmet."
+  },
+  "receiverMemory": {
+    "source": "final/vm/guest/files-5000-metrics.jsonl",
+    "samples": 4916,
+    "nonJSONLines": [],
+    "uniquePids": [
+      7803
+    ],
+    "firstSample": {
+      "guestMonotonic": 128.719485134,
+      "pid": 7803,
+      "rssKiB": 27896,
+      "pssKiB": 18665,
+      "hwmKiB": 27896,
+      "availableKiB": 1617580,
+      "swapTotalKiB": 0,
+      "swapKiB": 0,
+      "memTotalKiB": 2014864
+    },
+    "lastSample": {
+      "guestMonotonic": 2625.057631043,
+      "pid": 7803,
+      "rssKiB": 560916,
+      "pssKiB": 525999,
+      "hwmKiB": 1193916,
+      "availableKiB": 1176396,
+      "swapTotalKiB": 0,
+      "swapKiB": 0,
+      "memTotalKiB": 2014864
+    },
+    "peakRss": {
+      "guestMonotonic": 168.02314878,
+      "pid": 7803,
+      "rssKiB": 1193340,
+      "pssKiB": 1158601,
+      "hwmKiB": 1193340,
+      "availableKiB": 581440,
+      "swapTotalKiB": 0,
+      "swapKiB": 0,
+      "memTotalKiB": 2014864
+    },
+    "peakPss": {
+      "guestMonotonic": 168.02314878,
+      "pid": 7803,
+      "rssKiB": 1193340,
+      "pssKiB": 1158601,
+      "hwmKiB": 1193340,
+      "availableKiB": 581440,
+      "swapTotalKiB": 0,
+      "swapKiB": 0,
+      "memTotalKiB": 2014864
+    },
+    "maximumResidentHighWaterMark": {
+      "guestMonotonic": 168.561151145,
+      "pid": 7803,
+      "rssKiB": 1172952,
+      "pssKiB": 1138213,
+      "hwmKiB": 1193916,
+      "availableKiB": 578432,
+      "swapTotalKiB": 0,
+      "swapKiB": 0,
+      "memTotalKiB": 2014864
+    },
+    "minimumMemAvailable": {
+      "guestMonotonic": 173.404139529,
+      "pid": 7803,
+      "rssKiB": 1175904,
+      "pssKiB": 1141165,
+      "hwmKiB": 1193916,
+      "availableKiB": 576504,
+      "swapTotalKiB": 0,
+      "swapKiB": 0,
+      "memTotalKiB": 2014864
+    },
+    "maximumProcessSwapKiB": 0,
+    "uniqueSwapTotalKiB": [
+      0
+    ],
+    "summaryMiB": {
+      "peakRss": 1165.37109375,
+      "peakPss": 1131.4462890625,
+      "minimumAvailable": 562.9921875,
+      "lastRss": 547.76953125,
+      "lastPss": 513.6708984375
+    }
+  },
+  "kernel": {
+    "source": "final/vm/kernel-final.txt",
+    "totalLines": 731,
+    "oomRelatedLines": [],
+    "finalFreeOutput": [
+      "Mem:            1967         384        1050           4         719        1582",
+      "Swap:              0           0           0"
+    ]
+  },
+  "screenshots": [
+    {
+      "source": "final/files-5000-host-failure.png",
+      "observed": "Sending files, visible early rows Done, progress bar mostly filled, Cancel available; no Finished visible."
+    },
+    {
+      "source": "final/files-5000-guest-failure.png",
+      "observed": "Receiving files, destination /home/probe/received-5000, visible early rows Done, progress bar mostly filled, Cancel available; no Finished visible."
+    }
+  ],
+  "baselineComparison": {
+    "runId": "38111506442",
+    "source": "evidence/run-38111506442/final-analysis.json",
+    "savedFiles": 5000,
+    "contentValid": true,
+    "observedProgressSeconds": 1900.853010339,
+    "observedProgressMinutes": 31.68088350565,
+    "observedRate": 2.6188242714844208,
+    "currentRate": 1.9401613153532773,
+    "currentToBaselineRateRatio": 0.7408520443617017,
+    "rateChangePercent": -25.914795563829827,
+    "currentElapsedMinutes": 39.96231278284999,
+    "straightLineRemainingSecondsAtObservedAverage": 175.24316009676267,
+    "comparisonLimit": "Distinct runs; added Options wheel/editor actions and normal run variation are not isolated variables. Observed progress averages are not exact Accept-to-completion throughput. Projection is not evidence that completion would actually occur."
+  },
+  "interpretation": "The run reaches real Options, scroll, editor/draft/Cancel and Back. Saving progresses to 4660 hash-complete files at the harness deadline. It does not meet the full save gate; no flat retained-count interval, kernel OOM, or persistent filename/content corruption is demonstrated. It is also not a passing 5000-file completion run.",
+  "limitations": [
+    "One retained final outcome; no causal baseline/fix comparison.",
+    "Progress/hashing includes SSH and observer work, starts after eight files already saved, and stops at the deadline.",
+    "Screenshots show state at capture time, not continuous responsiveness during saving.",
+    "Memory samplers sequentially read proc fields; values are close observations, not atomic snapshots."
+  ]
+}
