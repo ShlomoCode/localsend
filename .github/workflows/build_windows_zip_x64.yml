@@ -15,7 +15,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force evidence/issue1461 | Out-Null
-          @('[wsl2]', 'networkingMode=nat', 'localhostForwarding=false') | Set-Content "$env:USERPROFILE/.wslconfig" -Encoding ascii
+          @('[wsl2]', 'networkingMode=nat', 'localhostForwarding=false', 'guiApplications=false') | Set-Content "$env:USERPROFILE/.wslconfig" -Encoding ascii
           Copy-Item "$env:USERPROFILE/.wslconfig" evidence/issue1461/wslconfig.txt
           netsh interface ipv4 show excludedportrange protocol=tcp | Out-File evidence/issue1461/windows-excluded-tcp-ports.txt
       - name: Install supported pinned Ubuntu 24.04 WSL2
