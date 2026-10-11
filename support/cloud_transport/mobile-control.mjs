@@ -60,6 +60,12 @@ try {
   caps['bstack:options'].resignApp=false;
   caps['bstack:options'].sessionName='issue-2007-source-candidate-baseline-candidate-baseline';
   writeFileSync('evidence/source-session-capabilities.json',JSON.stringify(redactSourceAudit(caps),null,2));
+  const planResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+  assert(planResponse.ok,'Fresh BrowserStack capacity probe failed before allocation');
+  const plan=await planResponse.json();
+  const availableLimit=Math.min(5,Number(plan.parallel_sessions_max_allowed));
+  writeFileSync('evidence/source-allocation-capacity.json',JSON.stringify({checkedUtc:new Date().toISOString(),running:plan.parallel_sessions_running,limit:availableLimit,queued:plan.queued_sessions},null,2));
+  assert(availableLimit>0&&Number(plan.parallel_sessions_running)<availableLimit,'No fresh shared BrowserStack capacity; do not queue or disturb other sessions');
  }
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
