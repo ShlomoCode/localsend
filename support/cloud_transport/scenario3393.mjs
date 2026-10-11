@@ -50,10 +50,13 @@ export default async function({session,wd,senderPort,transportStatus}) {
   let pending='';for(let i=0;i<15;i++){pending=await source('calibration-pending-'+i);if(pending.includes('Accept'))break;await new Promise(resolve=>setTimeout(resolve,1000));}
   if(!pending.includes('Accept'))throw new Error('Repeat sender did not reach receiver approval');
   await click('Options');await source('calibration-options');
-  const edit=await wd('POST',`/session/${session}/element`,{using:'xpath',value:'(//android.widget.Button[@content-desc="" and @clickable="true"])[1]'});
+  const edit=await wd('POST',`/session/${session}/element`,{using:'xpath',value:'(//android.widget.Button[not(@content-desc) and @clickable="true"])[1]'});
   await wd('POST',`/session/${session}/element/${edit['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
-  await source('calibration-native-picker');await lifecycle('calibration-native-picker');await ui('snapshot',0,0,'windows-calibration-native-picker');
+  const entered=Date.now();await source('calibration-native-picker');await lifecycle('calibration-native-picker');await ui('snapshot',0,0,'windows-calibration-native-picker');
   const shot=await wd('GET',`/session/${session}/screenshot`);writeFileSync('evidence/calibration-native-picker.png',Buffer.from(shot,'base64'));
+  await new Promise(resolve=>setTimeout(resolve,10000));
+  await source('calibration-native-picker-after-hold');await lifecycle('calibration-native-picker-after-hold');await ui('snapshot',0,0,'windows-calibration-native-picker-after-hold');
+  writeFileSync('evidence/calibration-picker-time.json',JSON.stringify({entered:new Date(entered).toISOString(),observedDwellMs:Date.now()-entered,exactTimingTrial:false},null,2));
   results.push({case:'picker-calibration',dwellTest:false,nativeUiObserved:true});
  } finally { writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2)); }
 }
