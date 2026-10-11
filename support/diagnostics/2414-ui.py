@@ -51,7 +51,7 @@ def metrics(pid,stop,path):
             stop.wait(.25)
 results=[]
 for count in [5]:
-    case='files-'+str(count); fixture=Path('/tmp/issue2414')/case; fixture.mkdir(parents=True,exist_ok=True)
+    case='files-'+str(count); fixture=Path.home()/('Case2414Files'+str(count)); fixture.mkdir(parents=True,exist_ok=True)
     content=b'LocalSend issue 2414 fixed ordinary file content\n'
     for n in range(count): (fixture/('file-%05d.txt'%n)).write_bytes(content)
     dest=Path('/tmp/issue2414-received')/case; dest.mkdir(parents=True,exist_ok=True)
@@ -73,14 +73,9 @@ for count in [5]:
         focus(swin); screen(case+'-send-observed'); click(96,188); screen(case+'-folder-observed'); click(514,150)
         locate('Recent',case+'-picker-ready',10); chooser=run('xdotool','search','--onlyvisible','--name','Choose Directory').split()[-1]; focus(chooser);
         (out/(case+'-namespace-fixture.txt')).write_text(run('sudo','ip','netns','exec','issue2414-sender','find',str(fixture.parent),'-maxdepth','2','-type','f'))
-        screen(case+'-picker'); run('xdotool','key','ctrl+l'); time.sleep(.5); screen(case+'-picker-location-entry'); run('xdotool','type','--clearmodifiers',str(fixture.parent)+'/'); screen(case+'-picker-location-typed'); run('xdotool','key','Return'); time.sleep(2)
-        with (out/(case+'-picker-tree-after.txt')).open('w') as tree: subprocess.run(['timeout','10','/usr/bin/python3','support/diagnostics/2414-desktop-tree.py'],stdout=tree,stderr=subprocess.STDOUT)
-        click(*locate(case,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(1048,772); time.sleep(1)
-        # GTK directory picker enters the directory; select its Open button.
-        words=screen(case+'-picker-entered')
-        opens=[w for w in words if w['text'].strip() in ['Open','Select']]
-        if opens:
-            w=opens[-1]; click(int(w['left'])+int(w['width'])//2,int(w['top'])+int(w['height'])//2)
+        screen(case+'-picker'); click(*locate('Home',case+'-picker-home',10)); time.sleep(2)
+        click(*locate(fixture.name,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(*locate('Open',case+'-picker-open',10)); time.sleep(2)
+        screen(case+'-picker-accepted')
         click(*locate('Receiver2414',case+'-target',60)); time.sleep(2)
         focus(rwin); option_xy=locate('Options',case+'-receive',30)
         started=time.monotonic(); click(*option_xy)
