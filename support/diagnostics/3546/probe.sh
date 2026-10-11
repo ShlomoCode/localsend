@@ -29,6 +29,8 @@ sleep 2
 import -window root evidence/tray-context.png
 cp "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" evidence/plasma-config.txt
 xdotool key Escape
+xdotool search --name '^Welcome Center$' windowminimize || true
+xdotool search --name '^LocalSend$' windowminimize || true
 "$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var ps=panels();for(var i=0;i<ps.length;i++){var ws=ps[i].widgets();for(var j=0;j<ws.length;j++){if(ws[j].type=="org.kde.plasma.systemtray") ws[j].showConfigurationInterface();}}'
 sleep 3
 import -window root evidence/tray-settings.png
