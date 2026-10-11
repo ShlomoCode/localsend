@@ -83,7 +83,7 @@ sudo ip link set "$peer" up
 sudo ip route replace 224.0.0.0/4 dev "$peer"
 { uname -a; lscpu; free -m; swapon --show; ip addr; ip route; cat /etc/os-release; } > evidence/environment.txt
 # Keep a separate ordinary D-Bus session alive. Commands source its trusted env.
-nohup dbus-run-session -- bash -c 'export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1; export -p > /home/probe/desktop-env.sh; Xvfb :99 -screen 0 1200x800x24 > /home/probe/evidence/xvfb.log 2>&1 & sleep 2; openbox > /home/probe/evidence/openbox.log 2>&1 & sleep 2400' > evidence/desktop.log 2>&1 < /dev/null &
+nohup dbus-run-session -- bash -c 'export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1; export -p > /home/probe/desktop-env.sh; Xvfb :99 -screen 0 1200x800x24 > /home/probe/evidence/xvfb.log 2>&1 & sleep 2; openbox > /home/probe/evidence/openbox.log 2>&1 & sleep 3600' > evidence/desktop.log 2>&1 < /dev/null &
 GUEST
 desktop_ready=0
 for n in $(seq 1 20); do
@@ -94,4 +94,4 @@ test "$desktop_ready" = 1
 { uname -a; lscpu; free -m; swapon --show; ip addr; ip route; cat /etc/os-release; } > evidence/host-environment.txt
 # No cgroups, process memory caps, artificial pressure, or synthetic OOM.
 vm_pair_stage=real-app-pair
-timeout 1400 dbus-run-session -- xvfb-run -a -s "-screen 0 1200x800x24" bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/host-openbox.log 2>&1 & python3 support/diagnostics/2414-host-pair-ui.py' > evidence/scenario.log 2>&1
+timeout 3000 dbus-run-session -- xvfb-run -a -s "-screen 0 1200x800x24" bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/host-openbox.log 2>&1 & python3 support/diagnostics/2414-host-pair-ui.py' > evidence/scenario.log 2>&1

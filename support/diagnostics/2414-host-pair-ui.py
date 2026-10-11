@@ -209,7 +209,9 @@ for count in (5, 5000):
         click("guest", (width // 2 + 69, height - 50), rwin)
         screen("guest", case + "-accepted")
         stage = "save"
-        end = time.monotonic() + 300
+        # Original release saved only ~2.8 tiny files/second on the host control.
+        # Allow ordinary progress to complete; this is not an Options timeout.
+        end = time.monotonic() + 2400
         while time.monotonic() < end:
             saved = guest("verify")
             if saved["content_valid"]:
