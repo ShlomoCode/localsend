@@ -157,9 +157,11 @@ def select_file(swin, fixture, stage):
 def clear_selection(swin, stage):
     focus(swin)
     click(locate("Edit", stage + "-edit-selection", roi=(200, 20, 800, 450)))
-    # SelectedFilesPage exposes the labelled ordinary Delete all action; this
-    # avoids guessing the centered card geometry of its unlabelled X icon.
-    click(locate("Delete", stage + "-delete-all", roi=(200, 20, 800, 250)))
+    # Normal Delete all center is visible in the retained 1000x700 selection
+    # page. Gate the heading before clicking and the cleared state afterwards.
+    locate("Selection", stage + "-selection-page", roi=(20, 20, 500, 100))
+    screen(stage + "-delete-all-before")
+    click((728, 111))
     locate("File", stage + "-cleared", roi=(200, 80, 780, 180))
 
 
