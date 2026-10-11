@@ -5,25 +5,23 @@ Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,
 Get-CimInstance Win32_VideoController|Select-Object Name,DriverVersion,VideoModeDescription|ConvertTo-Json|Set-Content "$EvidenceDirectory/gpu.json"
 @{image=$env:ImageOS;imageVersion=$env:ImageVersion;architecture=$env:PROCESSOR_ARCHITECTURE;screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.ToString()}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
 function Snapshot($name,$process) {
- $process.Refresh();$r=New-Object Desktop2861+Rect;$handle=[IntPtr]::Zero
+ $process.Refresh();$r=New-Object Desktop2861+Rect;$frame=New-Object Desktop2861+Rect;$handle=[IntPtr]::Zero
  if(!$process.HasExited -and $process.MainWindowHandle){$handle=$process.MainWindowHandle}
  [Desktop2861]::GetClientRect($handle,[ref]$r)|Out-Null
- @{utc=[DateTime]::UtcNow.ToString('o');pid=$process.Id;hasExited=$process.HasExited;window=$handle.ToInt64();foreground=[Desktop2861]::GetForegroundWindow().ToInt64();client=@{width=$r.right;height=$r.bottom};dpi=[Desktop2861]::GetDpiForWindow($handle)}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-state.json"
+ [Desktop2861]::GetWindowRect($handle,[ref]$frame)|Out-Null
+ @{utc=[DateTime]::UtcNow.ToString('o');pid=$process.Id;hasExited=$process.HasExited;window=$handle.ToInt64();foreground=[Desktop2861]::GetForegroundWindow().ToInt64();frame=$frame;client=@{width=$r.right;height=$r.bottom};dpi=[Desktop2861]::GetDpiForWindow($handle)}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-state.json"
  $bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
  $bmp=New-Object System.Drawing.Bitmap($bounds.Width,$bounds.Height);$g=[System.Drawing.Graphics]::FromImage($bmp)
  $g.CopyFromScreen($bounds.X,$bounds.Y,0,0,$bmp.Size);$bmp.Save("$EvidenceDirectory/$name.png",[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
- $scope=[System.Windows.Automation.TreeScope]::Children
- $root=[System.Windows.Automation.AutomationElement]::RootElement
- if($handle -ne [IntPtr]::Zero){$root=[System.Windows.Automation.AutomationElement]::FromHandle($handle);$scope=[System.Windows.Automation.TreeScope]::Descendants}
- $elements=$root.FindAll($scope,[System.Windows.Automation.Condition]::TrueCondition)
- $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString();pid=$_.Current.ProcessId;offscreen=$_.Current.IsOffscreen}}|ConvertTo-Json -Depth 4|Set-Content "$EvidenceDirectory/$name-uia.json"
+ # Native geometry and rendered pixels measure this bug; avoid blocking its startup on a UIA provider.
+ Get-Process|Where-Object{$_.MainWindowHandle -ne [IntPtr]::Zero}|Select-Object Id,Name,MainWindowTitle,MainWindowHandle|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-windows.json"
 }
 function FocusLocalSend($process) {
  Get-Process wsl,WindowsTerminal -ErrorAction SilentlyContinue|Stop-Process -Force
  [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
  $process.Refresh();if(!$process.MainWindowHandle){throw 'No LocalSend window to focus'}
  [Desktop2861]::SetForegroundWindow($process.MainWindowHandle)|Out-Null
- $window=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle).Current.BoundingRectangle
+ $window=New-Object Desktop2861+Rect;[Desktop2861]::GetWindowRect($process.MainWindowHandle,[ref]$window)|Out-Null
  [Desktop2861]::SetCursorPos([int]$window.Left+100,[int]$window.Top+15)|Out-Null
  [Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 500
@@ -52,23 +50,25 @@ Snapshot 'powertoys-started' $power
 Get-Process '*PowerToys*'|Select-Object Name,Id,Path,MainWindowHandle|ConvertTo-Json|Set-Content "$EvidenceDirectory/powertoys-processes.json"
 $ptSettings="$env:LOCALAPPDATA/Microsoft/PowerToys"
 Get-ChildItem $ptSettings -Recurse -File -Filter '*.json'|Where-Object{$_.Name -in @('settings.json','app-zone-history.json','applied-layouts.json','custom-layouts.json','layout-hotkeys.json','layout-templates.json')}|ForEach-Object {
- $relative=$_.FullName.Substring($ptSettings.Length).TrimStart('\','/');$target=Join-Path "$EvidenceDirectory/powertoys-settings" $relative
+ $relative=$_.FullName.Substring($ptSettings.Length).TrimStart([char[]]'\/');$target=Join-Path "$EvidenceDirectory/powertoys-settings" $relative
  New-Item -ItemType Directory -Force (Split-Path $target)|Out-Null;Copy-Item $_.FullName $target
 }
 $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
 Start-Sleep -Seconds 15;Snapshot 'powertoys-default-localsend' $app
 Stop-Process -Id $app.Id -Force
 Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
+Start-Sleep -Seconds 3
 $rootFile="$ptSettings/settings.json";$rootConfig=Get-Content $rootFile -Raw|ConvertFrom-Json
 foreach($property in $rootConfig.enabled.PSObject.Properties){$property.Value=($property.Name -eq 'FancyZones')}
-$rootConfig|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 $rootFile
+[System.IO.File]::WriteAllText($rootFile,($rootConfig|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
 $fzFile="$ptSettings/FancyZones/settings.json";$fzConfig=Get-Content $fzFile -Raw|ConvertFrom-Json
 foreach($key in @('fancyzones_appLastZone_moveWindows','fancyzones_overrideSnapHotkeys','fancyzones_shiftDrag')){
  $fzConfig.properties|Add-Member -MemberType NoteProperty -Name $key -Value @{value=$true} -Force
 }
-$fzConfig|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 $fzFile
+[System.IO.File]::WriteAllText($fzFile,($fzConfig|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
 Copy-Item $fzFile "$EvidenceDirectory/restore-config.json"
 $power=Start-Process $pt.FullName -PassThru;Start-Sleep -Seconds 10
+Copy-Item $rootFile "$EvidenceDirectory/loaded-root-config.json";Copy-Item $fzFile "$EvidenceDirectory/loaded-fz-config.json"
 Get-Process '*PowerToys*'|Select-Object Name,Id,Path|ConvertTo-Json|Set-Content "$EvidenceDirectory/zone-processes.json"
 if(!(Get-Process PowerToys.FancyZones -ErrorAction SilentlyContinue)){throw 'FancyZones module not running'}
 Add-Type @"
@@ -90,7 +90,7 @@ $history="$ptSettings/FancyZones/app-zone-history.json"
 if(!(Test-Path $history) -or !((Get-Content $history -Raw|ConvertFrom-Json).'app-zone-history'|Where-Object{$_.'app-path' -ieq $exe.FullName})){
  # Use the normal Shift-drag workflow when this desktop's Win+arrow override does not record a zone.
  FocusLocalSend $app
- $window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle).Current.BoundingRectangle
+ $window=New-Object Desktop2861+Rect;[Desktop2861]::GetWindowRect($app.MainWindowHandle,[ref]$window)|Out-Null
  $startX=[int]$window.Left+100;$startY=[int]$window.Top+15
  [Desktop2861]::SetCursorPos($startX,$startY)|Out-Null;[Input2380]::keybd_event(0x10,0,0,[UIntPtr]::Zero)
  [Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
@@ -111,7 +111,7 @@ foreach($iteration in 1..3){
  Start-Sleep -Seconds 9;Snapshot "zone-relaunch-$iteration-10s" $app
  $app.Refresh();[Desktop2861]::SetForegroundWindow($app.MainWindowHandle)|Out-Null
  # Real mouse corner resize in the same process; this is a causal diagnostic after retaining startup evidence.
- $window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle).Current.BoundingRectangle
+ $window=New-Object Desktop2861+Rect;[Desktop2861]::GetWindowRect($app.MainWindowHandle,[ref]$window)|Out-Null
  [Desktop2861]::SetCursorPos([int]$window.Right-2,[int]$window.Bottom-2)|Out-Null
  [Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
  for($step=1;$step -le 10;$step++){[Desktop2861]::SetCursorPos([int]$window.Right-2-$step*5,[int]$window.Bottom-2-$step*3)|Out-Null;Start-Sleep -Milliseconds 30}
