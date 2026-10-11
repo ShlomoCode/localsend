@@ -42,7 +42,9 @@ const worker=(async()=>{
 })();
 const results=[];
 for(const [bytes,pauseSeconds] of [[0,0],[1,0],[65537,2],[65537,10],[65537,30],[32*1024*1024,0]]){
+ console.log('Reverse control starting: bytes='+bytes+' pauseSeconds='+pauseSeconds);
  const s=net.connect({host:'127.0.0.1',port:53320,allowHalfOpen:true});
+ s.setTimeout(120000,()=>s.destroy(new Error('Reverse control idle timeout')));
  const chunks=[];s.on('data',chunk=>chunks.push(chunk));
  await new Promise((ok,no)=>{s.once('connect',ok);s.once('error',no);});
  const done=new Promise((ok,no)=>{s.once('end',ok);s.once('error',no);});
@@ -57,8 +59,10 @@ for(const [bytes,pauseSeconds] of [[0,0],[1,0],[65537,2],[65537,10],[65537,30],[
  s.end();await done;const reply=JSON.parse(Buffer.concat(chunks));
  assert.equal(reply.bytes,bytes);assert.equal(reply.sha256,hash.digest('hex'));
  results.push({bytes,pauseSeconds,durationMs,aliveAfterPause:true,byteExact:true,replyAfterHalfClose:true});
+ console.log('Reverse control passed: bytes='+bytes+' pauseSeconds='+pauseSeconds);
 }
 assert(r.status().peak<2*1024*1024);
+console.log('Reverse controls complete; closing infrastructure');
 running=false;await r.stop();for(const s of sockets.values())s.destroy();
 await worker.catch(()=>{});await Promise.all(readers);await new Promise(ok=>listener.close(ok));await new Promise(ok=>receiver.close(ok));
 writeFileSync('reverse-control-results.json',JSON.stringify({results,metrics:r.status(),maxGeneratedChunk:65536},null,2));
