@@ -10,6 +10,9 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class Desktop2381 {
+ [StructLayout(LayoutKind.Sequential)] public struct Rect {public int left,top,right,bottom;}
+ [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h,out Rect rect);
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
  [StructLayout(LayoutKind.Sequential)] public struct WindowPoint {public int x,y;}
  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(WindowPoint point);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,System.Text.StringBuilder value,int size);
@@ -222,6 +225,11 @@ for($i=1;$i -le 12;$i++) {
 foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";width=1000;height=760})) {
  [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,$size.width,$size.height,$true) | Out-Null
  Start-Sleep -Seconds 2
+ $clientRect=New-Object Desktop2381+Rect
+ $windowRect=New-Object Desktop2381+Rect
+ [Desktop2381]::GetClientRect($sender.MainWindowHandle,[ref]$clientRect) | Out-Null
+ [Desktop2381]::GetWindowRect($sender.MainWindowHandle,[ref]$windowRect) | Out-Null
+ @{requested=$size;client=$clientRect;window=$windowRect} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/$($size.name)-bounds.json"
  Screenshot "$($size.name)-before-wheel"
  [Desktop2381]::SetCursorPos(440,300) | Out-Null
  for($n=0;$n -lt 6;$n++) {
