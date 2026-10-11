@@ -87,47 +87,85 @@ def picker_control(word,label):
     # Open and cancel the actual chooser in the same process/keyboard setting.
     click_word(word,label+"-before")
     start=time.monotonic(); deadline=start+10
-    observed=False; attempt=0
+    observed=False; attempt=0; cancel_point=None
     while time.monotonic()<deadline:
-        rows=snap(label+"-chooser-"+str(attempt))
-        labels={r["text"].lower().strip() for r in rows}
-        # Whole-screen sparse OCR truncated the real GTK Cancel label to
-        # "Can" in run 38165470861. Inspect the actual active chooser's
-        # button strip, retaining exact labels rather than accepting fragments.
-        if "cancel" not in labels:
-            focused=run("xdotool","getwindowfocus").stdout.strip()
-            title=run("xdotool","getwindowname",focused).stdout.strip()
-            owner=run("xdotool","getwindowpid",focused).stdout.strip()
-            # A supported desktop portal may own the native chooser in a
-            # separate process; record its PID and require its actual title.
-            if owner.isdigit() and title.lower() in ("open file","select folder","select a folder","select directory"):
-                geometry=run("xdotool","getwindowgeometry","--shell",focused).stdout
-                (out/(label+"-chooser-"+str(attempt)+"-window.txt")).write_text(title+"\n"+geometry)
-                values=dict(line.split("=",1) for line in geometry.splitlines() if "=" in line)
-                left=int(values["X"])+max(0,int(values["WIDTH"])-360)
-                top=int(values["Y"])+max(0,int(values["HEIGHT"])-65)
-                crop=out/(label+"-chooser-"+str(attempt)+"-buttons.png")
-                run("scrot","--autoselect",f"{left},{top},360,65",str(crop))
-                result=run("tesseract",str(crop),"stdout","--psm","6","tsv")
-                (crop.with_suffix(".tsv")).write_text(result.stdout)
-                button_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
-                for row in button_rows:
-                    row["left"]=str(left+int(row["left"])); row["top"]=str(top+int(row["top"]))
-                rows+=button_rows
-                labels={r["text"].lower().strip() for r in rows}
-                log("chooser-button-ocr",case=label,window_id=focused,window_title=title,owner_pid=owner,file=crop.name)
-        if "cancel" in labels and ("open" in labels or "select" in labels):
-            observed=True; break
+        frame=label+"-chooser-"+str(attempt)
+        rows=snap(frame)
+        focused=run("xdotool","getwindowfocus").stdout.strip()
+        title=run("xdotool","getwindowname",focused).stdout.strip()
+        owner=run("xdotool","getwindowpid",focused).stdout.strip()
+        action="open" if word=="File" else "select"
+        titles=("open file",) if word=="File" else ("select folder","select a folder","select directory")
+        # The retained Mint cohort uses an in-process GTK chooser. A portal
+        # owned by another process would need a separate provenance gate.
+        if owner.isdigit() and int(owner)==app.pid and title.lower() in titles:
+            geometry=run("xdotool","getwindowgeometry","--shell",focused).stdout
+            (out/(frame+"-window.txt")).write_text(title+"\n"+geometry)
+            values=dict(line.split("=",1) for line in geometry.splitlines() if "=" in line)
+            wx=int(values["X"]); wy=int(values["Y"])
+            ww=int(values["WIDTH"]); wh=int(values["HEIGHT"])
+            anchors=[r for r in rows if r["text"].lower().strip()==action
+                     and wx+ww/2 <= int(r["left"]) < wx+ww
+                     and wy+wh/2 <= int(r["top"]) < wy+wh]
+            if len(anchors)==1:
+                anchor=anchors[0]
+                # Native Y+HEIGHT included the panel in run 38167982047.
+                # Use the rendered action baseline in the SAME saved frame.
+                # These paddings passed all nine retained positive frames and
+                # six adjacent/non-dialog negatives; Folder still needs cloud UI validation.
+                left=int(anchor["left"])-111; top=int(anchor["top"])-5
+                width=int(anchor["width"])+129; height=int(anchor["height"])+11
+                with (out/(frame+".png")).open("rb") as saved_frame:
+                    header=saved_frame.read(24)
+                if len(header)!=24 or header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR":
+                    raise RuntimeError("Saved chooser frame has no valid PNG dimensions: "+frame)
+                image_width=int.from_bytes(header[16:20],"big"); image_height=int.from_bytes(header[20:24],"big")
+                # FFmpeg can clamp an out-of-frame crop and shift its origin.
+                # Reject it instead of mapping clicks from the requested origin.
+                if not (left>=0 and top>=0 and width>0 and height>0
+                        and left+width<=image_width and top+height<=image_height):
+                    log("chooser-button-crop-out-of-bounds",case=label,x=left,y=top,width=width,height=height,
+                        image_width=image_width,image_height=image_height)
+                    attempt+=1; time.sleep(1); continue
+                crop=out/(frame+"-buttons.png")
+                cropped=run("ffmpeg","-v","error","-y","-i",str(out/(frame+".png")),
+                            "-vf",f"crop={width}:{height}:{left}:{top},scale={width*3}:{height*3}:flags=lanczos",
+                            "-frames:v","1",str(crop))
+                (out/(frame+"-buttons-ffmpeg.stderr")).write_text(cropped.stderr)
+                result=run("tesseract",str(crop),"stdout","--psm","7","tsv") if cropped.returncode==0 else None
+                if result is not None:
+                    crop.with_suffix(".tsv").write_text(result.stdout)
+                    (out/(frame+"-buttons-tesseract.stderr")).write_text(result.stderr)
+                    button_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+                    cancels=[r for r in button_rows if r["text"].lower().strip()=="cancel"]
+                    actions=[r for r in button_rows if r["text"].lower().strip()==action]
+                    log("chooser-button-ocr",case=label,window_id=focused,window_title=title,owner_pid=owner,
+                        file=crop.name,anchor=anchor,crop=dict(x=left,y=top,width=width,height=height,scale=3),
+                        crop_returncode=cropped.returncode,ocr_returncode=result.returncode,words=button_rows)
+                    if (result.returncode==0 and len(cancels)==1 and len(actions)==1
+                            and float(cancels[0]["conf"])>=90 and float(actions[0]["conf"])>=90):
+                        cancel=cancels[0]
+                        cancel_point=(round(left+(int(cancel["left"])+int(cancel["width"])/2)/3),
+                                      round(top+(int(cancel["top"])+int(cancel["height"])/2)/3))
+                        observed=True; break
+                else:
+                    log("chooser-button-crop-failed",case=label,returncode=cropped.returncode,file=crop.name)
         attempt+=1; time.sleep(1)
     log("picker-control",case=label,app_pid=app.pid,observed=observed,elapsed=time.monotonic()-start)
     if not observed: raise RuntimeError("Rendered chooser controls absent: "+label)
-    cancel=next(r for r in rows if r["text"].lower().strip()=="cancel")
-    x=int(cancel["left"])+int(cancel["width"])//2; y=int(cancel["top"])+int(cancel["height"])//2
+    x,y=cancel_point
     log("click",label="Cancel",case=label,x=x,y=y)
     run("xdotool","mousemove",str(x),str(y),"click","1")
     time.sleep(2)
     rows=snap(label+"-returned")
-    if not any(r["text"].lower().strip()=="selection" for r in rows):
+    returned_window=run("xdotool","getwindowfocus").stdout.strip()
+    returned_pid=run("xdotool","getwindowpid",returned_window).stdout.strip()
+    returned_title=run("xdotool","getwindowname",returned_window).stdout.strip()
+    visible_choosers=run("xdotool","search","--onlyvisible","--name","^"+title+"$").stdout.splitlines()
+    log("picker-control-return",case=label,chooser_window=focused,visible_chooser_windows=visible_choosers,
+        returned_window=returned_window,returned_pid=returned_pid,returned_title=returned_title)
+    if (focused in visible_choosers or returned_pid!=str(app.pid) or returned_title!="LocalSend"
+            or not any(r["text"].lower().strip()=="selection" for r in rows)):
         raise RuntimeError("Chooser cancel did not return to rendered Send page: "+label)
 def capture_geometry_phase():
     # Optional accessibility queries occur only after every original timing case.
