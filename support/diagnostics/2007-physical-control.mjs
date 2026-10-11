@@ -16,6 +16,21 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   writeFileSync(`evidence/android-${stage}.xml`,await wd('GET',prefix+'/source'));
   writeFileSync(`evidence/android-${stage}.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
  }
+ async function returnedApproval(stage){
+  const deadline=Date.now()+10000;
+  let element;
+  let attempt=0;
+  do{
+   element=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Accept'}).catch(error=>{
+    if(!String(error).includes('no such element'))throw error;
+    return null;
+   });
+   if(element){await snapshot(stage+'-approval-ready');return element;}
+   writeFileSync(`evidence/android-${stage}-returning-${attempt++}.xml`,await wd('GET',prefix+'/source'));
+   await new Promise(r=>setTimeout(r,200));
+  }while(Date.now()<deadline);
+  assert(element,'Actual receive approval did not return after native folder selection');
+ }
  async function chooseSafDocuments(stage){
   if(!safDocuments)return;
   async function click(using,value){
@@ -107,6 +122,8 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   fileManagerInventory.push({appId,installed});
  }
  writeFileSync('evidence/installed-file-managers.json',JSON.stringify({method:'Read-only Appium isAppInstalled for normal preinstalled file managers',apps:fileManagerInventory},null,2));
+ const installedPackages=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'pm list packages'}}),args:[]}).catch(error=>({error:String(error)}));
+ writeFileSync('evidence/installed-packages.json',JSON.stringify({method:'Read-only BrowserStack adbShell pm list packages',result:installedPackages},null,2));
  const before=await wd('POST',prefix+'/appium/device/pull_file',{path:deviceFolder+'/A.txt'}).catch(error=>{
   if(!String(error).includes('No such file or directory'))throw error;
   return null;
@@ -142,7 +159,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   }
   assert(accept,'Original Android app did not render receive approval');
   await chooseSafDocuments('baseline');
-  if(safDocuments)accept=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Accept'});
+  if(safDocuments)accept=await returnedApproval('baseline');
   const acceptRect=await wd('GET',prefix+'/element/'+accept['element-6066-11e4-a52e-4f735466cecf']+'/rect');
   writeFileSync('evidence/android-input.json',JSON.stringify({action:'Accept',utc:new Date().toISOString(),rect:acceptRect},null,2));
   await wd('POST',prefix+'/element/'+accept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
@@ -280,7 +297,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    }
    assert(secondAccept,'Actual resend did not render Android approval');
    await chooseSafDocuments('resend');
-   if(safDocuments)secondAccept=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Accept'});
+   if(safDocuments)secondAccept=await returnedApproval('resend');
    const acceptUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+secondAccept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    let saved;
