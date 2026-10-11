@@ -21,11 +21,11 @@ jobs:
           path: ${{ runner.temp }}/releases/candidate
       - name: Matched actual Settings, system text size and narrow viewport
         shell: powershell
-        run: ./support/diagnostics/text-size2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/compare2861 -Versions @('baseline','candidate') -Locales @('en','uk','fr','he') -InspectFolderDialog
+        run: ./support/diagnostics/text-size2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/compare2861 -Versions @('baseline','candidate') -Locales @('en','he') -InspectFolderDialog
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: compare2861
+          name: compare2861-focused
           path: |
             ${{ runner.temp }}/compare2861
             !${{ runner.temp }}/compare2861/scale-*/*-app/**

@@ -80,6 +80,16 @@ function Click([int]$x,[int]$y,[string]$name) {
  [Desktop2861]::SetCursorPos($x,$y)|Out-Null;[Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 800
 }
+function FocusApp {
+ if([Desktop2861]::GetForegroundWindow() -eq $script:p.MainWindowHandle){return}
+ $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window -and $_.Current.Name -like '*wsl.exe*'}|ForEach-Object{
+  try{([System.Windows.Automation.WindowPattern]$_.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)).Close()}catch{}
+ }
+ [Desktop2861]::SetForegroundWindow($script:p.MainWindowHandle)|Out-Null
+ Click 100 16 'Foreground LocalSend through observed title bar'
+ if([Desktop2861]::GetForegroundWindow() -ne $script:p.MainWindowHandle){throw 'LocalSend foreground recovery failed'}
+}
 Get-CimInstance Win32_OperatingSystem|Select-Object Caption,Version,BuildNumber,OSArchitecture|ConvertTo-Json|Set-Content "$EvidenceDirectory/environment.json"
 @{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;commit=$env:GITHUB_SHA;run=$env:GITHUB_RUN_ID;processor=$env:PROCESSOR_ARCHITECTURE;screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.ToString();textScale=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor;logPixels=(Get-ItemProperty 'HKCU:/Control Panel/Desktop' -ErrorAction SilentlyContinue).LogPixels}|ConvertTo-Json|Set-Content "$EvidenceDirectory/runner.json"
 Get-ChildItem 'C:/Windows/Fonts' -Filter '*seg*'|Get-FileHash -Algorithm SHA256|ConvertTo-Json|Set-Content "$EvidenceDirectory/segoe-fonts.json"
@@ -113,9 +123,11 @@ foreach($version in $Versions) {foreach($locale in $Locales) {
   $scale=(Get-ItemProperty 'HKCU:/Software/Microsoft/Accessibility' -ErrorAction SilentlyContinue).TextScaleFactor
   # Positions observed in actual initial screenshots at the supported Windows Text size settings.
   $settingsY=switch($scale){125{254};150{272};default{243}}
-  Click 110 $settingsY 'Settings rail at observed text-size position';Capture "$name-settings-top"
+  $settingsX=if($locale -eq 'he'){1105}else{110}
+  Click $settingsX $settingsY 'Settings rail at observed text-size position';Capture "$name-settings-top"
   if($WindowWidth -ne 1215){[Desktop2861]::MoveWindow($script:p.MainWindowHandle,0,0,$WindowWidth,738,$true)|Out-Null;$script:captureWidth=$WindowWidth;Start-Sleep -Seconds 2;Capture "$name-settings-resized"}
   for($step=1;$step -le 8;$step++) {
+   FocusApp
    $scrollX=[Math]::Min(750,$WindowWidth-60)
    [Desktop2861]::SetCursorPos($scrollX,600)|Out-Null;[Desktop2861]::mouse_event(2048,0,0,4294967176,[UIntPtr]::Zero)
    $script:inputs+=@{action='Settings scroll down 120';step=$step;utc=[DateTime]::UtcNow.ToString('o')}
@@ -138,12 +150,12 @@ foreach($version in $Versions) {foreach($locale in $Locales) {
     $bounds=$choose.Current.BoundingRectangle
     Click ([int]($bounds.X+$bounds.Width/2)) ([int]($bounds.Y+$bounds.Height/2)) 'Observed Select Folder pane at native button bounds'
     Start-Sleep -Seconds 3
-    Capture "$name-long-folder-selected"
+    FocusApp;Capture "$name-long-folder-selected"
     Copy-Item "$appdir/settings.json" "$EvidenceDirectory/$name-long-folder-selected-profile.json"
     $selected=Get-Content "$appdir/settings.json" -Raw|ConvertFrom-Json
     if(!$selected.'flutter.ls_destination' -or $selected.'flutter.ls_destination'.Replace('/','\') -ne $longFolder){throw 'Native folder selection was not persisted'}
     Click 930 640 'Reset selected destination at observed destination control region'
-    Start-Sleep -Seconds 2;Capture "$name-long-folder-reset"
+    Start-Sleep -Seconds 2;FocusApp;Capture "$name-long-folder-reset"
     Copy-Item "$appdir/settings.json" "$EvidenceDirectory/$name-long-folder-reset-profile.json"
     $reset=Get-Content "$appdir/settings.json" -Raw|ConvertFrom-Json
     if($reset.'flutter.ls_destination'){throw 'Destination reset was not persisted'}
