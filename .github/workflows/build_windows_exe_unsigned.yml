@@ -98,28 +98,26 @@ jobs:
       - name: Build the separate transport app
         shell: pwsh
         run: ./support/cloud_transport/build-helper.ps1
-      - name: Start BrowserStack Local
+      - name: Start Local and run the physical app control in one process scope
         shell: pwsh
         run: |
           Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
           Expand-Archive C:/tmp/bs-local.zip C:/tmp/bs-local-bin -Force
           Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
           Start-Process node -ArgumentList support/cloud_transport/local.mjs -RedirectStandardOutput "$PWD/evidence/local.stdout.txt" -RedirectStandardError "$PWD/evidence/local.stderr.txt"
-          $deadline=(Get-Date).AddSeconds(180)
+          $deadline=(Get-Date).AddSeconds(240)
           while(-not (Test-Path C:/tmp/helper/local-ready) -and (Get-Date) -lt $deadline){Start-Sleep 2}
           if(-not (Test-Path C:/tmp/helper/local-ready)){
             Get-Content evidence/local.stdout.txt,evidence/local.stderr.txt -ErrorAction SilentlyContinue
             throw 'BrowserStack Local did not become ready'
           }
-      - name: Upload single-run helper
-        shell: pwsh
-        run: |
+          Start-Sleep -Seconds 15
+          Get-Process node,BrowserStackLocal -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,StartTime | ConvertTo-Json | Set-Content evidence/local-processes-before-session.json
           curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/upload -F file=@C:/tmp/helper/cloud-transport-helper.apk -o C:/tmp/helper/upload.json
           if($LASTEXITCODE -ne 0){throw 'Helper upload failed'}
-          node --input-type=module -e 'import fs from "node:fs";const app=JSON.parse(fs.readFileSync("C:/tmp/helper/upload.json")).app_url;if(!app)throw new Error("No helper app URL");fs.appendFileSync(process.env.GITHUB_ENV,"HELPER_APP="+app+"\n");'
-      - name: Physical relay and actual app transfer control
-        shell: pwsh
-        run: node support/cloud_transport/mobile-control.mjs
+          $env:HELPER_APP=(Get-Content C:/tmp/helper/upload.json | ConvertFrom-Json).app_url
+          if(-not $env:HELPER_APP){throw 'No helper app URL'}
+          node support/cloud_transport/mobile-control.mjs
       - name: Collect session identity
         if: always()
         shell: pwsh

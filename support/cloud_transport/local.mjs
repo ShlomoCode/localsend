@@ -3,7 +3,7 @@ import {writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawn} from 'node:child_process';
 if(process.platform==='win32'){
- const args=['--key',process.env.BROWSERSTACK_ACCESS_KEY,'--local-identifier',process.env.BS_LOCAL_ID,'--force-local','--only-automate'];
+ const args=['--key',process.env.BROWSERSTACK_ACCESS_KEY,'--local-identifier',process.env.BS_LOCAL_ID,'--force-local','--only-automate','--enable-logging-for-api'];
  const binary=spawn('C:/tmp/bs-local-bin/BrowserStackLocal.exe',args,{windowsHide:true});
  let output='',ready=false;
  function capture(data){

@@ -18,6 +18,11 @@ async function clickText(text){
 }
 const results=[];
 try {
+ const localUrl=new URL('https://www.browserstack.com/local/v1/list');localUrl.searchParams.set('auth_token',process.env.BROWSERSTACK_ACCESS_KEY);
+ const localResponse=await fetch(localUrl,{signal:AbortSignal.timeout(30000)});
+ let localText=await localResponse.text();
+ for(const secret of [process.env.BROWSERSTACK_ACCESS_KEY,process.env.BROWSERSTACK_USERNAME,token])if(secret)localText=localText.replaceAll(secret,'[redacted]');
+ writeFileSync('evidence/local-api-before-session.json',JSON.stringify({httpStatus:localResponse.status,ownIdentifier:process.env.BS_LOCAL_ID,ownIdentifierPresent:localText.includes(process.env.BS_LOCAL_ID),response:localText.slice(0,8000)},null,2));
  const caps={platformName:'Android','appium:deviceName':process.env.BS_DEVICE||'Vivo Y21','appium:platformVersion':process.env.BS_OS||'11.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend issue3393',buildName:'issue3393-'+process.env.GITHUB_RUN_ID,sessionName:'issue3393 Windows1.17 Android15 direct-accept control',idleTimeout:300,debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
