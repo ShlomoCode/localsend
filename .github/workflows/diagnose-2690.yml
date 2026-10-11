@@ -1,0 +1,16 @@
+name: Diagnose AppImage 2690 Gentoo
+on:
+  workflow_dispatch:
+jobs:
+  gentoo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+      - name: Inspect official artifact and prepare Gentoo
+        run: bash support/diagnostics/2690/inspect.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue2690-evidence-${{ github.run_id }}
+          path: evidence/cloud
