@@ -221,8 +221,12 @@ async function receiverNetworkSettings(label) {
   if(!['0','1'].includes(before))throw new Error('Advanced settings checkbox value is not an observed boolean');
   await capture(label+'-advanced-before');
   if(before==='0')await wd('POST',prefix()+'/element/'+eid(checkbox)+'/click',{});
-  const current=await unique('xpath',toggle);
-  const after=await wd('GET',prefix()+'/element/'+eid(current)+'/attribute/value');
+  // Expanding settings moves this already-observed footer offscreen (run
+  // 38181832948). Read its unique refreshed value without a visibility gate;
+  // the actual Network port/Encryption controls still must be visible below.
+  const current=await elements('xpath',toggle);
+  if(current.length!==1||(await elements('xpath',footer)).length!==1)throw new Error('Advanced settings readback is absent or ambiguous');
+  const after=await wd('GET',prefix()+'/element/'+eid(current[0])+'/attribute/value');
   if(after!=='1')throw new Error('Advanced settings did not reveal its controls');
   save(label+'-advanced-toggle.json',{before,after,footer,toggle,nativeAuthority:'Original 38179175479 scroll-4 XML: unique Advanced settings StaticText, immediate sibling Switch; source LabeledCheckbox labelFirst=true'});
   await capture(label+'-advanced-revealed');
