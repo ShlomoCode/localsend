@@ -97,7 +97,7 @@ $apps = @{}
 foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="sender";port=53318;alias="SourceBeta"})) {
  $folder = "$EvidenceDirectory/$($item.name)-app"
  Copy-Item (Split-Path $Executable) $folder -Recurse
- $settings = @{"flutter.ls_port"=$item.port;"flutter.ls_alias"=$item.alias;"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false;"flutter.ls_network_whitelist"=@("10.0.20.2","100.95.193.205")}
+ $settings = @{"flutter.ls_port"=$item.port;"flutter.ls_alias"=$item.alias;"flutter.ls_locale"="en";"flutter.ls_save_window_placement"=$false;"flutter.ls_advanced_settings"=$true;"flutter.ls_network_whitelist"=@("10.0.20.2","100.95.193.205")}
  $settings | ConvertTo-Json | Set-Content -Encoding UTF8 "$folder/settings.json"
  $p = Start-Process "$folder/localsend_app.exe" -WorkingDirectory $folder -PassThru
  Start-Sleep -Seconds 12
@@ -131,7 +131,25 @@ foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205"
  Screenshot "filled-$($favorite.ip)"
  PrimaryButton "filled-$($favorite.ip)"
  Start-Sleep -Seconds 3
- Screenshot $(if ($favorite.ip -eq "10.0.20.2") {"favorites-first"} else {"favorites-second"})
+ $listSnapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-first"} else {"favorites-second"}
+ Screenshot $listSnapshot
+ $storedNow = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
+ $expected = if($favorite.ip -eq "10.0.20.2") {1} else {2}
+ if (@($storedNow.'flutter.ls_favorites').Count -lt $expected -or -not $storedNow.'flutter.ls_favorites') {
+  Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -in @(53317,53318)} | Select-Object LocalAddress,LocalPort,RemoteAddress,State,OwningProcess | ConvertTo-Json | Set-Content "$EvidenceDirectory/listeners-at-favorite-error.json"
+  $controls=@()
+  foreach($ip in @("127.0.0.1","10.0.20.2","100.95.193.205")) {
+   $tcp=New-Object System.Net.Sockets.TcpClient
+   try {$task=$tcp.ConnectAsync($ip,53317);$ready=$task.Wait(5000);$controls+=@{ip=$ip;connected=($ready -and $tcp.Connected);error=$null}}
+   catch {$controls+=@{ip=$ip;connected=$false;error=$_.Exception.Message}}
+   finally {$tcp.Dispose()}
+  }
+  $controls | ConvertTo-Json | Set-Content "$EvidenceDirectory/tcp-controls.json"
+  Click 435 517
+  Screenshot "favorite-error-details"
+  throw "Favorite submit did not reach the Favorites list; diagnostics retained"
+ }
+
 }
 $stored = Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
 $favorites = @($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json})
@@ -145,6 +163,27 @@ Start-Sleep -Seconds 8
 Screenshot "nearby-after-add"
 Click 576 212
 Screenshot "favorites-after-scan"
+Word "Cancel" "favorites-after-scan"
+Click 103 245
+Screenshot "settings-top"
+$found=$false
+for ($step=0;$step -lt 9;$step++) {
+ $snapshot = if($step -eq 0) {"settings-top"} else {"settings-scroll-$step"}
+ $rows=Import-Csv "$EvidenceDirectory/$snapshot.tsv" -Delimiter "`t"
+ if ($rows | Where-Object {$_.text -eq "Filtered"}) {
+  Word "Filtered" $snapshot
+  Screenshot "network-whitelist-ui"
+  $found=$true
+  break
+ }
+ [Desktop2381]::SetCursorPos(800,500) | Out-Null
+ [Desktop2381]::mouse_event(0x0800,0,0,4294966816,[UIntPtr]::Zero)
+ Start-Sleep -Milliseconds 700
+ Screenshot "settings-scroll-$($step+1)"
+}
+if (-not $found) {throw "Whitelist UI was not reached"}
+Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces-after-ui.json"
+
 
 foreach ($name in @("sender","receiver")) {
  $stored = Get-Content "$EvidenceDirectory/$name-app/settings.json" -Raw | ConvertFrom-Json
