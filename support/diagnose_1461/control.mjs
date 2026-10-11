@@ -84,7 +84,7 @@ async function receivedHash(fixture,name){
  await tap('Done',{action:true});
 }
 function wifiSwitches(xml){return nodes(xml).filter(n=>/Switch/.test(n.class||'')&&n.enabled==='true'&&n.displayed==='true'&&['true','false'].includes(n.checked));}
-async function toggleWifi(expected,name,{requireActivePeer=false}={}){
+async function toggleWifi(expected,name,{requireActivePeer=false,observeTransient=false}={}){
  const xml=await source(),switches=wifiSwitches(xml);assert.equal(switches.length,1,'Ambiguous observed system Wi-Fi switch');
  assert(nodes(xml).some(n=>n.package==='com.android.settings')&&labels(xml).some(v=>/Wi-Fi/.test(v)),'Observed switch is not on native Wi-Fi settings');
  assert.equal(switches[0].checked,expected?'false':'true','Unexpected Wi-Fi starting state');
@@ -93,12 +93,14 @@ async function toggleWifi(expected,name,{requireActivePeer=false}={}){
  assert.equal(targets.length,1,'Nonclickable native Switch requires its uniquely observed clickable switch bar');const target=targets[0];
  const rect=target.bounds.match(/^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/);assert(rect&&+rect[1]<=+bounds[1]&&+rect[2]<=+bounds[2]&&+rect[3]>=+bounds[3]&&+rect[4]>=+bounds[4],'Observed clickable switch bar does not contain Wi-Fi switch');
  await snap(name+'-before',xml);
+ if(observeTransient&&!requireActivePeer){const state=r.status();assert(state.persistent?.established&&state.persistent.id===report.controlStream&&state.activePeerIds.includes(report.controlPeer),'Original Wi-Fi transient input requires still-established native control stream and active peer');save('transport-immediately-before-native-wifi-input.json',state);}
  if(requireActivePeer){const state=r.status();assert(state.activePeerIds.includes(report.interruptedPeer),'Large-upload peer already ended before Wi-Fi input');assert(state.peerChunks[report.interruptedPeer].fromSender.bytes<report.largeFixtureBytes*0.9,'Source may already have finished before Wi-Fi input');save('transport-immediately-before-wifi-input.json',state);}
  report.wifiSwitchMayHaveChanged=true;
  const elements=await wd('POST',base()+'/elements',{using:'id',value:target['resource-id']});assert.equal(elements.length,1,'Observed clickable native switch target not unique');
  const id=elements[0]['element-6066-11e4-a52e-4f735466cecf']||elements[0].ELEMENT;assert(id,'Native switch element reference missing');
  await wd('POST',base()+'/element/'+id+'/click',{});
  report.actions.push({utc:new Date().toISOString(),label:name,before:n,actionTarget:target,method:'Native click on observed clickable system switch-bar ancestor'});
+ if(observeTransient){await snap(name+'-after-input');report.wifiInputObservedOnly=true;return;}
  const changed=await wait(s=>wifiSwitches(s).length===1&&wifiSwitches(s)[0].checked===String(expected),30000,'System Wi-Fi did not change');
  await snap(name,changed);return changed;
 }
@@ -106,8 +108,7 @@ async function normalWifiDisconnect({requireActivePeer=false}={}){
  // Use the actual Android system Wi-Fi switch. Closing diagnostic sockets is not this experiment.
  await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});
  await wait(s=>wifiSwitches(s).length===1&&nodes(s).some(n=>n.package==='com.android.settings'),30000,'Resolved native Settings Wi-Fi switch not exposed');
- await toggleWifi(false,'wifi-off',{requireActivePeer});
- report.wifiDisconnectObserved=true;
+ await toggleWifi(false,'wifi-off',{requireActivePeer,observeTransient:true});
 }
 async function transportObservation(name){
  await activate('org.localsend.cloudtransport');await tap('Show transport status',{action:true});
@@ -156,7 +157,7 @@ async function restoreNetwork(name){
  }else{
   await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Restore Wi-Fi switch unavailable');
   if(wifiSwitches(await source())[0].checked==='false')await toggleWifi(true,name);
-  await transportObservation(name+'-native-observation');
+  await awaitObservedNetwork(networkRestored,name+'-native-observation');
  }
 }
 async function selectCompatibleDevice(){
@@ -206,7 +207,7 @@ async function helperLossEvidence(streamId,name){
  do{await tap('Show transport status',{action:true});xml=await wait(s=>labels(s).some(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n')),10000,'Retired helper transport observation absent');
   status=JSON.parse(labels(xml).find(v=>v.startsWith('HELPER_TRANSPORT_STATUS\n')).slice('HELPER_TRANSPORT_STATUS\n'.length));observed=status.lastDownlinkObservation;
   if(observed?.streamId===streamId&&observed.closedMs>0)break;assert(Date.now()<end,'No matching Android native physical closure observed');await sleep(1000);
- }while(true);await snap(name,xml);
+ }while(true);await snap(name,xml);save(name+'.json',status);
  assert(/^physical-read-failure:/.test(observed.outcome),'Helper stream closure was diagnostic or unclassified');
  assert(observed.firstReadMs>0&&observed.closedMs>=observed.firstReadMs,'Helper never established physical read or missing native closure time');
  const failure=observed.failureNetworkObservation;
@@ -215,7 +216,8 @@ async function helperLossEvidence(streamId,name){
  assert(failure.wifiEnabled===false&&failure.activeNetwork===null&&Array.isArray(failure.networks)&&!failure.networks.some(wifiNetwork)&&failure.errors?.length===0,'Native read failure occurred while OS network was still present; early or proxy-only closure excluded');
  if(interruptionMode==='provider-airplane')assert(networkOff(failure),'Native read failure preceded actual airplane-mode OS loss; provider-only early closure excluded');
  assert(!observed.retirementReason||observed.retirementReason==='service-cleanup','Diagnostic retirement preceded link closure');
- save(name+'.json',status);return observed;
+ if(interruptionMode==='wifi-ui')report.wifiDisconnectObserved=true;
+ return observed;
 }
 async function forwardControls(){
  await tap('Start socket control');
@@ -246,6 +248,7 @@ async function forwardControls(){
   const activeEnd=Date.now()+30000;let peer;
   do{peer=r.status().activePeerIds.find(id=>r.status().peerDownlink[id]===stream.id&&r.status().peerChunks[id]?.fromSender.bytes===65537);if(peer)break;assert(Date.now()<activeEnd,'Physical dropout socket did not progress');await sleep(100);}while(true);
   assert.equal(r.status().opened,opened+1,'Unexpected socket opened during transport loss control');
+  report.controlStream=stream.id;report.controlPeer=peer;
   save('physical-dropout-before.json',r.status());await disconnectNetwork();
   const lossEnd=Date.now()+60000;let event;
   do{event=r.status().streamHistory.find(e=>e.id===stream.id&&e.physical&&e.ownedPeers.includes(peer));if(event&&closed&&!r.status().activePeerIds.includes(peer))break;assert(Date.now()<lossEnd,'Observed OS interruption did not produce a native downlink abort and native Windows peer close; no synthetic reset substituted');await sleep(250);}while(true);
@@ -316,7 +319,7 @@ try{
  const physicalEnd=Date.now()+60000;let physicalLoss;
  do{physicalLoss=r.status().streamHistory.find(e=>e.id===report.interruptedStream&&e.physical&&e.ownedPeers.includes(report.interruptedPeer));if(physicalLoss)break;assert(Date.now()<physicalEnd,'Actual transfer network loss had no native physical downlink abort; synthetic/deadline failures excluded');await sleep(250);}while(true);
  report.physicalLoss=physicalLoss;report.androidPhysicalLoss=await helperLossEvidence(report.interruptedStream,'actual-network-helper-loss');save('actual-network-loss.json',{windows:physicalLoss,android:report.androidPhysicalLoss});
- await command('record-interruption',{kind:interruptionMode==='wifi-ui'?'normal-network-interruption':'distinct-provider-airplane-interruption',evidence:interruptionMode==='wifi-ui'?'../wifi-off.png; actual Android Settings switch verified true→false':'../airplane-os-network-off.json; actual airplane on, Wi-Fi off, no active interface; same-generation physical native closure'});
+ await command('record-interruption',{kind:interruptionMode==='wifi-ui'?'normal-network-interruption':'distinct-provider-airplane-interruption',evidence:interruptionMode==='wifi-ui'?'../wifi-off-after-input.png; ../actual-network-loss.json; actual native Settings input plus same-generation native catch Wi-Fi-off evidence':'../airplane-os-network-off.json; actual airplane on, Wi-Fi off, no active interface; same-generation physical native closure'});
  await sleep(15000);const after=await command('probe',{fixture:'failed',phase:'after-terminal-error'});report.cases.push({name:interruptionMode,probe:after});
  const details=await command('error-details');report.errorDetails=details;
  const errorText=details.result?.ocr?.text+' '+((details.result?.uia?.tree||[]).map(n=>n.name).join(' '));assert(/DioException|SocketException|connection|network/i.test(errorText),'Actual error details lack a network-failure observation');
