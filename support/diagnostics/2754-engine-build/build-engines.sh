@@ -49,7 +49,7 @@ release_build() {
   resources "$variant-after-release"
   # These are the complete local-engine consumer inputs, not arbitrary object files.
   local required=(libflutter_linux_gtk.so flutter_linux gen_snapshot icudtl.dat dart-sdk \
-    flutter_patched_sdk gen font-subset impellerc)
+    flutter_patched_sdk gen font-subset impellerc shader_lib)
   {
     for entry in "${required[@]}"; do require_release_input "$variant" -e "$release/$entry"; done
     require_release_input "$variant" -d "$release/gen/dart-pkg/sky_engine/lib"
@@ -63,6 +63,7 @@ release_build() {
     require_release_input "$variant" -x "$release/gen_snapshot"
     require_release_input "$variant" -x "$release/font-subset"
     require_release_input "$variant" -x "$release/impellerc"
+    require_release_input "$variant" -f "$release/shader_lib/flutter/runtime_effect.glsl"
   } 2>&1 | tee "$directory/provenance/consumer-input-check.txt"
   # ELF inspection establishes artifact identity. GTK dependency resolution belongs to the guest gate.
   readelf -h -d -n "$release/libflutter_linux_gtk.so" > "$directory/provenance/engine-elf.txt"

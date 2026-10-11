@@ -29,6 +29,22 @@ clone_exact https://github.com/flutter/flutter.git "$FRAMEWORK_SHA" "$framework_
 git -C "$framework_root" fetch --depth=1 origin refs/tags/3.41.9:refs/tags/3.41.9
 [[ $(git -C "$framework_root" rev-parse '3.41.9^{commit}') == "$FRAMEWORK_SHA" ]]
 [[ $(cat "$framework_root/bin/internal/engine.version") == "$ENGINE_SHA" ]]
+if [[ ! -e "$release/shader_lib" ]]; then
+  [[ $(jq -er .run_id "$variant_artifact/provenance/manifest.json") == 38153341418 ]]
+  bash "$assets/restore-shader-inputs.sh" "$framework_root" "$release" "$output/provenance/shader-inputs"
+  cp "$variant_artifact/provenance/manifest.json" "$output/provenance/shader-inputs/original-engine-manifest.json"
+  cp "$variant_artifact/host-release.tar.gz.sha256" "$output/provenance/shader-inputs/original-engine-archive.sha256"
+  jq --arg variant "$PROBE_VARIANT" --arg original_run "38153341418" \
+    --arg archive_hash "$(awk 'NR==1 {print $1}' "$variant_artifact/host-release.tar.gz.sha256")" \
+    --arg original_manifest_hash "$(sha256sum "$variant_artifact/provenance/manifest.json" | awk '{print $1}')" \
+    '. + {variant:$variant,original_engine_run_id:$original_run,original_engine_archive_sha256:$archive_hash,
+      original_engine_manifest_sha256:$original_manifest_hash}' \
+    "$output/provenance/shader-inputs/manifest.json" > "$output/provenance/shader-inputs/manifest.tmp"
+  mv "$output/provenance/shader-inputs/manifest.tmp" "$output/provenance/shader-inputs/manifest.json"
+  # The additive source inputs must leave every original transported byte intact.
+  (cd "$release" && sha256sum -c "$variant_artifact/provenance/engine-files-SHA256SUMS") \
+    > "$output/provenance/shader-inputs/original-inputs-reverified.log"
+fi
 [[ ${GITHUB_REPOSITORY:-} == ShlomoCode/localsend ]]
 clone_exact "https://github.com/$GITHUB_REPOSITORY.git" "$LOCALSEND_SHA" "$app_source"
 # Explicit SDK paths and pinned Rust; no codegen or source repair.
