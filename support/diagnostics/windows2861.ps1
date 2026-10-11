@@ -10,7 +10,7 @@ public static class Desktop2861 {
  [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string form;
  public ushort logPixels;public uint bits,width,height,flags,frequency,icmMethod,icmIntent,mediaType,dither,reserved1,reserved2,panningWidth,panningHeight;
  }
- [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern bool EnumDisplaySettings(string device,int mode,ref DevMode d);
+ [DllImport("user32.dll",EntryPoint="EnumDisplaySettingsW",ExactSpelling=true,SetLastError=true)] public static extern bool EnumDisplaySettings(string device,int mode,ref DevMode d);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DevMode d,int flags);
  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left,top,right,bottom; }
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -29,7 +29,9 @@ New-Item 'HKLM:/SOFTWARE/Policies/Microsoft/Windows/OOBE' -Force|Out-Null
 Set-ItemProperty 'HKLM:/SOFTWARE/Policies/Microsoft/Windows/OOBE' DisablePrivacyExperience 1
 Get-Process CloudExperienceHost,CloudExperienceHostBroker,UserOOBEBroker,WWAHost -ErrorAction SilentlyContinue|Stop-Process -Force
 $mode=New-Object Desktop2861+DevMode;$mode.size=[Runtime.InteropServices.Marshal]::SizeOf($mode)
-if([Desktop2861]::EnumDisplaySettings($null,-1,[ref]$mode)) {
+$enumResult=[Desktop2861]::EnumDisplaySettings($null,-1,[ref]$mode)
+@{size=$mode.size;enum=$enumResult;error=[Runtime.InteropServices.Marshal]::GetLastWin32Error();processSession=(Get-Process -Id $PID).SessionId;video=@(Get-CimInstance Win32_VideoController|Select-Object Name,CurrentHorizontalResolution,CurrentVerticalResolution)}|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/display-enumeration.json"
+if($enumResult) {
  $mode.width=1920;$mode.height=1080;$mode.fields=0x180000
  $displayResult=[Desktop2861]::ChangeDisplaySettings([ref]$mode,0)
  @{result=$displayResult;requestedWidth=1920;requestedHeight=1080}|ConvertTo-Json|Set-Content "$EvidenceDirectory/display-setup.json"
@@ -38,12 +40,15 @@ Start-Sleep -Seconds 3
 $desktop=[System.Windows.Automation.AutomationElement]::RootElement
 for($attempt=0;$attempt -lt 8;$attempt++) {
  $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
- $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-uia-$attempt.json"
+ $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-uia-$attempt.json"
+ $ok=$elements|Where-Object{$_.Current.Name -eq 'OK' -and !$_.Current.IsOffscreen}|Select-Object -First 1
+ if($ok){$bounds=$ok.Current.BoundingRectangle;[Desktop2861]::SetCursorPos([int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))|Out-Null;[Desktop2861]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);Start-Sleep -Seconds 1;continue}
  $next=$elements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -in @('Next','Accept')}|Select-Object -First 1
  if(!$next){break}
  try{([System.Windows.Automation.InvokePattern]$next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()}catch{break}
  Start-Sleep -Seconds 1
 }
+[System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
 $script:inputs=@()
 function Capture([string]$name) {
  $bmp=New-Object System.Drawing.Bitmap(1215,738);$g=[System.Drawing.Graphics]::FromImage($bmp)
@@ -72,6 +77,8 @@ foreach($version in @('1.17.0','1.18.2')) {foreach($locale in @('en','uk')) {
  try {
   Start-Sleep -Seconds 15;$script:p.Refresh();if(!$script:p.MainWindowHandle){throw 'No app window'}
   [Desktop2861]::MoveWindow($script:p.MainWindowHandle,0,0,1215,738,$true)|Out-Null;[Desktop2861]::SetForegroundWindow($script:p.MainWindowHandle)|Out-Null
+  [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
+  Click 100 85 'Foreground LocalSend logo'
   Start-Sleep -Seconds 2;Capture "$name-initial"
   if([Desktop2861]::GetForegroundWindow() -ne $script:p.MainWindowHandle){throw 'LocalSend not foreground; scenario not reached'}
   Click 110 243 'Settings rail';Capture "$name-settings-top"
