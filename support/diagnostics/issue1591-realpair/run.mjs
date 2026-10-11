@@ -198,7 +198,74 @@ async function gallery(desired, label) {
   if ((after === '1' || after === 1 || after === true) !== desired) throw new Error('Gallery setting did not change');
   save(label + '-gallery.json', {desired, before, after, locator, cardName, nativeLayoutAuthority:'Original run 38179175479 settings-entry XML and image: six Receive switches, gallery fourth', selectionTiming:'Global Settings before real transfer'});
   await capture(label + '-settings-selected');
+  await receiverNetworkSettings(label);
   await click('Receive'); await capture(label + '-receive-ready');
+}
+async function receiverNetworkSettings(label) {
+  stage = label + '-receiver-network-settings';
+  // Retained scroll-4 XML from run 38179175479 exposes one footer StaticText
+  // followed immediately by its unnamed checkbox, represented as Switch.
+  const footer = '//XCUIElementTypeStaticText[@name="Advanced settings"]';
+  const toggle = footer + '/following-sibling::*[1][self::XCUIElementTypeSwitch]';
+  let found;
+  for (let attempt=0;attempt<6;attempt++) {
+    found=await elements('xpath',toggle);
+    if(found.length>1)throw new Error('Advanced settings footer is ambiguous');
+    if(found.length===1&&await wd('GET',prefix()+'/element/'+eid(found[0])+'/displayed'))break;
+    await wd('POST',prefix()+'/execute/sync',{script:'mobile: swipe',args:[{direction:'up'}]});
+    await capture(label+'-advanced-footer-scroll-'+attempt);
+  }
+  const checkbox=await unique('xpath',toggle);
+  if((await elements('xpath',footer)).length!==1)throw new Error('Advanced settings label is ambiguous');
+  const before=await wd('GET',prefix()+'/element/'+eid(checkbox)+'/attribute/value');
+  if(!['0','1'].includes(before))throw new Error('Advanced settings checkbox value is not an observed boolean');
+  await capture(label+'-advanced-before');
+  if(before==='0')await wd('POST',prefix()+'/element/'+eid(checkbox)+'/click',{});
+  const current=await unique('xpath',toggle);
+  const after=await wd('GET',prefix()+'/element/'+eid(current)+'/attribute/value');
+  if(after!=='1')throw new Error('Advanced settings did not reveal its controls');
+  save(label+'-advanced-toggle.json',{before,after,footer,toggle,nativeAuthority:'Original 38179175479 scroll-4 XML: unique Advanced settings StaticText, immediate sibling Switch; source LabeledCheckbox labelFirst=true'});
+  await capture(label+'-advanced-revealed');
+  // The app source orders Network plain TextFieldTv controls as Device model,
+  // Port, Discovery Timeout, Multicast address; alias uses a separate button.
+  // Encryption is this card's only BooleanEntry. Require the observed native
+  // inventory to match before reading values; never mutate these controls.
+  const card='//XCUIElementTypeOther[starts-with(normalize-space(@name),"Network ") and contains(@name,"Device name") and contains(@name,"Device model") and contains(@name,"Port") and contains(@name,"Discovery Timeout") and contains(@name,"Encryption") and contains(@name,"Multicast address")]';
+  const encryption=card+'/following-sibling::XCUIElementTypeSwitch';
+  const fields=card+'/following-sibling::XCUIElementTypeTextField';
+  for(let attempt=0;attempt<6;attempt++){
+    const switches=await elements('xpath',encryption),inputs=await elements('xpath',fields);
+    if(switches.length>1||inputs.length>4)throw new Error('Network control inventory is ambiguous');
+    if(switches.length===1&&inputs.length===4&&await wd('GET',prefix()+'/element/'+eid(switches[0])+'/displayed')&&await wd('GET',prefix()+'/element/'+eid(inputs[1])+'/displayed'))break;
+    await wd('POST',prefix()+'/execute/sync',{script:'mobile: swipe',args:[{direction:'down'}]});
+    await capture(label+'-network-scroll-'+attempt);
+  }
+  const cards=await elements('xpath',card),switches=await elements('xpath',encryption),inputs=await elements('xpath',fields);
+  await capture(label+'-network-settings');
+  if(cards.length!==1||switches.length!==1||inputs.length!==4)throw new Error('Network labels/control order do not match source; actual encryption/port proof unavailable');
+  if(!await wd('GET',prefix()+'/element/'+eid(switches[0])+'/displayed')||!await wd('GET',prefix()+'/element/'+eid(inputs[1])+'/displayed'))throw new Error('Network encryption/port controls are not visibly observed');
+  const observed=[];
+  for(const element of inputs)observed.push({name:await wd('GET',prefix()+'/element/'+eid(element)+'/attribute/name'),value:await wd('GET',prefix()+'/element/'+eid(element)+'/attribute/value'),rect:await wd('GET',prefix()+'/element/'+eid(element)+'/rect')});
+  const encryptionValue=await wd('GET',prefix()+'/element/'+eid(switches[0])+'/attribute/value');
+  const portValue=observed[1].value;
+  const cardName=await wd('GET',prefix()+'/element/'+eid(cards[0])+'/attribute/name');
+  save(label+'-network-settings.json',{cardName,card,fieldOrder:['Device model','Port','Discovery Timeout','Multicast address'],observed,portValue,encryptionValue,
+    sourceAuthority:'Current unchanged settings_tab.dart: advanced plain TextFieldTv order; Encryption sole Network BooleanEntry',mutations:'Only Advanced settings visibility checkbox; port/encryption controls read without edits'});
+  if(encryptionValue!=='1'||portValue!=='53317')throw new Error('Actual receiver settings do not admit the expected encrypted port 53317 control');
+  if(/Offline|Restart the server to apply the settings/i.test(cardName))throw new Error('Receiver Network UI does not establish an active server with applied settings');
+  if(before==='0'){
+    for(let attempt=0;attempt<6;attempt++){
+      const choices=await elements('xpath',toggle);
+      if(choices.length===1&&await wd('GET',prefix()+'/element/'+eid(choices[0])+'/displayed'))break;
+      await wd('POST',prefix()+'/execute/sync',{script:'mobile: swipe',args:[{direction:'up'}]});
+    }
+    const restore=await unique('xpath',toggle);
+    if(await wd('GET',prefix()+'/element/'+eid(restore)+'/attribute/value')!=='1')throw new Error('Advanced visibility checkbox changed unexpectedly');
+    await wd('POST',prefix()+'/element/'+eid(restore)+'/click',{});
+    const restored=await unique('xpath',toggle);
+    if(await wd('GET',prefix()+'/element/'+eid(restored)+'/attribute/value')!=='0')throw new Error('Advanced visibility did not restore its prior state');
+    await capture(label+'-advanced-restored');
+  }
 }
 async function configureProxy(label) {
   stage = label + '-proxy-start';
