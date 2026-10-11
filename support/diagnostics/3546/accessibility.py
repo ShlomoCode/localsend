@@ -214,7 +214,25 @@ def regression_controls(pid):
     quit_via_menu(processes[0].pid, "control-profile-1")
     assert registered_item(processes[1].pid)["address"] == items[1]["address"], "Quitting first profile removed the second tray"
     open_via_menu(processes[1].pid, "control-surviving-profile")
+    with Path("evidence/control-profile-1-restart.log").open("w") as logfile:
+        directory = Path("profile-1").resolve()
+        processes[0] = subprocess.Popen([str(directory / app.name)], cwd=directory, stdout=logfile, stderr=subprocess.STDOUT)
+    restarted_first = registered_item(processes[0].pid)
+    assert restarted_first["id"] == items[0]["id"], "First profile restart changed application identity"
+    assert restarted_first["address"] != items[0]["address"], "First profile did not create a new live registration"
+    open_via_menu(processes[0].pid, "control-profile-1-restarted")
     quit_via_menu(processes[1].pid, "control-profile-2")
+    assert registered_item(processes[0].pid)["address"] == restarted_first["address"], "Quitting second profile removed restarted first tray"
+    with Path("evidence/control-profile-2-restart.log").open("w") as logfile:
+        directory = Path("profile-2").resolve()
+        processes[1] = subprocess.Popen([str(directory / app.name)], cwd=directory, stdout=logfile, stderr=subprocess.STDOUT)
+    restarted_second = registered_item(processes[1].pid)
+    assert restarted_second["id"] == items[1]["id"], "Second profile restart changed application identity"
+    assert restarted_second["address"] != items[1]["address"], "Second profile did not create a new live registration"
+    open_via_menu(processes[1].pid, "control-profile-2-restarted")
+    Path("evidence/control-two-profiles-restarted.json").write_text(json.dumps([restarted_first, restarted_second], indent=2))
+    quit_via_menu(processes[0].pid, "control-profile-1-final")
+    quit_via_menu(processes[1].pid, "control-profile-2-final")
     Path("evidence/control-result.json").write_text(json.dumps({"always_shown_retained": True, "same_profile_handoff": True, "two_independent_trays": True, "open_targets_owner": True, "quit_preserves_other": True}, indent=2))
 
 

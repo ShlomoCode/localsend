@@ -42,6 +42,7 @@ jobs:
           channel: stable
       - name: Verify additive public API and omitted-ID compatibility
         run: |
+          set -euo pipefail
           cp support/diagnostics/3546/tray_identity_test.dart source/app/test/tray_identity_3546_test.dart
           cd source
           flutter pub get
