@@ -446,6 +446,7 @@ try{
   report.largeHelperState=await waitHelperState({ready:true,mode:r.status().transport,previousInstance:(report.fallbackHelperState||report.initialHelperState).instance,name:'fresh-ready'});
   assert.equal(report.largeHelperState.peerAbsoluteMs,90*minute,'Large helper peer limit must be observed at 90 minutes');
   report.status='preparing';report.observations=[];report.sendUtc=null;report.verifiedUtc=null;report.elapsedSendToVerifiedMs=null;report.uploadStateAtAndroidFinished=null;report.verificationStarted=null;report.windowsCompletion=null;report.verificationDeadlineUtc=null;report.lateHash=null;report.uploadStateAtVerifiedSave=null;report.verificationObservationLagMs=null;report.transport=null;report.realTransferHelper=null;report.transferDeadlineUtc=null;
+  report.sendAdmissionAgeMs=null;report.favoriteBeforeSend=null;report.controlSizeBytes=null;report.endToEndBytesPerSecond=null;report.anrWaitActions=null;
   windowsOutput=windowsRoot;mkdirSync(windowsOutput,{recursive:true});
   receiver=null;receiverExit=null;for(const log of receiverLogs)log.end();receiverLogs=[];
   // Keep moderate evidence; each receiver owns distinct destination and coordination markers.
@@ -493,11 +494,25 @@ try{
  await snap('file-picker-recent');await ui('textContains('+JSON.stringify(name)+')');
  const selected=await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),largePass?Math.max(1,remaining()):60000,'LocalSend did not show Selection, one file, and '+controlSizeLabel);
  await snap('selected-one-file',selected);if(!largePass){await manualInputComparison();await addFavorite();}
- if(largePass){await activate('org.localsend.fixture3556');await checkLargeStorage('Refresh capacity',reserveBytes,'before-send');await activate('org.localsend.localsend_app');}
+ if(largePass){
+  await activate('org.localsend.fixture3556');await checkLargeStorage('Refresh capacity',reserveBytes,'before-send');await activate('org.localsend.localsend_app');
+  await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel))&&
+   nodes(s).some(n=>n['content-desc']==='Send\nTab 2 of 3'&&n.selected==='true'),30000,'Large selection did not remain on the Send tab after storage observation');
+  // Done returned to the main Send page; the persisted target row lives in the Favorites dialog.
+  await click('Favorites');
+ }
+ const favoriteLabel='issue3556-cloud-receiver\n(127.0.0.1)';
+ const favoriteModal=await waitFor(s=>labels(s).includes('Cancel')&&labels(s).includes('Add')&&
+  nodes(s).some(n=>n['content-desc']===favoriteLabel&&n.clickable==='true'&&n.enabled==='true'&&n.displayed==='true'&&
+   /\[\d+,\d+\]\[\d+,\d+\]/.test(n.bounds||'')),30000,'Favorites dialog did not expose the exact enabled persisted target before Send');
+ await snap('favorite-before-send',favoriteModal);
+ report.favoriteBeforeSend={label:favoriteLabel,ip:'127.0.0.1',port:53318,persistedFromModerate:largePass,evidence:artifactName('favorite-before-send.xml')};
  const metricsBefore=r.status();
  r.beginMeasurement('Original '+controlName+' favorite-touch through Finished and verified save');
  // Favorite selection registers again and then startSession sends the already selected file.
- const favorite=await wd('POST',base()+'/element',{using:'-android uiautomator',value:'new UiSelector().descriptionContains("issue3556-cloud-receiver")'});
+ const favorite=await wd('POST',base()+'/element',{using:'accessibility id',value:favoriteLabel});
+ assert.equal(await wd('GET',base()+'/element/'+elementId(favorite)+'/displayed'),true,'Exact favorite is no longer displayed before Send');
+ assert.equal(await wd('GET',base()+'/element/'+elementId(favorite)+'/attribute/enabled'),'true','Exact favorite is no longer enabled before Send');
  const favoriteRect=await wd('GET',base()+'/element/'+elementId(favorite)+'/rect');
  admit();report.sendUtc=new Date().toISOString();const sendStart=Date.now();
  report.sendAdmissionAgeMs=sessionAge();
