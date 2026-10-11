@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ ${GITHUB_ACTIONS:-} == true ]] || exit 8
+(cd evidence/packages && sha256sum -c SHA256SUMS)
 mkdir -p evidence/cloud /home/runner/issue1927-mint /tmp/issue1927-mint/seed
 collect() {
   result=$?
@@ -21,6 +22,8 @@ printf '759c9b5a2ad26eb9844b24f7da1696c705ff5fe07924a749f385f435176c2306  /home/
 ssh-keygen -q -t ed25519 -N '' -f /tmp/issue1927-mint/id
 cp /tmp/issue1927-mint/id.pub /tmp/issue1927-mint/seed/id.pub
 cp support/diagnostics/issue1927.sh /tmp/issue1927-mint/seed/scenario.sh
+cp support/diagnostics/issue1927-portal-gui.sh /tmp/issue1927-mint/seed/portal-gui.sh
+cp evidence/packages/{baseline,candidate}.flatpak /tmp/issue1927-mint/seed/
 cat > /tmp/issue1927-mint/seed/bootstrap.sh <<'BOOT'
 #!/bin/bash
 set -euxo pipefail
@@ -28,6 +31,8 @@ exec > >(tee /tmp/issue1927-bootstrap.log /dev/ttyS0) 2>&1
 mkdir -p /home/mint/.ssh /home/mint/evidence
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/scenario.sh /home/mint/scenario.sh
+cp /mnt/portal-gui.sh /home/mint/portal-gui.sh
+cp /mnt/{baseline,candidate}.flatpak /home/mint/
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
@@ -86,7 +91,8 @@ tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
 { cinnamon --version; flatpak --version; loginctl list-sessions; } > evidence/desktop-identity.txt
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user --noninteractive -y flathub org.localsend.localsend_app
+flatpak install --user --noninteractive -y flathub org.freedesktop.Platform/x86_64/26.08
+flatpak install --user --noninteractive -y ./baseline.flatpak
 { dpkg-query -W '*xdg-desktop-portal*'; flatpak remote-info --user --log flathub org.localsend.localsend_app; } > evidence/portal-and-package-history.txt 2>&1
 gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop > evidence/portal-host-introspection.txt 2>&1 || true
 flatpak run --user --command=sh org.localsend.localsend_app -c 'command -v gdbus; gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop' > evidence/portal-sandbox-introspection.txt 2>&1 || true
@@ -132,6 +138,13 @@ sleep 2
 xdotool mousemove --window "$wid" 105 211 click 1
 sleep 2
 import -window "$wid" evidence/post-login-settings.png
+flatpak kill org.localsend.localsend_app
+flatpak override --user --reset org.localsend.localsend_app
+flatpak uninstall --user --delete-data --noninteractive -y org.localsend.localsend_app
+rm -f "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
+flatpak install --user --noninteractive -y ./candidate.flatpak
+flatpak override --user --show org.localsend.localsend_app > evidence/candidate-overrides.txt
+source /home/mint/portal-gui.sh
 GUEST
 scp -r -i /tmp/issue1927-mint/id -P 2277 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue1927-mint/known mint@127.0.0.1:/home/mint/evidence evidence/cloud/guest
 sudo chown -R "$(id -u):$(id -g)" evidence
