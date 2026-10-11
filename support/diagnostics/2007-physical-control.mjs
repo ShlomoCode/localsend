@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 export default async function({session,wd,senderHost,senderPort,transportStatus}) {
  const prefix=`/session/${session}`;
  const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
+ const requestedDeletionAction=process.env.ISSUE_2007_DELETE_ACTION||'permanent';
  const windows=process.platform==='win32';
  await wd('POST',prefix+'/appium/settings',{settings:{waitForIdleTimeout:0}});
  async function snapshot(stage){
@@ -136,12 +137,26 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
    await new Promise(r=>setTimeout(r,1000));
    await snapshot('files-A-selected');
-   const remove=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Delete'});
+   let remove;
+   if(requestedDeletionAction==='trash'){
+    const options=await wd('POST',prefix+'/element',{using:'accessibility id',value:'More options'});
+    await wd('POST',prefix+'/element/'+options['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+    await snapshot('files-delete-options');
+    remove=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@text="Move to trash" or @text="Move to Trash" or @content-desc="Move to trash" or @content-desc="Move to Trash"]'}).catch(error=>{
+     if(!String(error).includes('no such element'))throw error;
+     return null;
+    });
+    writeFileSync('evidence/trash-capability.json',JSON.stringify({app:'Google Files',actualNativeOptionsInspected:true,trashActionObserved:remove!==null,source:'android-files-delete-options.xml',screenshot:'android-files-delete-options.png',deletionAttempted:false},null,2));
+    assert(remove,'Actual Google Files More options does not expose Move to trash; no trash deletion or resend trial occurred');
+   }else{
+    remove=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Delete'});
+   }
    await wd('POST',prefix+'/element/'+remove['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
    await new Promise(r=>setTimeout(r,1000));
    await snapshot('files-delete-dialog');
    const deleteSource=readFileSync('evidence/android-files-delete-dialog.xml','utf8');
    const deletionMode=/trash/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
+   assert.equal(deletionMode,requestedDeletionAction,'Native confirmation does not match the requested deletion action; do not substitute another deletion mode');
    const confirm=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash")]'});
    await waitFile('evidence/resend-address-ready',90000);
    const deleteUtc=new Date().toISOString();
