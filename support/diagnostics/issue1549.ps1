@@ -73,11 +73,37 @@ $installerText = Get-Content "$fixedManifest/LocalSend.LocalSend.installer.yaml"
 $installerText = [regex]::Replace($installerText, '(?m)^(    Custom: [^\r\n]+)', '$1' + "`n    Upgrade: /FORCECLOSEAPPLICATIONS")
 [IO.File]::WriteAllText("$fixedManifest/LocalSend.LocalSend.installer.yaml", $installerText, (New-Object Text.UTF8Encoding $false))
 Copy-Item "$fixedManifest/LocalSend.LocalSend.installer.yaml" "$ev/fixed-switch-installer.yaml"
+$installManifest = Join-Path $env:RUNNER_TEMP 'manifest151-install'
+$installFixedManifest = Join-Path $env:RUNNER_TEMP 'manifest151-install-force'
+New-Item -ItemType Directory -Force $installManifest,$installFixedManifest | Out-Null
+Copy-Item "$manifest/*" $installManifest
+Copy-Item "$fixedManifest/*" $installFixedManifest
+foreach ($dir in @($installManifest,$installFixedManifest)) {
+ $text = (Get-Content "$dir/LocalSend.LocalSend.installer.yaml" -Raw) -replace 'UpgradeBehavior: uninstallPrevious[^\r\n]*','UpgradeBehavior: install'
+ [IO.File]::WriteAllText("$dir/LocalSend.LocalSend.installer.yaml",$text,(New-Object Text.UTF8Encoding $false))
+}
+$currentManifest = Join-Path $env:RUNNER_TEMP 'manifest182-fixed'
+$currentNegativeManifest = Join-Path $env:RUNNER_TEMP 'manifest182-no-force'
+New-Item -ItemType Directory -Force $currentManifest,$currentNegativeManifest | Out-Null
+foreach ($file in @('LocalSend.LocalSend.yaml','LocalSend.LocalSend.installer.yaml','LocalSend.LocalSend.locale.en-US.yaml')) {
+ Invoke-WebRequest "https://raw.githubusercontent.com/microsoft/winget-pkgs/ce0af1b598526303ab464bb648000fab4479b392/manifests/l/LocalSend/LocalSend/1.18.2/$file" -OutFile "$currentManifest/$file"
+}
+Copy-Item "$currentManifest/*" $currentNegativeManifest
+$text = (Get-Content "$currentNegativeManifest/LocalSend.LocalSend.installer.yaml" -Raw) -replace '(?m)^    Upgrade: /FORCECLOSEAPPLICATIONS\r?\n',''
+[IO.File]::WriteAllText("$currentNegativeManifest/LocalSend.LocalSend.installer.yaml",$text,(New-Object Text.UTF8Encoding $false))
+foreach ($variant in @(@('install-no-force',$installManifest),@('install-force',$installFixedManifest),@('current-fixed',$currentManifest),@('current-no-force',$currentNegativeManifest))) {
+ New-Item -ItemType Directory -Force "$ev/$($variant[0])-manifest" | Out-Null
+ Copy-Item "$($variant[1])/*" "$ev/$($variant[0])-manifest"
+}
 & $wgPath settings --enable LocalManifestFiles 2>&1 | Out-File "$ev/manifest-setting.txt"
 & $wgPath validate --manifest $manifest 2>&1 | Out-File "$ev/original-manifest-validation.txt"
 if ($LASTEXITCODE -ne 0) { throw 'Original Microsoft manifest validation failed' }
 & $wgPath validate --manifest $fixedManifest 2>&1 | Out-File "$ev/fixed-manifest-validation.txt"
 if ($LASTEXITCODE -ne 0) { throw 'Single-switch manifest validation failed' }
+foreach ($dir in @($installManifest,$installFixedManifest,$currentManifest,$currentNegativeManifest)) {
+ & $wgPath validate --manifest $dir 2>&1 | Out-File "$ev/validate-$([IO.Path]::GetFileName($dir)).txt"
+ if ($LASTEXITCODE -ne 0) { throw "Manifest validation failed: $dir" }
+}
 function Snapshot($name) {
  Get-Process localsend_app -ErrorAction SilentlyContinue | Select-Object Id, Path, StartTime, Responding, MainWindowHandle, MainWindowTitle | ConvertTo-Json | Set-Content "$ev/$name-process.json"
  $registry = foreach ($root in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
@@ -85,6 +111,11 @@ function Snapshot($name) {
  }
  @($registry) | ConvertTo-Json | Set-Content "$ev/$name-registry.json"
  @{ Registry = @($registry); Process = @(Get-Process localsend_app -ErrorAction SilentlyContinue | Select-Object Id, MainWindowHandle); SampleTime = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 4 | Set-Content "$ev/$name-state.json"
+ $profilePath = "$env:APPDATA/LocalSend/settings.json"
+ if (Test-Path $profilePath) {
+  $profile = Get-Content $profilePath -Raw | ConvertFrom-Json
+  @{ Path = $profilePath; Exists = $true; MinimizeToTray = $profile.'flutter.ls_minimize_to_tray' } | ConvertTo-Json | Set-Content "$ev/$name-profile-state.json"
+ }
  & $wgPath list --id LocalSend.LocalSend --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-File "$ev/$name-winget-list.txt"
  Get-ChildItem "$env:ProgramFiles/LocalSend" -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime | ConvertTo-Json | Set-Content "$ev/$name-files.json"
  if (Test-Path "$env:ProgramFiles/LocalSend/localsend_app.exe") {
@@ -142,7 +173,14 @@ function Upgrade($name,$route,$running,$tray=$false,$hidden=$false,$target='1.15
  Snapshot "$name-before"
  if ($route -eq 'source') { $args = @('upgrade','--id','LocalSend.LocalSend','--exact','--version',$target,'--source','winget','--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
  else {
-  $selectedManifest = if ($route -eq 'local-manifest-fixed') { $fixedManifest } else { $manifest }
+  $selectedManifest = switch ($route) {
+   'local-manifest-fixed' { $fixedManifest }
+   'install-no-force' { $installManifest }
+   'install-force' { $installFixedManifest }
+   'current-fixed' { $currentManifest }
+   'current-no-force' { $currentNegativeManifest }
+   default { $manifest }
+  }
   $args = @('upgrade','--manifest',"`"$selectedManifest`"",'--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity')
  }
  $start = Get-Date
@@ -161,14 +199,15 @@ function Upgrade($name,$route,$running,$tray=$false,$hidden=$false,$target='1.15
  $reg = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{00809252-FEC6-448E-83B4-E7F55AE7E47D}_is1' -ErrorAction SilentlyContinue
  $installedVersion = if (Test-Path "$env:ProgramFiles/LocalSend/localsend_app.exe") { (Get-Item "$env:ProgramFiles/LocalSend/localsend_app.exe").VersionInfo.ProductVersion } else { $null }
  $completed = $up.ExitCode -eq 0 -and $reg.DisplayVersion -eq $target -and $installedVersion -like "$target*"
- @{ ExpectedSuccess = $route -eq 'local-manifest-fixed' -or $target -eq '1.18.2'; Completed = $completed; Registration = $reg.DisplayVersion; FileVersion = $installedVersion; ProcessAlive = [bool](Get-Process localsend_app -ErrorAction SilentlyContinue) } | ConvertTo-Json | Set-Content "$ev/$name-verdict.json"
+ $expectedSuccess = $route -in @('install-force','current-fixed')
+ @{ ExpectedSuccess = $expectedSuccess; Completed = $completed; Registration = $reg.DisplayVersion; FileVersion = $installedVersion; ProcessAlive = [bool](Get-Process localsend_app -ErrorAction SilentlyContinue) } | ConvertTo-Json | Set-Content "$ev/$name-verdict.json"
 }
 try {
  $route = if ($source151 -eq 0) { 'source' } else { 'local-manifest' }
- Upgrade 'original-metadata-tray-visible' 'local-manifest' $true $true
- Upgrade 'one-switch-tray-visible-1' 'local-manifest-fixed' $true $true
- Upgrade 'one-switch-tray-visible-2' 'local-manifest-fixed' $true $true
- Upgrade 'current-source-tray-visible' 'source' $true $true $false '1.18.2'
+ Upgrade 'historical-install-no-force' 'install-no-force' $true $true
+ Upgrade 'historical-install-force' 'install-force' $true $true
+ Upgrade 'current-exact-no-force' 'current-no-force' $true $true $false '1.18.2'
+ Upgrade 'current-exact-fixed' 'current-fixed' $true $true $false '1.18.2'
 } finally {
  foreach ($logRoot in @("$env:LOCALAPPDATA/Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir", "$env:LOCALAPPDATA/Microsoft/WinGet/DiagOutputDir")) {
   if (Test-Path $logRoot) { Copy-Item "$logRoot/*" $ev -Force -ErrorAction Continue }

@@ -17,16 +17,16 @@ jobs:
             New-Item -ItemType Directory -Force evidence/cloud | Out-Null
             $bootstrap = Join-Path $env:RUNNER_TEMP 'winget1549'
             New-Item -ItemType Directory -Force $bootstrap | Out-Null
-            Invoke-WebRequest 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx' -OutFile "$bootstrap/vclibs.appx"
-            Invoke-WebRequest 'https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.8.6' -OutFile "$bootstrap/xaml.zip"
-            Expand-Archive "$bootstrap/xaml.zip" "$bootstrap/xaml"
-            Add-AppxPackage "$bootstrap/vclibs.appx"
-            Add-AppxPackage "$bootstrap/xaml/tools/AppX/x64/Release/Microsoft.UI.Xaml.2.8.appx"
-            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.8.1911/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile "$bootstrap/winget.msixbundle"
-            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.8.1911/76fba573f02545629706ab99170237bc_License1.xml' -OutFile "$bootstrap/license.xml"
+            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.29.380/DesktopAppInstaller_Dependencies.zip' -OutFile "$bootstrap/dependencies.zip"
+            Expand-Archive "$bootstrap/dependencies.zip" "$bootstrap/dependencies"
+            $dependencies = @(Get-ChildItem "$bootstrap/dependencies" -Recurse -File | Where-Object { $_.FullName -match '\\x64\\' -and $_.Extension -in @('.appx','.msix') } | Select-Object -ExpandProperty FullName)
+            if ($dependencies.Count -eq 0) { throw 'Official dependency archive has no x64 packages' }
+            foreach ($dependency in $dependencies) { Add-AppxPackage $dependency }
+            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.29.380/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile "$bootstrap/winget.msixbundle"
+            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.29.380/e53e159d00e04f729cc2180cffd1c02e_License1.xml' -OutFile "$bootstrap/license.xml"
             Get-ChildItem $bootstrap -File | Get-FileHash | ConvertTo-Json | Set-Content evidence/cloud/bootstrap-hashes.json
-            Add-AppxProvisionedPackage -Online -PackagePath "$bootstrap/winget.msixbundle" -LicensePath "$bootstrap/license.xml" -DependencyPackagePath @("$bootstrap/vclibs.appx", "$bootstrap/xaml/tools/AppX/x64/Release/Microsoft.UI.Xaml.2.8.appx")
-            Add-AppxPackage "$bootstrap/winget.msixbundle"
+            Add-AppxProvisionedPackage -Online -PackagePath "$bootstrap/winget.msixbundle" -LicensePath "$bootstrap/license.xml" -DependencyPackagePath $dependencies
+            Add-AppxPackage "$bootstrap/winget.msixbundle" -DependencyPath $dependencies
           }
       - name: Measure original release upgrade
         shell: powershell
