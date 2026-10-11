@@ -131,11 +131,22 @@ export default async function({session,wd,senderPort,transportStatus}){
    await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,'-CompletePrevious']);
    await waitForNativeControl({wd,prefix,label:gallery+'-pending',...target('Accept')});
    await click('Options');await capture(gallery+'-options-before');
-   const e=await waitForNativeControl({wd,prefix,label:gallery+'-gallery',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and (@content-desc="On" or @content-desc="Off") and @clickable="true"]'});
+   // Current Flutter merges this section into one semantics node. Inspect its
+   // exact gallery label/value lines; no click or inferred screen coordinate.
+   const merged=process.env.SOURCE_APP_FAMILY==='current';
+   const galleryLocator={using:'xpath',value:merged
+    ?'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Save media to gallery") and contains(@content-desc,"Save to folder") and @clickable="true"]'
+    :'//*[@package="org.localsend.localsend_app" and (@content-desc="On" or @content-desc="Off") and @clickable="true"]'};
+   const e=await waitForNativeControl({wd,prefix,label:gallery+'-gallery',...galleryLocator,sourceIncludes:['Save media to gallery']});
+   const matches=await wd('POST',prefix+'/elements',galleryLocator);
+   if(matches.length!==1)throw new Error('Receive Options gallery semantics are not unique');
    const id=e['element-6066-11e4-a52e-4f735466cecf'];
-   const selected=await wd('GET',prefix+'/element/'+id+'/attribute/content-desc');
+   const description=await wd('GET',prefix+'/element/'+id+'/attribute/content-desc');
+   const lines=description.split('\n'),galleryLabels=lines.filter(line=>line==='Save media to gallery');
+   if(merged&&galleryLabels.length!==1)throw new Error('Receive Options gallery label is not unique');
+   const selected=merged?lines[lines.indexOf('Save media to gallery')+1]:description;
    if(selected!==(desired?'On':'Off'))throw new Error('Receive Options did not inherit the global gallery setting');
-   await waitForNativeControl({wd,prefix,label:gallery+'-gallery-verified',using:'xpath',value:`//*[@package="org.localsend.localsend_app" and @content-desc="${desired?'On':'Off'}" and @clickable="true"]`,sourceIncludes:['Save media to gallery']});
+   writeFileSync(`evidence/${gallery}-options-gallery.json`,JSON.stringify({desired,selected,description,merged,matches:matches.length,selectionTiming:'Inherited global setting before acceptance'},null,2));
    await capture(gallery+'-options-selected');await wd('POST',prefix+'/back',{});
    await click('Accept');await waitForNativeControl({wd,prefix,label:gallery+'-complete',...target('Done')});
    await capture(gallery+'-completed');
