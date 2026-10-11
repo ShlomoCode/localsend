@@ -89,48 +89,6 @@ jobs:
             fvm flutter pub get 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
           fi
 
-      - name: Repair excluded-platform dependency metadata for newer SDK
-        if: inputs.flutter_sdk != '3.24.5'
-        working-directory: source/app
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.pub-cache/bin:$PATH"
-          node <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-          const crypto = require('crypto');
-          const {fileURLToPath} = require('url');
-          const config = JSON.parse(fs.readFileSync('.dart_tool/package_config.json'));
-          const pkg = config.packages.find(p => p.name === 'open_filex');
-          const root = fileURLToPath(new URL(pkg.rootUri, new URL('file://' + path.resolve('.dart_tool/package_config.json'))));
-          const file = path.join(root, 'pubspec.yaml');
-          function hashes(dir = root) {
-            return fs.readdirSync(dir, {withFileTypes:true}).flatMap(entry => {
-              const absolute = path.join(dir, entry.name);
-              return entry.isDirectory() ? hashes(absolute) : [[path.relative(root, absolute), crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')]];
-            }).sort((a,b) => a[0].localeCompare(b[0]));
-          }
-          const before = hashes();
-          const original = fs.readFileSync(file, 'utf8');
-          if (!original.includes('version: 4.5.0') || !original.includes('default_package: dartPluginClass')) throw Error('Unexpected pinned plugin metadata');
-          const repaired = original.replace(/      windows:[\s\S]*$/, '');
-          if (!repaired.includes('      ios:') || !repaired.includes('pluginClass: OpenFilePlugin') || repaired.includes('default_package:')) throw Error('Unexpected repair result');
-          const out = process.env.GITHUB_WORKSPACE + '/evidence';
-          fs.writeFileSync(out + '/open-filex-original-pubspec.yaml', original);
-          fs.writeFileSync(out + '/open-filex-repaired-pubspec.yaml', repaired);
-          fs.writeFileSync(file, repaired);
-          const after = hashes();
-          const withoutMetadata = list => list.filter(([name]) => name !== 'pubspec.yaml');
-          if (JSON.stringify(withoutMetadata(before)) !== JSON.stringify(withoutMetadata(after))) throw Error('Dependency code changed');
-          fs.writeFileSync(out + '/open-filex-tree-before.json', JSON.stringify(before,null,2));
-          fs.writeFileSync(out + '/open-filex-tree-after.json', JSON.stringify(after,null,2));
-          fs.writeFileSync(out + '/open-filex-code-comparison.json', JSON.stringify({version:'4.5.0',allFilesExceptPubspecEqual:true,iosPluginDeclarationUnchanged:true},null,2));
-          NODE
-          diff -u "$GITHUB_WORKSPACE/evidence/open-filex-original-pubspec.yaml" "$GITHUB_WORKSPACE/evidence/open-filex-repaired-pubspec.yaml" > "$GITHUB_WORKSPACE/evidence/open-filex-metadata.patch" || test "$?" = 1
-          shasum -a 256 "$GITHUB_WORKSPACE/evidence/"open-filex-*-pubspec.yaml > "$GITHUB_WORKSPACE/evidence/open-filex-metadata.sha256"
-          fvm flutter pub get 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve-after-metadata-repair.log"
-
       - name: Configure supported diagnostic renderer input
         if: inputs.renderer != 'impeller'
         working-directory: source/app
