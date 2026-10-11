@@ -231,9 +231,13 @@ try:
     for role in ("Receiver1054", "Sender1054"):
         bundle = Path("/tmp") / role
         shutil.copytree("released/base", bundle)
-        settings = {"flutter.ls_alias": role, "flutter.ls_port": 53317,
+        # Exact c1ce storage schema3: quick_save is enum-name string, not the
+        # bool accepted by the old1.17 harness. Pin current schema so migration
+        # cannot silently replace off with paired; leave first-run generated
+        # identity/security keys to the app.
+        settings = {"flutter.ls_version": 3, "flutter.ls_alias": role, "flutter.ls_port": 53317,
                     "flutter.ls_locale": "en", "flutter.ls_destination": str(dest),
-                    "flutter.ls_quick_save": False, "flutter.ls_minimize_to_tray": False,
+                    "flutter.ls_quick_save": "off", "flutter.ls_minimize_to_tray": False,
                     "flutter.ls_send_mode": "multiple", "flutter.ls_auto_finish": False}
         (bundle / "settings.json").write_text(json.dumps(settings))
         executable = str(bundle / "localsend_app")
