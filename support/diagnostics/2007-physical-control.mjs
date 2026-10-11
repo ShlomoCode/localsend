@@ -456,7 +456,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await waitFile(`evidence/${stage}-requested`,90000);
    const resendInput=JSON.parse(readFileSync(`evidence/${stage}-input.json`,'utf8'));
    const resendExpected=readFileSync(resendInput.path);
-   if(repeatResend){
+   if(repeatResend||process.env.ISSUE_2007_FINALIZE_INTERVENTION){
     assert.equal(resendInput.name,fixtureName,'Each same-session resend must use this arm\'s owned filename');
     assert.deepEqual(resendExpected,expected,'Each same-session resend must use the unchanged baseline bytes');
    }

@@ -58,6 +58,11 @@ export function storageObserver({wd,prefix,session}) {
   const result=JSON.parse(Buffer.from(encoded,'base64').toString());
   assert.equal(result.callbackPath,'/storage/emulated/0/Download/'+fixtureName,'Callback must refer to this exact owned fixture');
   writeFileSync('evidence/native-scan-intervention.json',JSON.stringify({session,requestedUtc,result},null,2));
+  assert(!result.callbackObservationError,'Scanner callback observation failed: '+result.callbackObservationError);
+  assert(result.callbackUri,'Supported scanner returned no completed MediaStore URI');
+  const own=result.afterRows.observations.find(item=>item.name===fixtureName);
+  const published=own?.queries.flatMap(query=>query.rows).find(row=>row._data===result.callbackPath&&row.is_pending==='0'&&row._size===String(result.afterNativeStat.bytes));
+  assert(published,'Completed scan did not publish the exact received file; refuse finalization attribution');
   await activate(previous);
   return result;
  }
