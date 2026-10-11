@@ -1,5 +1,5 @@
 diff --git a/app/lib/model/cross_file.dart b/app/lib/model/cross_file.dart
-index 4680bf0c..86d3a5eb 100644
+index 4680bf0..86d3a5e 100644
 --- a/app/lib/model/cross_file.dart
 +++ b/app/lib/model/cross_file.dart
 @@ -1,3 +1,4 @@
@@ -30,7 +30,7 @@ index 4680bf0c..86d3a5eb 100644
    @override
    String toString() {
 diff --git a/app/lib/provider/network/send_provider.dart b/app/lib/provider/network/send_provider.dart
-index d4adf330..9db60f40 100644
+index d4adf33..9db60f4 100644
 --- a/app/lib/provider/network/send_provider.dart
 +++ b/app/lib/provider/network/send_provider.dart
 @@ -90,6 +90,8 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
