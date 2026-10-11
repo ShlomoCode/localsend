@@ -39,7 +39,7 @@ function healthIssue(window, {background = true, afterSwitch = false, requirePee
   if (requirePeer && !r.healthSamples.some(entry => entry.payload.generation === window.generation && entry.payload.pid === window.pid && entry.payload.peers.some(peer => peer.ready && peer.toLocalSendBytes > 0 && peer.fromLocalSendBytes > 0))) return 'no ready bidirectional LocalSend peer observed';
   return null;
 }
-async function checkpoint(window, milestone, {awaitBackground = false, requirePeer = false} = {}) {
+async function checkpoint(window, milestone, {awaitBackground = false, requirePeer = false, minimumObservedBudgetSeconds = 0} = {}) {
   if (window.healthFault) throw new Error('Transport infrastructure health failed: ' + window.healthFault.issue);
   const invokedUtc = new Date().toISOString();
   const foregroundState = await wd('POST', prefix() + '/execute/sync', {script:'mobile: queryAppState', args:[{bundleId:appId}]}, 10000);
@@ -51,13 +51,32 @@ async function checkpoint(window, milestone, {awaitBackground = false, requirePe
     await pause(100);
   } while (Date.now() <= deadline);
   const observation = {milestone, invokedUtc, checkedUtc:new Date().toISOString(), foregroundAppId:appId, foregroundState,
-    healthMaxAgeMs, budgetInterpretation:'Latest finite allowance minus monotonic server sample age; no promised iOS task duration', health:r.health(), issue};
+    healthMaxAgeMs, minimumObservedBudgetSeconds,
+    budgetInterpretation:'Latest finite allowance minus monotonic server sample age; network sampling latency is not bounded and this is an admission margin, not guaranteed remaining time', health:r.health(), issue};
+  observation.observedAdjustedBudgetSeconds = observation.health.lastHealth?.payload.remainingBudgetSeconds - observation.health.healthAgeMs / 1000;
+  if (!issue && (!Number.isFinite(observation.observedAdjustedBudgetSeconds) || observation.observedAdjustedBudgetSeconds < minimumObservedBudgetSeconds)) issue = 'observed background allowance is below the conservative admission margin';
+  observation.issue = issue;
   window.checkpoints.push(observation);
   save(window.case + '-health-checkpoints.json', window);
   save(window.case + '-health-samples.json', r.healthSamples);
   if (foregroundState !== 4) throw new Error('Transport infrastructure: LocalSend is not observed foreground (state 4) at ' + milestone);
   if (issue) throw new Error('Transport infrastructure at ' + milestone + ': ' + issue);
   if (window.healthFault) throw new Error('Transport infrastructure health failed: ' + window.healthFault.issue);
+}
+async function auditTransportDrain(window) {
+  const started = Date.now(), deadline = started + 5000, observations = [];
+  let drained = false;
+  do {
+    const state = r.status(), issue = window.healthFault?.issue || healthIssue(window, {afterSwitch:true,requirePeer:true});
+    const peerAudit = Object.entries(state.peerBytes).map(([id,bytes]) => ({id,...bytes,acknowledged:bytes.acknowledgedToDevice === bytes.fromSender}));
+    drained = state.pendingAckSeq === null && state.queued === 0 && peerAudit.every(peer => peer.acknowledged);
+    observations.push({utc:new Date().toISOString(),elapsedMs:Date.now()-started,pendingAckSeq:state.pendingAckSeq,queued:state.queued,peerAudit,health:r.health(),issue,drained});
+    save(window.case + '-transport-drain-audit.json',{timeoutMs:5000,elapsedMs:Date.now()-started,drained,observations});
+    if (issue) throw new Error('Transport infrastructure before drain admission: ' + issue);
+    if (drained) break;
+    await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+  } while (Date.now() < deadline);
+  if (!drained) throw new Error('Transport infrastructure: pending ACK or unacknowledged sender bytes at case end');
 }
 function monitorHealth(window) {
   monitoredWindow = window;
@@ -220,14 +239,17 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   await powershell('windows2311-context.ps1', ['-Case',label, '-FixturePath',resolve('evidence/' + filename), '-SelectOnly', ...(previousFinished ? ['-CompletePrevious'] : [])]);
   const window = await configureProxy(label);
   stage = label + '-windows-send';
-  await checkpoint(window, 'before-windows-send');
+  // These admission margins exceed the one-second media duration. They are
+  // observed allowances, not RPC latency bounds or guaranteed iOS lifetime.
+  await checkpoint(window, 'before-windows-send', {minimumObservedBudgetSeconds:20});
   await powershell('windows3393-ui.ps1', ['-Action','click','-X','246','-Y','266','-Label',label+'-favorites','-RequireForeground','-UseControlSequence']);
+  await checkpoint(window, 'before-windows-send-action', {minimumObservedBudgetSeconds:20});
   await powershell('windows3393-ui.ps1', ['-Action','click','-X','145','-Y','225','-Label',label+'-send','-RequireForeground','-UseControlSequence']);
   window.senderSendUtc = new Date().toISOString(); await checkpoint(window, 'after-windows-send');
   stage = label + '-receiver-approval';
   await capture(label + '-pending');
   await unique('accessibility id', 'Accept', 12000);
-  await checkpoint(window, 'before-Accept', {requirePeer:true});
+  await checkpoint(window, 'before-Accept', {requirePeer:true,minimumObservedBudgetSeconds:15});
   window.acceptInvokedUtc = new Date().toISOString(); await click('Accept', 1000);
   window.acceptReturnedUtc = new Date().toISOString(); await checkpoint(window, 'after-Accept', {requirePeer:true});
   await capture(label + '-accepted');
@@ -277,6 +299,7 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   }
   save('scenario-results.json', {results, backgroundWindows});
   await checkpoint(window, 'verified-case-end', {requirePeer:true});
+  await auditTransportDrain(window);
   monitoredWindow = null;
   await click('Done'); previousFinished = true;
   await activate(proxyId); await click('stopProxy');
@@ -309,6 +332,20 @@ async function collectMetadata() {
         const raw = await log.text();save(file, raw);
         if (!raw.trim()) failure ||= 'Required original evidence is empty: ' + key;
         if (key === 'device_logs_url' && (!raw.includes('loopback-ready') || !raw.includes('did-enter-background'))) failure ||= 'Device logs omitted helper loopback/lifecycle proof';
+        if (key === 'device_logs_url') {
+          let ownedStopped = false;
+          const events = [], fatal = [];
+          const pattern = /started destination=127\.0\.0\.1:53317|stopping reason=user-stop|background-expired|background-task-unavailable|relay-(?:poll|push|health)-failed/g;
+          for (const match of raw.matchAll(pattern)) {
+            if (match[0].startsWith('started destination=')) ownedStopped = false;
+            if (match[0] === 'stopping reason=user-stop') ownedStopped = true;
+            const entry = {event:match[0],offset:match.index,ownedStopped,rawContext:raw.slice(Math.max(0,match.index-220),match.index+220)};
+            events.push(entry);
+            if (!ownedStopped && !match[0].startsWith('started destination=')) fatal.push(entry);
+          }
+          save('native-proxy-fatal-audit.json',{orderingAuthority:'Original device log text order; normal owned stop is stopping reason=user-stop, new helper start opens the next interval',events,fatal});
+          if (fatal.length) failure ||= 'Native helper expiry or transport failure before owned stop';
+        }
       }
     }
   } catch (error) { save('metadata-error.txt', error); failure ||= 'Required original BrowserStack evidence retrieval failed'; }
