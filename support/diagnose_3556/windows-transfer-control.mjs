@@ -327,6 +327,7 @@ async function refreshRegistration(label){
  await tap('-android uiautomator','new UiSelector().descriptionContains("issue3556-cloud-receiver")');
  await waitFor(s=>!labels(s).includes('Add')&&r.status().opened>before.opened,60000,'Actual favorite connection refresh failed');
  await snap(label+'-registered');save(label+'-transport.json',{utc:new Date().toISOString(),before,after:r.status()});await peerObserve(label);
+ await wd('POST',base()+'/appium/device/press_keycode',{keycode:4});await snap(label+'-picker-dismissed');
 
 }
 async function restartServer(){
