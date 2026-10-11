@@ -18,7 +18,6 @@ void main() {
 
   setUp(() {
     persistence = MockPersistenceService();
-    save = Completer<void>();
     when(persistence.getFavorites()).thenReturn([
       FavoriteDevice(id: 'favorite', fingerprint: 'fingerprint', ip: '127.0.0.1', port: 53317, alias: 'Original'),
     ]);
@@ -37,6 +36,7 @@ void main() {
   }
 
   testWidgets('confirm closes the edit route after saving and reopens with the saved name', (tester) async {
+    save = Completer<void>();
     await tester.pumpWidget(_testApp(persistence));
     await openEditor(tester);
     await confirmRename(tester);
@@ -56,6 +56,7 @@ void main() {
   });
 
   testWidgets('cancel during saving does not close a subsequently opened dialog', (tester) async {
+    save = Completer<void>();
     await tester.pumpWidget(_testApp(persistence));
     await openEditor(tester);
     await confirmRename(tester);
