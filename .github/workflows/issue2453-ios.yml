@@ -3,6 +3,11 @@ name: Issue 2453 historical iOS admission
 on:
   workflow_dispatch:
     inputs:
+      flutter_sdk:
+        description: Diagnostic Flutter SDK for historical app source
+        type: choice
+        options: ['3.24.5', '3.32.8']
+        default: '3.24.5'
       renderer:
         description: Diagnostic renderer, unchanged source and historical Flutter
         type: choice
@@ -42,6 +47,7 @@ jobs:
           git rev-parse HEAD > "$out/source-commit.txt"
           git status --porcelain > "$out/source-status-before.txt"
           printf '%s\n' '${{ inputs.renderer }}' > "$out/renderer.txt"
+          printf '%s\n' '${{ inputs.flutter_sdk }}' > "$out/selected-sdk.txt"
           cp .fvmrc app/pubspec.lock app/ios/Podfile.lock "$out/locks-before/"
           shasum -a 256 "$out/locks-before/"* > "$out/locks-before.sha256"
           sw_vers > "$out/runner.txt"
@@ -55,7 +61,7 @@ jobs:
       - name: Install historical pinned Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '${{ inputs.flutter_sdk }}'
           cache: false
           pub-cache: false
 
@@ -66,11 +72,21 @@ jobs:
           set -euo pipefail
           dart pub global activate fvm 3.2.1
           export PATH="$HOME/.pub-cache/bin:$PATH"
-          fvm install 3.24.5
+          if [[ '${{ inputs.flutter_sdk }}' != 3.24.5 ]]; then
+            sed -i '' 's/3.24.5/${{ inputs.flutter_sdk }}/' ../.fvmrc
+            # Flutter3.32 SDK pins intl0.20; retain all other declared app dependencies.
+            sed -i '' 's/intl: \^0.19.0/intl: ^0.20.2/' pubspec.yaml
+            git diff -- ../.fvmrc pubspec.yaml > "$GITHUB_WORKSPACE/evidence/sdk-input.patch"
+          fi
+          fvm install '${{ inputs.flutter_sdk }}'
           fvm flutter --version > "$GITHUB_WORKSPACE/evidence/flutter.txt"
           pod --version > "$GITHUB_WORKSPACE/evidence/cocoapods.txt"
           fvm flutter precache --ios
-          fvm flutter pub get --enforce-lockfile 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
+          if [[ '${{ inputs.flutter_sdk }}' == 3.24.5 ]]; then
+            fvm flutter pub get --enforce-lockfile 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
+          else
+            fvm flutter pub get 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
+          fi
 
       - name: Configure supported diagnostic renderer input
         if: inputs.renderer != 'impeller'
@@ -114,7 +130,7 @@ jobs:
           shasum -a 256 "$out/localsend-1.17.0-unsigned-device.ipa" > "$out/ipa.sha256"
           plutil -p "$app/Info.plist" > "$out/runner-plist.txt"
           find "$app" -type f -exec shasum -a 256 {} \; > "$out/device-bundle.sha256"
-          printf '%s\n' 'Rebuilt unchanged 1.17 source with pinned Flutter3.24.5. Unsigned arm64, not the historical App Store binary. BrowserStack normal signing/admission remains to be verified.' > "$out/artifact-scope.txt"
+          printf '%s\n' 'Rebuilt historical1.17 source; requested Flutter SDK and renderer recorded separately. Diagnostic SDK input and solver drift retained. Unsigned arm64, not the historical App Store binary. BrowserStack normal signing/admission remains to be verified.' > "$out/artifact-scope.txt"
 
       - name: Preserve source state on success or failure
         if: always()
