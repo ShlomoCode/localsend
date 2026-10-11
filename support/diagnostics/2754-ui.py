@@ -1,12 +1,15 @@
 import subprocess, time, pathlib, json, csv, io, os
 out=pathlib.Path("/home/probe/evidence"); out.mkdir(exist_ok=True)
 events=[]
-def run(*args,**kw): return subprocess.run(args,text=True,capture_output=True,**kw)
+def run(*args,**kw):
+    kw.setdefault("timeout",15)
+    return subprocess.run(args,text=True,capture_output=True,**kw)
 def log(name,**data):
     events.append(dict(t=time.monotonic(),wall=time.time(),name=name,**data))
     (out/"events.json").write_text(json.dumps(events,indent=2))
 def snap(name):
     path=out/(name+".png"); run("scrot",str(path))
+    log("screenshot",file=path.name)
     res=run("tesseract",str(path),"stdout","tsv")
     (out/(name+".tsv")).write_text(res.stdout)
     return list(csv.DictReader(io.StringIO(res.stdout),delimiter="\t"))
@@ -24,11 +27,14 @@ def text_case(label):
     click_word("Text",label+"-before")
     start=time.monotonic(); log("text-open",case=label)
     run("xdotool","type","--clearmodifiers","--delay","60",label+" typed control")
-    for second in [0,1,3,10,20,35,50]:
+    for second in [0,1,3,10,20,35,50,65]:
         time.sleep(max(0,start+second-time.monotonic())); snap(label+"-"+str(second))
         proc=run("ps","-eLo","pid,tid,stat,pcpu,wchan:32,comm").stdout
         focus=run("xdotool","getwindowfocus","getwindowname").stdout
         (out/(label+"-"+str(second)+"-state.txt")).write_text(proc+"\nFOCUS\n"+focus)
+        if label.endswith("stack") and second==10:
+            stack=run("sudo","gdb","-q","-batch","-p",str(app.pid),"-ex","thread apply all bt 20")
+            (out/(label+"-gdb.txt")).write_text(stack.stdout+stack.stderr)
     if trace:
         run("sudo","kill","-INT",str(trace.pid))
     run("xdotool","key","Escape"); time.sleep(2)
@@ -67,6 +73,22 @@ if state != "true": raise RuntimeError("UI did not enable supported virtual keyb
 run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-on")
 text_case("keyboard-on-repeat")
+# Test the other supported activation mode through the same Accessibility UI.
+run("xdotool","windowactivate","--sync",wid); time.sleep(2)
+mode_rows=snap("activation-mode-before")
+mode_hits=[r for r in mode_rows if r["text"].lower()=="activation"]
+if not mode_hits: raise RuntimeError("Supported Activation mode row not visible")
+mode_y=int(mode_hits[0]["top"])+int(mode_hits[0]["height"])//2
+run("xdotool","mousemove",str(x),str(mode_y),"click","1"); time.sleep(1)
+run("xdotool","key","Home","Return"); time.sleep(3)
+snap("activation-mode-after")
+mode=run("gsettings","get","org.cinnamon.keyboard","activation-mode").stdout.strip()
+(out/"activation-mode.txt").write_text(mode)
+if mode!="'accessible'": raise RuntimeError("UI did not choose accessible keyboard mode: "+mode)
+run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
+text_case("keyboard-accessible")
+text_case("keyboard-accessible-repeat")
+text_case("keyboard-accessible-stack")
 # Return the supported setting through the same UI, then repeat the original trigger.
 run("xdotool","windowactivate","--sync",wid); time.sleep(2)
 run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(3)

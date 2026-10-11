@@ -5,8 +5,10 @@ free -m > evidence/cloud/resources.txt
 df -Th /home/runner /tmp >> evidence/cloud/resources.txt
 test "$(df -Pk /home/runner | awk "NR==2 {print \$4}")" -ge 12582912
 sudo apt-get update
-sudo apt-get install -y qemu-system-x86 qemu-utils genisoimage socat imagemagick openssh-client
-curl -fL --retry 3 https://mirrors.edge.kernel.org/linuxmint/stable/22.2/linuxmint-22.2-cinnamon-64bit.iso -o /home/runner/issue2754-mint/mint.iso
+sudo apt-get install -y qemu-system-x86 qemu-utils genisoimage socat imagemagick openssh-client tesseract-ocr
+for mirror in https://mirror.csclub.uwaterloo.ca/linuxmint https://mirrors.edge.kernel.org/linuxmint; do
+  if curl -fL --connect-timeout 20 --max-time 600 --speed-time 90 --speed-limit 1048576 "$mirror/stable/22.2/linuxmint-22.2-cinnamon-64bit.iso" -o /home/runner/issue2754-mint/mint.iso; then break; fi
+done
 printf "759c9b5a2ad26eb9844b24f7da1696c705ff5fe07924a749f385f435176c2306  /home/runner/issue2754-mint/mint.iso\n" | sha256sum -c - | tee evidence/cloud/iso-hash.txt
 ssh-keygen -q -t ed25519 -N "" -f /tmp/issue2754-mint/id
 cp /tmp/issue2754-mint/id.pub /tmp/issue2754-mint/seed/id.pub
@@ -28,8 +30,18 @@ touch /home/mint/evidence/bootstrap-complete
 BOOT
 genisoimage -quiet -o /home/runner/issue2754-mint/probe.iso -V PROBE -r /tmp/issue2754-mint/seed
 sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -boot d -drive file=/home/runner/issue2754-mint/mint.iso,media=cdrom,readonly=on -drive file=/home/runner/issue2754-mint/probe.iso,media=cdrom,readonly=on -device virtio-vga -usb -device usb-tablet -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2275-:22 -device virtio-net-pci,netdev=net0 -display none -monitor unix:/tmp/issue2754-mint/monitor,server,nowait -serial file:evidence/cloud/serial.log -daemonize
-# Mint official ISO boots to its normal graphical live login. Wait for startup, then open a real terminal.
-sleep 130
+# Verify normal graphical live login from the rendered desktop before sending terminal input.
+desktop_ready=0
+for n in $(seq 1 18); do
+  sleep 15
+  printf "screendump %s/evidence/cloud/desktop-readiness.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor
+  sudo chmod a+r evidence/cloud/desktop-readiness.ppm
+  convert evidence/cloud/desktop-readiness.ppm evidence/cloud/desktop-readiness.png
+  tesseract evidence/cloud/desktop-readiness.png stdout > evidence/cloud/desktop-readiness.txt 2>/dev/null
+  if grep -Eq "Computer|Home|Install.*Mint" evidence/cloud/desktop-readiness.txt; then desktop_ready=1; break; fi
+done
+echo "DESKTOP_READY=$desktop_ready"
+test "$desktop_ready" = 1
 printf "screendump %s/evidence/cloud/mint-start.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor
 printf "sendkey ctrl-alt-t\n" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor
 sleep 5
@@ -41,11 +53,15 @@ keys={" ":"spc","/":"slash",";":"semicolon",".":"dot","-":"minus"}
 s=socket.socket(socket.AF_UNIX);s.connect("/tmp/issue2754-mint/monitor");s.settimeout(.1)
 for ch in command:
     s.sendall(("sendkey "+keys.get(ch,ch)+" 40\n").encode());time.sleep(.08)
-s.sendall(b"sendkey ret\n");s.close()
+time.sleep(.5);s.close()
 KEYS
+# A separate HMP invocation keeps Return from being lost when the typing socket closes.
+printf "sendkey ret 80\n" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor > evidence/cloud/return-monitor.log
+sleep 3
+printf "screendump %s/evidence/cloud/terminal-checkpoint.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor > evidence/cloud/checkpoint-monitor.log
 opts=(-i /tmp/issue2754-mint/id -p 2275 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known -o ConnectTimeout=5)
 ready=0
-for n in $(seq 1 60); do
+for n in $(seq 1 20); do
  if timeout 10 ssh "${opts[@]}" mint@127.0.0.1 "test -f /home/mint/evidence/bootstrap-complete && pgrep -x cinnamon && command -v tesseract" > evidence/cloud/readiness.log 2>&1; then ready=1; break; fi
  sleep 15
 done
