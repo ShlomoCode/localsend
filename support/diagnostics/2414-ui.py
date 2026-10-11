@@ -23,7 +23,9 @@ def locate(label,stage,deadline=20):
             w=matches[0]; return int(w['left'])+int(w['width'])//2,int(w['top'])+int(w['height'])//2
         if time.monotonic()>end: raise RuntimeError('Visible label missing: '+label)
         time.sleep(.5)
-def click(x,y): run('xdotool','mousemove',str(x),str(y),'click','1'); time.sleep(.3)
+def click(x,y):
+    run('xdotool','mousemove',str(x),str(y),'click','1')
+    run('xdotool','mousemove','1190','790'); time.sleep(.3)
 def focus(win):
     run('xdotool','windowactivate','--sync',win); time.sleep(.5)
 def window(pid):
@@ -104,6 +106,8 @@ for count in [5,5000]:
         if count==5 and not result.get('content_valid'): raise RuntimeError('Small directory control failed; do not interpret large case')
     finally:
         if 'stop' in locals(): stop.set()
+        with (out/(case+'-kernel-final.txt')).open('w') as kernel:
+            subprocess.run(['sudo','journalctl','-k','--no-pager'],stdout=kernel,stderr=subprocess.STDOUT)
         for p,w,pid in apps:
             subprocess.run(['kill',str(pid)],check=False)
             p.terminate()

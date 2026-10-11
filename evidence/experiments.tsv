@@ -12,3 +12,4 @@ E09	host sender desktop	5-file typed-path chooser control	Recent with autocomple
 E10	Home browse directory selection	select5→real send→Options	selection and Options proven; absoluteBack misses movedreceiver; savedcontrol not reached	38106331396	no
 E11	receiver-relativeBack	5-fileOptions→approval	Options1.322s; approvalvisiblyshowsAccept butOCRmisseslabel; noacceptclick	38106625564	no
 E12	observedAcceptbounds	5-file directory→send→Options→save	saved5, byte-exactcontenttrue, bothappsFinished	38106985658	yes-control
+E13	5000 count prepared	5-file prerequisite	Home tooltip covers fixture label; no selection, 5000neverstarted	38107209480	no
