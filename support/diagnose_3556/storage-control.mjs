@@ -13,7 +13,13 @@ async function reset(){await wd('POST',`/session/${session}/appium/device/termin
 async function ready(suffix,deadlineMs){const end=Date.now()+deadlineMs;while(Date.now()<end){const s=await wd('GET',`/session/${session}/source`);if(s.includes('FAILED')||s.includes('INSUFFICIENT_STORAGE'))throw Error('Fixture generation failed');if(s.includes('READY')&&s.includes(suffix))return s;await new Promise(r=>setTimeout(r,3000));}throw Error('Fixture staging deadline');}
 function fixtureName(source){const m=source.match(/READY name=([^&<"]+)/);if(!m)throw Error('Fixture name absent');return m[1];}
 async function observe(name,seconds){const start=Date.now();let waits=0;const observations=[];for(let i=0;i<=seconds;i+=5){const s=await wd('GET',`/session/${session}/source`);writeFileSync('evidence/'+name+'-'+i+'.xml',s);const anr=/isn.t responding|not responding/i.test(s);observations.push({elapsedMs:Date.now()-start,anr,selectedFiles:s.match(/content-desc="[^"]*files?[^"]*"/gi)});if(anr){await snap(name+'-anr-'+waits);await ui('textMatches("(?i)wait")');waits++;}if(i===0||i===seconds)await snap(name+'-'+i);await new Promise(r=>setTimeout(r,5000));}writeFileSync('evidence/'+name+'-observations.json',JSON.stringify({waits,observations},null,2));}
-async function filePick(file,name){await reset();await click('File');await snap(name+'-picker');await ui('textContains('+JSON.stringify(file)+')');await observe(name,30);}
+async function filePick(file,name){
+ await reset();await click('File');
+ const end=Date.now()+30000;while(Date.now()<end){if((await wd('GET',`/session/${session}/source`)).includes('com.google.android.documentsui'))break;await new Promise(r=>setTimeout(r,1000));}
+ await snap(name+'-picker');
+ if(file.endsWith('.bin')){await click('Show roots');await snap(name+'-roots');await ui('text("Downloads")');await ui('text("Issue3556")');await snap(name+'-owned-directory');}
+ await ui('textContains('+JSON.stringify(file)+')');await observe(name,30);
+}
 async function mediaPick(file,name){await reset();await click('Media');await snap(name+'-picker');await ui('descriptionContains('+JSON.stringify(file)+')');await snap(name+'-selected');await ui('descriptionStartsWith("Confirm")');await observe(name,60);}
 try{
  const plan=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth}}).then(r=>r.json());writeFileSync('evidence/live-plan.json',JSON.stringify(plan));if(plan.parallel_sessions_running>=plan.parallel_sessions_max_allowed)throw Error('No live BrowserStack slot');
