@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dart_mappable/dart_mappable.dart';
@@ -31,6 +32,21 @@ class CrossFile with CrossFileMappable {
     required this.lastModified,
     required this.lastAccessed,
   });
+
+  /// Refreshes a native file's size before negotiating a new transfer.
+  Future<CrossFile> refreshSize() async {
+    final filePath = path;
+    if (filePath == null || bytes != null || filePath.startsWith('content://')) {
+      return this;
+    }
+
+    try {
+      return copyWith(size: await File(filePath).length());
+    } on FileSystemException {
+      // Preserve the existing upload error handling for missing or unreadable files.
+      return this;
+    }
+  }
 
   /// Custom toString() to avoid printing the bytes.
   @override
