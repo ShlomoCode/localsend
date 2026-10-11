@@ -12,7 +12,7 @@ inventory() {
 }
 printf 'deb [check-valid-until=no] http://archive.debian.org/debian buster main\n' > /etc/apt/sources.list.d/legacy.list
 apt-get update 2>&1 | tee "$E/debian12-apt-update.log"
-apt-get install -y --no-install-recommends libappindicator3-1=0.4.92-7 gir1.2-appindicator3-0.1=0.4.92-7 curl ca-certificates zenity xvfb dbus-x11 openbox xdotool imagemagick binutils libgl1-mesa-dri xdg-user-dirs 2>&1 | tee "$E/debian12-legacy-install.log"
+apt-get install -y --no-install-recommends libappindicator3-1=0.4.92-7 gir1.2-appindicator3-0.1=0.4.92-7 curl ca-certificates zenity xvfb xauth dbus-x11 openbox xdotool imagemagick binutils libgl1-mesa-dri xdg-user-dirs 2>&1 | tee "$E/debian12-legacy-install.log"
 cd "$E"
 apt-get download libappindicator3-1=0.4.92-7 gir1.2-appindicator3-0.1=0.4.92-7 libindicator3-7
 sha256sum ./*.deb > old-deb-sha256.txt
