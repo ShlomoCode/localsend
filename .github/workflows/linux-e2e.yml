@@ -12,7 +12,7 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
-          apt-get install -y ca-certificates curl git plasma-desktop plasma-workspace kwin-x11 systemsettings xvfb xauth dbus-x11 xdotool imagemagick qdbus-qt6 libgtk-3-0 libayatana-appindicator3-1 libcanberra-gtk3-module libgl1-mesa-dri libegl-mesa0 python3-pyatspi
+          apt-get install -y ca-certificates curl git plasma-desktop plasma-workspace kwin-x11 systemsettings xvfb xauth dbus-x11 xdotool imagemagick qdbus-qt6 libgtk-3-0 libayatana-appindicator3-1 libcanberra-gtk3-module libgl1-mesa-dri libegl-mesa0 python3-pyatspi python3-dbus
           mkdir -p evidence release
           curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o release.tar.gz
           echo '287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16  release.tar.gz' | sha256sum -c -

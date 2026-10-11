@@ -211,6 +211,12 @@ try:
             snapshot(stage + "-restarted-panel")
             outcomes.append({"before": before, "after": after, "preference_lost": panel_item() is not None})
             Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
+            click(find("Show hidden icons", "button"))
+            click(find("Configure System Tray...", "button"))
+            click(find("Entries"))
+            snapshot(stage + "-restarted-entries")
+            click(find("Cancel", "button"))
+            subprocess.run(["xdotool", "key", "Escape"], check=True)
         Path("evidence/outcomes.json").write_text(json.dumps(outcomes, indent=2))
         assert all(case["preference_lost"] for case in outcomes), "Baseline did not reproduce in both restart cycles"
 except Exception:
