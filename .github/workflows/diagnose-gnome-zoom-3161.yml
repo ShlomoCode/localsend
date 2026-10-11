@@ -1,0 +1,287 @@
+name: Diagnose GNOME Zoom 3161
+on:
+  workflow_dispatch:
+jobs:
+  gnome-zoom:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    steps:
+      - name: Install VM tools and prepare the Ubuntu guest
+        env:
+          START_VERSION: trixie
+          GRAPHICS: virgl
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-system-gui qemu-utils cloud-image-utils socat imagemagick openssh-client xvfb mesa-utils xdotool x11-apps ffmpeg tesseract-ocr
+          mkdir -p evidence/vm /tmp/localsend-vm /home/runner/localsend-vm
+          df -Th /home/runner /tmp | tee evidence/vm/host-filesystems.txt
+          disk_type=$(findmnt -no FSTYPE -T /home/runner)
+          disk_free_kb=$(df -Pk /home/runner | awk 'NR == 2 {print $4}')
+          test "$disk_type" != tmpfs
+          test "$disk_free_kb" -ge 10485760
+          curl --fail --location --retry 3 \
+            --output /home/runner/localsend-vm/debian.img \
+            "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+          qemu-img resize /home/runner/localsend-vm/debian.img 36G
+          ssh-keygen -q -t ed25519 -N '' -f /tmp/localsend-vm/id_ed25519
+          probe_key=$(cat /tmp/localsend-vm/id_ed25519.pub)
+          cat > /tmp/localsend-vm/user-data <<EOF
+          #cloud-config
+          users:
+            - default
+            - name: probe
+              groups: [adm, sudo, audio, video, render]
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              shell: /bin/bash
+              ssh_authorized_keys:
+                - $probe_key
+          package_update: true
+          packages:
+            - task-gnome-desktop
+            - flatpak
+            - gdb
+            - curl
+            - openssh-server
+            - libayatana-appindicator3-1
+            - python3-pyatspi
+          runcmd:
+            - [sh, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=probe\\n' > /etc/gdm3/custom.conf"]
+            - [systemctl, set-default, graphical.target]
+            - [systemctl, enable, gdm3]
+          power_state:
+            mode: reboot
+            timeout: 30
+            condition: true
+          EOF
+          printf 'instance-id: localsend-3161\nlocal-hostname: localsend-3161\n' > /tmp/localsend-vm/meta-data
+          cloud-localds /home/runner/localsend-vm/seed.iso /tmp/localsend-vm/user-data /tmp/localsend-vm/meta-data
+          gpu_args=(-device virtio-vga -display none -vnc 127.0.0.1:1)
+          if [ "$GRAPHICS" = virgl ]; then
+            touch /tmp/localsend-vm/virgl
+            Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX > evidence/vm/host-xvfb.log 2>&1 &
+            export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEODRIVER=x11
+            for i in $(seq 1 20); do if xdpyinfo >/dev/null 2>&1; then break; fi; sleep 1; done
+            glxinfo -B > evidence/vm/host-glx.txt
+            gpu_args=(-device virtio-vga-gl -display sdl,gl=on)
+          fi
+          cat > /tmp/localsend-vm/capture <<'CAPTURE'
+          #!/bin/bash
+          set -euo pipefail
+          target=$1
+          if [ -f /tmp/localsend-vm/virgl ]; then
+            DISPLAY=:99 xwd -root -silent | convert xwd:- "$target"
+          else
+            ppm="${target%.png}.ppm"
+            printf 'screendump %s\n' "$ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor
+            sudo chown "$(id -u):$(id -g)" "$ppm"
+            convert "$ppm" "$target"
+          fi
+          CAPTURE
+          chmod +x /tmp/localsend-vm/capture
+          sudo --preserve-env=DISPLAY,LIBGL_ALWAYS_SOFTWARE,SDL_VIDEODRIVER qemu-system-x86_64 \
+            -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 6144 \
+            -drive file=/home/runner/localsend-vm/debian.img,if=virtio,format=qcow2 \
+            -drive file=/home/runner/localsend-vm/seed.iso,media=cdrom,readonly=on \
+            "${gpu_args[@]}" -usb -device usb-tablet \
+            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -monitor unix:/tmp/localsend-vm/monitor,server,nowait \
+            -serial file:evidence/vm/serial.log \
+            -daemonize 2> evidence/vm/qemu-start.log
+          printf 'Image: Debian 13 %s generic cloud image + task-gnome-desktop\nCPU: QEMU Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm on KVM host\nGraphics: %s\n' "$START_VERSION" "$GRAPHICS" > evidence/vm/host-setup.txt
+          uname -a >> evidence/vm/host-setup.txt
+          lscpu > evidence/vm/host-cpu.txt
+          free -m >> evidence/vm/host-setup.txt
+          df -Th /home/runner /tmp >> evidence/vm/host-setup.txt
+
+      - name: Wait for a complete GDM login session
+        run: |
+          set -u
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          ready=0
+          for i in $(seq 1 90); do
+            if timeout 12 ssh "${ssh_opts[@]}" probe@127.0.0.1 'cloud-init status --wait >/dev/null 2>&1 && systemctl is-active --quiet gdm3 && loginctl list-sessions --no-legend | grep -q probe && find /run/user/$(id -u) -maxdepth 1 -type s -name "wayland-*" | grep -q .' >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 20
+          done
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'uname -a; cloud-init status; systemctl status gdm3 --no-pager; loginctl list-sessions; ls -la /run/user/$(id -u)/wayland-* 2>&1' > evidence/vm/guest-session.txt 2>&1 || true
+          printf 'GDM_SESSION_READY=%s\n' "$ready" | tee -a evidence/vm/guest-session.txt
+          if [ "$ready" != 1 ]; then
+            printf 'screendump %s\n' "$GITHUB_WORKSPACE/evidence/vm/setup.ppm" | timeout 8 sudo socat - UNIX-CONNECT:/tmp/localsend-vm/monitor || true
+            exit 1
+          fi
+          timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'lscpu' > evidence/vm/guest-cpu.txt
+          grep -q 'GenuineIntel' evidence/vm/guest-cpu.txt
+          grep -q 'Skylake' evidence/vm/guest-cpu.txt
+
+      - name: Install legitimate 1.17 Flatpak and record identities
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 1200 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/install.log 2>&1 <<'GUEST'
+          set -euo pipefail
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.localsend.localsend_app
+          flatpak remote-info --log flathub org.localsend.localsend_app > /tmp/flatpak-history.txt
+          cat /tmp/flatpak-history.txt
+          old_commit=df68d5e6649a894643f4bff68711e52ad86c2f26c93470139f2ff1e2b38e4418
+          sudo flatpak update -y --commit="$old_commit" org.localsend.localsend_app
+          # Deploy the runtime declared by the historical app, without altering its contents.
+          runtime=$(flatpak info --show-runtime org.localsend.localsend_app)
+          sudo flatpak install -y flathub "$runtime"
+          flatpak info org.localsend.localsend_app
+          flatpak info org.localsend.localsend_app | grep -Eq "Version: +1.17.0"
+          flatpak info --show-metadata org.localsend.localsend_app
+          flatpak info --show-commit org.localsend.localsend_app
+          for ref in $(flatpak list --runtime --columns=ref); do flatpak info "$ref"; done
+          sha256sum "$(flatpak info -l org.localsend.localsend_app)/files/localsend_app"
+          cat /etc/os-release
+          gnome-shell --version
+          flatpak --version
+          lspci -nn
+          loginctl list-sessions
+          GUEST
+
+      - name: Prepare Settings UI automation and preserve its tree
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' <<'GUEST'
+          set -e
+          cat > /home/probe/session-env <<'ENV'
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          export WAYLAND_DISPLAY=$(basename "$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' | head -1)")
+          export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME
+          user_environment=$(systemctl --user show-environment)
+          export DISPLAY=$(printf '%s\n' "$user_environment" | sed -n 's/^DISPLAY=//p' | head -1)
+          export XAUTHORITY=$(printf '%s\n' "$user_environment" | sed -n 's/^XAUTHORITY=//p' | head -1)
+          ENV
+          . /home/probe/session-env
+          gsettings set org.gnome.desktop.session idle-delay 0
+          gsettings set org.gnome.desktop.screensaver lock-enabled false
+          mkdir -p /home/probe/evidence
+          cat > /home/probe/settings-ui.py <<'PY'
+          import pyatspi, time, sys
+          def descendants(obj, depth=0):
+              if depth > 12: return
+              yield obj, depth
+              try:
+                  for child in obj:
+                      yield from descendants(child, depth+1)
+              except Exception: pass
+          nodes=list(descendants(pyatspi.Registry.getDesktop(0)))
+          for obj,d in nodes:
+              try:
+                  print(' '*d+str(obj.getRoleName())+' '+repr(obj.name)+' '+str(obj.getState().getStates()))
+              except Exception: pass
+          if len(sys.argv)==1: sys.exit(0)
+          label=sys.argv[1]
+          candidates=[]
+          for obj,d in nodes:
+              try:
+                  if (obj.name or '').strip().lower()==label.lower(): candidates.append(obj)
+              except Exception: pass
+          for obj in candidates:
+              for target,_ in descendants(obj):
+                  try:
+                      action=target.queryAction()
+                      if action.nActions:
+                          print('UI_ACTION',target.name,target.getRoleName(),action.getName(0),flush=True)
+                          action.doAction(0)
+                          time.sleep(3)
+                          sys.exit(0)
+                  except Exception: pass
+          print('NO_ACTION_FOR',label,flush=True)
+          sys.exit(2)
+          PY
+          nohup gnome-control-center accessibility > /home/probe/evidence/settings.log 2>&1 < /dev/null &
+          GUEST
+          sleep 10
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/settings-initial.png"
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/settings-initial-tree.txt
+          # Navigate the genuine Settings UI. The schema is only read to verify UI action outcomes.
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Seeing' > evidence/vm/seeing-action.txt
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/settings-seeing.png"
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/settings-seeing-tree.txt
+
+      - name: Exercise real Zoom UI and tab input with controls
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          export DISPLAY=:99
+          qemu_window=$(xdotool search --onlyvisible --class qemu | head -1)
+          xdotool windowfocus "$qemu_window"
+          ffmpeg -y -f x11grab -video_size 1280x800 -framerate 10 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p evidence/vm/zoom-ui.mp4 > evidence/vm/video.log 2>&1 &
+          video_pid=$!
+          trap 'kill -INT "$video_pid" 2>/dev/null || true' EXIT
+          cat > /tmp/localsend-vm/click-text <<'CLICK'
+          #!/bin/bash
+          set -euo pipefail
+          word=$1; name=$2
+          /tmp/localsend-vm/capture "$name-before.png"
+          tesseract "$name-before.png" "$name-ocr" tsv >/dev/null 2>&1
+          point=$(awk -F '\t' -v w="$word" '$12==w && $11>40 {printf "%d %d",$7+$9/2,$8+$10/2; exit}' "$name-ocr.tsv")
+          test -n "$point"
+          printf '%s target=%s point=%s\n' "$(date -u +%FT%T.%N)" "$word" "$point" >> "$GITHUB_WORKSPACE/evidence/vm/input-timing.txt"
+          read -r x y <<< "$point"
+          DISPLAY=:99 xdotool mousemove "$x" "$y" click 1
+          sleep 3
+          /tmp/localsend-vm/capture "$name-after.png"
+          CLICK
+          chmod +x /tmp/localsend-vm/click-text
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; nohup flatpak run org.localsend.localsend_app > /home/probe/evidence/localsend.log 2>&1 < /dev/null &' > evidence/vm/zoom-off-start.txt
+          sleep 25
+          xdotool key alt+F10
+          sleep 3
+          /tmp/localsend-vm/click-text Send "$GITHUB_WORKSPACE/evidence/vm/control-off-send"
+          /tmp/localsend-vm/click-text Receive "$GITHUB_WORKSPACE/evidence/vm/control-off-receive"
+          # Return to Settings, activate its Zoom action, and verify the actual GNOME state.
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gnome-control-center accessibility' > evidence/vm/settings-present.log 2>&1 &
+          sleep 5
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Zoom; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-action.txt
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/zoom-action.png"
+          # A Zoom row may open a subpage; if so, use the Zoom switch on that subpage.
+          if ! tail -1 evidence/vm/zoom-action.txt | grep -q true; then
+            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py Zoom; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-switch-action.txt
+          fi
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled' > evidence/vm/zoom-confirmed.txt
+          grep -q true evidence/vm/zoom-confirmed.txt
+          xdotool key alt+Tab
+          sleep 3
+          for repeat in 1 2 3; do
+            /tmp/localsend-vm/click-text Send "$GITHUB_WORKSPACE/evidence/vm/zoom-on-$repeat-send" || true
+            /tmp/localsend-vm/click-text Receive "$GITHUB_WORKSPACE/evidence/vm/zoom-on-$repeat-receive" || true
+            timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 'date -u; ps -eLo pid,tid,stat,pcpu,wchan:30,comm | grep -E "localsend|gnome-shell"; cat /home/probe/evidence/localsend.log' > "evidence/vm/zoom-on-$repeat-state.txt"
+          done
+          sleep 10
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/zoom-on-final.png"
+          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'app_pid=$(pgrep -n -x localsend || true); if [ -n "$app_pid" ]; then sudo gdb -q -batch -p "$app_pid" -ex "thread apply all bt 16"; fi' > evidence/vm/zoom-on-backtrace.txt 2>&1 || true
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' > evidence/vm/calculator-start.txt
+          sleep 5
+          xdotool type --clearmodifiers '2+3'
+          xdotool key Return
+          sleep 3
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/calculator-zoom-on.png"
+          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; python3 /home/probe/settings-ui.py' > evidence/vm/calculator-tree.txt
+          kill -INT "$video_pid"
+          wait "$video_pid" || true
+          trap - EXIT
+
+      - name: Collect session diagnostics and identities
+        if: always()
+        run: |
+          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
+          timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'journalctl --user -b --no-pager; sudo journalctl -b -p warning --no-pager' > evidence/vm/session-journal.txt 2>&1 || true
+          timeout 30 scp "${ssh_opts[@]/-p/-P}" -r probe@127.0.0.1:/home/probe/evidence evidence/vm/guest-files || true
+          /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/final.png" || true
+          sudo chown -R "$(id -u):$(id -g)" evidence/vm
+          chmod -R a+rX evidence/vm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gnome-zoom-3161-evidence
+          path: evidence/vm/
