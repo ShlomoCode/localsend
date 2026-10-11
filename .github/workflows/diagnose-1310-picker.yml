@@ -17,13 +17,17 @@ on:
       capture_picker:
         type: boolean
         default: false
+      sender_runtime:
+        type: choice
+        default: xfce-extracted
+        options: [xfce-extracted, gnome-fuse]
 concurrency:
   group: issue402-diagnostic
   cancel-in-progress: false
 jobs:
   desktop:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Prepare unchanged historical release desktops
@@ -33,6 +37,7 @@ jobs:
           docker build --build-arg PICKER_BACKEND=${{ inputs.picker_backend || 'zenity' }} --build-arg APP_VERSION=${{ inputs.app_version || '1.8.0' }} -f support/diagnostics/402-desktop.Dockerfile -t issue402-desktop .
           docker network create --subnet 172.29.40.0/24 issue402-net
       - name: Select and transfer through actual applications
+        if: inputs.sender_runtime != 'gnome-fuse'
         run: |
           docker run -d --name issue402-receiver --network issue402-net -e ROLE=receiver -v "$PWD/evidence/cloud:/evidence" issue402-desktop
           docker run -d --name issue402-sender --network issue402-net -e ROLE=sender -e CAPTURE_PICKER=${{ inputs.capture_picker }} -e SELECTION_MODE=${{ inputs.selection_mode || 'path' }} -v "$PWD/evidence/cloud:/evidence" issue402-desktop
@@ -43,6 +48,30 @@ jobs:
             tail -n 60 "evidence/cloud/$name.log"
             test "$status" = 0 || result=1
           done
+          exit "$result"
+      - name: Native GNOME Xorg sender and ordinary AppImage FUSE
+        if: inputs.sender_runtime == 'gnome-fuse'
+        run: |
+          test '${{ inputs.app_version }}' = '1.8.0'
+          test '${{ inputs.picker_backend }}' = zenity
+          test '${{ inputs.selection_mode }}' = path
+          test '${{ inputs.capture_picker }}' = false
+          bash support/diagnostics/402-gnome-vm.sh > evidence/cloud/gnome-host.log 2>&1 &
+          vm_pid=$!
+          while [ ! -e evidence/cloud/gnome-ready ]; do
+            if ! kill -0 "$vm_pid" 2>/dev/null; then
+              wait "$vm_pid"
+              exit 1
+            fi
+            sleep 5
+          done
+          docker run -d --name issue402-receiver --network issue402-net -p 127.0.0.1:53317:53317 -e ROLE=receiver -e RECEIVER_LIFETIME=900 -v "$PWD/evidence/cloud:/evidence" issue402-desktop
+          result=0
+          wait "$vm_pid" || result=1
+          status=$(timeout 120 docker wait issue402-receiver) || status=124
+          docker logs issue402-receiver > evidence/cloud/issue402-receiver.log 2>&1
+          tail -n 60 evidence/cloud/gnome-scenario.log || true
+          test "$status" = 0 || result=1
           exit "$result"
       - name: Preserve readable diagnostic evidence on every outcome
         if: always()

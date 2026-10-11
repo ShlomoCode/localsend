@@ -36,7 +36,7 @@ def snapshot(name):
 
 
 def click(label, name, optional=False):
-    if label in ('Accept', 'Done') or label.endswith('.txt'):
+    if label in ('Accept', 'Done', 'Confirm') or label.endswith('.txt'):
         matches = []
         def visit(node, depth=0):
             if depth > 18:
@@ -237,7 +237,7 @@ else:
                 raise RuntimeError('No actual saved-file receipt after GUI send: ' + case)
             snapshot(case + '-transfer')
             app.terminate()
-            command('pkill', '-f', '/home/probe/squashfs-root/usr/bin/localsend_app')
+            command('pkill', '-x', 'localsend_app')
             time.sleep(4)
     finally:
         (out / 'done').touch()
