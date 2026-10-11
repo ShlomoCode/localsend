@@ -118,7 +118,10 @@ def favorites():
     result = [json.loads(s) if isinstance(s, str) else s for s in stored.get('flutter.ls_favorites', [])]
     return result
 
-for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '/tmp/current1840/app')]:
+stages = [('historical117', '/tmp/release1840'), ('currentc1ce', '/tmp/current1840/app')]
+if pathlib.Path('/tmp/candidate1840/app').exists():
+    stages.append(('candidate', '/tmp/candidate1840/app'))
+for stage, location in stages:
     out = root/stage
     out.mkdir()
     executable = next(pathlib.Path(location).rglob('localsend_app'))
@@ -208,6 +211,10 @@ for stage, location in [('historical117', '/tmp/release1840'), ('currentc1ce', '
             (out/('edit-'+str(index)+'-saved.json')).write_text(json.dumps(saved, indent=2))
             if saved[0]['alias'] != new_alias:
                 raise RuntimeError('Confirm did not persist requested alias')
+            if stage=='candidate' and still_open:
+                raise RuntimeError('Candidate still retains edit modal after saving')
+            if stage!='candidate' and not still_open:
+                raise RuntimeError('Untouched baseline did not reproduce expected retained edit modal')
             if still_open:
                 click_word(confirmed, 'Cancel')
             rows = snap('edit-'+str(index)+'-reopened-list')
