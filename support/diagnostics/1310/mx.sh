@@ -35,6 +35,6 @@ sleep 3
 vncdo -s localhost::5900 type demo key enter
 sleep 3
 vncdo -s localhost::5900 capture evidence/mx/ssh-start.png
-sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'id; cat /etc/os-release; command -v xdotool; command -v scrot; command -v tesseract'
+sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'id; cat /etc/os-release; command -v xdotool || true; command -v scrot || true; command -v tesseract || true'
 sshpass -p demo scp -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" support/diagnostics/1310/mx-guest.sh support/diagnostics/1310/actions.sh demo@127.0.0.1:/home/demo/
 timeout 1200 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'bash /home/demo/mx-guest.sh' | tee evidence/mx/scenario.log

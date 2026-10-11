@@ -48,7 +48,7 @@ for version in 1.14.0 1.18.2; do
   snapshot "$version-after-text"
   xdotool key Escape
   sleep 2
-  { systemctl --user status xdg-desktop-portal xdg-desktop-portal-gtk --no-pager || true; journalctl --user -u xdg-desktop-portal -u xdg-desktop-portal-gtk --no-pager; } > "evidence/$version-portal-state.txt"
+  { systemctl --user status xdg-desktop-portal xdg-desktop-portal-gtk --no-pager || true; journalctl --user -u xdg-desktop-portal -u xdg-desktop-portal-gtk --no-pager || true; busctl --user list || true; } > "evidence/$version-portal-state.txt"
   kill "$pid"
   sleep 3
 done
