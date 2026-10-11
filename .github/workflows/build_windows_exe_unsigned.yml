@@ -23,7 +23,9 @@ jobs:
             Add-AppxPackage "$bootstrap/vclibs.appx"
             Add-AppxPackage "$bootstrap/xaml/tools/AppX/x64/Release/Microsoft.UI.Xaml.2.8.appx"
             Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.8.1911/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile "$bootstrap/winget.msixbundle"
+            Invoke-WebRequest 'https://github.com/microsoft/winget-cli/releases/download/v1.8.1911/76fba573f02545629706ab99170237bc_License1.xml' -OutFile "$bootstrap/license.xml"
             Get-ChildItem $bootstrap -File | Get-FileHash | ConvertTo-Json | Set-Content evidence/cloud/bootstrap-hashes.json
+            Add-AppxProvisionedPackage -Online -PackagePath "$bootstrap/winget.msixbundle" -LicensePath "$bootstrap/license.xml" -DependencyPackagePath @("$bootstrap/vclibs.appx", "$bootstrap/xaml/tools/AppX/x64/Release/Microsoft.UI.Xaml.2.8.appx")
             Add-AppxPackage "$bootstrap/winget.msixbundle"
           }
       - name: Measure original release upgrade

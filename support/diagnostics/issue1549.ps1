@@ -98,8 +98,8 @@ function Upgrade($name,$route,$running) {
   if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'Baseline app failed to create its real window' }
  }
  Snapshot "$name-before"
- if ($route -eq 'source') { $args = @('upgrade','--id','LocalSend.LocalSend','--exact','--version','1.15.1','--source','winget','--scope','machine','--architecture','x64','--silent','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
- else { $args = @('upgrade','--manifest',"`"$manifest`"",'--scope','machine','--architecture','x64','--silent','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
+ if ($route -eq 'source') { $args = @('upgrade','--id','LocalSend.LocalSend','--exact','--version','1.15.1','--source','winget','--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
+ else { $args = @('upgrade','--manifest',"`"$manifest`"",'--scope','machine','--architecture','x64','--accept-package-agreements','--accept-source-agreements','--disable-interactivity') }
  $start = Get-Date
  $up = Start-Process $wgPath -ArgumentList $args -PassThru -RedirectStandardOutput "$ev/$name-winget-upgrade.txt" -RedirectStandardError "$ev/$name-winget-error.txt"
  $timeline = @()
