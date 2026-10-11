@@ -35,7 +35,7 @@ done
 phase=apt-update
 timeout 240 apt-get update
 phase=ssh-install
-timeout 240 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
+timeout 600 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
 phase=ssh-start
 systemctl start ssh
 systemctl show ssh -p ActiveState -p SubState
@@ -77,31 +77,39 @@ sleep 3
 printf "screendump %s/evidence/cloud/terminal-checkpoint.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor > evidence/cloud/checkpoint-monitor.log
 opts=(-i /tmp/issue2754-mint/id -p 2275 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known -o ConnectTimeout=5)
 ready=0
-for n in $(seq 1 30); do
+for n in $(seq 1 50); do
  date -u '+%FT%TZ' >> evidence/cloud/readiness.log
  if timeout 10 ssh "${opts[@]}" mint@127.0.0.1 "test -f /home/mint/evidence/bootstrap-complete && pgrep -x cinnamon" >> evidence/cloud/readiness.log 2>&1; then ready=1; break; fi
- if grep -Eq 'BOOTSTRAP_EXIT.*status=[1-9]' evidence/cloud/serial.log; then break; fi
+ if sudo grep -Eq 'BOOTSTRAP_EXIT.*status=[1-9]' evidence/cloud/serial.log; then break; fi
  sleep 15
 done
 printf "screendump %s/evidence/cloud/bootstrap.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor
 sudo chown -R "$(id -u):$(id -g)" evidence/cloud
 if [ "$ready" != 1 ]; then exit 1; fi
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
-sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace
-curl -fL https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
+timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace
+curl -fL --connect-timeout 20 --max-time 180 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
 sha256sum /tmp/localsend.deb > evidence/release-sha256.txt
-sudo apt-get install -y /tmp/localsend.deb
+timeout 120 sudo apt-get install -y /tmp/localsend.deb
 export DISPLAY=:0 XAUTHORITY=/home/mint/.Xauthority XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
 uname -a > evidence/environment.txt
 cat /etc/os-release >> evidence/environment.txt
 cinnamon --version >> evidence/environment.txt
-dpkg-query -W cinnamon cinnamon-settings-daemon caribou >> evidence/environment.txt || true
+dpkg-query -W cinnamon cinnamon-settings-daemon caribou libgtk-3-0t64 libatk1.0-0t64 libatspi2.0-0t64 dbus >> evidence/environment.txt || true
 loginctl list-sessions >> evidence/environment.txt
 xrandr >> evidence/environment.txt
+echo UI_PROVISION_READY
+GUEST
+status=$?
+if [ "$status" = 0 ]; then
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+set -euo pipefail
+cd /home/mint
+export DISPLAY=:0 XAUTHORITY=/home/mint/.Xauthority XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
 screen_size=$(xrandr | sed -n "s/.*current \([0-9]*\) x \([0-9]*\),.*/\1x\2/p")
 ffmpeg -y -f x11grab -framerate 10 -video_size "$screen_size" -i :0 -c:v libx264 -preset ultrafast evidence/scenario.mp4 > evidence/video.log 2>&1 &
 video_pid=$!
@@ -114,6 +122,7 @@ sudo journalctl -b --no-pager > evidence/journal.txt
 exit "$status"
 GUEST
 status=$?
+fi
 set -e
 scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known mint@127.0.0.1:/home/mint/evidence evidence/cloud/guest || true
 exit "$status"
