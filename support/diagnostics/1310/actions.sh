@@ -38,6 +38,21 @@ for version in 1.14.0 1.18.2; do
   sleep 7
   snapshot "$version-after-file"
   wait "$video"
+  # Exercise a real choice through the native dialog, then retain the app's
+  # selected-file state. Merely seeing a dialog is a narrower control.
+  mkdir -p payload
+  printf 'Issue 1310 real file selection control\n' > payload/control.txt
+  sha256sum payload/control.txt >> evidence/payload-sha256.txt
+  xdotool key ctrl+l
+  xdotool type --clearmodifiers --delay 30 "$(pwd)/payload/control.txt"
+  xdotool key Return
+  sleep 2
+  snapshot "$version-file-selected"
+  if ! awk -F '\t' '$12=="control.txt"{found=1}END{exit !found}' "evidence/$version-file-selected.tsv"; then
+    xdotool key Return
+    sleep 2
+    snapshot "$version-file-selected-confirmed"
+  fi
   xdotool key Escape
   sleep 2
   click_label "$version-before-folder" Folder
