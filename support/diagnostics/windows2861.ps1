@@ -133,10 +133,10 @@ foreach($version in $Versions) {foreach($locale in $Locales) {
     $pickerElements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     $pickerElements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-folder-picker-navigated-uia.json"
     Capture "$name-folder-picker-navigated"
-    $choose=$pickerElements|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -match '^(Select Folder|Choose Folder|Select)$' -and $_.Current.IsEnabled}|Select-Object -First 1
+    $choose=$pickerElements|Where-Object{$_.Current.ControlType -ne [System.Windows.Automation.ControlType]::Window -and $_.Current.Name -eq 'Select Folder' -and $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.IsEnabled}|Select-Object -First 1
     if(!$choose){throw 'Native folder selection button not observed'}
-    $script:inputs+=@{action='Invoke observed native folder selection button';name=$choose.Current.Name;utc=[DateTime]::UtcNow.ToString('o')}
-    ([System.Windows.Automation.InvokePattern]$choose.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    $bounds=$choose.Current.BoundingRectangle
+    Click ([int]($bounds.X+$bounds.Width/2)) ([int]($bounds.Y+$bounds.Height/2)) 'Observed Select Folder pane at native button bounds'
     Start-Sleep -Seconds 3
     Capture "$name-long-folder-selected"
     Copy-Item "$appdir/settings.json" "$EvidenceDirectory/$name-long-folder-selected-profile.json"

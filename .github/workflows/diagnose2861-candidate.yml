@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: 8e9a13d8675237bba2b93efe456c1f202bd2d12f
+          ref: 1093babb68bbf2efda8a682d97481ac3c89745bf
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.41.9
