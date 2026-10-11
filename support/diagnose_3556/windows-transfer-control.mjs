@@ -26,7 +26,7 @@ const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
  requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
  release:process.env.ALIAS_BASELINE_APK?'current-c1ce322':'1.17.0',scenario:'Actual Android confirmed alias, Receive, Windows registration, server Stop/Start and relaunch',
- boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','One control cannot establish sustained 16GB throughput or behavior'],
+ boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','Alias discovery observations only; no file transfer is performed'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
 let sessionCreationAttempted=false;
@@ -322,12 +322,12 @@ async function renameAlias(value){
 async function refreshRegistration(label){
  await click('Send\nTab 2 of 3');await click('Favorites');
  const xml=await snap(label+'-favorites');
- const edit=nodes(xml).filter(n=>n.class==='android.widget.Button'&&!n['content-desc']&&n.enabled==='true');
- assert.equal(edit.length,1,'Favorite editor button must be uniquely observed');
- const b=edit[0].bounds.match(/\d+/g).map(Number);await touch({x:b[0],y:b[1],width:b[2]-b[0],height:b[3]-b[1]},'Observed favorite Edit button');
- await snap(label+'-edit');const before=r.status();await click('Confirm');
- await waitFor(s=>labels(s).some(v=>v.includes('issue3556-cloud-receiver'))&&nodes(s).filter(n=>n.class==='android.widget.EditText').length===0&&r.status().opened>before.opened,60000,'Actual peer registration refresh failed');
- await snap(label+'-registered');save(label+'-transport.json',{utc:new Date().toISOString(),before,after:r.status()});await peerObserve(label);await click('Cancel');
+
+ const before=r.status();
+ await tap('-android uiautomator','new UiSelector().descriptionContains("issue3556-cloud-receiver")');
+ await waitFor(s=>!labels(s).includes('Add')&&r.status().opened>before.opened,60000,'Actual favorite connection refresh failed');
+ await snap(label+'-registered');save(label+'-transport.json',{utc:new Date().toISOString(),before,after:r.status()});await peerObserve(label);
+
 }
 async function restartServer(){
  await click('Settings\nTab 3 of 3');for(let i=0;i<2;i++)await wd('POST',base()+'/execute/sync',{script:'mobile: scrollGesture',args:[{left:60,top:350,width:900,height:1500,direction:'down',percent:0.7}]});
