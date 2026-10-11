@@ -10,6 +10,8 @@ public static class Desktop2861 {
  [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string form;
  public ushort logPixels;public uint bits,width,height,flags,frequency,icmMethod,icmIntent,mediaType,dither,reserved1,reserved2,panningWidth,panningHeight;
  }
+ public static DevMode NewMode() { return new DevMode { size=(ushort)Marshal.SizeOf(typeof(DevMode)), extra=0 }; }
+ public static string ModeLayout() { return "size="+Marshal.SizeOf(typeof(DevMode))+",dmSize="+Marshal.OffsetOf(typeof(DevMode),"size")+",fields="+Marshal.OffsetOf(typeof(DevMode),"fields")+",width="+Marshal.OffsetOf(typeof(DevMode),"width")+",height="+Marshal.OffsetOf(typeof(DevMode),"height"); }
  [DllImport("user32.dll",EntryPoint="EnumDisplaySettingsW",ExactSpelling=true,SetLastError=true)] public static extern bool EnumDisplaySettings(string device,int mode,ref DevMode d);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DevMode d,int flags);
  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left,top,right,bottom; }
@@ -25,10 +27,8 @@ public static class Desktop2861 {
 New-Item -ItemType Directory -Force $EvidenceDirectory|Out-Null
 Start-Transcript "$EvidenceDirectory/transcript.txt"
 # Prepare only this disposable cloud desktop before launching any application.
-New-Item 'HKLM:/SOFTWARE/Policies/Microsoft/Windows/OOBE' -Force|Out-Null
-Set-ItemProperty 'HKLM:/SOFTWARE/Policies/Microsoft/Windows/OOBE' DisablePrivacyExperience 1
-Get-Process CloudExperienceHost,CloudExperienceHostBroker,UserOOBEBroker,WWAHost -ErrorAction SilentlyContinue|Stop-Process -Force
-$mode=New-Object Desktop2861+DevMode;$mode.size=[Runtime.InteropServices.Marshal]::SizeOf($mode)
+$mode=[Desktop2861]::NewMode()
+[Desktop2861]::ModeLayout()|Set-Content "$EvidenceDirectory/mode-layout.txt"
 $enumResult=[Desktop2861]::EnumDisplaySettings($null,-1,[ref]$mode)
 @{size=$mode.size;enum=$enumResult;error=[Runtime.InteropServices.Marshal]::GetLastWin32Error();processSession=(Get-Process -Id $PID).SessionId;video=@(Get-CimInstance Win32_VideoController|Select-Object Name,CurrentHorizontalResolution,CurrentVerticalResolution)}|ConvertTo-Json -Depth 5|Set-Content "$EvidenceDirectory/display-enumeration.json"
 if($enumResult) {
@@ -39,6 +39,7 @@ if($enumResult) {
 Start-Sleep -Seconds 3
 $desktop=[System.Windows.Automation.AutomationElement]::RootElement
 for($attempt=0;$attempt -lt 8;$attempt++) {
+ $setupBmp=New-Object System.Drawing.Bitmap(1920,1080);$setupG=[System.Drawing.Graphics]::FromImage($setupBmp);$setupG.CopyFromScreen(0,0,0,0,$setupBmp.Size);$setupBmp.Save("$EvidenceDirectory/setup-$attempt.png",[System.Drawing.Imaging.ImageFormat]::Png);$setupG.Dispose();$setupBmp.Dispose()
  $elements=$desktop.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
  $elements|ForEach-Object{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle.ToString()}}|ConvertTo-Json|Set-Content "$EvidenceDirectory/setup-uia-$attempt.json"
  $ok=$elements|Where-Object{$_.Current.Name -eq 'OK' -and !$_.Current.IsOffscreen}|Select-Object -First 1
@@ -49,6 +50,7 @@ for($attempt=0;$attempt -lt 8;$attempt++) {
  Start-Sleep -Seconds 1
 }
 [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')
+if([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width -lt 1215){throw 'Desktop smaller than original screenshot; do not run report scenario'}
 $script:inputs=@()
 function Capture([string]$name) {
  $bmp=New-Object System.Drawing.Bitmap(1215,738);$g=[System.Drawing.Graphics]::FromImage($bmp)
