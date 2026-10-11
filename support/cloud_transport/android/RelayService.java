@@ -17,7 +17,7 @@ public final class RelayService extends Service {
   private volatile String lifecycle="starting",lastFailure="";
   private volatile HttpURLConnection pullConnection;
   private volatile Thread pullThread;
-  private int ownedStartId;
+  private volatile int ownedStartId;
   private String endpoint,token,transport="legacy";
   private final String instance=java.util.UUID.randomUUID().toString().replace("-","").substring(0,8);
   private final ConcurrentHashMap<String,HttpURLConnection> uploads=new ConcurrentHashMap<>();
@@ -55,8 +55,9 @@ public final class RelayService extends Service {
   private void trace(String origin,String id){Log.i("CloudTransport","elapsedNs="+SystemClock.elapsedRealtimeNanos()+" origin="+origin+" peer="+id);}
   public IBinder onBind(Intent intent){return null;}
   public int onStartCommand(Intent intent,int flags,int id){
-    if(running||destroying)return START_NOT_STICKY;
+    // Android advances the start ID even when this instance ignores a duplicate start.
     ownedStartId=id;
+    if(running||destroying)return START_NOT_STICKY;
     NotificationManager nm=getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel("relay","Cloud transport",NotificationManager.IMPORTANCE_LOW));
     startForeground(1,new Notification.Builder(this,"relay").setSmallIcon(android.R.drawable.stat_sys_upload).setContentTitle("LocalSend cloud transport").setContentText("Diagnostic relay active").build());
