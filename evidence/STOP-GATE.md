@@ -22,6 +22,10 @@ Infrastructure runs are recorded separately in EXPERIMENTS.md and are not counte
 
 The release and packaging of the original report were unspecified. v1.8.0 was the last official release before the report; v1.7.0 was its predecessor. Both used file_picker 5.2.5. The source follows valid file symlinks when calculating size. Raw native picker stdout captures preserve the original symlink path; accessible links were never made dangling or denied.
 
+These are legitimate configurations and interactions, not eleven independent environments. Most conditions share the XFCE container and ordinary payload; E6 supplies native GNOME/FUSE coverage. The supported qarma backend was not tested and was not identified in the report.
+
+The December 2024 macOS claim remains unversioned and untested. The October 2025 directory-symlink omission is a distinct traversal scenario. Non-reproduction of the original Ubuntu file-picker case does not resolve either later claim. Independent quality review of all 30 files in E1–E10 and deeper E6/E9/E10 evidence is preserved in QUALITY-REVIEW.md; E11 was verified separately by the owning agent.
+
 The original file-picker problem was not substituted with the later directory-symlink omission. No LocalSend application, build, test or reproduction ran locally. All application scenarios ran in serialized cloud jobs against unchanged official releases. No production patch or PR exists, and no historical commit is claimed to fix issue 402. An independent reviewer challenged source and environment assumptions.
 
 No workload is active. Parent has requested an independent quality review of E6/E9/E10 against the original report; no further workload will start during that gate. Parent owns the stop decision. Current evidence supports non-reproduction in the tested conditions; it does not establish the cause of the original report or justify a speculative production fix.
