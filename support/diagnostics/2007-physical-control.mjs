@@ -49,19 +49,25 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await snapshot(stage+'-native-documents');
   await click('xpath','//*[@text="Use this folder" or @text="USE THIS FOLDER"]');
   await snapshot(stage+'-native-permission');
-  const permissionPromptObserved=/text="(?:Allow|ALLOW)"/.test(readFileSync(`evidence/android-${stage}-native-permission.xml`,'utf8'));
-  if(permissionPromptObserved)await click('xpath','//*[@text="Allow" or @text="ALLOW"]');
+  let permissionPromptObserved=/text="(?:Allow|ALLOW)"/.test(readFileSync(`evidence/android-${stage}-native-permission.xml`,'utf8'));
+  let permissionAccepted=false;
+  if(permissionPromptObserved){await click('xpath','//*[@text="Allow" or @text="ALLOW"]');permissionAccepted=true;}
   let selected;
   const selectionDeadline=Date.now()+10000;
   let selectionAttempt=0;
   do{
    await snapshot(stage+'-selected-directory-'+selectionAttempt);
    selected=readFileSync(`evidence/android-${stage}-selected-directory-${selectionAttempt++}.xml`,'utf8');
+   if(!permissionAccepted&&/text="(?:Allow|ALLOW)"/.test(selected)){
+    permissionPromptObserved=true;
+    await click('xpath','//*[@text="Allow" or @text="ALLOW"]');
+    permissionAccepted=true;
+   }
    if(selected.includes('/storage/emulated/0/Documents')||selected.includes('primary%3ADocuments')||selected.includes('primary:Documents'))break;
    await new Promise(r=>setTimeout(r,200));
   }while(Date.now()<selectionDeadline);
   assert(selected.includes('/storage/emulated/0/Documents')||selected.includes('primary%3ADocuments')||selected.includes('primary:Documents'),'Selected Documents destination not observed');
-  writeFileSync(`evidence/${stage}-saf-selection.json`,JSON.stringify({actualNativePicker:true,permissionPromptObserved,permissionAccepted:permissionPromptObserved,selectedDocumentsObserved:true,physicalPath:deviceFolder,source:`android-${stage}-selected-directory-${selectionAttempt-1}.xml`,apiBasis:'Official 1.17 source selects pickDirectoryPathAndroid on SDK27+ and SafStream for content URI. Native Documents selection observed, not inferred from path alone.'},null,2));
+  writeFileSync(`evidence/${stage}-saf-selection.json`,JSON.stringify({actualNativePicker:true,permissionPromptObserved,permissionAccepted,selectedDocumentsObserved:true,physicalPath:deviceFolder,source:`android-${stage}-selected-directory-${selectionAttempt-1}.xml`,apiBasis:'Official 1.17 source selects pickDirectoryPathAndroid on SDK27+ and SafStream for content URI. Native Documents selection observed, not inferred from path alone.'},null,2));
   await wd('POST',prefix+'/back',{});
  }
  async function waitFile(file,ms){
