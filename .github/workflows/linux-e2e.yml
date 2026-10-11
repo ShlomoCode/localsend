@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           cp support/diagnostics/3546/tray_identity_test.dart source/app/test/tray_identity_3546_test.dart
           cd source
-          flutter pub get
+          flutter pub get --enforce-lockfile
           cd app
           flutter test test/tray_identity_3546_test.dart 2>&1 | tee ../../api-results.txt
       - uses: actions/upload-artifact@v6
