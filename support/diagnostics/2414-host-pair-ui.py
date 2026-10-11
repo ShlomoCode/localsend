@@ -54,6 +54,9 @@ def screen(side, stage):
     (OUT / (stage + "-timing.json")).write_text(json.dumps({"clock": side + " monotonic", **timing}))
     words = list(csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE))
     for word in words:
+        # Blank frames have a page row without text. Stripping command output
+        # removes its final empty TSV field; normalize it to a harmless no-match.
+        word["text"] = word.get("text") or ""
         for key in ("left", "top", "width", "height"):
             word[key] = int(word[key]) // 2
     return words, timing

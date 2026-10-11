@@ -17,3 +17,4 @@ E14	5000 ordinaryfiles	real selection→send→Options	Optionsvisible3.765s, RSS
 E15	normalizedreceiverapproval	5000Options→realAccept→save	Options5.483s;507savedin180s;continuedprogressatteardown;saveintervalshort	38107835899	yes-partial-transfer
 E16	external sender; ordinary 2CPU/2GiB receiver guest	5-file control then 5000 Options/input/save	238 evidence files existed; upload failed EACCES on root-owned QEMU serial.log; raw lost; no product result	38108292337	no-retained-raw
 E17	same external sender and 2CPU/2GiB receiver	5-file control then 5000 Options/Back checkpoint beforeAccept	Options visible5.502s; Back<=1.805s; RSS258.8to1100.3MiB; noOOM;5000namesandhashesverified;bothFinished	38111506442	yes-complete-transfer
+E18	same2CPU/2GiB real receiver	5/5000 Options wheel/editor draft/Cancel thenBack	first readiness frame empty; missing TSV text caused NoneType crash before folder selection; probes never started	38113631059	no-infrastructure

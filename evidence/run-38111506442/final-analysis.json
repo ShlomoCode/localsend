@@ -1,0 +1,201 @@
+{
+  "scope": "Analysis of original released LocalSend 1.17 on Ubuntu 24.04 x64 with two vCPU and nominal 2 GiB RAM; no application execution or source changes.",
+  "artifactSha256": "6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81  released/baseline.tar.gz",
+  "results": [
+    {
+      "count": 5,
+      "failure": null,
+      "classification": "completed-real-app-transfer",
+      "options_click_guest_monotonic": 82.491395484,
+      "options_first_observed_screenshot_guest_monotonic": 83.494738914,
+      "options_first_observed_seconds": 1.003343430000001,
+      "options_assertion_seconds_including_ocr": 2.2526092059999883,
+      "timing_note": "First matching screenshot capture completion, including SSH input/capture overhead; not isolated paint latency.",
+      "back_first_observed_seconds": 3.0079036599999966,
+      "saved_files": 5,
+      "verified_complete_files": 5,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 93.828760091,
+      "content_valid": true
+    },
+    {
+      "count": 5000,
+      "failure": null,
+      "classification": "completed-real-app-transfer",
+      "options_click_guest_monotonic": 122.143341434,
+      "options_first_observed_screenshot_guest_monotonic": 127.64510764,
+      "options_first_observed_seconds": 5.501766205999999,
+      "options_assertion_seconds_including_ocr": 7.058291784000005,
+      "timing_note": "First matching screenshot capture completion, including SSH input/capture overhead; not isolated paint latency.",
+      "back_first_observed_seconds": 2.97440394100002,
+      "kernel_at_options": {
+        "guest_monotonic": 135.8987196,
+        "kernel_oom_related_line_count": 0,
+        "kernel_note": "Inspect retained kernel journal; a text match alone does not establish product causality."
+      },
+      "saved_files": 5000,
+      "verified_complete_files": 5000,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 2052.890086805,
+      "content_valid": true
+    }
+  ],
+  "saveProgress": {
+    "source": "final/files-5000-save-progress.jsonl",
+    "samples": 184,
+    "first": {
+      "host_monotonic": 285.203899959,
+      "saved_files": 22,
+      "verified_complete_files": 22,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 152.037076466,
+      "content_valid": false
+    },
+    "last": {
+      "host_monotonic": 2186.052475931,
+      "saved_files": 5000,
+      "verified_complete_files": 5000,
+      "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+      "guest_monotonic": 2052.890086805,
+      "content_valid": true
+    },
+    "elapsedGuestSeconds": 1900.853010339,
+    "elapsedHostSeconds": 1900.8485759720002,
+    "savedCountMonotonic": true,
+    "verifiedCountMonotonic": true,
+    "allSamplesSavedEqualsVerified": false,
+    "intervalsWithNoSavedIncrease": [],
+    "largestSamplingGap": {
+      "from": 152.037076466,
+      "to": 162.829056476,
+      "seconds": 10.791980010000003,
+      "savedDelta": 42,
+      "verifiedDelta": 42
+    },
+    "smallestSavedIncrease": 1,
+    "largestSavedIncrease": 42,
+    "distinctExpectedHashes": [
+      "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb"
+    ],
+    "averageFilesPerSecondAcrossObservedProgress": 2.6188242714844208,
+    "verificationMeaning": "verify enumerates saved regular files, then hashes them individually while the transfer continues. Final content_valid requires exactly the expected file-00000.txt through file-04999.txt name set and all 5000 content hashes. Interim content_valid=false indicates an incomplete final criterion. Samples with one saved file not yet hash verified may observe the current file while being written; they do not establish persistent content corruption.",
+    "samplesWithSavedNotYetHashVerified": [
+      {
+        "host_monotonic": 575.45522755,
+        "saved_files": 1035,
+        "verified_complete_files": 1034,
+        "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+        "guest_monotonic": 442.290789836,
+        "content_valid": false
+      },
+      {
+        "host_monotonic": 793.314219955,
+        "saved_files": 1706,
+        "verified_complete_files": 1705,
+        "expected_content_sha256": "6632a5e5b167e55fdbbb9e3ad38fd7ff042e66b620a00fb744b0d7f7e21534fb",
+        "guest_monotonic": 660.152573883,
+        "content_valid": false
+      }
+    ]
+  },
+  "receiverMemory": {
+    "source": "final/vm/guest/files-5000-metrics.jsonl",
+    "samples": 3865,
+    "firstSample": {
+      "guestMonotonic": 96.971486369,
+      "rssKiB": 28088,
+      "pssKiB": 18955,
+      "hwmKiB": 28088,
+      "availableKiB": 1611820,
+      "memTotalKiB": 2014868,
+      "swapTotalKiB": 0,
+      "processSwapKiB": 0
+    },
+    "lastSample": {
+      "guestMonotonic": 2055.688175515,
+      "rssKiB": 520072,
+      "pssKiB": 485515,
+      "hwmKiB": 1137712,
+      "availableKiB": 1237652,
+      "memTotalKiB": 2014868,
+      "swapTotalKiB": 0,
+      "processSwapKiB": 0
+    },
+    "peakRss": {
+      "guestMonotonic": 133.618095045,
+      "rssKiB": 1137412,
+      "pssKiB": 1102461,
+      "hwmKiB": 1137712,
+      "availableKiB": 615880,
+      "memTotalKiB": 2014868,
+      "swapTotalKiB": 0,
+      "processSwapKiB": 0
+    },
+    "peakPss": {
+      "guestMonotonic": 133.105205989,
+      "rssKiB": 1137344,
+      "pssKiB": 1102560,
+      "hwmKiB": 1137712,
+      "availableKiB": 636256,
+      "memTotalKiB": 2014868,
+      "swapTotalKiB": 0,
+      "processSwapKiB": 0
+    },
+    "maximumResidentHighWaterMark": {
+      "guestMonotonic": 125.847973634,
+      "rssKiB": 1124692,
+      "pssKiB": 1089988,
+      "hwmKiB": 1137712,
+      "availableKiB": 632920,
+      "memTotalKiB": 2014868,
+      "swapTotalKiB": 0,
+      "processSwapKiB": 0
+    },
+    "minimumMemAvailable": {
+      "guestMonotonic": 133.618095045,
+      "rssKiB": 1137412,
+      "pssKiB": 1102461,
+      "hwmKiB": 1137712,
+      "availableKiB": 615880,
+      "memTotalKiB": 2014868,
+      "swapTotalKiB": 0,
+      "processSwapKiB": 0
+    },
+    "maximumProcessSwapKiB": 0,
+    "uniqueSwapTotalKiB": [
+      0
+    ],
+    "units": "KiB; divide by 1024 for MiB",
+    "summaryMiB": {
+      "peakRss": 1110.75390625,
+      "peakPss": 1076.71875,
+      "minimumMemAvailable": 601.4453125,
+      "lastRss": 507.8828125,
+      "lastPss": 474.1357421875
+    }
+  },
+  "kernel": {
+    "source": "final/vm/kernel-final.txt",
+    "totalLines": 730,
+    "oomRelatedLines": [],
+    "finalFreeOutput": [
+      "Mem:            1967         393        1001           4         761        1574",
+      "Swap:              0           0           0"
+    ]
+  },
+  "disk": {
+    "source": "final/vm/disk-final.txt",
+    "raw": "Filesystem        1B-blocks        Used   Available Use% Mounted on\n/dev/root      154894188544 65502732288 89374679040  43% /\n376832\t/home/runner/issue2414-vm-pair/seed.iso\n2151702528\t/home/runner/issue2414-vm-pair/ubuntu.img\n",
+    "meaning": "df is host storage backing the VM, not guest destination storage; du -B1 reports allocated host footprint, not QCOW2 virtual capacity.",
+    "hostAvailableBytes": 89374679040,
+    "qcowAllocatedBytes": 2151702528,
+    "seedAllocatedBytes": 376832
+  },
+  "interpretation": "The 5000-file operation continuously advanced in the recorded count samples and completed with all 5000 names and byte hashes verified. Roughly 31.7 minutes of observed saving is evidence of a long successful operation in this environment, not a hang. Options caused a transient memory spike; no recorded kernel OOM appears in the final journal.",
+  "limitations": [
+    "First progress sample already contains 22 files; the elapsed progress interval is not the exact Accept-to-completion duration.",
+    "Sampling and verification include SSH and hashing overhead; throughput is harness-observed, not isolated transfer throughput.",
+    "CPU analysis remains in checkpoint-analysis.json; this report does not duplicate it.",
+    "No baseline/fix causal comparison was run. Screenshot outcome confirmation was performed by the parent investigator."
+  ]
+}

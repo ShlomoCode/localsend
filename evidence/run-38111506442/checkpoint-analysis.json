@@ -478,5 +478,28 @@
     "Back observation uses accept-ready screenshot, not earlier returned screenshot. Both have intervening SSH activation/input/capture operations.",
     "The five-file control completed and content-verified five files. The 5000 checkpoint is before Accept/full save and has no final transfer result.",
     "No kernel OOM matches at checkpoint does not rule out a future OOM or userspace stall."
-  ]
+  ],
+  "parentVisualReview": {
+    "reviewer": "Parent investigator",
+    "options5000": {
+      "approvalCaptureStart": 123.173770216,
+      "approvalCaptureEnd": 123.24103259,
+      "optionsCaptureStart": 127.583245849,
+      "optionsCaptureEnd": 127.64510764,
+      "click": 122.143341434,
+      "observationLatencyIntervalSeconds": {
+        "lower": 1.0976911559999962,
+        "upper": 5.501766205999999
+      },
+      "note": "Parent visually confirmed options-0 still shows approval and options-1 shows Options; interval derives from capture times and is not isolated paint latency."
+    },
+    "back5000": {
+      "click": 131.85336245,
+      "returnedApprovalCaptureStart": 133.610835386,
+      "returnedApprovalCaptureEnd": 133.658367582,
+      "humanVerifiedUpperBoundSeconds": 1.8050051320000193,
+      "checkerUpperBoundSeconds": 2.974403941,
+      "note": "Parent visually confirmed returned.png already shows approval; checker waited for the later accept-ready screenshot."
+    }
+  }
 }
