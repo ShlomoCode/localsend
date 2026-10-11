@@ -40,7 +40,7 @@ export async function probeInstalledProviders({wd,prefix}) {
    }while(Date.now()<deadline);
    if(!record.actualEntryPointObserved){record.unavailable='Normal launch observed, but matching source/main page did not become ready before bounded deadline';writeFileSync('evidence/'+label+'-unavailable.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));continue;}
    writeFileSync('evidence/'+label+'-entry.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
-   const menu=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@content-desc="Show navigation menu" or @content-desc="Show roots" or @content-desc="Open navigation drawer" or @content-desc="Menu" or @content-desc="More options"]',label:label+'-menu',timeoutMs:3000,optional:true});
+   const menu=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@content-desc="Show navigation menu" or @content-desc="Show roots" or @content-desc="Open navigation drawer" or @content-desc="Menu" or starts-with(@content-desc,"More options")]',label:label+'-menu',timeoutMs:3000,optional:true});
    if(menu){
     await wd('POST',prefix+'/element/'+menu['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
     // Observe the menu with fresh reads, not the entry-page snapshot.
@@ -53,6 +53,18 @@ export async function probeInstalledProviders({wd,prefix}) {
      await new Promise(resolve=>setTimeout(resolve,200));
     }
     writeFileSync('evidence/'+label+'-menu.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
+    const trash=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Trash" or @text="Recycle bin" or @content-desc="Trash" or @content-desc="Recycle bin"]',label:label+'-trash-entry',timeoutMs:3000,optional:true});
+    if(trash){
+     await wd('POST',prefix+'/element/'+trash['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+     // Inspect only. Do not alter existing files or empty an unrelated bin.
+     for(let trashAttempt=0;trashAttempt<3;trashAttempt++){
+      writeFileSync('evidence/'+label+'-trash-'+trashAttempt+'.xml',await wd('GET',prefix+'/source'));
+      await new Promise(resolve=>setTimeout(resolve,200));
+     }
+     writeFileSync('evidence/'+label+'-trash.png',Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
+     record.trashEntryOpened=true;
+     record.trashActualPackage=await wd('GET',prefix+'/appium/device/current_package');
+    }
    }
    record.menuControlObserved=menu!==null;
    record.limit='Only this observed normal entry/menu is inspected; missing label does not establish absence of all trash paths.';
