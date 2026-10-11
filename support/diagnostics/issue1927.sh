@@ -46,10 +46,14 @@ launch_settings() {
   import -window "$wid" "$OUT/$label-before.png"
 }
 state() {
-  local label=$1 instance
+  local label=$1 instance app_pid
   instance=$(flatpak ps --columns=instance,application | awk '$2=="org.localsend.localsend_app" {print $1; exit}')
   test -n "$instance"
   flatpak enter "$instance" sh -c 'ls -la /home/runner/.config/autostart; cat /home/runner/.config/autostart/*.desktop' > "$OUT/$label-sandbox-entry.txt" 2>&1 || true
+  app_pid=$(pgrep -n -x localsend)
+  sudo cat "/proc/$app_pid/environ" | tr '\0' '\n' | grep -E '^(HOME|XDG_CONFIG_HOME|FLATPAK_ID|container)=' > "$OUT/$label-app-environment.txt"
+  sudo ls -la "/proc/$app_pid/root/home/runner/.config/autostart" > "$OUT/$label-process-root.txt" 2>&1 || true
+  sudo find "/proc/$app_pid/root/home/runner" -maxdepth 4 -name '*.desktop' -exec cat {} \; >> "$OUT/$label-process-root.txt" 2>&1 || true
   { ls -la "$HOME/.config/autostart"; cat "$HOME/.config/autostart/"*.desktop; } > "$OUT/$label-host-entry.txt" 2>&1 || true
   ps -eo pid,ppid,comm,args | grep -E '[l]ocalsend|[b]wrap' > "$OUT/$label-processes.txt"
   import -window "$wid" "$OUT/$label.png"
@@ -75,6 +79,7 @@ for repeat in 1 2; do
   sleep 2
 done
 # This is the documented user workaround, a supported Flatpak permission override.
+mkdir -p "$HOME/.config/autostart"
 flatpak override --user --filesystem=xdg-config/autostart org.localsend.localsend_app
 flatpak override --user --show org.localsend.localsend_app > "$OUT/permission-control.txt"
 launch_settings permission
@@ -85,4 +90,5 @@ xdotool windowactivate "$wid" key alt+F4
 sleep 4
 launch_settings permission-reopened
 state permission-reopened
+flatpak run --user --command=flatpak-spawn org.localsend.localsend_app --host true > "$OUT/host-spawn-control.txt" 2>&1 || true
 flatpak kill org.localsend.localsend_app
