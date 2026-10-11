@@ -1,0 +1,458 @@
+import assert from 'node:assert/strict';
+import {mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
+import path from 'node:path';
+
+// Caller must first complete the actual 1 MiB app-to-app control in this same session.
+// This callback creates no session, starts no network send, and leaves session cleanup to its caller.
+export default async function shareScenario({session,wd,output}){
+ assert(session&&typeof wd==='function'&&output,'Provide the existing session, WebDriver callback, and controller evidence root');
+ const directory=path.join(path.resolve(output),'share-scenario');mkdirSync(directory,{recursive:true});
+ const base='/session/'+session,sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
+ const secrets=['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','RELAY_TOKEN','RELAY_APP','HELPER_APP','BASELINE_APP'].map(k=>process.env[k]).filter(Boolean);
+ function redact(value){let text=String(value);for(const secret of secrets)text=text.replaceAll(secret,'[redacted]');return text;}
+ const save=(name,value)=>writeFileSync(path.join(directory,name),redact(typeof value==='string'?value:JSON.stringify(value,null,2)));
+ const report={status:'preparing',startedUtc:new Date().toISOString(),session,requestedOrientation:'PORTRAIT',
+  scope:'File/Recent selection Edit and observed Back, then warm native chooser sharing and actual next UI input, after a verified 1 MiB Android-to-Windows transfer; no 16GB network transfer',
+  hypothesis:'A share_handler MediaStore copy on the main thread is unproven. This module observes the unmodified app without injecting a stall.',
+  limits:['Public MediaStore fixtures differ from the reporter original file','Requested portrait may not persist; record actual screenshot dimensions',
+   'One warm share attempt per size does not establish deterministic reproduction','No Windows network send or 16GB transfer is attempted'],
+  snapshots:[],actions:[],cases:[],editCases:[],cpuSamples:[],largeFixture:null,errors:[]};
+ function decode(text){return text.replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16)))
+  .replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&quot;/g,'"').replace(/&apos;/g,"'")
+  .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
+ const nodes=xml=>[...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fromEntries(
+  [...m[0].matchAll(/([\w.:-]+)=(["'])(.*?)\2/g)].map(a=>[a[1],decode(a[3])])));
+ const labels=xml=>nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);
+ const source=()=>wd('GET',base+'/source');
+ let nativeLogsUnavailable=false,nextNativeLogs=0;
+ async function nativeLogs(name){
+  if(nativeLogsUnavailable||Date.now()<nextNativeLogs)return;
+  nextNativeLogs=Date.now()+30000;
+  try{save(name+'-native-logcat.json',{utc:new Date().toISOString(),entries:await wd('POST',base+'/log',{type:'logcat'}),
+   limit:'Provider log format is retained; thread identity is only established when the raw record exposes it. No thread stacks or CPU are inferred.'});}
+  catch(error){nativeLogsUnavailable=true;save('native-logcat-unavailable.json',{utc:new Date().toISOString(),error:redact(error.message)});}
+ }
+ const foregroundMethods=new Map();
+ async function foreground(name){
+  const result={utc:new Date().toISOString(),documentation:'https://github.com/appium/appium-uiautomator2-driver#mobile-getcurrentpackage'};
+  for(const [key,command,route] of [['package','getCurrentPackage','current_package'],['activity','getCurrentActivity','current_activity']]){
+   if(foregroundMethods.get(key)==='unavailable'){result[key+'Unavailable']=true;continue;}
+   try{
+    result[key]=foregroundMethods.get(key)==='legacy'?await wd('GET',base+'/appium/device/'+route):
+     await wd('POST',base+'/execute/sync',{script:'mobile: '+command,args:[{}]});
+    foregroundMethods.set(key,foregroundMethods.get(key)||'mobile');
+   }catch(error){
+    result[key+'Error']=redact(error.message);
+    if(/unknown command|unsupported|not implemented|unknown mobile command/i.test(error.message)){
+     try{result[key]=await wd('GET',base+'/appium/device/'+route);foregroundMethods.set(key,'legacy');}
+     catch(fallback){result[key+'FallbackError']=redact(fallback.message);foregroundMethods.set(key,'unavailable');}
+    }
+   }
+  }
+  save(name+'-foreground.json',result);return result;
+ }
+ async function shareObservation(name){
+  // Screenshot and focused package/activity do not depend on a successful accessibility tree.
+  const png=Buffer.from(await wd('GET',base+'/screenshot'),'base64');writeFileSync(path.join(directory,name+'.png'),png);
+  assert(png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Screenshot is not PNG');
+  const metadata={name,utc:new Date().toISOString(),width:png.readUInt32BE(16),height:png.readUInt32BE(20),foreground:await foreground(name)};
+  await nativeLogs(name);
+  try{metadata.xml=await source();save(name+'.xml',metadata.xml);metadata.primarypackage=nodes(metadata.xml).find(n=>n.package)?.package||null;}
+  catch(error){
+   metadata.sourceError=redact(error.message);save(name+'-source-error.json',{utc:new Date().toISOString(),error:metadata.sourceError});
+   if(!/Timed out after \d+ms waiting for the root AccessibilityNodeInfo/.test(error.message))throw error;
+  }
+  report.snapshots.push({...metadata,xml:undefined});return metadata;
+ }
+ async function snap(name,xml){
+  const text=xml||await source();save(name+'.xml',text);
+  const png=Buffer.from(await wd('GET',base+'/screenshot'),'base64');writeFileSync(path.join(directory,name+'.png'),png);
+  assert(png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Screenshot is not PNG');
+  const metadata={name,utc:new Date().toISOString(),width:png.readUInt32BE(16),height:png.readUInt32BE(20),
+   primarypackage:nodes(text).find(n=>n.package)?.package||null};
+  report.snapshots.push(metadata);return {xml:text,...metadata};
+ }
+ async function waitFor(predicate,timeout,message){
+  const deadline=Date.now()+timeout;
+  do{const xml=await source();if(predicate(xml))return xml;await sleep(1000);}while(Date.now()<deadline);
+  throw Error(message);
+ }
+ function id(element){const value=element['element-6066-11e4-a52e-4f735466cecf']||element.ELEMENT;assert(value,'Missing WebDriver element ID');return value;}
+ async function bounds(using,value){
+  const element=await wd('POST',base+'/element',{using,value});
+  const rect=await wd('GET',base+'/element/'+id(element)+'/rect');
+  assert(rect.width>0&&rect.height>0,'Observed control has no area: '+value);return rect;
+ }
+ async function touch(rect,label,screen){
+  if(screen)assert(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=screen.width&&rect.y+rect.height<=screen.height,'Observed control bounds leave the captured screen: '+label);
+  report.actions.push({utc:new Date().toISOString(),label,rect});
+  await wd('POST',base+'/actions',{actions:[{type:'pointer',id:'share3556',parameters:{pointerType:'touch'},actions:[
+   {type:'pointerMove',duration:0,origin:'viewport',x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},
+   {type:'pointerDown',button:0},{type:'pause',duration:120},{type:'pointerUp',button:0}]}]});
+ }
+ const click=async name=>touch(await bounds('accessibility id',name),name);
+ const ui=async expression=>touch(await bounds('-android uiautomator','new UiSelector().'+expression),expression);
+ async function helperClick(name){
+  await wd('POST',base+'/element',{using:'-android uiautomator',value:'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().description('+JSON.stringify(name)+'))'});
+  await click(name);
+ }
+ async function activate(appId){
+  await wd('POST',base+'/appium/device/activate_app',{appId});
+  await wd('POST',base+'/orientation',{orientation:'PORTRAIT'});
+  report.actions.push({utc:new Date().toISOString(),label:'Request portrait after activation',appId,observedOrientation:await wd('GET',base+'/orientation')});
+ }
+ async function warmReset(name){
+  await wd('POST',base+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app',options:{timeout:5000}});
+  await activate('org.localsend.localsend_app');
+  await waitFor(s=>labels(s).includes('Send\nTab 2 of 3'),30000,'Original LocalSend Send tab not available after warm restart');
+  await click('Send\nTab 2 of 3');
+  const before=await snap(name+'-before'),manual=await bounds('accessibility id','Manual sending');
+  return {before,manual};
+ }
+ function parseFixture(xml,expectedBytes){
+  const details=labels(xml).find(v=>v.includes('READY name='));assert(details,'Fixture READY metadata missing');
+  const name=details.match(/READY name=([^\n]+)/)?.[1],uri=details.match(/\nuri=([^\n]+)/)?.[1];
+  const bytes=Number(details.match(/\nbytes=(\d+)/)?.[1]),sha256=details.match(/\nsha256=([a-f0-9]{64})/)?.[1];
+  const mediaDurationMs=Number(details.match(/mediaDurationMs=(\d+)/)?.[1]),frame=details.match(/decodedFrame=(\d+)x(\d+)/);
+  const availableBytes=Number(details.match(/availableBytes=(\d+)/)?.[1]);
+  assert(name?.endsWith('.mp4')&&uri?.startsWith('content://media/')&&sha256,'Expected this helper owned public MediaStore MP4');
+  assert.equal(bytes,expectedBytes,'Unexpected fixture size');assert(mediaDurationMs>0&&frame&&Number(frame[1])>0&&Number(frame[2])>0,'Fixture video did not decode');
+  return {name,uri,bytes,sha256,mediaDurationMs,decodedFrame:{width:Number(frame[1]),height:Number(frame[2])},availableBytes,details};
+ }
+ function selected(xml,bytes){
+  return labels(xml).some(v=>v.includes('Selection\nFiles: 1\nSize: '+(bytes===1048576?'1.0 MB':bytes===67108864?'67.1 MB':'16.0 GB')));
+ }
+ function manualResponse(xml){
+  const text=labels(xml);
+  if(text.includes('Enter address'))return 'Enter address';
+  // The supported Manual sending route first opens AddFileDialog when selection is not ready.
+  if(text.includes('Add to selection'))return 'Add to selection';
+  return null;
+ }
+ let cpuUnavailable=false,cpuSupported=false,cpuMethod='performance';
+ async function sampleCpu(stage){
+  if(cpuUnavailable)return;
+  const sample={stage,utc:new Date().toISOString(),packageName:'org.localsend.localsend_app',dataType:'cpuinfo'};
+  const started=Date.now();
+  try{
+   if(cpuMethod==='performance'){
+    try{
+     if(!cpuSupported){
+      sample.advertisedTypes=await wd('POST',base+'/execute/sync',{script:'mobile: getPerformanceDataTypes',args:[]});
+      assert(Array.isArray(sample.advertisedTypes)&&sample.advertisedTypes.includes('cpuinfo'),'Appium does not advertise cpuinfo');
+      cpuSupported=true;
+     }
+     sample.raw=await wd('POST',base+'/execute/sync',{script:'mobile: getPerformanceData',args:[{packageName:sample.packageName,dataType:'cpuinfo'}]});
+     sample.method='mobile: getPerformanceData';
+    }catch(error){
+     sample.performanceUnavailable=redact(error.message);cpuMethod='shell';
+    }
+   }
+   if(cpuMethod==='shell'){
+    // Official UiAutomator2 mobile:shell API; read-only, bounded command, no permission/configuration changes.
+    sample.method='mobile: shell';sample.command={command:'dumpsys',args:['cpuinfo'],timeout:5000,includeStderr:true};
+    sample.documentation='https://github.com/appium/appium-uiautomator2-driver#mobile-shell';
+    sample.raw=await wd('POST',base+'/execute/sync',{script:'mobile: shell',args:[sample.command]});
+    const stdout=typeof sample.raw==='string'?sample.raw:sample.raw?.stdout;
+    assert(typeof stdout==='string'&&stdout.trim(),'dumpsys cpuinfo returned no stdout');
+    sample.packageLines=stdout.split(/\r?\n/).filter(line=>line.includes(sample.packageName));
+    sample.packagePresent=sample.packageLines.length>0;
+   }
+   sample.status='returned';
+  }catch(error){sample.status='unavailable';sample.error=redact(error.message);cpuUnavailable=true;}
+  sample.requestDurationMs=Date.now()-started;
+  sample.limit=sample.method==='mobile: shell'?'Raw dumpsys cpuinfo reports its own historical sampling window and system/process context; matching package lines are retained, absence is not zero CPU':
+   'Appium package cpuinfo at this instant; raw headers and values are retained without assuming units or whole-device CPU';
+  report.cpuSamples.push(sample);save('cpu-samples.json',report.cpuSamples);
+ }
+ async function findChooserTarget(entry,name){
+  function itemPositions(xml){
+   const list=nodes(xml),container=list.find(n=>n['resource-id']==='android:id/resolver_list');
+   const top=Number(container?.bounds?.match(/^\[\d+,(\d+)\]/)?.[1]);
+   return list.filter(n=>n.package==='android'&&n.class==='android.widget.TextView'&&n['resource-id']==='android:id/text1'&&n.text&&n.text!=='1 item')
+    .map(n=>({label:n.text,bounds:n.bounds,relativeY:Number(n.bounds?.match(/^\[\d+,(\d+)\]/)?.[1])-top}));
+  }
+  const deadline=Date.now()+60000,maxScrolls=8;
+  let scrolls=0,index=0,lastLayout=null,stableObservations=0,falseGestures=0,swipeUsed=false;
+  entry.chooserSearch={startedUtc:new Date().toISOString(),maxScrolls,timeoutMs:60000,observations:[],
+   documentation:'https://github.com/appium/appium-uiautomator2-driver/blob/master/docs/android-mobile-gestures.md#mobile-scrollgesture'};
+  do{
+   const observed=await snap(name+'-chooser-search-'+String(index++).padStart(2,'0'));
+   const list=nodes(observed.xml),targets=list.filter(n=>n.text==='LocalSend'&&n.enabled==='true'&&n.displayed==='true');
+   if(targets.length){
+    assert.equal(targets.length,1,'Chooser exposes multiple LocalSend targets');
+    entry.chooserSearch.status='target-observed';entry.chooserSearch.scrolls=scrolls;entry.chooserSearch.finishedUtc=new Date().toISOString();
+    save(name+'-result.json',entry);return observed;
+   }
+   const containers=list.filter(n=>n.package==='android'&&n['resource-id']==='android:id/resolver_list'&&n.displayed==='true'&&n.enabled==='true');
+   if(!containers.length){await sleep(1000);continue;}
+   assert.equal(containers.length,1,'Native chooser resolver list is ambiguous');
+   const spinner=list.some(n=>n.displayed==='true'&&(/ProgressBar$/.test(n.class||'')||/progressbar/i.test(n['resource-id']||'')));
+   const layout=JSON.stringify(list.filter(n=>n.package==='android'&&(n.text||n['resource-id']==='android:id/resolver_list'||n['resource-id']==='android:id/contentPanel'))
+    .map(n=>({text:n.text,bounds:n.bounds,resourceId:n['resource-id'],scrollable:n.scrollable})));
+   const changed=layout!==lastLayout;
+   if(changed){lastLayout=layout;stableObservations=1;falseGestures=0;}else stableObservations++;
+   entry.chooserSearch.observations.push({utc:observed.utc,snapshot:observed.name,layoutChanged:changed,stableObservations,spinner,
+    spinnerDetection:'Accessible ProgressBar only; a custom painted spinner can be present without this flag. See saved PNG.',scrolls,falseGestures});
+   save(name+'-result.json',entry);
+   // A Samsung sheet can expand without scrolling its app grid. Settle fresh layout before another gesture.
+   // A false gesture result is local to that attempt, never proof that the native chooser search is finished.
+   if(stableObservations<2||scrolls>=maxScrolls||(falseGestures>=2&&(spinner||swipeUsed))){
+    await sleep(Math.min(1500,Math.max(0,deadline-Date.now())));continue;
+   }
+   const element=await wd('POST',base+'/element',{using:'id',value:containers[0]['resource-id']}),elementId=id(element);
+   const rect=await wd('GET',base+'/element/'+elementId+'/rect');
+   assert(rect.width>0&&rect.height>0&&rect.x>=0&&rect.y>=0&&rect.x+rect.width<=observed.width&&rect.y+rect.height<=observed.height,'Chooser scroll container has invalid current screen bounds');
+   const fallback=falseGestures>=2;
+   const action={utc:new Date().toISOString(),label:fallback?'Swipe observed native chooser resolver list':'Scroll observed native chooser resolver list',
+    resourceId:containers[0]['resource-id'],rect,direction:'down',percent:0.75,method:fallback?'W3C touch swipe':'mobile: scrollGesture'};
+   action.itemsBefore=itemPositions(observed.xml);
+   report.actions.push(action);entry.chooserSearch.observations.push(action);save(name+'-result.json',entry);
+   if(fallback){
+    // One real swipe derived entirely from the freshly observed list rect; it selects no app or intent.
+    const x=Math.round(rect.x+rect.width/2),startY=Math.round(rect.y+rect.height*0.85),endY=Math.round(rect.y+rect.height*0.2);
+    action.start={x,y:startY};action.end={x,y:endY};swipeUsed=true;
+    await wd('POST',base+'/actions',{actions:[{type:'pointer',id:'chooser3556',parameters:{pointerType:'touch'},actions:[
+     {type:'pointerMove',duration:0,origin:'viewport',x,y:startY},{type:'pointerDown',button:0},{type:'pause',duration:100},
+     {type:'pointerMove',duration:800,origin:'viewport',x,y:endY},{type:'pointerUp',button:0}]}]});
+   }else{
+    // Official mobile:scrollGesture accepts a current element ID; false may reflect sheet expansion/readiness.
+    const canScrollMore=await wd('POST',base+'/execute/sync',{script:'mobile: scrollGesture',args:[{elementId,direction:'down',percent:0.75}]});
+    assert(typeof canScrollMore==='boolean','Chooser scroll returned no supported can-scroll boolean');
+    action.canScrollMore=canScrollMore;falseGestures=canScrollMore?0:falseGestures+1;
+   }
+   scrolls++;entry.chooserSearch.scrolls=scrolls;
+   const after=await snap(name+'-chooser-after-scroll-'+String(scrolls).padStart(2,'0'));
+   action.itemsAfter=itemPositions(after.xml);
+   action.itemPositionChanges=action.itemsBefore.flatMap(before=>{
+    const matches=action.itemsAfter.filter(item=>item.label===before.label);
+    return matches.length===1&&Number.isFinite(before.relativeY)&&Number.isFinite(matches[0].relativeY)&&before.relativeY!==matches[0].relativeY?
+     [{label:before.label,beforeRelativeY:before.relativeY,afterRelativeY:matches[0].relativeY}]:[];
+   });
+   action.itemMovementObserved=action.itemPositionChanges.length>0;
+   action.movementLimit='Item Y positions are relative to the current resolver list, so sheet expansion alone is not counted as item scrolling; no movement is not an end-of-list proof';
+   save(name+'-result.json',entry);
+   await sleep(500);
+  }while(Date.now()<deadline);
+  throw Error('Native chooser did not expose LocalSend within the bounded 60-second observed search');
+ }
+ const hasLabel=(xml,name)=>labels(xml).some(v=>v===name||v.split('\n').includes(name));
+ const hasFile=(xml,name)=>labels(xml).some(v=>v===name||v.split('\n').includes(name));
+ async function closeObservedEditor(fixture,name){
+  let xml=await source();
+  if(manualResponse(xml)){
+   assert(hasLabel(xml,'Cancel'),'Open input route exposes no observed Cancel');
+   await click('Cancel');xml=await waitFor(s=>!manualResponse(s),10000,'Manual dialog did not close');
+  }
+  // Back here is the visible Flutter navigation control, never the native Back key.
+  if(hasFile(xml,fixture.name)||!selected(xml,fixture.bytes)){
+   const close=['Cancel','Close','Back'].find(label=>hasLabel(xml,label));
+   assert(close,'Editor exposes no semantic Cancel, Close, or Back; no blind dismissal attempted');
+   const before=await snap(name+'-before-close',xml);
+   await touch(await bounds('accessibility id',close),'Observed editor '+close,before);
+   xml=await waitFor(s=>selected(s,fixture.bytes),10000,'Editor did not return to the original selection');
+  }
+  return xml;
+ }
+ async function manualCancel(entry,name,response,screen){
+  const stage={name,response,startedUtc:new Date().toISOString(),status:'started'};
+  (entry.inputStages??=[]).push(stage);save(name+'-result.json',stage);
+  try{
+   if(response==='Enter address'){
+    assert(nodes(screen.xml).filter(n=>n.class==='android.widget.EditText').length===1,'Manual route does not expose exactly one input');
+    const field=await wd('POST',base+'/element',{using:'class name',value:'android.widget.EditText'}),fieldId=id(field);
+    await touch(await wd('GET',base+'/element/'+fieldId+'/rect'),'Focus observed Manual address input',screen);
+    assert.equal(await wd('GET',base+'/element/'+fieldId+'/attribute/focused'),'true','Manual address input did not gain focus');
+    await snap(name+'-focused');
+    await wd('POST',base+'/element/'+fieldId+'/clear',{});
+    await wd('POST',base+'/element/'+fieldId+'/value',{text:'127.0.0.1',value:[...'127.0.0.1']});
+    screen=await snap(name+'-typed');
+    assert(nodes(screen.xml).some(n=>n.class==='android.widget.EditText'&&n.text==='127.0.0.1'),'Manual input value was not rendered');
+    stage.inputReadbackVerified=true;
+    stage.visualEvidence=name+'-typed.png';
+   }
+   const dismiss=['Cancel','Close'].find(label=>hasLabel(screen.xml,label));
+   assert(dismiss,'Observed dialog offers no Cancel or Close');
+   await touch(await bounds('accessibility id',dismiss),'Observed '+response+' '+dismiss,screen);
+   await snap(name+'-dismissed',await waitFor(s=>!manualResponse(s),10000,'Observed Manual dialog did not dismiss'));
+   stage.status='input-route-dismissed';stage.dismiss=dismiss;
+  }catch(error){stage.status='incomplete';stage.error=redact(error.stack||error);throw error;}
+  finally{stage.finishedUtc=new Date().toISOString();save(name+'-result.json',stage);save('progress.json',report);}
+ }
+ async function editCancel(fixture,name){
+  const entry={name,fixture,startedUtc:new Date().toISOString(),status:'started',scope:'Original v1.18.2 MP4 Selection Edit opens file management, with visible Back; it has no filename input'};
+  report.editCases.push(entry);save(name+'-result.json',entry);
+  try{
+   await warmReset(name+'-file-selection');
+   await click('File');
+   await waitFor(s=>s.includes('com.google.android.documentsui'),30000,'Android File picker did not appear');
+   await snap(name+'-file-picker');await click('Show roots');
+   const roots=await snap(name+'-file-picker-roots');
+   const recent=nodes(roots.xml).filter(n=>n.text==='Recent');assert(recent.length,'Recent root not observed');
+   await ui('text("Recent").instance('+(recent.length-1)+')');
+   const picker=await snap(name+'-file-picker-recent');
+   assert(nodes(picker.xml).filter(n=>n.text===fixture.name).length===1,'Recent picker does not show one exact owned fixture filename');
+   await touch(await bounds('-android uiautomator','new UiSelector().text('+JSON.stringify(fixture.name)+')'),'Observed owned fixture File/Recent selection',picker);
+   let xml=await waitFor(s=>selected(s,fixture.bytes),60000,'File/Recent did not show one selected fixture with expected size');
+   entry.fileSelectionObserved=true;save(name+'-result.json',entry);
+   const before=await snap(name+'-before',xml);
+   await sampleCpu(name+'-before-edit');
+   await touch(await bounds('accessibility id','Edit'),'Observed selection Edit',before);
+   xml=await waitFor(s=>hasFile(s,fixture.name)&&hasLabel(s,'Back'),15000,'Edit did not expose the original filename and visible Back');
+   await snap(name+'-opened',xml);entry.editResponseObserved=true;
+   assert(hasFile(xml,fixture.name),'Editor does not show the original fixture filename');
+   // The original MP4 route only offers removal and visible Back. Never invoke Delete or invent a rename route.
+   entry.originalFilenameObserved=fixture.name;
+   entry.filenameInput='Not part of the original MP4 Edit route';save(name+'-result.json',entry);
+   await sampleCpu(name+'-editor-open');
+   await closeObservedEditor(fixture,name);
+   const returned=await snap(name+'-returned');
+   assert(selected(returned.xml,fixture.bytes),'Original selection size missing after closing editor');
+   // Reopen to verify filename identity, because the Send selection card only exposes count and size.
+   await touch(await bounds('accessibility id','Edit'),'Reopen Edit to verify retained filename',returned);
+   xml=await waitFor(s=>hasFile(s,fixture.name)&&hasLabel(s,'Back'),10000,'Retained filename and visible Back were not observed when reopening Edit');
+   await snap(name+'-identity-retained',xml);entry.filenameRetained=true;
+   await closeObservedEditor(fixture,name+'-identity-check');await snap(name+'-complete');
+   entry.selectionRetained=true;entry.status='editor-opened-and-closed-filename-retained';
+  }catch(error){
+   entry.status='incomplete';entry.error=redact(error.stack||error);report.errors.push(name+': '+entry.error);
+   await snap(name+'-failure').catch(e=>{entry.failureCaptureError=redact(e.message);});
+   // Preserve independent share evidence and recover only through controls actually present.
+   await closeObservedEditor(fixture,name+'-recovery').catch(e=>{entry.recoveryError=redact(e.message);});
+  }finally{
+   entry.finishedUtc=new Date().toISOString();save(name+'-result.json',entry);save('progress.json',report);
+  }
+ }
+ async function warmShare(fixture,name,seconds){
+  const entry={name,fixture,startedUtc:new Date().toISOString(),selectionObserved:false,manualResponse:null,waitActions:0,observations:[]};
+  report.cases.push(entry);
+  save(name+'-result.json',entry);
+  try{
+  await sampleCpu(name+'-before-share');
+  const prepared=await warmReset(name);entry.before={width:prepared.before.width,height:prepared.before.height,manualBounds:prepared.manual};
+  await activate('org.localsend.fixture3556');
+  const ready=await snap(name+'-helper-before-share');const activeFixture=parseFixture(ready.xml,fixture.bytes);
+  assert.equal(activeFixture.uri,fixture.uri,'Helper last URI changed before sharing');assert.equal(activeFixture.sha256,fixture.sha256);
+  entry.nativeShareActionUtc=new Date().toISOString();await helperClick('Share owned fixture');await snap(name+'-chooser-loading');
+  const chooser=await findChooserTarget(entry,name);
+  await snap(name+'-chooser-ready',chooser.xml);entry.chooserLocalSendInputUtc=new Date().toISOString();
+  await touch(await bounds('-android uiautomator','new UiSelector().text("LocalSend").enabled(true)'),'Observed native chooser LocalSend target',chooser);
+  const first=await shareObservation(name+'-first-frame');entry.selectionObserved=Boolean(first.xml&&selected(first.xml,fixture.bytes));
+  // Do not touch old coordinates after a rotation or layout change. Re-observe the semantic control.
+  const currentManual=first.xml&&labels(first.xml).includes('Manual sending')?await bounds('accessibility id','Manual sending').catch(()=>null):null;
+  entry.layoutComparison={before:{width:prepared.before.width,height:prepared.before.height,manual:prepared.manual},
+   after:{width:first.width,height:first.height,manual:currentManual}};
+  if(!currentManual){
+   entry.nextInputUnavailableReason='Manual sending semantic bounds unavailable after native share; no stale coordinate input was sent';
+  }
+  const sameLayout=currentManual&&first.width===prepared.before.width&&first.height===prepared.before.height&&
+   ['x','y','width','height'].every(k=>currentManual[k]===prepared.manual[k]);
+  entry.layoutComparison.sameLayout=sameLayout;
+  if(currentManual){
+   try{await touch(currentManual,'Legitimate next Manual sending action after share',first);entry.nextInputUtc=new Date().toISOString();}
+   catch(error){entry.nextInputUnavailableReason=redact(error.message);}
+  }
+  const start=Date.now(),deadline=start+seconds*1000;
+  let selectionInputChecked=entry.selectionObserved&&Boolean(entry.nextInputUtc),index=0,nextCpu=0;
+  do{
+   const shot=await shareObservation(name+'-observe-'+String(index++).padStart(3,'0'));
+   if(!shot.xml){
+    entry.observations.push({utc:shot.utc,elapsedMs:Date.now()-start,sourceUnavailable:true,sourceError:shot.sourceError,foreground:shot.foreground,
+     width:shot.width,height:shot.height});save(name+'-result.json',entry);save('progress.json',report);
+    if(Date.now()>=deadline)break;await sleep(Math.min(5000,deadline-Date.now()));continue;
+   }
+   const xml=shot.xml,names=labels(xml),anr=/isn.t responding|not responding/i.test(names.join('\n'));
+   entry.selectionObserved=entry.selectionObserved||selected(xml,fixture.bytes);
+   const response=manualResponse(xml);if(response)entry.manualResponse=response;
+   if(Date.now()>=nextCpu){await sampleCpu(name+'-observe-'+index);nextCpu=Date.now()+30000;}
+   entry.observations.push({utc:shot.utc,elapsedMs:Date.now()-start,anr,selection:selected(xml,fixture.bytes),manualResponse:response,
+    width:shot.width,height:shot.height,primarypackage:shot.primarypackage,foreground:shot.foreground});
+   if(anr){await ui('textMatches("(?i)wait")');entry.waitActions++;}
+   else if(response){
+    if(selectionInputChecked&&response==='Enter address')entry.responseAfterSelection=true;
+    await manualCancel(entry,name+'-manual-cancel-'+index,response,shot);
+   }
+   // Require an actual response after a confirmed selection, not only an accessibility label.
+   if(entry.selectionObserved&&!selectionInputChecked&&!response&&!anr){
+    const live=await snap(name+'-selected-before-input');
+    try{
+     const rect=await bounds('accessibility id','Manual sending');
+     await touch(rect,'Manual sending response check after observed selection',live);selectionInputChecked=true;
+    }catch(error){entry.responseCheckUnavailableReason=redact(error.message);}
+   }else if(selectionInputChecked&&response==='Enter address'){entry.responseAfterSelection=true;}
+   save(name+'-result.json',entry);save('progress.json',report);
+   if(Date.now()>=deadline)break;
+   await sleep(Math.min(5000,deadline-Date.now()));
+  }while(true);
+  entry.finishedUtc=new Date().toISOString();
+  entry.outcome=entry.waitActions?'anr-observed':entry.selectionObserved&&entry.responseAfterSelection?'selection-and-input-response-observed':'selection-or-input-response-not-established';
+  save(name+'-result.json',entry);
+  if(fixture.bytes!==16000000000)assert(entry.selectionObserved&&entry.responseAfterSelection,'Share size control did not establish Selection and a real Enter address response');
+  }catch(error){
+   entry.outcome='incomplete';entry.error=redact(error.stack||error);
+   if(entry.chooserSearch&&entry.chooserSearch.status!=='target-observed'){
+    entry.chooserSearch.status='incomplete';entry.chooserSearch.error=redact(error.message);entry.chooserSearch.finishedUtc=new Date().toISOString();
+   }
+   throw error;
+  }
+  finally{entry.finishedUtc=new Date().toISOString();save(name+'-result.json',entry);save('progress.json',report);}
+ }
+ try{
+  const windowsPath=path.join(path.resolve(output),'windows','results.json'),fixturePath=path.join(path.resolve(output),'fixture.json');
+  assert(existsSync(windowsPath)&&existsSync(fixturePath),'Actual app control evidence must exist before this callback');
+  const windows=JSON.parse(readFileSync(windowsPath,'utf8')),small=JSON.parse(readFileSync(fixturePath,'utf8'));
+  assert.equal(windows.status,'saved-file-verified','Actual Windows save control is not verified');
+  assert(windows.actions.some(a=>a.name==='Accept')&&windows.savedFiles.some(f=>f.bytes===1048576&&f.sha256.toLowerCase()===small.sha256),'Actual control Accept/hash evidence missing');
+  const initialLabels=labels(await source());
+  assert(initialLabels.some(v=>/^(?:100,\s*)?Finished$/.test(v.split('\n')[0].trim()))&&!initialLabels.some(v=>v.includes('Finished with error')),'Existing Android session does not show actual control Finished or 100, Finished');
+  await activate('org.localsend.fixture3556');
+  const helper=await snap('small-owned-fixture');const fixture=parseFixture(helper.xml,1048576);
+  assert.equal(fixture.sha256,small.sha256,'Share control must use the successful actual transfer fixture');
+  report.actualControlPrecondition={verified:true,bytes:1048576,sha256:fixture.sha256};
+  await editCancel(fixture,'small-edit-cancel');
+  await warmShare(fixture,'small-share-control',30);
+  await activate('org.localsend.fixture3556');await helperClick('Stage 64MiB video');
+  const moderateXml=await waitFor(s=>labels(s).some(v=>/READY name=.*67108864\.mp4/.test(v)),120000,'64MiB share fixture staging did not become ready');
+  await snap('moderate-fixture-ready',moderateXml);const moderate=parseFixture(moderateXml,67108864);save('moderate-fixture.json',moderate);
+  await warmShare(moderate,'moderate-share-control',60);
+  await activate('org.localsend.fixture3556');await helperClick('Refresh capacity');
+  const capacity=await snap('large-capacity-before'),text=labels(capacity.xml).join('\n');
+  const beforeFree=Number(text.match(/availableBytes=(\d+)/)?.[1]);
+  assert(beforeFree>=16000000000+2147483648,'16GB public MediaStore staging requires its existing 2 GiB reserve');
+  report.largeCapacityBeforeBytes=beforeFree;
+  report.largeStaging={status:'staging',startedUtc:new Date().toISOString(),beforeFreeBytes:beforeFree,expectedBytes:16000000000};
+  save('large-staging-result.json',report.largeStaging);
+  await helperClick('Stage 16GB video');const deadline=Date.now()+1800000;let staged,index=0,nextScreenshot=0;
+  do{
+   const xml=await source(),details=labels(xml).join('\n');
+   save('large-staging-'+String(index++).padStart(3,'0')+'.xml',xml);
+   if(/FAILED|INSUFFICIENT_STORAGE/.test(details))throw Error('Large fixture staging failed through the public helper UI');
+   if(/READY name=.*16000000000\.mp4/.test(details)){staged=xml;break;}
+   if(Date.now()>=nextScreenshot){await snap('large-staging-screen-'+index,xml);nextScreenshot=Date.now()+30000;}
+   report.largeStaging.observations=index;report.largeStaging.lastObservedUtc=new Date().toISOString();
+   save('large-staging-result.json',report.largeStaging);
+   save('progress.json',report);await sleep(3000);
+  }while(Date.now()<deadline);
+  assert(staged,'16GB public fixture staging exceeded 30 minutes');
+  await snap('large-fixture-ready',staged);const large=parseFixture(staged,16000000000);
+  assert(large.availableBytes>=2147483648,'16GB staging did not retain the required free-space reserve');
+  report.largeFixture=large;save('large-fixture.json',large);
+  report.largeStaging.status='ready';report.largeStaging.finishedUtc=new Date().toISOString();report.largeStaging.fixture=large;
+  save('large-staging-result.json',report.largeStaging);
+  await editCancel(large,'large-edit-cancel');
+  report.cacheGrowthUnavailable='No ordinary provider API for release-app private cache byte size or native thread stacks is established; ordinary logcat records are retained if available, without shell permission changes or private-cache payload pull.';
+  await warmShare(large,'large-share-warm',900);
+  report.status=report.errors.length?'observed-with-incomplete-stages':'observed';report.finishedUtc=new Date().toISOString();return report;
+ }catch(error){
+  report.status='incomplete';report.errors.push(redact(error.stack||error));
+  if(report.largeStaging?.status==='staging'){
+   report.largeStaging.status='incomplete';report.largeStaging.error=redact(error.stack||error);
+   report.largeStaging.finishedUtc=new Date().toISOString();save('large-staging-result.json',report.largeStaging);
+  }
+  await snap('failure').catch(e=>report.errors.push('Failure capture: '+redact(e.message)));
+  throw error;
+ }finally{
+  report.finishedUtc=new Date().toISOString();save('results.json',report);
+  save('limits.txt',report.scope+'\n'+report.hypothesis+'\n'+report.limits.join('\n'));
+ }
+}
