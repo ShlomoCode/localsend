@@ -2,7 +2,7 @@
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y build-essential pkg-config libffi-dev libexpat1-dev python3-pip ninja-build curl ca-certificates
+apt-get install -y build-essential pkg-config libffi-dev libexpat1-dev libxml2-dev python3-pip ninja-build curl ca-certificates
 pip3 install --no-cache-dir meson==1.6.1
 cd /work
 cat /etc/os-release > client-build-os.txt
@@ -18,6 +18,7 @@ meson setup build wayland-1.26.0 --buildtype=release -Dtests=false -Ddocumentati
 ninja -C build
 cp build/src/libwayland-client.so.0.26.0 client-jammy.so
 readelf -d client-jammy.so > client-jammy-dynamic.txt
+grep -Fq 'Library soname: [libwayland-client.so.0]' client-jammy-dynamic.txt
 readelf -Ws client-jammy.so > client-jammy-symbols.txt
 readelf --version-info client-jammy.so > client-jammy-versions.txt
 sha256sum client-jammy.so > client-jammy.sha256
