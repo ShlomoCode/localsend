@@ -1,6 +1,7 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
@@ -20,6 +21,19 @@ export default async function({session,wd,senderPort,transportStatus}) {
  }
  async function click(label) { const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:label});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{}); }
  async function nativeText(text) { const e=await wd('POST',`/session/${session}/element`,{using:'xpath',value:`//*[@text="${text}"]`});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{}); }
+ async function approvalReady(label) {
+  const deadline=Date.now()+10000;let attempt=0;
+  do {
+   const element=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:'Accept'}).catch(error=>{
+    if(!String(error).includes('no such element'))throw error;
+    return null;
+   });
+   if(element){await source(`${label}-ready`);return element;}
+   await source(`${label}-transition-${attempt++}`);
+   await new Promise(resolve=>setTimeout(resolve,200));
+  }while(Date.now()<deadline);
+  throw new Error('Actual Accept control did not appear after returning from Options');
+ }
  try {
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2026-10-11T00:00:00Z','-FixtureFileName',controlFile,'-DiagnosticPeerPort',String(senderPort)]);
   await source('control-before');await lifecycle('control-before');
@@ -63,6 +77,9 @@ export default async function({session,wd,senderPort,transportStatus}) {
   await nativeText('Documents');
   const documents=await source('calibration-documents-folder');
   if(!documents.includes('package="com.google.android.documentsui"')||!documents.includes('text="Documents"'))throw new Error('Native Documents folder was not observed');
+  const folderButton=await wd('POST',`/session/${session}/element`,{using:'xpath',value:'//*[@text="Use this folder"]'});
+  const folderButtonRect=await wd('GET',`/session/${session}/element/${folderButton['element-6066-11e4-a52e-4f735466cecf']}/rect`);
+  writeFileSync('evidence/calibration-folder-button-rect.json',JSON.stringify(folderButtonRect,null,2));
   await nativeText('Use this folder');
   const permission=await source('calibration-folder-permission');
   if(permission.includes('text="Allow"')){await nativeText('Allow');}
@@ -71,14 +88,19 @@ export default async function({session,wd,senderPort,transportStatus}) {
   const selectedShot=await wd('GET',`/session/${session}/screenshot`);writeFileSync('evidence/calibration-selected-destination.png',Buffer.from(selectedShot,'base64'));
   await lifecycle('calibration-after-folder-selection');
   await wd('POST',`/session/${session}/back`,{});
-  await source('calibration-before-accept');await click('Accept');
+  const approval=await approvalReady('calibration-before-accept');
+  await wd('POST',`/session/${session}/element/${approval['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
   await new Promise(resolve=>setTimeout(resolve,3000));
   await source('calibration-after-accept');await lifecycle('calibration-after-accept');
   await ui('snapshot',0,0,'windows-calibration-after-accept');
+  const savedShot=await wd('GET',`/session/${session}/screenshot`);writeFileSync('evidence/calibration-after-accept.png',Buffer.from(savedShot,'base64'));
   const repeatFile=`issue3393-${process.env.GITHUB_RUN_ID}-picker-calibration.txt`;
   const repeatSaved=await wd('POST',`/session/${session}/appium/device/pull_file`,{path:`/sdcard/Documents/${repeatFile}`});
   const repeatData=Buffer.from(repeatSaved,'base64');writeFileSync('evidence/calibration-saved-payload.txt',repeatData);
   if(repeatData.toString()!=='LocalSend issue3393 picker-calibration unique payload')throw new Error('Native-picker saved content differs from sender payload');
-  results.push({case:'picker-calibration',dwellTest:false,nativeUiObserved:true,fileName:repeatFile,destination:'/sdcard/Documents',savedContentVerified:true});
+  const expectedHash=createHash('sha256').update('LocalSend issue3393 picker-calibration unique payload').digest('hex');
+  const savedHash=createHash('sha256').update(repeatData).digest('hex');
+  writeFileSync('evidence/calibration-saved-hash.json',JSON.stringify({fileName:repeatFile,size:repeatData.length,expectedSha256:expectedHash,savedSha256:savedHash,verified:savedHash===expectedHash},null,2));
+  results.push({case:'picker-calibration',dwellTest:false,nativeUiObserved:true,fileName:repeatFile,destination:'/sdcard/Documents',savedContentVerified:true,savedSha256:savedHash});
  } finally { writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2)); }
 }
