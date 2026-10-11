@@ -198,7 +198,7 @@ await snapshot('fresh-media-after-dpad');
 async function freshEntry(name) {
   adb('shell','am','force-stop','org.localsend.localsend_app');
   adb('shell','am','start','-n','org.localsend.localsend_app/.MainActivity');
-  await pause(2500);
+  await waitForAppWindow();
   await mouseNode('Send',`${name}-send`);
   await mouseNode('Media',`${name}-media`);
   await pause(3000);
