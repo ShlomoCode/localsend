@@ -52,6 +52,7 @@ async function mouseTap(x,y,label) {
     method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),
   });
   const body=await result.json();
+  fs.writeFileSync(`${out}/native-mouse-events.txt`,adb('logcat','-d','-v','threadtime','appium:I','*:S'));
   fs.appendFileSync(`${out}/native-mouse-actions.jsonl`,JSON.stringify({time:Date.now(),x,y,label,request,status:result.status,body})+'\n');
   if(!result.ok || body.value?.error) throw new Error('Native mouse executor rejected the action');
 }
@@ -94,6 +95,7 @@ async function record(name, action) {
   log({ type: 'recording', action: 'end', name });
 }
 adb('shell', 'settings', 'put', 'system', 'show_touches', '1');
+adb('shell','setprop','log.tag.appium','INFO');
 adb('shell', 'mkdir', '-p', '/sdcard/issue1864-recordings');
 adb('shell', 'touch', '/sdcard/issue1864-recordings/.nomedia');
 adb('shell', 'am', 'start', '-a', 'android.settings.SETTINGS');

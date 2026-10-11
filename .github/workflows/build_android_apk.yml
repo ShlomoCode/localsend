@@ -87,6 +87,8 @@ jobs:
           for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_MEDIA_IMAGES READ_MEDIA_VIDEO; do adb shell pm grant org.localsend.localsend_app android.permission.$permission 2>&1 | tee -a evidence-cloud/permission-grants.txt || true; done
           npm install -g appium
           appium driver install uiautomator2
+          appium --version > evidence-cloud/appium-version.txt
+          appium driver list --installed > evidence-cloud/appium-drivers.txt
           appium --port 4723 --log evidence-cloud/appium.log &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4723/status && break; sleep 1; done
           node support/tests/issue1864-tv.mjs
