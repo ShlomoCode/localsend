@@ -8,7 +8,10 @@ import {createHash} from 'node:crypto';
 import {relay} from '../cloud_transport/relay.mjs';
 import shareScenario from './share-scenario.mjs';
 
-// Drive the unmodified apps. This 1 MiB control cannot establish 16GB throughput.
+// Drive the unmodified apps. The moderate control measures throughput; neither size proves 16GB behavior.
+const controlBytes=process.env.MODERATE_TRANSFER_CONTROL==='1'?64*1024*1024:1048576;
+const controlName=controlBytes===1048576?'1 MiB':'64 MiB';
+const controlSizeLabel=controlBytes===1048576?'1.0 MB':'67.1 MB';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const output=path.resolve(process.env.TRANSFER_EVIDENCE_DIRECTORY||'evidence/windows-transfer');
 const windowsOutput=path.join(output,'windows');
@@ -22,8 +25,8 @@ const save=(name,value)=>writeFileSync(path.join(output,name),typeof value==='st
 const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Samsung Galaxy S20',android:'10.0',
  requestedOrientation:'PORTRAIT',initialObservedOrientation:null,cleanupErrors:[],snapshots:[],
- release:'1.18.2',scenario:'Actual 1 MiB MP4 Android File/Recent selection, favorite registration/send, Windows UI Accept and saved hash',
- boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','1 MiB control cannot extrapolate stable throughput or 16GB behavior'],
+ release:'1.18.2',scenario:'Actual '+controlName+' MP4 Android File/Recent selection, favorite registration/send, Windows UI Accept and saved hash',
+ boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','One control cannot establish sustained 16GB throughput or behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
 let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
 let sessionCreationAttempted=false;
@@ -316,13 +319,13 @@ try{
  assert.equal(report.initialObservedOrientation,'PORTRAIT','The small transfer control requires initial portrait orientation');
  await wd('POST',base()+'/timeouts',{implicit:5000});
  await wd('POST',base()+'/appium/settings',{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
- await snap('fixture-before');await click('Stage small video');
+ await snap('fixture-before');await click(controlBytes===1048576?'Stage small video':'Stage 64MiB video');
  const staged=await waitFor(s=>{const t=labels(s).join('\n');if(/FAILED|INSUFFICIENT_STORAGE/.test(t))throw Error('Fixture staging failed');return /READY name=.*\.mp4/.test(t);},60000,'Small video staging timed out');
  await snap('fixture-ready',staged);
  const details=labels(staged).find(v=>v.includes('READY name='));
  const name=details.match(/READY name=([^\n]+)/)?.[1],bytes=Number(details.match(/\nbytes=(\d+)/)?.[1]);
  const sha256=details.match(/\nsha256=([a-f0-9]{64})/)?.[1];
- assert(name&&name.endsWith('.mp4')&&sha256,'Fixture identity missing');assert.equal(bytes,1048576,'Control must be exactly 1 MiB');
+ assert(name&&name.endsWith('.mp4')&&sha256,'Fixture identity missing');assert.equal(bytes,controlBytes,'Control must have the requested exact size');
  const mediaDurationMs=Number(details.match(/mediaDurationMs=(\d+)/)?.[1]);
  const decodedFrame=details.match(/decodedFrame=(\d+)x(\d+)/);
  assert(mediaDurationMs>0,'Fixture helper did not report positive video duration');
@@ -343,7 +346,7 @@ try{
  const recent=nodes(roots).filter(n=>n.text==='Recent');assert(recent.length,'Recent root not observed');
  await ui('text("Recent").instance('+(recent.length-1)+')');
  await snap('file-picker-recent');await ui('textContains('+JSON.stringify(name)+')');
- const selected=await waitFor(s=>labels(s).some(v=>/Selection\nFiles: 1\nSize: 1\.0 MB/.test(v)),60000,'LocalSend did not show Selection, one file, and 1.0 MB');
+ const selected=await waitFor(s=>labels(s).some(v=>v.includes('Selection\nFiles: 1\nSize: '+controlSizeLabel)),60000,'LocalSend did not show Selection, one file, and '+controlSizeLabel);
  await snap('selected-one-file',selected);await manualInputComparison();await addFavorite();
  const metricsBefore=r.status();
  // Favorite selection registers again and then startSession sends the already selected file.
@@ -387,15 +390,17 @@ try{
    report.transport={before:metricsBefore,after:metricsAfter,
     windowsToAndroidBytes:metricsAfter.fromSender-metricsBefore.fromSender,
     androidToWindowsBytes:metricsAfter.fromDevice-metricsBefore.fromDevice,
-    scope:'Transport counts include TLS and protocol traffic. Elapsed time starts immediately before the favorite touch and includes registration, approval, network and saving; observation lag is recorded separately. 1 MiB only.'};
+    scope:'Transport counts include TLS and protocol traffic. Elapsed time starts immediately before the favorite touch and includes registration, approval, network and saving; observation lag is recorded separately. '+controlName+' only.'};
    await snap('android-finished',xml);break;
   }
   await sleep(5000);
  }while(Date.now()<end);
  assert.equal(report.status,'passed','Ten-minute app-to-app control did not reach Android Finished and verified Windows save');
+ report.controlSizeBytes=bytes;
+ report.endToEndBytesPerSecond=bytes/(report.elapsedSendToVerifiedMs/1000);
  save('app-control-results.json',report);
- console.log('1 MiB Android-to-Windows app control passed; no 16GB or stable-throughput claim.');
- if(process.env.SHARE_AFTER_CONTROL==='1'){
+ console.log(controlName+' Android-to-Windows app control passed; no 16GB claim.');
+ if(process.env.SHARE_AFTER_CONTROL==='1'&&controlBytes===1048576){
   report.shareScenario=await shareScenario({session,wd,output});
  }
 }catch(error){

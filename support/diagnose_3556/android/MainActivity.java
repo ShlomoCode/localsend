@@ -27,6 +27,7 @@ public final class MainActivity extends Activity {
     status=new TextView(this);status.setText(capacity()+saved.getString("readyDetails",""));panel.addView(status);
     add(panel,"Stage small data",()->stage(1024*1024,false));
     add(panel,"Stage small video",()->stage(1024*1024,true));
+    add(panel,"Stage 64MiB video",()->stage(64L*1024*1024,true));
     add(panel,"Stage 1GB video",()->stage(1000000000L,true));
     add(panel,"Stage 16GB data",()->stage(16000000000L,false));
     add(panel,"Stage 16GB video",()->stage(16000000000L,true));

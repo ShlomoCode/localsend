@@ -5,7 +5,7 @@ on:
       scenario:
         type: choice
         default: selection
-        options: [selection, windows-transfer-control]
+        options: [selection, windows-transfer-control, moderate-transfer-control]
 jobs:
   storage-control:
     if: inputs.scenario == 'selection'
@@ -44,14 +44,15 @@ jobs:
           name: issue3556-storage-evidence
           path: evidence/
   windows-transfer-control:
-    if: inputs.scenario == 'windows-transfer-control'
+    if: inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control'
     runs-on: windows-2022
     timeout-minutes: 45
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue3556-${{ github.run_id }}
-      SHARE_AFTER_CONTROL: '0'
+      SHARE_AFTER_CONTROL: '1'
+      MODERATE_TRANSFER_CONTROL: ${{ inputs.scenario == 'moderate-transfer-control' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -73,6 +74,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Controller syntax failed'}
           node --check support/diagnose_3556/share-scenario.mjs
           if($LASTEXITCODE -ne 0){throw 'Share callback syntax failed'}
+          node --check support/cloud_transport/relay.mjs
+          if($LASTEXITCODE -ne 0){throw 'Relay syntax failed'}
           foreach($script in @('windows-helper-build.ps1','windows-transfer-step.ps1','windows_receiver.ps1')){
             $tokens=$null; $errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD "support/diagnose_3556/$script"),[ref]$tokens,[ref]$errors)

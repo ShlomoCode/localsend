@@ -7,6 +7,14 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
   const peers=new Map(); const events=[]; let waiter=null; let queued=0; let peak=0; let next=0;
   const metrics={opened:0,fromSender:0,fromDevice:0,paused:0};
   const trace=[];const started=process.hrtime.bigint();
+  const emptyChunks=()=>({count:0,bytes:0,min:null,max:0,firstElapsedMs:null,lastElapsedMs:null});
+  const chunks={fromSender:emptyChunks(),fromDevice:emptyChunks()},peerChunks=Object.create(null);
+  function measureChunk(direction,length,id){
+    const now=Number(process.hrtime.bigint()-started)/1e6;
+    const peer=peerChunks[id]??={fromSender:emptyChunks(),fromDevice:emptyChunks()};
+    for(const c of [chunks[direction],peer[direction]]){c.count++;c.bytes+=length;c.min=c.min===null?length:Math.min(c.min,length);c.max=Math.max(c.max,length);c.firstElapsedMs??=now;c.lastElapsedMs=now;}
+  }
+  const status=()=>({...metrics,queued,peak,peers:peers.size,chunks:structuredClone(chunks),peerChunks:structuredClone(peerChunks)});
   function record(origin,id,detail={}){trace.push({elapsedMs:Number(process.hrtime.bigint()-started)/1e6,origin,id,...detail});}
   function dequeue() {
     const batch=[];
@@ -21,7 +29,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
   function attach(p,id,source){
     peers.set(id,p);metrics.opened++;
     record(source+'-open',id);
-    p.on('data',data=>{metrics.fromSender+=data.length;enqueue({id,kind:'data',bytes:data.length,data:data.toString('base64')});});
+    p.on('data',data=>{metrics.fromSender+=data.length;measureChunk('fromSender',data.length,id);enqueue({id,kind:'data',bytes:data.length,data:data.toString('base64')});});
     p.on('end',()=>{record(source+'-eof',id);enqueue({id,kind:'eof'});});
     p.on('error',e=>{record(source+'-error',id,{code:e.code||'SOCKET_ERROR'});enqueue({id,kind:'error',error:e.code||'SOCKET_ERROR'});});
     p.on('close',()=>{record(source+'-close',id);peers.delete(id);enqueue({id,kind:'close'});});
@@ -38,7 +46,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
       const w={res,timer:setTimeout(()=>{record('poll-renewal');if(waiter===w)waiter=null;res.end('[]');},15000)};
       waiter=w;res.on('close',()=>{if(waiter===w){clearTimeout(w.timer);waiter=null;}});return;
     }
-    if(req.method==='GET' && req.url==='/status'){res.end(JSON.stringify({...metrics,queued,peak,peers:peers.size}));return;}
+    if(req.method==='GET' && req.url==='/status'){res.end(JSON.stringify(status()));return;}
     if(req.method==='POST' && req.url==='/push') {
       let raw=''; req.on('data',d=>{raw+=d;if(raw.length>256*1024)req.destroy();});
       req.on('end',()=>{
@@ -51,7 +59,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
           }
           const p=peers.get(e.id);
           if(!p){res.writeHead(410);res.end('{}');return;}
-          if(e.kind==='data'){const data=Buffer.from(e.data,'base64');metrics.fromDevice+=data.length;p.write(data,()=>res.end('{}'));}
+          if(e.kind==='data'){const data=Buffer.from(e.data,'base64');metrics.fromDevice+=data.length;measureChunk('fromDevice',data.length,e.id);p.write(data,()=>res.end('{}'));}
           else if(e.kind==='eof'){record('device-eof',e.id);p.end();res.end('{}');}
           else if(e.kind==='error'){record('device-error',e.id,{source:e.origin||'unspecified'});p.destroy(new Error('Device socket failed'));res.end('{}');}
           else {res.writeHead(400);res.end('{}');}
@@ -60,7 +68,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     }
     res.writeHead(404);res.end('{}');
   });
-  return {token,metrics,trace,record,status:()=>({...metrics,queued,peak,peers:peers.size}),
+  return {token,metrics,trace,record,status,
     start:async()=>{if(!reverseTargetPort)await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
     stop:async()=>{record('relay-stop');if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}for(const [id,p] of peers){record('relay-stop-close',id);p.destroy();}server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),...(reverseTargetPort?[]:[new Promise(r=>tcp.close(r))])]);}};
 }
