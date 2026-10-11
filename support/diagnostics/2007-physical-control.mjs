@@ -259,7 +259,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:process.env.BS_DEVICE||'Vivo Y21',os:'Android '+(process.env.BS_OS||'11.0'),release:process.env.ISSUE_2007_RELEASE||'1.18.2',sender:windows?'Original Windows desktop app through real file picker':'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:deviceFolder+'/'+fixtureName,bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
   await waitFile('evidence/sender-first-finished',30000);
-  if(storage)await storage.observe('before-trash');
+  if(storage){
+   const visibility=await storage.observe('before-trash');
+   const owned=visibility.observations.find(observation=>observation.name===fixtureName);
+   assert(owned&&owned.exists&&owned.queries.some(query=>query.rows.some(row=>row._id)),'Known-present owned file has no observable MediaStore row; refuse to interpret later empty rows');
+  }
   if(process.env.ISSUE_2007_BASELINE_ONLY==='1'){
    await closeReceiverFinished();
    if(desktop.exitCode===null)await new Promise(r=>desktop.once('exit',r));
