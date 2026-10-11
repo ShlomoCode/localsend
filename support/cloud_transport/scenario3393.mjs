@@ -6,7 +6,17 @@ export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
  async function source(label) { const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
- async function lifecycle(label) { const state=await wd('POST',`/session/${session}/execute/sync`,{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'dumpsys activity -p org.localsend.localsend_app processes'}}),args:[]});writeFileSync(`evidence/${label}-processes.txt`,state); }
+ async function lifecycle(label) {
+  const failures=[];
+  for(const command of ['dumpsys activity -p org.localsend.localsend_app processes','dumpsys activity processes','dumpsys activity']){
+   try{
+    const state=await wd('POST',`/session/${session}/execute/sync`,{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]});
+    writeFileSync(`evidence/${label}-processes.txt`,state);writeFileSync(`evidence/${label}-lifecycle-capability.json`,JSON.stringify({command,failures},null,2));return;
+   }catch(error){failures.push({command,error:String(error)});}
+  }
+  const appState=await wd('POST',`/session/${session}/appium/device/app_state`,{appId:'org.localsend.localsend_app'}).catch(error=>({error:String(error)}));
+  writeFileSync(`evidence/${label}-lifecycle-capability.json`,JSON.stringify({failures,appState,processFlagsUnavailable:true},null,2));
+ }
  async function click(label) { const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:label});await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{}); }
  try {
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2026-10-11T00:00:00Z','-FixtureFileName','issue3393-payload.txt','-DiagnosticPeerPort',String(senderPort)]);
