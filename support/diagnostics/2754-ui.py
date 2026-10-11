@@ -14,8 +14,39 @@ def snap(name):
     res=run("tesseract",str(path),"stdout","--psm","11","tsv")
     (out/(name+".tsv")).write_text(res.stdout)
     return list(csv.DictReader(io.StringIO(res.stdout),delimiter="\t"))
+def keyboard_switch(name):
+    snap(name)
+    geo=run("xdotool","getwindowgeometry","--shell",wid).stdout
+    vals=dict(line.split("=",1) for line in geo.splitlines() if "=" in line)
+    # The top keyboard moves the settings window. Re-read its current geometry.
+    left=int(vals["X"])+86; top=int(vals["Y"])+95
+    crop=out/(name+"-rows.png")
+    run("scrot","--autoselect",f"{left},{top},628,220",str(crop))
+    result=run("tesseract",str(crop),"stdout","--psm","11","tsv")
+    (out/(name+"-rows.tsv")).write_text(result.stdout)
+    rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+    hits=[r for r in rows if r["text"].lower()=="on-screen"]
+    if not hits: raise RuntimeError("Supported virtual keyboard row not located in settings crop")
+    r=hits[0]; y=top+int(r["top"])+int(r["height"])//2
+    x=int(vals["X"])+int(vals["WIDTH"])-150
+    log("keyboard-toggle-ui",x=x,y=y)
+    run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(4)
 def click_word(word,name):
     rows=snap(name)
+    if word.lower()=="text":
+        geo=run("xdotool","getwindowgeometry","--shell",w[-1]).stdout
+        vals=dict(line.split("=",1) for line in geo.splitlines() if "=" in line)
+        x=int(vals["X"])+int(vals["WIDTH"])//2-150
+        y=int(vals["Y"])+int(vals["HEIGHT"])//2-110
+        crop=out/(name+"-modal-gate.png")
+        run("scrot","--autoselect",f"{x},{y},310,220",str(crop))
+        result=run("tesseract",str(crop),"stdout","--psm","6","tsv")
+        (out/(name+"-modal-gate.tsv")).write_text(result.stdout)
+        modal_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+        labels={r["text"].lower().strip() for r in modal_rows}
+        log("fresh-text-gate",file=crop.name,x=x,y=y,previous_modal={"type","message"}.issubset(labels))
+        if {"type","message"}.issubset(labels):
+            raise RuntimeError("Previous Text dialog still visible before fresh trigger: "+name)
     hits=[r for r in rows if r["text"].lower().strip()==word.lower()]
     if not hits: raise RuntimeError("Missing UI label "+word+" in "+name)
     r=hits[0]; x=int(r["left"])+int(r["width"])//2; y=int(r["top"])+int(r["height"])//2
@@ -68,43 +99,29 @@ settings=subprocess.Popen(["cinnamon-settings","accessibility"],stdout=open(out/
 time.sleep(6); snap("accessibility-start")
 click_word("Keyboard","accessibility-keyboard-tab"); time.sleep(2)
 rows=snap("accessibility-keyboard")
-# Cinnamon Accessibility keyboard row has a switch at the right of its label.
-hits=[r for r in rows if r["text"].lower()=="on-screen"]
-if not hits: raise RuntimeError("Supported virtual keyboard row not located; inspect screenshot")
-r=hits[0]; y=int(r["top"])+int(r["height"])//2
-wid=run("xdotool","getwindowfocus").stdout.strip(); geo=run("xdotool","getwindowgeometry","--shell",wid).stdout
-vals=dict(line.split("=",1) for line in geo.splitlines() if "=" in line)
-x=int(vals["X"])+int(vals["WIDTH"])-150
-log("keyboard-toggle-ui",x=x,y=y); run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(4)
+wid=run("xdotool","getwindowfocus").stdout.strip()
+keyboard_switch("keyboard-enable")
 snap("accessibility-after-toggle")
 (out/"keyboard-settings.txt").write_text(run("gsettings","list-recursively","org.cinnamon.desktop.a11y.applications").stdout)
 state=run("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboard-enabled").stdout.strip()
 if state != "true": raise RuntimeError("UI did not enable supported virtual keyboard: "+state)
+(out/"activation-mode.txt").write_text(run("gsettings","get","org.cinnamon.keyboard","activation-mode").stdout)
 run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-on")
 text_case("keyboard-on-repeat")
-# Test the other supported activation mode through the same Accessibility UI.
-run("xdotool","windowactivate","--sync",wid); time.sleep(2)
-mode_rows=snap("activation-mode-before")
-mode_hits=[r for r in mode_rows if r["text"].lower()=="activation"]
-if not mode_hits: raise RuntimeError("Supported Activation mode row not visible")
-mode_y=int(mode_hits[0]["top"])+int(mode_hits[0]["height"])//2
-run("xdotool","mousemove",str(x),str(mode_y),"click","1"); time.sleep(1)
-run("xdotool","key","Home","Return"); time.sleep(3)
-snap("activation-mode-after")
-mode=run("gsettings","get","org.cinnamon.keyboard","activation-mode").stdout.strip()
-(out/"activation-mode.txt").write_text(mode)
-if mode!="'accessible'": raise RuntimeError("UI did not choose accessible keyboard mode: "+mode)
-run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
-text_case("keyboard-accessible")
-text_case("keyboard-accessible-repeat")
-text_case("keyboard-accessible-stack")
 # Return the supported setting through the same UI, then repeat the original trigger.
 run("xdotool","windowactivate","--sync",wid); time.sleep(2)
-run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(3)
+keyboard_switch("keyboard-disable-again")
 (out/"keyboard-disabled-again.txt").write_text(run("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboard-enabled").stdout)
 if run("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboard-enabled").stdout.strip() != "false":
     raise RuntimeError("UI failed to restore virtual keyboard setting")
 run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-off-again")
+# Capture a separate stack only after completing the uninstrumented off/on/off control.
+run("xdotool","windowactivate","--sync",wid); time.sleep(2)
+keyboard_switch("keyboard-enable-stack")
+if run("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboard-enabled").stdout.strip() != "true":
+    raise RuntimeError("UI failed to enable virtual keyboard for stack capture")
+run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
+text_case("keyboard-on-stack")
 log("completed")
