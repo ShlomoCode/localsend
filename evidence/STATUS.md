@@ -1,6 +1,6 @@
 # Issue 2830: long clipboard transfer freezes Android
 
-Status: Short-text control, 105,000 ASCII characters without line breaks, 105,000 characters with LF line breaks, and 105 KiB passed on Galaxy S23 / Android 13. Xiaomi short control 38110353448 failed during Favorites discovery; 38111742971 repeats it with Windows error details and MIUI/build diagnostics. The reported Android freeze has not been reproduced. No production patch exists.
+Status: Four fixtures passed on Galaxy S23 / Android 13. Xiaomi short, ASCII105000, and multiline105000 passed with discovery timeout 10000 ms. Next: replace the canonical ASCII spaces with X, retaining length and all other Xiaomi conditions. The reported Android freeze has not been reproduced. No production patch exists.
 
 ## Report and evidence boundary
 
@@ -16,7 +16,7 @@ The reporter uses Dell Inspiron 3501, Windows 11 Pro, and Xiaomi Redmi Note 10 P
 
 ## Environment gaps
 
-- One owned job/session at a time is allowed for this issue; the Xiaomi short-control job is currently active.
+- One owned job/session at a time is allowed for this issue; no job/session is active after the multiline result.
 - The shared transport and actual short-text app-to-app control have passed.
 - Windows 11 runner is ARM with original x64 release under emulation. Dell hardware and native x64 remain different.
 - Galaxy S23 / Android 13 is available. Xiaomi Redmi Note 11 / Android 11 is the next comparison; its MIUI version is unknown. Redmi Note 10 Pro / MIUI 14 / Android 13 remains uncovered.
@@ -65,3 +65,17 @@ Supplementary memory snapshots are available despite rejected `dumpsys activity`
 Xiaomi short run 38110353448 / 721bfc80 passed all four socket controls and the pending-poll handoff (14,385 ms). The original Android app remains on Receive; inspected before/receiver screenshots show different positions of its animated logo, while Windows Favorites shows Error. No preview appeared and no text transfer was completed. Relay metrics show 2,542 bytes returned after the controls, with two additional connections closing. Retained device logs show target-connected/eof for those connections and continued relay polling, without a 409, connection-refused message, or ANR. This is a discovery/readiness failure, not the reported long-text freeze, and does not count as a substantive application experiment.
 
 Run 38111742971 / 9eccc165 repeats the same 44-byte fixture, original applications, and Xiaomi device. It adds MIUI/build property diagnostics and a Windows error-details screenshot after failure; transport, timeouts, and product behavior are unchanged. Exact error text is needed before choosing a readiness correction.
+
+That repeat passed. Inspected screenshots show the exact 44-byte preview and Receive after Copy; source/readback SHA-256 is `10f6b75f53e5d94f86ef113f23647fba57e411f34f8ba74c30ca334e92b02fd4`. The proposed 500 ms discovery-timeout explanation remains unconfirmed: no timeout setting was changed, and no Windows error dialog was needed in the successful repeat. `getprop ro.miui.ui.version.name` and `getprop ro.build.fingerprint` were explicitly rejected as unsupported BrowserStack ADB commands, so MIUI remains unknown. Run 38112230754 now tests ASCII105000 on this Xiaomi environment using c88af778 (documentation-only changes above 9eccc165).
+
+Run 38112230754 failed before text transfer. Inspected `ascii105000-windows-error-details.png` reads `[RhttpTimeoutException] Request timed out. URL: https://127.0.0.1:53318/api/localsend/v1/info`. Android remains on normal Receive. Post-control relay bytes are exactly the same as the earlier short discovery failure: sender 488, receiver 2542. No long-text response was exercised, so this run is excluded from substantive application experiments. Code inspection confirms default discovery timeout 500 ms (`v1.17.0:common/lib/constants.dart:26`) and preference key `ls_timeout` (`app/lib/provider/persistence_provider.dart:71`). Its scope is Favorites discovery; the upload client remains long-lived.
+
+Run 38112860787 / 8ef99127 repeats the short Xiaomi control with only the supported Windows user setting `flutter.ls_timeout` changed to 10000 ms. The generated sender settings are separately retained as `sender-settings-fixture.json`. This is a cloud relay latency accommodation, not a product patch or reproduction of the Android freeze. A fresh short control precedes long tests under that setting. Live device catalog again confirms the only Xiaomi entry is Note 11 / Android 11; MIUI remains unknown.
+
+The 10000 ms short control passed. Sender settings fixture confirms that value; inspected preview/after-Copy screenshots and source/readback SHA-256 `10f6b75f53e5d94f86ef113f23647fba57e411f34f8ba74c30ca334e92b02fd4` prove desired success. This calibration repeat is not counted as another substantive reproduction experiment. Run 38113374423 changes only short→ASCII105000 on unchanged 8ef99127, with matching device, releases, and timeout.
+
+Run 38113374423 / 8ef99127 passed ASCII105000 on Xiaomi Note 11 / Android 11, with timeout 10000 ms. Raw result: `previewVisible=true`, `copyResponsive=true`, `sourceMatches=null`, `clipboardVerified=true`. Source and clipboard readback are 105000 UTF-8 bytes, 105000 Unicode scalars / UTF-16 units, 210000 UTF-16 bytes, LF0/CR0; SHA-256 is identical: `83b801b3087bde5b41b2309cd1e364dbcccf7d9a8c86652a8479e08d3bffaf5a`. Inspected screenshots show actual text preview and Receive after Copy. First preview source response is 1337 ms; this is Appium response time, not rendering latency. Sender settings fixture confirms 10000 ms. Run 38113967487 changes only the content to multiline105000 on unchanged head, device, applications, and settings.
+
+Run 38113967487 / 8ef99127 passed multiline105000 on unchanged Xiaomi conditions. Raw result: `previewVisible=true`, `copyResponsive=true`, `sourceMatches=null`, `clipboardVerified=true`. Source/readback are 105000 UTF-8 bytes / Unicode scalars, 210000 UTF-16 bytes, LF1640/CR0; SHA-256 is identical: `caad1d316ceadf1c0b89ce451b846056c35476f84fd662c7c32177fd7c60c838`. Inspected screenshots show text preview and Receive after Copy. An artifact-download HTTP418 was retried successfully via the configured SOCKS proxy; it does not affect the application result.
+
+The next `unbroken105000` fixture derives from the canonical ASCII source by replacing every ASCII space with X, preserving all other positions and the length. Its metadata additionally records space count. Device, releases, user settings, transport, and UI steps remain unchanged. This isolates word-break opportunities rather than changing encoding and length together.
