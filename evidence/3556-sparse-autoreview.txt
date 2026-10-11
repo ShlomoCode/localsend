@@ -1,0 +1,3 @@
+autoreview clean: no accepted/actionable findings reported
+overall: patch is correct (0.9)
+The supplied diff introduces no concrete P0–P2 defects. The monotonic deadline checks preserve the open-request, EOF, and hash requirements while adding separate assertions and evidence captured before cleanup.
