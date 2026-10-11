@@ -11,6 +11,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
       - name: Byte exact transport controls
         run: node support/cloud_transport/control.mjs
       - name: Build diagnostic helper without LocalSend changes
