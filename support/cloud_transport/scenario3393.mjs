@@ -7,11 +7,13 @@ import {exactNativeButton} from './native-labels.mjs';
 const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}) {
  const results=[];
- const policyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
+ const oneplusPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
+ const samsungPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-enable-and-restore';
+ const policyOn=oneplusPolicyOn||samsungPolicyOn;
  const samsungDiscovery=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-policy-discovery';
  if(samsungDiscovery&&process.env.BS_DEVICE!=='Samsung Galaxy S25')throw new Error('Samsung policy discovery requires Samsung Galaxy S25');
- if(policyOn&&(process.env.BS_DEVICE!=='OnePlus 13R'||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires OnePlus 13R and scheduled 20 s');
- let policyAttempted=false,policyModule;
+ if(policyOn&&(process.env.BS_DEVICE!==(samsungPolicyOn?'Samsung Galaxy S25':'OnePlus 13R')||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires its selected device and scheduled 20 s');
+ let policyAttempted=false,policyModule,samsungPolicyState;
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
  async function source(label) { const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
@@ -29,7 +31,12 @@ export default async function({session,wd,senderPort,transportStatus}) {
  const prefix=`/session/${session}`,appPackage='org.localsend.localsend_app',pickerPackage='com.google.android.documentsui';
  const destinationUri='content://com.android.externalstorage.documents/tree/primary%3ADocuments';
  const appTarget=label=>({using:'xpath',value:`//*[@package="${appPackage}" and @content-desc="${label}" and @clickable="true"]`});
- const destinationTarget={using:'xpath',value:`//*[@package="${appPackage}" and contains(@content-desc,"${destinationUri}")]`};
+ // The captured description separates the destination from media options with
+ // newlines. Match those delimiters so a nested Documents tree cannot pass.
+ const newline='\n';
+ const destinationDescription=`(starts-with(@content-desc,concat("Destination","${newline}","${destinationUri}","${newline}")) or starts-with(@content-desc,concat("Save to folder","${newline}","${destinationUri}","${newline}")))`;
+ const destinationNodes=`//*[@package="${appPackage}" and @class="android.widget.Button" and ${destinationDescription}]`;
+ const destinationTarget={using:'xpath',value:`${destinationNodes}[count(${destinationNodes})=1]`};
  // The released Android app groups Destination and media options under one parent.
  // Index 0 is the pencil in the observed native tree; reject ambiguous identities.
  const destinationParent='//*[@package="org.localsend.localsend_app" and @class="android.widget.Button" and (starts-with(@content-desc,"Destination") or starts-with(@content-desc,"Save to folder")) and contains(@content-desc,"/storage/emulated/0/Download")]';
@@ -59,7 +66,10 @@ export default async function({session,wd,senderPort,transportStatus}) {
  }
 
  try {
-  if(policyOn){
+  if(samsungPolicyOn){
+   policyModule=await import('./samsung-policy3393.mjs');
+   samsungPolicyState=await policyModule.prepare({session,wd,onMutationAttempt:state=>{samsungPolicyState=state;policyAttempted=true;}});
+  }else if(oneplusPolicyOn){
    policyModule=await import('./oneplus-policy3393.mjs');
    await policyModule.setOnePlusBackground({session,wd,enabled:true,requireInitial:false,label:'policy-enable',onMutationAttempt:()=>{policyAttempted=true;}});
   }
@@ -87,7 +97,7 @@ export default async function({session,wd,senderPort,transportStatus}) {
   if(samsungDiscovery)return;
   if(policyOn){
    const {default:timedPicker}=await import('./picker3393-timed.mjs');
-   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true});
+   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true,samsungPicker:samsungPolicyOn});
    return;
   }
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case','picker-calibration']);
@@ -130,7 +140,10 @@ export default async function({session,wd,senderPort,transportStatus}) {
   const {default:timedPicker}=await import('./picker3393-timed.mjs');
   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results});
  } finally {
-  try{if(policyAttempted)await policyModule.setOnePlusBackground({session,wd,enabled:false,label:'policy-restore'});}
-  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyDiscovery:samsungDiscovery,transport:transportStatus()},null,2));}
+  try{
+   if(samsungPolicyOn&&policyAttempted)await policyModule.restore({session,wd,state:samsungPolicyState});
+   else if(oneplusPolicyOn&&policyAttempted)await policyModule.setOnePlusBackground({session,wd,enabled:false,label:'policy-restore'});
+  }
+  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyOnExperiment:samsungPolicyOn,samsungPolicyDiscovery:samsungDiscovery,transport:transportStatus()},null,2));}
  }
 }

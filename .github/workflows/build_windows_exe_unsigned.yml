@@ -16,7 +16,7 @@ on:
         default: '10000'
       background_policy:
         type: choice
-        options: [observe, oneplus-enable-and-restore, samsung-policy-discovery]
+        options: [observe, oneplus-enable-and-restore, samsung-policy-discovery, samsung-enable-and-restore]
         default: observe
 permissions:
   contents: read

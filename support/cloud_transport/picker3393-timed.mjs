@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const exec=promisify(execFile);
 
-export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false,semanticSelectionAfterHold=false}) {
+export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false,semanticSelectionAfterHold=false,samsungPicker=false}) {
  const prefix=`/session/${session}`;
  function phase(caseName,name){const event={phase:name,utc:new Date().toISOString()};writeFileSync(`evidence/${caseName}-phase.json`,JSON.stringify(event,null,2));appendFileSync(`evidence/${caseName}-phases.jsonl`,JSON.stringify(event)+'\n');}
  async function returnToOptions(caseName){
@@ -73,7 +73,12 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
    await ui('snapshot',0,0,`windows-${caseName}-after-timed-hold`);
    // A Documents row at the storage root is not the current Documents folder.
    const documentsFolder={...folderTarget,sourceIncludes:['text="Documents" resource-id="com.google.android.documentsui:id/breadcrumb_text"']};
-   const rootDocumentsRow={...documentRow,sourceIncludes:['text="Files on OnePlus 13R" resource-id="com.google.android.documentsui:id/header_title"']};
+   const documentsBreadcrumb='//*[@package="com.google.android.documentsui" and @resource-id="com.google.android.documentsui:id/breadcrumb_text" and @text="Documents"]';
+   const documentsTitle='//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents" and @displayed="true"]';
+   // Samsung discovery has not observed a picker header. Navigate the unique
+   // observed row only when Documents is not the current breadcrumb; the exact
+   // selected URI is still checked before accepting the upload.
+   const rootDocumentsRow=samsungPicker?{using:'xpath',value:`${documentsTitle}/ancestor::*[@package="com.google.android.documentsui" and @clickable="true" and @enabled="true" and @displayed="true"][1][count(${documentsTitle})=1 and count(${documentsBreadcrumb})=0]`}:{...documentRow,sourceIncludes:['text="Files on OnePlus 13R" resource-id="com.google.android.documentsui:id/header_title"']};
    const current=await ready(`${caseName}-native-picker-after-hold`,{}, {choices:[documentsFolder,rootDocumentsRow],sourceIncludes:['package="com.google.android.documentsui"']});
    if(current.readiness.choice===1)await clickElement(current,`${caseName}-documents-after-hold`);
    const folderButton=await ready(`${caseName}-use-folder-after-hold`,documentsFolder,{sourceIncludes:documentsFolder.sourceIncludes});
