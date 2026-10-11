@@ -255,13 +255,14 @@ foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";w
 $lastRows=Import-Csv "$EvidenceDirectory/larger-after-edge-drag.tsv" -Delimiter "`t"
 $lastPeer=$lastRows | Where-Object {$_.text -eq "Peer12"} | Select-Object -First 1
 $lastPeerIp=$lastRows | Where-Object {$_.text -like '*127.0.0.12*'} | Select-Object -First 1
-@{lastRowVisible=($null -ne $lastPeer);lastRowOcr=$lastPeer;input="six wheel notches, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
+@{lastRowVisible=($null -ne $lastPeer -or $null -ne $lastPeerIp);lastRowOcr=$lastPeer;lastRowIpOcr=$lastPeerIp;input="six wheel notches, then edge drag"} | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/last-row-observation.json"
 if($lastPeer -or $lastPeerIp) {
  $lastRowY=if($lastPeer){([int]$lastPeer.top + [int]$lastPeer.height/2)/2 + 10}else{([int]$lastPeerIp.top + [int]$lastPeerIp.height/2)/2 - 10}
  FavoritePencil "larger-after-edge-drag" $lastRowY
  Screenshot "last-row-edit"
- Word "Cancel" "last-row-edit"
- Screenshot "last-row-edit-cancelled"
+ [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+ Start-Sleep -Seconds 1
+ Screenshot "last-row-edit-dismissed"
 }
 Screenshot "long-list-before-cancel"
 Word "Cancel" "long-list-before-cancel"
