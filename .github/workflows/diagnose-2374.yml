@@ -1,0 +1,37 @@
+name: Issue2374 real settings entry
+on:
+  push:
+    branches: [codex/bug-2374-ui-diagnostic]
+    paths: ['support/diagnostics/2374/**', '.github/workflows/diagnose-2374.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-2374
+  cancel-in-progress: false
+jobs:
+  real-settings:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: 11700370485
+          run-id: 38132747719
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: source-artifact
+          merge-multiple: true
+      - name: Prepare ordinary Linux desktop
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils openbox xdotool scrot tesseract-ocr imagemagick dbus-x11 libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0t64 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 jq ffmpeg
+      - name: Real UI baseline and historical release
+        run: bash support/diagnostics/2374/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2374-settings-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
