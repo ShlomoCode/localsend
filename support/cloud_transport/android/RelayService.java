@@ -30,6 +30,7 @@ public final class RelayService extends Service {
   private volatile String downlinkStreamId="",downlinkOutcome="not-opened";
   private volatile String downlinkNativeError="",retirementReason="",retirementOutcome="not-requested";
   private volatile long downlinkFirstReadMs,downlinkClosedMs;
+  private volatile String downlinkFailureNetworkObservation="{}";
   private static volatile String lastDownlinkObservation="{}";
   private static volatile Context observationContext;
   private static final Object networkEventLock=new Object();
@@ -210,6 +211,7 @@ public final class RelayService extends Service {
       downlinkOutcome="diagnostic-owned-stop";downlinkClosedMs=SystemClock.elapsedRealtime();
     }catch(Exception error){
       downlinkClosedMs=SystemClock.elapsedRealtime();downlinkNativeError=error.getClass().getSimpleName();
+      try{downlinkFailureNetworkObservation=currentNetworkObservation().toString();}catch(JSONException ignored){}
       if(!running||destroying||activeService!=this){downlinkOutcome="diagnostic-owned-stop";trace(downlinkOutcome+":"+downlinkStreamId,"-");}
       else if(!downlinkOutcome.startsWith("diagnostic-")){downlinkOutcome="physical-read-failure:"+error.getClass().getSimpleName();trace(downlinkOutcome+":"+downlinkStreamId,"-");}
       throw error;
@@ -224,6 +226,7 @@ public final class RelayService extends Service {
   private void rememberDownlink(){
     try{lastDownlinkObservation=new JSONObject().put("instance",instance).put("streamId",downlinkStreamId).put("outcome",downlinkOutcome)
       .put("firstReadMs",downlinkFirstReadMs).put("closedMs",downlinkClosedMs).put("nativeErrorClass",downlinkNativeError)
+      .put("failureNetworkObservation",new JSONObject(downlinkFailureNetworkObservation))
       .put("retirementReason",retirementReason).put("retirementOutcome",retirementOutcome).toString();}catch(JSONException ignored){}
   }
   private void retireDownlink(String reason){

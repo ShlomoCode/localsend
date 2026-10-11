@@ -117,13 +117,14 @@ async function transportObservation(name){
 }
 const wifiNetwork=n=>n?.transports?.includes('WIFI');
 function networkOff(o){return o?.airplaneMode===true&&o.wifiEnabled===false&&Array.isArray(o.networks)&&!o.networks.some(wifiNetwork)&&o.activeNetwork===null&&o.errors?.length===0;}
-function networkRestored(o){return o?.airplaneMode===false&&o.wifiEnabled===true&&wifiNetwork(o.activeNetwork)&&o.activeNetwork.validated===true&&o.activeNetwork.interfaceName&&o.activeNetwork.addressPrefixes?.length>0&&o.errors?.length===0;}
+function networkRestored(o){return o?.airplaneMode===false&&o.wifiEnabled===true&&wifiNetwork(o.activeNetwork)&&o.activeNetwork.validated===true&&o.activeNetwork.interfaceName&&o.activeNetwork.addressPrefixes?.length>0&&o.networks?.some(n=>wifiNetwork(n)&&!n.transports.includes('VPN')&&n.interfaceName&&n.addressPrefixes?.length>0)&&o.errors?.length===0;}
 async function providerNetwork(profile,name){
  // This documented endpoint operates the owned device; API success is never loss evidence.
  if(profile==='airplane-mode')report.providerNetworkMayHaveChanged=true;
+ const startedUtc=new Date().toISOString();save(name+'-provider-start.json',{startedUtc,profile});
  const response=await fetch('https://api-cloud.browserstack.com/app-automate/sessions/'+session+'/update_network.json',{
   method:'PUT',headers:{authorization:auth,'content-type':'application/json'},body:JSON.stringify({networkProfile:profile}),signal:AbortSignal.timeout(60000)});
- const body=await response.text();save(name+'-provider.json',{utc:new Date().toISOString(),profile,status:response.status,body});
+ const body=await response.text();save(name+'-provider.json',{startedUtc,utc:new Date().toISOString(),profile,status:response.status,body});
  assert(response.ok,'Provider network profile unsupported or failed: '+response.status);
 }
 async function awaitObservedNetwork(predicate,name){
@@ -133,6 +134,7 @@ async function awaitObservedNetwork(predicate,name){
 }
 async function disconnectNetwork({requireActivePeer=false}={}){
  const before=await transportObservation('network-before-interruption');
+ report.networkBeforeInput=before.currentNetworkObservation;
  assert(before.currentNetworkObservation?.wifiEnabled===true&&wifiNetwork(before.currentNetworkObservation.activeNetwork),'No actual Wi-Fi transport before interruption');
  if(interruptionMode==='wifi-ui'){await normalWifiDisconnect({requireActivePeer});return;}
  assert(networkRestored(before.currentNetworkObservation),'Provider airplane trial requires observed airplane off and validated Wi-Fi/interface before input');
@@ -143,7 +145,14 @@ async function disconnectNetwork({requireActivePeer=false}={}){
 }
 async function restoreNetwork(name){
  if(interruptionMode==='provider-airplane'){
-  await providerNetwork('reset',name);await awaitObservedNetwork(networkRestored,name+'-os-restored');
+  await providerNetwork('reset',name);
+  const reset=await awaitObservedNetwork(o=>o?.airplaneMode===false&&o.errors?.length===0,name+'-airplane-off');
+  if(reset.currentNetworkObservation.wifiEnabled===false){
+   // Provider reset turns airplane off but need not restore Wi-Fi. Use the real system switch.
+   await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Native Wi-Fi restore switch unavailable');
+   if(wifiSwitches(await source())[0].checked==='false')await toggleWifi(true,name+'-native-wifi-on');
+  }
+  await awaitObservedNetwork(networkRestored,name+'-os-restored');
  }else{
   await activate('org.localsend.cloudtransport');await tap('Open Wi-Fi settings',{action:true});await wait(s=>wifiSwitches(s).length===1,30000,'Restore Wi-Fi switch unavailable');
   if(wifiSwitches(await source())[0].checked==='false')await toggleWifi(true,name);
@@ -200,6 +209,11 @@ async function helperLossEvidence(streamId,name){
  }while(true);await snap(name,xml);
  assert(/^physical-read-failure:/.test(observed.outcome),'Helper stream closure was diagnostic or unclassified');
  assert(observed.firstReadMs>0&&observed.closedMs>=observed.firstReadMs,'Helper never established physical read or missing native closure time');
+ const failure=observed.failureNetworkObservation;
+ assert(failure&&failure.elapsedRealtimeMs>=observed.closedMs&&failure.elapsedRealtimeMs-observed.closedMs<=1000,'Native read failure lacks contemporaneous OS network evidence');
+ assert(observed.closedMs>report.networkBeforeInput.elapsedRealtimeMs,'Native read closure occurred before observed interruption baseline');
+ assert(failure.wifiEnabled===false&&failure.activeNetwork===null&&Array.isArray(failure.networks)&&!failure.networks.some(wifiNetwork)&&failure.errors?.length===0,'Native read failure occurred while OS network was still present; early or proxy-only closure excluded');
+ if(interruptionMode==='provider-airplane')assert(networkOff(failure),'Native read failure preceded actual airplane-mode OS loss; provider-only early closure excluded');
  assert(!observed.retirementReason||observed.retirementReason==='service-cleanup','Diagnostic retirement preceded link closure');
  save(name+'.json',status);return observed;
 }
