@@ -1,0 +1,13 @@
+# Flutter native gate for issue 2754
+
+`run-native-gate.sh OUTPUT_DIR` prepares and runs the source-level B gate on an Ubuntu 24.04 cloud runner. The parent must review it before dispatch. It downloads four exact Flutter 3.41.9 files at commit `42d3d75a56efe1a2e9902f52dc8006099c45d937`, checks their recorded SHA256 hashes, and builds standalone stock and candidate binaries against the runner's GTK, ATK, and gtest. It uses the pinned `fl_test_gtk_logs.cc` initializer without a shim. It does not build the Flutter engine or LocalSend app.
+
+Install these packages in the cloud workflow before invoking the script: `g++`, `pkg-config`, `libgtk-3-dev`, `libgtest-dev`, `xvfb`, `xauth`, `curl`, and `git`. Invoke the script through `bash`; no executable mode is required. Use a fresh output directory for each attempt. The existing cloud workflow runs A first, then B, and retains this output directory even when a gate fails.
+
+The stock binary must fail both creation-parent and geometry-forwarding regression tests with the ordinary gtest failure status. The candidate binary must pass all five prepared tests, with no skipped tests. Output includes full build/test logs, gtest XML, source and binary hashes, environment versions, exit codes, and a result file written only after both controls satisfy their gates.
+
+Xvfb provides a display only for native fixtures. The tests temporarily replace the host's component extents callback with controlled SCREEN and WINDOW values and restore it afterward. They exercise actual `AtkSocket` forwarding and modeled host movement/resize. They also exercise public GTK widget-unset lifecycle, wrapper finalization with an external socket reference, repeated disposal, and preservation of a replacement parent. The standalone binaries link real system GTK, but controlled extents values do not measure a realized window.
+
+Passing this gate does not establish cloud Mint/Cinnamon UI behavior, actual SCREEN/WINDOW coordinates after moving a real window, allocation/scale changes, hit-testing, screen-reader interaction, or combined bridge dispatch behavior. Those remain ordinary graphical guest acceptance checks. The source hash checks pin Flutter files only; they do not assert that Ubuntu runner GTK matches the Mint guest binary. The script records those system versions so the difference remains visible.
+
+This directory contains the same narrow B production patch and native test bodies retained in the experiment evidence. Local preparation used source reads and static inspection only. No local build, native test, app, reproduction, or cloud job ran while preparing this harness.

@@ -1,0 +1,779 @@
+diff --git a/atk-adaptor/adaptors/socket-adaptor.c b/atk-adaptor/adaptors/socket-adaptor.c
+index 91a5f103..1dd5fd09 100644
+--- a/atk-adaptor/adaptors/socket-adaptor.c
++++ b/atk-adaptor/adaptors/socket-adaptor.c
+@@ -24,13 +24,208 @@
+ 
+ #include <atk/atk.h>
+ #include <droute/droute.h>
++#include <errno.h>
++#include <string.h>
+ 
++#include "accessible-register.h"
+ #include "accessible-stateset.h"
+ #include "bridge.h"
+ #include "introspection.h"
+ #include "object.h"
+ #include "spi-dbus.h"
+ 
++/* Experimental same-process dispatch. GTK objects and SpiRegister mutations
++ * must remain confined to the thread that initializes this adaptor. */
++static GThread *socket_owner_thread;
++
++typedef struct
++{
++  GWeakRef socket;
++  gchar *parent_id;
++  GThread *owner;
++} LocalSocketBinding;
++
++typedef struct _LocalSocketCall LocalSocketCall;
++struct _LocalSocketCall
++{
++  AtkComponent *plug;
++  AtkComponent *socket;
++  LocalSocketCall *previous;
++};
++
++typedef enum
++{
++  LOCAL_EXTENTS,
++  LOCAL_POSITION,
++  LOCAL_SIZE
++} LocalSocketMethod;
++
++static GPrivate active_local_calls = G_PRIVATE_INIT (NULL);
++
++static void atspi_plug_component_get_extents (AtkComponent *, gint *, gint *, gint *, gint *, AtkCoordType);
++static void atspi_plug_component_get_position (AtkComponent *, gint *, gint *, AtkCoordType);
++static void atspi_plug_component_get_size (AtkComponent *, gint *, gint *);
++
++static void
++local_socket_binding_free (gpointer data)
++{
++  LocalSocketBinding *binding = data;
++  g_weak_ref_clear (&binding->socket);
++  g_thread_unref (binding->owner);
++  g_free (binding->parent_id);
++  g_free (binding);
++}
++
++static gboolean
++split_socket_id (gchar *id, gchar **bus, gchar **path)
++{
++  gchar *separator;
++  if (!id || !*id || !(separator = strchr (id + 1, ':')))
++    return FALSE;
++  *separator = '\0';
++  *bus = id;
++  *path = separator + 1;
++  return dbus_validate_bus_name (*bus, NULL) && dbus_validate_path (*path, NULL);
++}
++
++/* SpiRegister's atoi lookup is permissive; reject aliases before using it. */
++static gboolean
++canonical_socket_path (const gchar *path)
++{
++  const gchar *prefix = "/org/a11y/atspi/accessible/";
++  const gchar *number;
++  gchar *end, *canonical;
++  guint64 index;
++  gboolean valid;
++  if (!g_str_has_prefix (path, prefix))
++    return FALSE;
++  number = path + strlen (prefix);
++  if (!g_ascii_isdigit (*number))
++    return FALSE;
++  errno = 0;
++  index = g_ascii_strtoull (number, &end, 10);
++  if (errno || *end || index == 0 || index > G_MAXINT)
++    return FALSE;
++  /* Match ref_to_path's existing %d format. Values above G_MAXINT produce
++   * a minus sign there, which is not permitted in a D-Bus object path. */
++  canonical = g_strdup_printf ("%s%d", prefix, (gint) index);
++  valid = g_str_equal (canonical, path);
++  g_free (canonical);
++  return valid;
++}
++
++/* Bind once at Embedded, then acquire an owning reference via GWeakRef for
++ * each query. This also invalidates on g_object_run_dispose(), even if another
++ * reference keeps the socket alive. Never revive a stale binding by lookup. */
++static void
++bind_local_socket (AtkObject *plug, const gchar *id)
++{
++  LocalSocketBinding *binding = g_new0 (LocalSocketBinding, 1);
++  gchar *copy = g_strdup (id), *bus, *path;
++  const gchar *unique = NULL;
++  binding->parent_id = g_strdup (id);
++  binding->owner = g_thread_ref (g_thread_self ());
++  g_weak_ref_init (&binding->socket, NULL);
++  if (g_thread_self () == socket_owner_thread)
++    unique = dbus_bus_get_unique_name (spi_global_app_data->bus);
++  if (g_thread_self () == socket_owner_thread && spi_global_register &&
++      split_socket_id (copy, &bus, &path) && unique &&
++      g_str_equal (bus, unique) && canonical_socket_path (path))
++    {
++      GObject *target = spi_global_register_path_to_object (path);
++      if (target && ATK_IS_SOCKET (target) && target != G_OBJECT (plug))
++        g_weak_ref_set (&binding->socket, target);
++    }
++  g_debug ("socket Embedded parent=%s thread=%p owner=%p",
++           id, (void *) g_thread_self (), (void *) socket_owner_thread);
++  g_free (copy);
++  g_object_set_data_full (G_OBJECT (plug), "spi-local-socket-binding", binding,
++                          local_socket_binding_free);
++}
++
++/* TRUE means handled locally (including an invalid local destination).
++ * FALSE is exclusively a valid destination on a different bus connection. */
++static gboolean
++local_socket_call (AtkComponent *plug, LocalSocketMethod method,
++                   gint *x, gint *y, gint *width, gint *height,
++                   AtkCoordType coord_type)
++{
++  gchar *id = NULL, *copy = NULL, *bus, *path;
++  const gchar *unique;
++  LocalSocketBinding *binding;
++  GObject *target = NULL;
++  LocalSocketCall call, *active;
++  gboolean handled = TRUE;
++  const gchar *reason = "wrong-thread";
++
++  if (x) *x = -1;
++  if (y) *y = -1;
++  if (width) *width = -1;
++  if (height) *height = -1;
++  /* Do not even read borrowed qdata or the global connection off-thread. */
++  if (g_thread_self () != socket_owner_thread)
++    goto out;
++  reason = "invalid-id";
++  id = g_strdup (g_object_get_data (G_OBJECT (plug), "dbus-plug-parent"));
++  copy = g_strdup (id);
++  if (!spi_global_app_data || !spi_global_app_data->bus ||
++      !split_socket_id (copy, &bus, &path))
++    goto out;
++  unique = dbus_bus_get_unique_name (spi_global_app_data->bus);
++  if (!unique)
++    goto out;
++  if (!g_str_equal (bus, unique))
++    {
++      handled = FALSE;
++      reason = "remote";
++      goto out;
++    }
++  reason = "invalid-path";
++  if (!spi_global_register || !canonical_socket_path (path))
++    goto out;
++  binding = g_object_get_data (G_OBJECT (plug), "spi-local-socket-binding");
++  reason = "stale-binding";
++  if (!binding || binding->owner != g_thread_self () ||
++      !g_str_equal (binding->parent_id, id) ||
++      !(target = g_weak_ref_get (&binding->socket)))
++    goto out;
++  reason = "removed-or-replaced";
++  if (spi_global_register_path_to_object (path) != target)
++    goto out;
++  reason = "invalid-target";
++  if (!ATK_IS_SOCKET (target) || target == G_OBJECT (plug))
++    goto out;
++  reason = "cycle";
++  active = g_private_get (&active_local_calls);
++  for (LocalSocketCall *cursor = active; cursor; cursor = cursor->previous)
++    if (cursor->plug == plug || cursor->socket == ATK_COMPONENT (target))
++      goto out;
++  call.plug = plug;
++  call.socket = ATK_COMPONENT (target);
++  call.previous = active;
++  g_private_set (&active_local_calls, &call);
++  /* Keep the initiating plug alive if callbacks drop its external owner. */
++  g_object_ref (plug);
++  if (method == LOCAL_EXTENTS)
++    atk_component_get_extents (call.socket, x, y, width, height, coord_type);
++  else if (method == LOCAL_POSITION)
++    atk_component_get_position (call.socket, x, y, coord_type);
++  else
++    atk_component_get_size (call.socket, width, height);
++  g_private_set (&active_local_calls, active);
++  reason = "local";
++  g_object_unref (plug);
++out:
++  g_debug ("socket geometry method=%d coord=%d id=%s result=%s target=%p thread=%p x=%d y=%d w=%d h=%d",
++           method, coord_type, id ? id : "(none)", reason, (void *) target,
++           (void *) g_thread_self (), x ? *x : -1, y ? *y : -1,
++           width ? *width : -1, height ? *height : -1);
++  g_clear_object (&target);
++  g_free (copy);
++  g_free (id);
++  return handled;
++}
++
+ static DBusMessage *
+ new_socket_call_message (AtkComponent *component, const char *member)
+ {
+@@ -54,13 +249,14 @@ new_socket_call_message (AtkComponent *component, const char *member)
+       g_free (bus_parent);
+       return message;
+     }
++  g_free (bus_parent);
+   return NULL;
+ }
+ 
+ static void
+ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gint *width, gint *height, AtkCoordType coord_type)
+ {
+-  DBusMessage *message = new_socket_call_message (component, "GetExtents");
++  DBusMessage *message;
+   DBusMessage *reply;
+   dbus_uint32_t coord_type_dbus = coord_type;
+   DBusError error;
+@@ -68,6 +264,11 @@ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gin
+   DBusMessageIter iter, iter_struct;
+   dbus_int32_t tmp;
+ 
++  if (local_socket_call (component, LOCAL_EXTENTS, x, y, width, height, coord_type))
++    return;
++  message = new_socket_call_message (component, "GetExtents");
++  if (!message)
++    return;
+   dbus_error_init (&error);
+   dbus_message_append_args (message, DBUS_TYPE_UINT32, &coord_type_dbus, DBUS_TYPE_INVALID);
+   reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
+@@ -111,12 +312,17 @@ atspi_plug_component_get_extents (AtkComponent *component, gint *x, gint *y, gin
+ static void
+ atspi_plug_component_get_position (AtkComponent *component, gint *x, gint *y, AtkCoordType coord_type)
+ {
+-  DBusMessage *message = new_socket_call_message (component, "GetPosition");
++  DBusMessage *message;
+   DBusMessage *reply;
+   dbus_uint32_t coord_type_dbus = coord_type;
+   DBusError error;
+   dbus_int32_t x_dbus, y_dbus;
+ 
++  if (local_socket_call (component, LOCAL_POSITION, x, y, NULL, NULL, coord_type))
++    return;
++  message = new_socket_call_message (component, "GetPosition");
++  if (!message)
++    return;
+   dbus_error_init (&error);
+   dbus_message_append_args (message, DBUS_TYPE_UINT32, &coord_type_dbus, DBUS_TYPE_INVALID);
+   reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
+@@ -149,11 +355,16 @@ atspi_plug_component_get_size (AtkComponent *component,
+                                gint *width,
+                                gint *height)
+ {
+-  DBusMessage *message = new_socket_call_message (component, "GetSize");
++  DBusMessage *message;
+   DBusMessage *reply;
+   DBusError error;
+   dbus_uint32_t width_dbus, height_dbus;
+ 
++  if (local_socket_call (component, LOCAL_SIZE, NULL, NULL, width, height, ATK_XY_SCREEN))
++    return;
++  message = new_socket_call_message (component, "GetSize");
++  if (!message)
++    return;
+   dbus_error_init (&error);
+   reply = dbus_connection_send_with_reply_and_block (spi_global_app_data->bus,
+                                                      message, -1, &error);
+@@ -193,8 +404,11 @@ impl_Embedded (DBusConnection *bus,
+     {
+       return droute_invalid_arguments_error (message);
+     }
++  if (g_thread_self () != socket_owner_thread)
++    return droute_not_yet_handled_error (message);
+   id = g_strconcat (dbus_message_get_sender (message), ":", path, NULL);
+   g_object_set_data_full (G_OBJECT (object), "dbus-plug-parent", id, (GDestroyNotify) g_free);
++  bind_local_socket (object, id);
+ 
+   if (ATK_IS_COMPONENT (object))
+     {
+@@ -221,6 +435,7 @@ static DRouteMethod methods[] = {
+ void
+ spi_initialize_socket (DRoutePath *path)
+ {
++  socket_owner_thread = g_thread_self ();
+   droute_path_add_interface (path,
+                              ATSPI_DBUS_INTERFACE_SOCKET,
+                              spi_org_a11y_atspi_Socket,
+diff --git a/tests/at-spi2-atk/meson.build b/tests/at-spi2-atk/meson.build
+index 4caf5d92..b8011262 100644
+--- a/tests/at-spi2-atk/meson.build
++++ b/tests/at-spi2-atk/meson.build
+@@ -80,3 +80,13 @@ foreach t: tests
+ endforeach
+ 
+ test('atk-test', atk_test_bin, timeout: 300)
++
++# Experimental private tests; do not install the binary or expose test APIs.
++socket_local_experiment = executable('socket-local-experiment',
++  'socket-local-experiment.c',
++  include_directories: [root_inc, include_directories('../../atk-adaptor')],
++  dependencies: [glib_dep, gobject_dep, libatk_dep, libdbus_dep,
++                 libdroute_dep, libatk_bridge_dep, atspi_dep])
++test('socket-local-experiment', find_program('dbus-run-session'),
++  args: ['--', socket_local_experiment.full_path()],
++  suite: 'socket-local-experiment', timeout: 60)
+diff --git a/tests/at-spi2-atk/socket-local-experiment.c b/tests/at-spi2-atk/socket-local-experiment.c
+new file mode 100644
+index 00000000..b5e72025
+--- /dev/null
++++ b/tests/at-spi2-atk/socket-local-experiment.c
+@@ -0,0 +1,457 @@
++/* Experimental regression tests, to be built/run only in the cloud guest.
++ * Include the production implementation so static forwarding vfuncs and
++ * Embedded binding are exercised directly, with the real SpiRegister. */
++#include <sys/types.h>
++#include <sys/wait.h>
++#include <unistd.h>
++#include <stdlib.h>
++
++#define spi_initialize_socket test_spi_initialize_socket
++#include "../../atk-adaptor/adaptors/socket-adaptor.c"
++#undef spi_initialize_socket
++
++typedef struct _Fixture Fixture;
++typedef struct
++{
++  AtkSocket parent;
++  Fixture *fixture;
++  gint origin_x, origin_y;
++  guint extents_calls, position_calls, size_calls;
++  gboolean recurse, remove_owner;
++} ProbeSocket;
++typedef struct { AtkSocketClass parent; } ProbeSocketClass;
++
++struct _Fixture
++{
++  AtkObject *plug;
++  AtkObject *socket;
++  gchar *socket_path;
++  gboolean finalized;
++};
++
++static void probe_component_init (AtkComponentIface *iface);
++G_DEFINE_TYPE_WITH_CODE (ProbeSocket, probe_socket, ATK_TYPE_SOCKET,
++                         G_IMPLEMENT_INTERFACE (ATK_TYPE_COMPONENT, probe_component_init))
++
++static void
++probe_extents (AtkComponent *component, gint *x, gint *y, gint *w, gint *h, AtkCoordType coord)
++{
++  ProbeSocket *probe = (ProbeSocket *) component;
++  probe->extents_calls++;
++  if (probe->recurse)
++    {
++      gint nested_w = 0, nested_h = 0;
++      atk_component_get_size (ATK_COMPONENT (probe->fixture->plug), &nested_w, &nested_h);
++      g_assert_cmpint (nested_w, ==, -1);
++      g_assert_cmpint (nested_h, ==, -1);
++    }
++  if (probe->remove_owner)
++    g_clear_object (&probe->fixture->socket);
++  /* Access after dropping the external owner detects missing temporary refs. */
++  *x = probe->origin_x + (coord == ATK_XY_SCREEN ? 300 : 0);
++  *y = probe->origin_y + (coord == ATK_XY_SCREEN ? 200 : 0);
++  *w = 81;
++  *h = 47;
++}
++
++static void
++probe_position (AtkComponent *component, gint *x, gint *y, AtkCoordType coord)
++{
++  ProbeSocket *probe = (ProbeSocket *) component;
++  probe->position_calls++;
++  *x = 19 + (coord == ATK_XY_SCREEN ? 300 : 0);
++  *y = 23 + (coord == ATK_XY_SCREEN ? 200 : 0);
++}
++
++static void
++probe_size (AtkComponent *component, gint *w, gint *h)
++{
++  ((ProbeSocket *) component)->size_calls++;
++  *w = 93;
++  *h = 59;
++}
++
++static void
++probe_component_init (AtkComponentIface *iface)
++{
++  iface->get_extents = probe_extents;
++  iface->get_position = probe_position;
++  iface->get_size = probe_size;
++}
++static void probe_socket_class_init (ProbeSocketClass *klass) { (void) klass; }
++static void
++probe_socket_init (ProbeSocket *probe)
++{
++  probe->origin_x = 11;
++  probe->origin_y = 17;
++}
++
++static void
++socket_finalized (gpointer data, GObject *object)
++{
++  (void) object;
++  ((Fixture *) data)->finalized = TRUE;
++}
++
++/* Use the real Embedded handler and its per-object data lifecycle. Sending the
++ * message itself through DRoute is a separate desktop integration control. */
++static void
++embed_message (Fixture *f, const gchar *sender, const gchar *path)
++{
++  DBusMessage *message = dbus_message_new_method_call (sender,
++      "/org/a11y/atspi/accessible/1", ATSPI_DBUS_INTERFACE_SOCKET, "Embedded");
++  DBusMessage *reply;
++  g_assert_nonnull (message);
++  dbus_message_set_serial (message, 1);
++  g_assert_true (dbus_message_set_sender (message, sender));
++  g_assert_true (dbus_message_append_args (message, DBUS_TYPE_STRING, &path, DBUS_TYPE_INVALID));
++  reply = impl_Embedded (spi_global_app_data->bus, message, f->plug);
++  g_assert_nonnull (reply);
++  g_assert_cmpint (dbus_message_get_type (reply), ==, DBUS_MESSAGE_TYPE_METHOD_RETURN);
++  dbus_message_unref (reply);
++  dbus_message_unref (message);
++}
++
++static void
++setup (Fixture *f, gconstpointer type)
++{
++  DBusError error;
++  gchar *plug_path, *plug_id;
++  const gchar *unique;
++  g_assert_null (spi_global_register);
++  g_assert_null (spi_global_app_data);
++  spi_global_app_data = g_new0 (SpiBridge, 1);
++  dbus_error_init (&error);
++  spi_global_app_data->bus = dbus_bus_get_private (DBUS_BUS_SESSION, &error);
++  g_assert_false (dbus_error_is_set (&error));
++  g_assert_nonnull (spi_global_app_data->bus);
++  dbus_connection_set_exit_on_disconnect (spi_global_app_data->bus, FALSE);
++  spi_global_register = g_object_new (SPI_REGISTER_TYPE, NULL);
++  socket_owner_thread = g_thread_self ();
++  f->plug = atk_plug_new ();
++  f->socket = type ? g_object_new (probe_socket_get_type (), NULL) : atk_socket_new ();
++  if (type)
++    ((ProbeSocket *) f->socket)->fixture = f;
++  unique = dbus_bus_get_unique_name (spi_global_app_data->bus);
++  plug_path = spi_register_object_to_path (spi_global_register, G_OBJECT (f->plug));
++  f->socket_path = spi_register_object_to_path (spi_global_register, G_OBJECT (f->socket));
++  plug_id = g_strdup_printf ("%s:%s", unique, plug_path);
++  /* No bridge embed hooks are installed in this fixture. Set the same public
++   * AtkSocket field that atk_socket_embed sets before its embed hook. */
++  ATK_SOCKET (f->socket)->embedded_plug_id = plug_id;
++  g_object_weak_ref (G_OBJECT (f->socket), socket_finalized, f);
++  embed_message (f, unique, f->socket_path);
++  g_free (plug_path);
++}
++
++static void
++teardown (Fixture *f, gconstpointer unused)
++{
++  (void) unused;
++  g_clear_object (&f->socket);
++  g_clear_object (&f->plug);
++  g_free (f->socket_path);
++  g_clear_object (&spi_global_register);
++  dbus_connection_close (spi_global_app_data->bus);
++  dbus_connection_unref (spi_global_app_data->bus);
++  g_free (spi_global_app_data);
++  spi_global_app_data = NULL;
++}
++
++static void
++assert_failed (Fixture *f)
++{
++  gint x = 0, y = 0, w = 0, h = 0;
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, -1); g_assert_cmpint (y, ==, -1);
++  g_assert_cmpint (w, ==, -1); g_assert_cmpint (h, ==, -1);
++}
++
++static void
++valid_methods (Fixture *f, gconstpointer unused)
++{
++  gint x, y, w, h;
++  ProbeSocket *probe = (ProbeSocket *) f->socket;
++  (void) unused;
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, 311); g_assert_cmpint (y, ==, 217);
++  g_assert_cmpint (w, ==, 81); g_assert_cmpint (h, ==, 47);
++  probe->origin_x += 40;
++  probe->origin_y += 60;
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_WINDOW);
++  g_assert_cmpint (x, ==, 51); g_assert_cmpint (y, ==, 77);
++  atk_component_get_position (ATK_COMPONENT (f->plug), &x, &y, ATK_XY_WINDOW);
++  g_assert_cmpint (x, ==, 19); g_assert_cmpint (y, ==, 23);
++  atk_component_get_size (ATK_COMPONENT (f->plug), &w, &h);
++  g_assert_cmpint (w, ==, 93); g_assert_cmpint (h, ==, 59);
++  g_assert_cmpuint (probe->extents_calls, ==, 2);
++  g_assert_cmpuint (probe->position_calls, ==, 1);
++  g_assert_cmpuint (probe->size_calls, ==, 1);
++}
++
++static void
++base_contract (Fixture *f, gconstpointer unused)
++{
++  gint x, y, w, h;
++  AtkObject *host = g_object_new (probe_socket_get_type (), NULL);
++  (void) unused;
++  assert_failed (f); /* Missing Flutter-style parent is not a zero origin. */
++  atk_object_set_parent (f->socket, host);
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, 311); g_assert_cmpint (y, ==, 217);
++  atk_component_get_position (ATK_COMPONENT (f->plug), &x, &y, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, -1); g_assert_cmpint (y, ==, -1);
++  atk_component_get_size (ATK_COMPONENT (f->plug), &w, &h);
++  g_assert_cmpint (w, ==, -1); g_assert_cmpint (h, ==, -1);
++  atk_object_set_parent (f->socket, NULL);
++  g_object_unref (host);
++}
++
++static void
++removed_path (Fixture *f, gconstpointer unused)
++{
++  (void) unused;
++  spi_register_deregister_object (spi_global_register, G_OBJECT (f->socket), TRUE);
++  assert_failed (f);
++  g_assert_false (f->finalized); /* Removal alone must invalidate a live object. */
++}
++
++static void
++disposed_socket (Fixture *f, gconstpointer unused)
++{
++  LocalSocketBinding *binding = g_object_get_data (G_OBJECT (f->plug), "spi-local-socket-binding");
++  (void) unused;
++  g_object_run_dispose (G_OBJECT (f->socket));
++  g_assert_null (g_weak_ref_get (&binding->socket));
++  assert_failed (f);
++}
++
++static void
++stale_path_reused (Fixture *f, gconstpointer unused)
++{
++  guint old_id = spi_register_object_to_ref (G_OBJECT (f->socket));
++  AtkObject *replacement = atk_socket_new ();
++  gchar *replacement_path;
++  (void) unused;
++  spi_register_deregister_object (spi_global_register, G_OBJECT (f->socket), TRUE);
++  /* Force the allocator to reuse this ID: a stale binding must not attach to
++   * an unrelated object merely because its path has become resolvable again. */
++  spi_global_register->reference_counter = old_id - 1;
++  replacement_path = spi_register_object_to_path (spi_global_register, G_OBJECT (replacement));
++  g_assert_cmpstr (replacement_path, ==, f->socket_path);
++  assert_failed (f);
++  g_free (replacement_path);
++  g_object_unref (replacement);
++}
++
++static void
++reembed_after_removal (Fixture *f, gconstpointer unused)
++{
++  AtkObject *replacement = g_object_new (probe_socket_get_type (), NULL);
++  gchar *new_path;
++  (void) unused;
++  ((ProbeSocket *) replacement)->fixture = f;
++  ATK_SOCKET (replacement)->embedded_plug_id = g_strdup (ATK_SOCKET (f->socket)->embedded_plug_id);
++  spi_register_deregister_object (spi_global_register, G_OBJECT (f->socket), TRUE);
++  assert_failed (f);
++  new_path = spi_register_object_to_path (spi_global_register, G_OBJECT (replacement));
++  g_assert_cmpstr (new_path, !=, f->socket_path);
++  g_clear_object (&f->socket);
++  f->socket = replacement;
++  f->finalized = FALSE;
++  g_object_weak_ref (G_OBJECT (replacement), socket_finalized, f);
++  g_free (f->socket_path);
++  f->socket_path = new_path;
++  embed_message (f, dbus_bus_get_unique_name (spi_global_app_data->bus), new_path);
++  valid_methods (f, NULL); /* A failed old binding must not poison the new one. */
++}
++
++static void
++owner_removed_inside_call (Fixture *f, gconstpointer unused)
++{
++  gint x, y, w, h;
++  (void) unused;
++  ((ProbeSocket *) f->socket)->remove_owner = TRUE;
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, 311); g_assert_cmpint (w, ==, 81);
++  g_assert_null (f->socket);
++  g_assert_true (f->finalized); /* Held reference is released after dispatch. */
++  assert_failed (f);
++}
++
++static void
++cross_method_cycle (Fixture *f, gconstpointer unused)
++{
++  gint x, y, w, h;
++  ProbeSocket *probe = (ProbeSocket *) f->socket;
++  (void) unused;
++  probe->recurse = TRUE;
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, 311);
++  g_assert_cmpuint (probe->extents_calls, ==, 1);
++  g_assert_cmpuint (probe->size_calls, ==, 0);
++  /* Verify the guard was popped: the next unrelated method remains usable. */
++  atk_component_get_size (ATK_COMPONENT (f->plug), &w, &h);
++  g_assert_cmpint (w, ==, 93);
++}
++
++static gpointer
++off_thread_call (gpointer data)
++{
++  assert_failed (data);
++  return NULL;
++}
++static void
++wrong_thread (Fixture *f, gconstpointer unused)
++{
++  GThread *thread;
++  SpiBridge *saved_app = spi_global_app_data;
++  (void) unused;
++  /* A guard after global bus access would dereference this poisoned pointer. */
++  spi_global_app_data = (SpiBridge *) GINT_TO_POINTER (1);
++  thread = g_thread_new ("off-owner", off_thread_call, f);
++  g_thread_join (thread);
++  spi_global_app_data = saved_app;
++  g_assert_cmpuint (((ProbeSocket *) f->socket)->extents_calls, ==, 0);
++}
++
++static void
++identity_controls (Fixture *f, gconstpointer unused)
++{
++  const gchar *unique = dbus_bus_get_unique_name (spi_global_app_data->bus);
++  gchar *alias = g_strconcat (f->socket_path, "junk", NULL);
++  AtkObject *wrong = atk_plug_new ();
++  gchar *wrong_path = spi_register_object_to_path (spi_global_register, G_OBJECT (wrong));
++  (void) unused;
++  embed_message (f, unique, alias);
++  assert_failed (f);
++  embed_message (f, unique, wrong_path);
++  assert_failed (f);
++  embed_message (f, unique, f->socket_path);
++  g_free (ATK_SOCKET (f->socket)->embedded_plug_id);
++  ATK_SOCKET (f->socket)->embedded_plug_id = g_strdup ("other-plug");
++  /* The remote component handler does not require reciprocal occupancy.
++   * Preserve that geometry contract instead of silently strengthening it. */
++  valid_methods (f, NULL);
++  g_free (wrong_path); g_free (alias); g_object_unref (wrong);
++}
++
++/* A real second process owns this destination and services all three methods.
++ * Distinct values and signatures detect accidental extents substitution. */
++static void
++remote_child (int notify_fd)
++{
++  DBusError error;
++  DBusConnection *connection;
++  guint received = 0;
++  gint64 deadline = g_get_monotonic_time () + 15 * G_TIME_SPAN_SECOND;
++  dbus_error_init (&error);
++  connection = dbus_bus_get_private (DBUS_BUS_SESSION, &error);
++  if (!connection || dbus_error_is_set (&error)) _exit (20);
++  const gchar *unique = dbus_bus_get_unique_name (connection);
++  if (write (notify_fd, unique, strlen (unique) + 1) != (ssize_t) strlen (unique) + 1) _exit (21);
++  close (notify_fd);
++  while (received < 3 && g_get_monotonic_time () < deadline &&
++         dbus_connection_read_write (connection, 1000))
++    {
++      DBusMessage *message = dbus_connection_pop_message (connection);
++      if (!message) continue;
++      if (dbus_message_get_type (message) == DBUS_MESSAGE_TYPE_METHOD_CALL)
++        {
++          DBusMessage *reply = dbus_message_new_method_return (message);
++          const gchar *member = dbus_message_get_member (message);
++          g_assert_cmpstr (dbus_message_get_path (message), ==, "/org/a11y/atspi/accessible/99");
++          g_assert_cmpstr (dbus_message_get_interface (message), ==, ATSPI_DBUS_INTERFACE_COMPONENT);
++          if (g_str_equal (member, "GetExtents"))
++            {
++              dbus_uint32_t coord;
++              gint32 values[] = { 701, 702, 703, 704 };
++              DBusMessageIter iter, rect;
++              g_assert_true (dbus_message_get_args (message, NULL, DBUS_TYPE_UINT32, &coord, DBUS_TYPE_INVALID));
++              g_assert_cmpuint (coord, ==, ATK_XY_WINDOW);
++              dbus_message_iter_init_append (reply, &iter);
++              dbus_message_iter_open_container (&iter, DBUS_TYPE_STRUCT, NULL, &rect);
++              for (guint i = 0; i < G_N_ELEMENTS (values); i++)
++                dbus_message_iter_append_basic (&rect, DBUS_TYPE_INT32, &values[i]);
++              dbus_message_iter_close_container (&iter, &rect);
++            }
++          else
++            {
++              gint32 a = 801, b = 802;
++              if (g_str_equal (member, "GetPosition"))
++                {
++                  dbus_uint32_t coord;
++                  g_assert_true (dbus_message_get_args (message, NULL, DBUS_TYPE_UINT32, &coord, DBUS_TYPE_INVALID));
++                  g_assert_cmpuint (coord, ==, ATK_XY_SCREEN);
++                }
++              else
++                {
++                  g_assert_cmpstr (member, ==, "GetSize");
++                  g_assert_cmpstr (dbus_message_get_signature (message), ==, "");
++                  a = 901; b = 902;
++                }
++              dbus_message_append_args (reply, DBUS_TYPE_INT32, &a, DBUS_TYPE_INT32, &b, DBUS_TYPE_INVALID);
++            }
++          dbus_connection_send (connection, reply, NULL);
++          dbus_connection_flush (connection);
++          dbus_message_unref (reply);
++          received++;
++        }
++      dbus_message_unref (message);
++    }
++  dbus_connection_close (connection);
++  dbus_connection_unref (connection);
++  _exit (received == 3 ? 0 : 22);
++}
++
++static void
++remote_process (Fixture *f, gconstpointer unused)
++{
++  int pipe_fds[2], status;
++  pid_t child;
++  gchar name[256] = { 0 };
++  gint x, y, w, h;
++  (void) unused;
++  g_assert_cmpint (pipe (pipe_fds), ==, 0);
++  child = fork ();
++  g_assert_cmpint (child, >=, 0);
++  if (child == 0)
++    {
++      close (pipe_fds[0]);
++      remote_child (pipe_fds[1]);
++    }
++  close (pipe_fds[1]);
++  g_assert_cmpint (read (pipe_fds[0], name, sizeof name - 1), >, 0);
++  close (pipe_fds[0]);
++  g_assert_cmpstr (name, !=, dbus_bus_get_unique_name (spi_global_app_data->bus));
++  embed_message (f, name, "/org/a11y/atspi/accessible/99");
++  atk_component_get_extents (ATK_COMPONENT (f->plug), &x, &y, &w, &h, ATK_XY_WINDOW);
++  g_assert_cmpint (x, ==, 701); g_assert_cmpint (y, ==, 702);
++  g_assert_cmpint (w, ==, 703); g_assert_cmpint (h, ==, 704);
++  atk_component_get_position (ATK_COMPONENT (f->plug), &x, &y, ATK_XY_SCREEN);
++  g_assert_cmpint (x, ==, 801); g_assert_cmpint (y, ==, 802);
++  atk_component_get_size (ATK_COMPONENT (f->plug), &w, &h);
++  g_assert_cmpint (w, ==, 901); g_assert_cmpint (h, ==, 902);
++  g_assert_cmpint (waitpid (child, &status, 0), ==, child);
++  g_assert_true (WIFEXITED (status)); g_assert_cmpint (WEXITSTATUS (status), ==, 0);
++  /* Disconnected remote owner must still use the normal D-Bus error path. */
++  assert_failed (f);
++}
++
++int
++main (int argc, char **argv)
++{
++  g_test_init (&argc, &argv, NULL);
++  g_test_add ("/socket-local/valid-methods", Fixture, GINT_TO_POINTER (1), setup, valid_methods, teardown);
++  g_test_add ("/socket-local/base-contract", Fixture, NULL, setup, base_contract, teardown);
++  g_test_add ("/socket-local/removed", Fixture, GINT_TO_POINTER (1), setup, removed_path, teardown);
++  g_test_add ("/socket-local/disposed", Fixture, GINT_TO_POINTER (1), setup, disposed_socket, teardown);
++  g_test_add ("/socket-local/reused-path", Fixture, GINT_TO_POINTER (1), setup, stale_path_reused, teardown);
++  g_test_add ("/socket-local/reembed", Fixture, GINT_TO_POINTER (1), setup, reembed_after_removal, teardown);
++  g_test_add ("/socket-local/owner-removed-in-call", Fixture, GINT_TO_POINTER (1), setup, owner_removed_inside_call, teardown);
++  g_test_add ("/socket-local/cross-method-cycle", Fixture, GINT_TO_POINTER (1), setup, cross_method_cycle, teardown);
++  g_test_add ("/socket-local/wrong-thread", Fixture, GINT_TO_POINTER (1), setup, wrong_thread, teardown);
++  g_test_add ("/socket-local/identity", Fixture, GINT_TO_POINTER (1), setup, identity_controls, teardown);
++  g_test_add ("/socket-local/remote-process", Fixture, GINT_TO_POINTER (1), setup, remote_process, teardown);
++  return g_test_run ();
++}

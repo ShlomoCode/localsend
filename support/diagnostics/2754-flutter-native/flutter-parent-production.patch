@@ -1,0 +1,44 @@
+--- a/engine/src/flutter/shell/platform/linux/fl_socket_accessible.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_socket_accessible.cc
+@@ -24,9 +24,24 @@
+   return 1;
+ }
+ 
++static void fl_socket_accessible_detach_socket(FlSocketAccessible* self) {
++  if (self->accessible_socket != nullptr &&
++      atk_object_get_parent(self->accessible_socket) == ATK_OBJECT(self)) {
++    atk_object_set_parent(self->accessible_socket, nullptr);
++  }
++}
++
++static void fl_socket_accessible_widget_unset(GtkAccessible* accessible) {
++  fl_socket_accessible_detach_socket(FL_SOCKET_ACCESSIBLE(accessible));
++
++  GTK_ACCESSIBLE_CLASS(fl_socket_accessible_parent_class)
++      ->widget_unset(accessible);
++}
++
+ static void fl_socket_accessible_dispose(GObject* object) {
+   FlSocketAccessible* self = FL_SOCKET_ACCESSIBLE(object);
+ 
++  fl_socket_accessible_detach_socket(self);
+   g_clear_object(&self->accessible_socket);
+ 
+   G_OBJECT_CLASS(fl_socket_accessible_parent_class)->dispose(object);
+@@ -38,12 +53,16 @@
+   ATK_OBJECT_CLASS(fl_socket_accessible_parent_class)->initialize(object, data);
+ 
+   self->accessible_socket = atk_socket_new();
++  atk_object_set_parent(self->accessible_socket, object);
+ }
+ 
+ static void fl_socket_accessible_class_init(FlSocketAccessibleClass* klass) {
+   GObjectClass* object_class = G_OBJECT_CLASS(klass);
+   object_class->dispose = fl_socket_accessible_dispose;
+ 
++  GtkAccessibleClass* accessible_class = GTK_ACCESSIBLE_CLASS(klass);
++  accessible_class->widget_unset = fl_socket_accessible_widget_unset;
++
+   AtkObjectClass* atk_class = ATK_OBJECT_CLASS(klass);
+   atk_class->initialize = fl_socket_accessible_initialize;
+   atk_class->get_n_children = fl_socket_accessible_get_n_children;
