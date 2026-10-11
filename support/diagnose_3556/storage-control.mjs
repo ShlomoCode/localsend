@@ -18,9 +18,10 @@ async function filePick(file,name){
  const end=Date.now()+30000;while(Date.now()<end){if((await wd('GET',`/session/${session}/source`)).includes('com.google.android.documentsui'))break;await new Promise(r=>setTimeout(r,1000));}
  await snap(name+'-picker');
  if(file.endsWith('.bin')){await click('Show roots');await snap(name+'-roots');await ui('text("Downloads")');await ui('text("Issue3556")');await snap(name+'-owned-directory');}
+ else {await click('Show roots');const roots=await wd('GET',`/session/${session}/source`);const count=[...roots.matchAll(/text="Recent"/g)].length;await ui('text("Recent").instance('+(count-1)+')');}
  await ui('textContains('+JSON.stringify(file)+')');await observe(name,30);
 }
-async function mediaPick(file,name){await reset();await click('Media');await snap(name+'-picker');await ui('descriptionContains('+JSON.stringify(file)+')');await snap(name+'-selected');await ui('descriptionStartsWith("Confirm")');await observe(name,60);}
+async function mediaPick(file,name){await reset();await click('Media');let source=await wd('GET',`/session/${session}/source`);if(source.includes('permissioncontroller'))await ui('textMatches("(?i)allow")');await snap(name+'-picker');await ui('descriptionContains('+JSON.stringify(file)+')');await snap(name+'-selected');await ui('descriptionStartsWith("Confirm")');await observe(name,name.startsWith('large')?300:30);}
 try{
  const plan=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth}}).then(r=>r.json());writeFileSync('evidence/live-plan.json',JSON.stringify(plan));if(plan.parallel_sessions_running>=plan.parallel_sessions_max_allowed)throw Error('No live BrowserStack slot');
  const c=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP],'appium:autoGrantPermissions':true,'appium:newCommandTimeout':2400,'bstack:options':{idleTimeout:600,projectName:'LocalSend bug sprint',buildName:'issue3556-'+process.env.GITHUB_RUN_ID,sessionName:'issue3556-S20-selection-control',debug:true,video:true,networkLogs:false}},firstMatch:[{}]}});
@@ -32,10 +33,10 @@ try{
  await snap('small-video-ready');const smallVideo=fixtureName(await ready('.mp4',30000));await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});await new Promise(r=>setTimeout(r,4000));await snap('baseline-initial');
  await wd('POST',`/session/${session}/timeouts`,{implicit:5000});
  if(process.env.SELECTION_MATRIX==='true'){
-   await filePick(smallData,'small-file-control');
+   await filePick(smallVideo,'small-file-control');
    await mediaPick(smallVideo,'small-media-control');
-   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Stage 16GB data');const largeData=fixtureName(await ready('16000000000.bin',1800000));await snap('large-data-ready');await filePick(largeData,'large-data-file');
    await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Stage 16GB video');const largeVideo=fixtureName(await ready('16000000000.mp4',1800000));await snap('large-video-ready');await filePick(largeVideo,'large-video-file');await mediaPick(largeVideo,'large-video-media');
+   await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.fixture3556'});await click('Refresh capacity');await snap('capacity-after-media');
  }
  console.log('S20 storage and small fixture snapshots captured. No large file staged or transferred.');
  if(process.env.HOLD_SECONDS){console.log('Owned issue3556 session='+session);const end=Date.now()+Number(process.env.HOLD_SECONDS)*1000;while(Date.now()<end){await new Promise(r=>setTimeout(r,20000));try{await wd('GET',`/session/${session}/source`);}catch(e){console.log('Owned session was ended externally; closing runner.');break;}}await snap('selection-final').catch(()=>{});}

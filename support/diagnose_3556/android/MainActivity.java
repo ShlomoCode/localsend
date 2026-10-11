@@ -29,7 +29,7 @@ public final class MainActivity extends Activity {
     add(panel,"Share owned fixture",()->{if(last!=null){Intent i=new Intent(Intent.ACTION_SEND).setType(getContentResolver().getType(last)).putExtra(Intent.EXTRA_STREAM,last).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(i,"Share issue 3556 fixture"));}});
     add(panel,"Refresh capacity",()->status.setText(capacity()));
     add(panel,"Delete owned fixtures",()->{if(!busy){for(Uri u:owned)getContentResolver().delete(u,null,null);owned.clear();last=null;status.setText(capacity()+"\nDeleted this session's fixture URIs only");}});
-    setContentView(panel);
+    ScrollView scroll=new ScrollView(this);scroll.addView(panel);setContentView(scroll);
   }
   private void add(LinearLayout panel,String title,Runnable action){Button b=new Button(this);b.setText(title);b.setContentDescription(title);b.setAllCaps(false);b.setOnClickListener(v->action.run());panel.addView(b);}
   private String capacity(){StatFs s=new StatFs(Environment.getExternalStorageDirectory().getPath());return "Issue 3556 fixture helper\nAndroid="+Build.VERSION.RELEASE+" SDK="+Build.VERSION.SDK_INT+" model="+Build.MODEL+"\navailableBytes="+s.getAvailableBytes()+" totalBytes="+s.getTotalBytes();}
