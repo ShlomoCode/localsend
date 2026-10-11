@@ -1,6 +1,6 @@
 param([string]$Executable,[string]$CandidateExecutable,[bool]$ReverseFavorites=$false,[string]$EvidenceDirectory)
 $ErrorActionPreference = "Stop"
-Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes, WindowsBase
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -64,6 +64,25 @@ function Paste([string]$value) {
  # Native Unicode keyboard events avoid modifier loss in the legacy SendKeys backend.
  [Desktop2381]::Text($value)
  Start-Sleep -Milliseconds 600
+}
+function FillNativeFilename([string]$path,[string]$snapshot) {
+ # Use the native file picker's standard edit-control API. Read back the exact
+ # displayed value before clicking real Open; keyboard focus can lose D:.
+ Click 400 442
+ $point=New-Object System.Windows.Point -ArgumentList 400,442
+ $element=[System.Windows.Automation.AutomationElement]::FromPoint($point)
+ $pattern=$null
+ for($level=0;$level -lt 4 -and $element;$level++) {
+  if($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) {break}
+  $element=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
+ }
+ if(-not $pattern) {throw "Native filename edit control does not expose ValuePattern"}
+ $fullPath=(Resolve-Path $path).Path
+ $pattern.SetValue($fullPath)
+ Start-Sleep -Milliseconds 500
+ $actual=$pattern.Current.Value
+ @{inputApi="native UI Automation ValuePattern";requested=$fullPath;displayed=$actual;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$snapshot-filename-input.json"
+ if($actual -cne $fullPath) {throw "Native filename control did not retain the exact fixture path"}
 }
 function Word([string]$word,[string]$snap) {
  $rows = Import-Csv "$EvidenceDirectory/$snap.tsv" -Delimiter "`t"
@@ -337,8 +356,7 @@ Get-FileHash $fixture -Algorithm SHA256 | ConvertTo-Json | Set-Content "$Evidenc
 Word "File" "sender-transfer-selection"
 Screenshot "native-file-picker"
 # Native picker field and Open measured in actual run 38106065597.
-Click 400 442
-Paste (Resolve-Path $fixture).Path
+FillNativeFilename $fixture "first-transfer"
 Screenshot "native-file-picker-filled"
 Click 464 473
 Start-Sleep -Seconds 3
@@ -417,8 +435,7 @@ if($currentView -and $CandidateExecutable) {
  Screenshot "$phase-selection"
  Word "File" "$phase-selection"
  Screenshot "$phase-native-file-picker"
- Click 400 442
- Paste (Resolve-Path $fixture).Path
+ FillNativeFilename $fixture $phase
  Screenshot "$phase-native-file-picker-filled"
  Click 464 473
  Start-Sleep -Seconds 3
@@ -470,8 +487,7 @@ $secondRows=Import-Csv "$EvidenceDirectory/sender-second-route-selection.tsv" -D
 if($secondRows | Where-Object {$_.text -eq "File"}) {
  Word "File" "sender-second-route-selection"
  Screenshot "native-second-file-picker"
- Click 400 442
- Paste (Resolve-Path $fixture).Path
+ FillNativeFilename $fixture "second-transfer"
  Screenshot "native-second-file-picker-filled"
  Click 464 473
  Start-Sleep -Seconds 3
