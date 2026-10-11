@@ -2,6 +2,10 @@ name: Build unsigned iOS device artifact
 
 on:
   workflow_dispatch:
+  # Register this fork-only diagnostic workflow without allocating a build runner.
+  push:
+    branches: [codex/sprint-ios-cloud]
+    paths: [.github/workflows/sprint-ios-cloud.yml]
 
 permissions:
   contents: read
@@ -12,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'ShlomoCode/localsend'
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 55
     steps:
