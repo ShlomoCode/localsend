@@ -178,7 +178,12 @@ jobs:
           deb_binary=$(find /opt /usr -name localsend_app -type f -print -quit)
           sha256sum "$deb_binary" "$(flatpak info -l org.localsend.localsend_app)/files/localsend_app"
           GUEST
-          for kind in deb flatpak; do
+          kinds=(deb flatpak)
+          if [ "$PACKAGE_VERSION" = previous-25.08 ]; then kinds+=(flatpak-other); fi
+          for kind in "${kinds[@]}"; do
+            if [ "$kind" = flatpak-other ]; then
+              timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app; flatpak info org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' > evidence/vm/pre-upgrade-other-package.txt 2>&1
+            fi
             timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind" <<'GUEST'
           set -u
           kind=$1
@@ -222,6 +227,9 @@ jobs:
             fi
             sleep 3
           done
+          if [ "$PACKAGE_VERSION" = previous-25.08 ]; then
+            timeout 120 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=31f3f559da9fc85ec88a82923e3d7287a873240573cbb9d6bd54bf4a26ad1ccd org.localsend.localsend_app; flatpak info org.localsend.localsend_app' > evidence/vm/pre-upgrade-package-restored.txt 2>&1
+          fi
 
       - name: Upgrade the installed 24.04 system through the supported LTS path
         if: inputs.start_version != '26.04'
@@ -247,6 +255,8 @@ jobs:
           test "$ready" = 1
 
       - name: Compare the reported generic kernel when available
+        env:
+          PACKAGE_VERSION: ${{ inputs.package_version || 'released' }}
         run: |
           set -euo pipefail
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
@@ -296,7 +306,12 @@ jobs:
             'uname -a; loginctl list-sessions; flatpak info --show-commit org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' \
             >> evidence/vm/kernel38-environment.txt 2>&1 || true
           test "$ready" = 1
-          for kind in deb flatpak; do
+          kinds=(deb flatpak)
+          if [ "$PACKAGE_VERSION" = previous-25.08 ]; then kinds+=(flatpak-other); fi
+          for kind in "${kinds[@]}"; do
+            if [ "$kind" = flatpak-other ]; then
+              timeout 120 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app; flatpak info org.localsend.localsend_app; flatpak list --runtime --columns=application,branch,commit' > evidence/vm/post-upgrade-other-package.txt 2>&1
+            fi
             label="${kind}38"
             timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $kind $label" <<'GUEST'
           set -u
@@ -340,6 +355,9 @@ jobs:
             fi
             sleep 3
           done
+          if [ "$PACKAGE_VERSION" = previous-25.08 ]; then
+            timeout 120 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo flatpak update -y --commit=31f3f559da9fc85ec88a82923e3d7287a873240573cbb9d6bd54bf4a26ad1ccd org.localsend.localsend_app; flatpak info org.localsend.localsend_app' > evidence/vm/post-upgrade-package-restored.txt 2>&1
+          fi
 
       - name: Compare valid session and renderer interventions
         run: |
