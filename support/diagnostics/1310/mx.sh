@@ -4,7 +4,7 @@ set -euo pipefail
 mkdir -p evidence/mx /home/runner/issue1310-mx
 mxroot=/home/runner/issue1310-mx
 sudo apt-get update
-sudo apt-get install -y qemu-system-x86 qemu-utils sshpass python3-pip imagemagick
+sudo apt-get install -y qemu-system-x86 qemu-utils sshpass python3-pip imagemagick genisoimage
 pip install vncdotool
 if ! test -f "$mxroot/mx.iso"; then
   downloaded=0
@@ -21,6 +21,25 @@ actual=$(sha256sum "$mxroot/mx.iso" | awk '{print $1}')
 test "$expected" = "$actual"
 printf 'media_verified=true\n' >> "$GITHUB_OUTPUT"
 qemu-img create -f qcow2 "$mxroot/disk.qcow2" 24G
+mkdir -p "$mxroot/bootstrap"
+cat > "$mxroot/bootstrap/bootstrap.sh" <<'BOOTSTRAP'
+#!/usr/bin/env bash
+exec > /dev/ttyS0 2>&1
+set -euxo pipefail
+date -u
+ip address
+ip route
+cat /etc/resolv.conf
+df -h
+free -m
+dpkg-query -W openssh-server || true
+apt-get update
+apt-get install -y openssh-server
+service ssh start
+ss -lntp
+date -u
+BOOTSTRAP
+genisoimage -quiet -r -o "$mxroot/bootstrap.iso" -V OBSERVATION "$mxroot/bootstrap"
 opts=(-p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" -o ConnectTimeout=5)
 cleanup() {
   printf '%s\n' "$?" > evidence/mx/host-exit-code.txt
@@ -30,7 +49,7 @@ cleanup() {
   sudo chown -R "$(id -u):$(id -g)" evidence
 }
 trap cleanup EXIT
-sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -drive file="$mxroot/disk.qcow2",if=virtio,format=qcow2 -cdrom "$mxroot/mx.iso" -boot d -device virtio-vga -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 -vnc 127.0.0.1:0 -serial file:evidence/mx/serial.log -pidfile "$mxroot/qemu.pid" -daemonize
+sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -drive file="$mxroot/disk.qcow2",if=virtio,format=qcow2 -cdrom "$mxroot/mx.iso" -drive file="$mxroot/bootstrap.iso",media=cdrom,index=3,readonly=on -boot d -device virtio-vga -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 -vnc 127.0.0.1:0 -serial file:evidence/mx/serial.log -pidfile "$mxroot/qemu.pid" -daemonize
 sleep 20
 vncdo -s localhost::5900 capture evidence/mx/boot-menu.png key enter
 sleep 120
@@ -44,12 +63,19 @@ vncdo -s localhost::5900 type demo key enter
 sleep 3
 vncdo -s localhost::5900 capture evidence/mx/ssh-start.png
 if ! timeout 12 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then
-  vncdo -s localhost::5900 type 'sudo apt-get update && sudo apt-get install -y openssh-server && sudo service ssh start' key enter
+  vncdo -s localhost::5900 type 'sudo mount /dev/sr1 /mnt' key enter
   sleep 3
-  vncdo -s localhost::5900 type demo key enter
+  vncdo -s localhost::5900 capture evidence/mx/bootstrap-mounted.png
+  vncdo -s localhost::5900 type 'sudo bash /mnt/bootstrap.sh' key enter
+  sleep 3
+  vncdo -s localhost::5900 capture evidence/mx/bootstrap-started.png
   ready=0
   for n in $(seq 1 60); do
     if timeout 10 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then ready=1; break; fi
+    if (( n % 6 == 0 )); then
+      vncdo -s localhost::5900 key shift capture "evidence/mx/bootstrap-progress-$n.png"
+      tail -n 30 evidence/mx/serial.log
+    fi
     sleep 5
   done
   vncdo -s localhost::5900 capture evidence/mx/ssh-installed.png
