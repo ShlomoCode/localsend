@@ -15,14 +15,14 @@ New-Item -ItemType Directory -Force $EvidenceDirectory | Out-Null
 Start-Transcript "$EvidenceDirectory/transcript.txt"
 function Screenshot([string]$name) {
  $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
- $bmp = New-Object System.Drawing.Bitmap($b.Width,$b.Height)
+ $bmp = New-Object System.Drawing.Bitmap(992,720)
  $g = [System.Drawing.Graphics]::FromImage($bmp)
- $g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size)
+ $g.CopyFromScreen(0,0,0,0,$bmp.Size)
  $path = "$EvidenceDirectory/$name.png"
  $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
  $g.Dispose(); $bmp.Dispose()
  & "C:/Program Files/Tesseract-OCR/tesseract.exe" $path "$EvidenceDirectory/$name" -l eng --psm 11 tsv 2> "$EvidenceDirectory/$name-ocr-error.txt"
- Get-Content "$EvidenceDirectory/$name.tsv" | Select-Object -Last 80 | Write-Host
+ Import-Csv "$EvidenceDirectory/$name.tsv" -Delimiter "`t" | Where-Object {$_.text} | Select-Object left,top,width,height,text | Format-Table | Out-String | Write-Host
 }
 function Click([int]$x,[int]$y) {
  [Desktop2381]::SetCursorPos($x,$y) | Out-Null
@@ -42,6 +42,7 @@ foreach ($ip in @("10.0.20.2","100.95.193.205")) {
  New-NetIPAddress -InterfaceIndex $nic.InterfaceIndex -IPAddress $ip -PrefixLength 16 -SkipAsSource $true -PolicyStore ActiveStore | Out-Null
 }
 Get-NetIPAddress | ConvertTo-Json -Depth 4 | Set-Content "$EvidenceDirectory/interfaces.json"
+Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status | ConvertTo-Json | Set-Content "$EvidenceDirectory/adapters.json"
 $apps = @{}
 foreach ($item in @(@{name="receiver";port=53317;alias="PeerAlpha"},@{name="sender";port=53318;alias="SourceBeta"})) {
  $folder = "$EvidenceDirectory/$($item.name)-app"
@@ -62,7 +63,28 @@ $sender = $apps.sender
 [Desktop2381]::SetForegroundWindow($sender.MainWindowHandle) | Out-Null
 Word "Send" "sender-initial"
 Screenshot "sender-send"
-# Pause at the actual Send screen to determine the favorite toolbar location.
+# The favorite icon was visually located at (576,212) in the retained release screenshot.
+Click 576 212
+Screenshot "favorites-empty"
+foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205";alias="NetBird LAN"})) {
+ $snapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-empty"} else {"favorites-first"}
+ Word "Add" $snapshot
+ Screenshot "add-$($favorite.ip)"
+ [System.Windows.Forms.SendKeys]::SendWait($favorite.ip)
+ [System.Windows.Forms.SendKeys]::SendWait("{TAB}^a53317+{TAB}+{TAB}^a")
+ [System.Windows.Forms.SendKeys]::SendWait($favorite.alias)
+ Screenshot "filled-$($favorite.ip)"
+ Word "Confirm" "filled-$($favorite.ip)"
+ Start-Sleep -Seconds 3
+ Screenshot $(if ($favorite.ip -eq "10.0.20.2") {"favorites-first"} else {"favorites-second"})
+}
+Word "Cancel" "favorites-second"
+Click 497 212
+Start-Sleep -Seconds 8
+Screenshot "nearby-after-add"
+Click 576 212
+Screenshot "favorites-after-scan"
+
 foreach ($name in @("sender","receiver")) {
  $stored = Get-Content "$EvidenceDirectory/$name-app/settings.json" -Raw | ConvertFrom-Json
  $stored.PSObject.Properties.Remove("flutter.ls_security_context")
@@ -70,5 +92,6 @@ foreach ($name in @("sender","receiver")) {
  $stored | ConvertTo-Json -Depth 10 | Set-Content "$EvidenceDirectory/$name-settings.json"
 }
 Stop-Process -Id $apps.sender.Id,$apps.receiver.Id -Force
-Remove-Item "$EvidenceDirectory/sender-app","$EvidenceDirectory/receiver-app" -Recurse -Force
+Start-Sleep -Seconds 3
+Remove-Item "$EvidenceDirectory/sender-app","$EvidenceDirectory/receiver-app" -Recurse -Force -ErrorAction Continue
 Stop-Transcript
