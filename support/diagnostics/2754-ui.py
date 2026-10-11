@@ -35,6 +35,20 @@ def keyboard_switch(name):
 def click_word(word,name):
     rows=snap(name)
     hits=[r for r in rows if r["text"].lower().strip()==word.lower()]
+    if not hits and word.lower()=="text":
+        selections=[r for r in rows if r["text"].lower().strip()=="selection"]
+        if not selections: raise RuntimeError("Missing original Selection heading in "+name)
+        selection=selections[0]
+        left=int(selection["left"])-8; top=int(selection["top"])+24
+        crop=out/(name+"-picker.png")
+        run("scrot","--autoselect",f"{left},{top},460,80",str(crop))
+        result=run("tesseract",str(crop),"stdout","--psm","11","tsv")
+        (out/(name+"-picker.tsv")).write_text(result.stdout)
+        picker_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+        hits=[r for r in picker_rows if r["text"].lower().strip()==word.lower()]
+        for hit in hits:
+            hit["left"]=str(left+int(hit["left"])); hit["top"]=str(top+int(hit["top"]))
+        log("picker-ocr-fallback",file=crop.name,x=left,y=top,text_found=bool(hits))
     if not hits: raise RuntimeError("Missing UI label "+word+" in "+name)
     r=hits[0]; x=int(r["left"])+int(r["width"])//2; y=int(r["top"])+int(r["height"])//2
     if word.lower()=="text":
@@ -83,7 +97,8 @@ time.sleep(3); snap("app-ready")
 click_word("Send","send"); time.sleep(2)
 text_case("keyboard-off")
 # Paste is a real application action, with clipboard content set by xclip.
-subprocess.run(["xclip","-selection","clipboard"],input=b"Paste control issue2754",check=True)
+# The clipboard owner can outlive the driver; do not let it retain SSH output streams.
+subprocess.run(["xclip","-selection","clipboard"],input=b"Paste control issue2754",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
 click_word("Paste","paste-before"); time.sleep(3); snap("paste-result")
 # Clear the selection through its rendered close control before the next original Text trigger.
 rows=snap("paste-clear-before")
