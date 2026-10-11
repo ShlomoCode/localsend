@@ -61,8 +61,13 @@ def choose_saf_destination():
     click(R, "(Downloads)", "saf-before-destination")
     xml = snapshot(R, "saf-directory-picker")
     if "Issue2051" not in labels(xml):
-        click(R, "Show roots", "saf-before-roots")
-        click(R, "Downloads", "saf-before-downloads")
+        if "Download" in labels(xml):
+            if "List view" in labels(xml):
+                click(R, "List view", "saf-before-list")
+            click(R, "Download", "saf-before-download-folder")
+        else:
+            click(R, "Show roots", "saf-before-roots")
+            click(R, "Downloads", "saf-before-downloads")
     click(R, "Issue2051", "saf-before-subdirectory")
     xml = snapshot(R, "saf-before-grant")
     label = next(v for v in labels(xml) if v.lower() == "use this folder")
