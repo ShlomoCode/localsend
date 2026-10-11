@@ -104,6 +104,19 @@ for version in 1.14.0 1.18.2; do
   snapshot "$version-after-text"
   xdotool key Escape
   sleep 2
+  file_dialog=0
+  folder_dialog=0
+  text_dialog=0
+  if grep -Eiq '"(Open File|Select.*file|Choose.*file)"' "evidence/$version-after-file-windows.txt"; then file_dialog=1; fi
+  if grep -Eiq '"(Choose Directory|Select.*Folder|Choose.*Folder)"' "evidence/$version-after-folder-windows.txt"; then folder_dialog=1; fi
+  if awk -F '\t' '$12=="message"{found=1}END{exit !found}' "evidence/$version-after-text.tsv"; then text_dialog=1; fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$version" "$package_format" "$file_dialog" "$folder_dialog" "$text_dialog" >> evidence/picker-observations.tsv
+  # These are observed window/text signals, not a substitute for raw frames.
+  # A File failure retains both known-working controls before reporting red.
+  if test "$file_dialog" = 0; then
+    printf 'File native dialog absent; inspect same-case controls and raw screenshots.\n' > "evidence/$version-file-assertion-failed.txt"
+    exit 1
+  fi
   if test "${TRANSFER_CONTROL:-0}" = 1 && { test "$version" = 1.14.0 || test "$package_format" = flatpak; }; then
     snapshot "$version-transfer-before"
     point=$(awk -F '\t' '$12=="devices" && $11>60 {print int($7+$9+58),int($8+$10/2);exit}' "evidence/$version-transfer-before.tsv")
