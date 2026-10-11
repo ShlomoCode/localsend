@@ -67,6 +67,9 @@ jobs:
             mobile-control-results.json
             mobile-control-final-status.json
             localsend-source.xml
+            helper-failure-source.xml
+            helper-failure.png
+            mobile-control-error.txt
       - uses: actions/upload-artifact@v6
         if: '!inputs.mobile'
         with:

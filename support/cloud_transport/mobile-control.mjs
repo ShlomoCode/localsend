@@ -9,10 +9,10 @@ const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.en
 const r=relay({token});await r.start();let session;
 async function wd(method,path,body) {
  const res=await fetch('https://hub-cloud.browserstack.com/wd/hub'+path,{method,headers:{authorization:auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(120000)});
- const json=await res.json();if(!res.ok||json.value?.error)throw new Error('WebDriver '+res.status+' '+(json.value?.error||''));return json.value;
+ const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'').slice(0,600);for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message);}return json.value;
 }
 async function clickText(text){
- const e=await wd('POST',`/session/${session}/element`,{using:'xpath',value:`//*[@text="${text}"]`});
+ const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:text});
  await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
 }
 const results=[];
@@ -38,6 +38,10 @@ try {
  console.log('Original LocalSend activated; relay target switched to localhost53317');
  const hold=Number(process.env.TRANSPORT_HOLD_SECONDS||0);
  if(hold){console.log('Transport integration window started');for(let i=0;i<hold;i+=20){await new Promise(ok=>setTimeout(ok,Math.min(20,hold-i)*1000));await wd('GET',`/session/${session}/source`);}}
+} catch(error) {
+ writeFileSync('mobile-control-error.txt',String(error));
+ if(session){writeFileSync('helper-failure-source.xml',await wd('GET',`/session/${session}/source`).catch(()=>''));const screenshot=await wd('GET',`/session/${session}/screenshot`).catch(()=>'');if(screenshot)writeFileSync('helper-failure.png',Buffer.from(screenshot,'base64'));}
+ throw error;
 } finally {
  writeFileSync('mobile-control-final-status.json',JSON.stringify({results,metrics:r.status()},null,2));
  if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});
