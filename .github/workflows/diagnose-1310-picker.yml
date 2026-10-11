@@ -8,7 +8,7 @@ on:
         default: ubuntu
       package_format:
         type: choice
-        options: [tar, appimage, deb]
+        options: [tar, appimage, deb, flatpak]
         default: tar
 permissions:
   contents: read

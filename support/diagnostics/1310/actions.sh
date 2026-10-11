@@ -16,6 +16,11 @@ click_label() {
 for version in 1.14.0 1.18.2; do
   mkdir -p "releases/$version"
   package_format=${PACKAGE_FORMAT:-tar}
+  args=()
+  if test "$package_format" = flatpak && test "$version" = 1.14.0; then
+    printf 'Historical1.14 Flatpak artifact not identified; no substitute version claimed.\n' > evidence/flatpak-historical-gap.txt
+    continue
+  fi
   case "$package_format" in
     tar)
       curl -fL --retry 3 -o "releases/$version.tar.gz" "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-linux-x86-64.tar.gz"
@@ -36,11 +41,24 @@ for version in 1.14.0 1.18.2; do
       dpkg -V localsend > "evidence/$version-package-verification.txt"
       binary=$(dpkg -L localsend | awk '/\/localsend_app$/{print;exit}')
       ;;
+    flatpak)
+      sudo apt-get install -y flatpak
+      flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      flatpak install --user --noninteractive flathub org.localsend.localsend_app
+      flatpak info --user org.localsend.localsend_app > evidence/flatpak-info.txt
+      actual_version=$(LANG=C flatpak info --user org.localsend.localsend_app | awk '$1=="Version:"{print $2}')
+      test "$actual_version" = "$version"
+      flatpak info --user --show-commit org.localsend.localsend_app > evidence/flatpak-commit.txt
+      flatpak info --user --show-permissions org.localsend.localsend_app > evidence/flatpak-permissions.txt
+      flatpak info --user --show-runtime org.localsend.localsend_app > evidence/flatpak-runtime.txt
+      binary=$(command -v flatpak)
+      args=(run --user org.localsend.localsend_app)
+      ;;
     *) exit 2;;
   esac
   printf '%s %s %s\n' "$version" "$package_format" "$binary" >> evidence/artifact-identity.txt
   ldd "$binary" > "evidence/$version-ldd.txt" 2>&1 || true
-  "$binary" > "evidence/$version-app.log" 2>&1 &
+  "$binary" "${args[@]}" > "evidence/$version-app.log" 2>&1 &
   pid=$!
   sleep 15
   window=$(xdotool search --onlyvisible --name '^LocalSend$' | head -1)
@@ -86,7 +104,7 @@ for version in 1.14.0 1.18.2; do
   snapshot "$version-after-text"
   xdotool key Escape
   sleep 2
-  if test "${TRANSFER_CONTROL:-0}" = 1 && test "$version" = 1.14.0; then
+  if test "${TRANSFER_CONTROL:-0}" = 1 && { test "$version" = 1.14.0 || test "$package_format" = flatpak; }; then
     snapshot "$version-transfer-before"
     point=$(awk -F '\t' '$12=="devices" && $11>60 {print int($7+$9+58),int($8+$10/2);exit}' "evidence/$version-transfer-before.tsv")
     test -n "$point"
