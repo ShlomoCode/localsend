@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 INPUT="${1:-/mnt}"
-EVIDENCE="${2:-/mnt/evidence}"
+SHARED_EVIDENCE="${2:-/mnt/evidence}"
 DATA="${3:-/mnt/flatpak-data}"
-mkdir -p "$EVIDENCE" "$DATA"
+mkdir -p "$SHARED_EVIDENCE" "$DATA"
 mountpoint -q "$INPUT" || mount -t 9p -o trans=virtio,version=9p2000.L,ro localsend_input "$INPUT"
-mountpoint -q "$EVIDENCE" || mount -t 9p -o trans=virtio,version=9p2000.L localsend_evidence "$EVIDENCE"
+mountpoint -q "$SHARED_EVIDENCE" || mount -t 9p -o trans=virtio,version=9p2000.L localsend_evidence "$SHARED_EVIDENCE"
 mountpoint -q "$DATA" || mount -t ext4 /dev/vda "$DATA"
-exec > >(tee -a "$EVIDENCE/guest.log") 2>&1
+EVIDENCE="$DATA/evidence"
+install -d -m 0777 "$EVIDENCE"
+collect_evidence() {
+  local status=$?
+  if ! cp -a --no-preserve=ownership "$EVIDENCE/." "$SHARED_EVIDENCE/"; then
+    echo 'Guest evidence export failed.' >> "$SHARED_EVIDENCE/infrastructure-failures.txt"
+    [[ $status -ne 0 ]] || status=1
+  fi
+  exit "$status"
+}
+trap collect_evidence EXIT
+exec > >(tee -a "$SHARED_EVIDENCE/guest.log") 2>&1
 fail() { echo "ERROR: $*" | tee -a "$EVIDENCE/infrastructure-failures.txt"; exit 1; }
 
 [[ -r "$INPUT/reproduce.sh" && -r "$INPUT/mint-vm-guest.sh" ]] || fail 'Read-only harness share is incomplete.'
