@@ -116,10 +116,14 @@ jobs:
           (cd candidate && ../packages/candidate.AppImage --appimage-extract > ../evidence/candidate-extract.log)
           sha256sum baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app | tee evidence/packaged-executables.sha256
           cmp baseline/squashfs-root/localsend_app candidate/squashfs-root/localsend_app
-          (cd baseline/squashfs-root && find . -type f -name '*.so*' -print0 | sort -z | xargs -0 sha256sum) > evidence/baseline-libraries.sha256
-          (cd candidate/squashfs-root && find . -type f -name '*.so*' -print0 | sort -z | xargs -0 sha256sum) > evidence/candidate-libraries.sha256
-          cmp evidence/baseline-libraries.sha256 evidence/candidate-libraries.sha256
-          grep -q 'libapp.so' evidence/candidate-libraries.sha256
+          (cd baseline/squashfs-root && find . -type f \( -name '*.so' -o -name '*.so.*' \) -print0 | sort -z | xargs -0 sha256sum) > evidence/baseline-libraries.sha256
+          (cd candidate/squashfs-root && find . -type f \( -name '*.so' -o -name '*.so.*' \) -print0 | sort -z | xargs -0 sha256sum) > evidence/candidate-libraries.sha256
+          diff -u evidence/baseline-libraries.sha256 evidence/candidate-libraries.sha256 > evidence/system-libraries.diff || test "$?" = 1
+          (cd baseline/squashfs-root && find lib -maxdepth 1 -type f -name '*.so' -print0 | sort -z | xargs -0 sha256sum) > evidence/baseline-app-libraries.sha256
+          (cd candidate/squashfs-root && find lib -maxdepth 1 -type f -name '*.so' -print0 | sort -z | xargs -0 sha256sum) > evidence/candidate-app-libraries.sha256
+          cmp evidence/baseline-app-libraries.sha256 evidence/candidate-app-libraries.sha256
+          grep -q 'libapp.so' evidence/candidate-app-libraries.sha256
+          grep -q 'libflutter_linux_gtk.so' evidence/candidate-app-libraries.sha256
           cp source-evidence/built-executable.sha256 evidence/prepackaging-executable.sha256
           cp baseline/squashfs-root/org.localsend.localsend_app.desktop evidence/baseline.desktop
           cp candidate/squashfs-root/org.localsend.localsend_app.desktop evidence/candidate.desktop
