@@ -38,13 +38,13 @@ def walk(node):
 def find(name, role=None):
     for _ in range(20):
         for node in walk(pyatspi.Registry.getDesktop(0)):
-            if node.name == name and (role is None or node.getRoleName() == role):
-                try:
+            try:
+                if node.name == name and (role is None or node.getRoleName() == role):
                     bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
                     if bounds.width > 0 and bounds.height > 0 and node.getState().contains(pyatspi.STATE_SHOWING):
                         return node
-                except Exception:
-                    continue
+            except Exception:
+                continue
         time.sleep(.25)
     raise RuntimeError(f"Accessible UI control missing: {name} ({role})")
 
@@ -100,10 +100,13 @@ def prepare_hide(stage):
     row = label.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
     candidates = []
     for node in walk(pyatspi.Registry.getDesktop(0)):
-        if node.getRoleName() == "combo box" and node.getState().contains(pyatspi.STATE_SHOWING):
-            bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-            if abs(bounds.y - row.y) < 20:
-                candidates.append(node)
+        try:
+            if node.getRoleName() == "combo box" and node.getState().contains(pyatspi.STATE_SHOWING):
+                bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+                if abs(bounds.y - row.y) < 20:
+                    candidates.append(node)
+        except Exception:
+            continue
     assert len(candidates) == 1, f"Expected one LocalSend visibility selector, got {len(candidates)}"
     click(candidates[0])
     subprocess.run(["xdotool", "key", "End", "Return"], check=True)
