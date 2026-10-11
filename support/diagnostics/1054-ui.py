@@ -59,17 +59,18 @@ def screen(stage, roi=None, psm=11):
 
 
 def locate(label, stage, seconds=20, roi=None, psm=11):
+    labels = {item.lower() for item in label} if isinstance(label, tuple) else {label.lower()}
     end = time.monotonic() + seconds
     index = 0
     while True:
         rows = screen(stage + "-" + str(index), roi, psm)
         index += 1
-        matches = [row for row in rows if row["text"].strip().lower() == label.lower()]
+        matches = [row for row in rows if row["text"].strip().lower() in labels]
         if matches:
             row = matches[0]
             return row["left"] + row["width"] // 2, row["top"] + row["height"] // 2
         if time.monotonic() >= end:
-            raise RuntimeError("Visible label missing: " + label)
+            raise RuntimeError("Visible label missing: " + str(label))
         time.sleep(.5)
 
 
@@ -296,7 +297,7 @@ try:
         focus(wid)
         # Initial native frame restoration can arrive after window mapping.
         # Wait for actual app content before asserting the normalized frame.
-        locate("LocalSend", role + "-content-ready", 30)
+        locate(("LocalSend", "Receive", "new"), role + "-content-ready", 30)
         time.sleep(3)
         normalize(wid, role + "-startup-normalized")
         # A fresh valid profile opens the ordinary release-notes page. Finish
