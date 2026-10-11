@@ -6,7 +6,7 @@ on:
         description: 'Run native source gates before any new VM experiment'
         type: choice
         default: vm
-        options: [vm, native, engine]
+        options: [vm, native, engine, engine-app]
       environment:
         type: choice
         default: mint
@@ -25,6 +25,11 @@ on:
         type: string
         required: false
         default: ''
+      engine_run_id:
+        description: 'Completed engine source build supplying immutable control/B artifacts for app-only retry'
+        type: string
+        required: false
+        default: ''
       bridge_variant:
         description: 'Mint c1ce bridge: system, rebuilt stock control, or candidate A'
         type: choice
@@ -40,6 +45,87 @@ concurrency:
   group: issue2754-cinnamon-diagnostic
   cancel-in-progress: false
 jobs:
+  engine-app-retry:
+    if: inputs.stage == 'engine-app'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the reviewed immutable engine source run
+        env:
+          ENGINE_RUN_ID: ${{ inputs.engine_run_id }}
+        run: |
+          test "$ENGINE_RUN_ID" = 38153341418
+          mkdir -p evidence/engine-app-retry
+          git rev-parse HEAD > evidence/engine-app-retry/diagnostic-head.txt
+      - name: Download complete immutable control engine
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-engine-control-linux-x64
+          run-id: ${{ inputs.engine_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/issue2754-control-engine-artifact
+      - name: Download complete immutable B engine
+        uses: actions/download-artifact@v4
+        with:
+          name: issue2754-engine-B-linux-x64
+          run-id: ${{ inputs.engine_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/issue2754-B-engine-artifact
+      - name: Install native app build dependencies
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tee evidence/engine-app-retry/apt-update.log
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev jq binutils file \
+            2>&1 | tee evidence/engine-app-retry/apt-install.log
+          command -v rustup
+      - name: Build control then B from immutable source-built engines
+        run: |
+          set -euo pipefail
+          for variant in control B; do
+            artifact="$RUNNER_TEMP/issue2754-$variant-engine-artifact"
+            # Each downloaded artifact keeps its original provenance descriptor.
+            jq -e --arg variant "$variant" '.run_id == "38153341418" and .variant == $variant' "$artifact/provenance/manifest.json"
+            PROBE_VARIANT="$variant" bash support/diagnostics/2754-engine-build/build-app.sh \
+              "$artifact" "evidence/engine-app-$variant/bundle"
+          done
+      - name: Preserve app-only failure and success provenance
+        if: always()
+        run: |
+          mkdir -p /tmp/issue2754-engine-app-retry-compact
+          rsync -a --include='*/' --include='*.log' --include='*.json' --include='*.txt' \
+            --include='*.xml' --include='*.tsv' --include='*.sha256' --include='*SHA256SUMS' \
+            --include='*.patch' --include='*.cmake' --exclude='*' \
+            evidence/ /tmp/issue2754-engine-app-retry-compact/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-engine-app-retry-evidence-compact
+          path: /tmp/issue2754-engine-app-retry-compact/
+          compression-level: 9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2754-engine-app-retry-evidence-full
+          path: evidence/
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: issue2754-c1ce-engine-control-linux-x64
+          path: evidence/engine-app-control/bundle/
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: issue2754-c1ce-engine-B-linux-x64
+          path: evidence/engine-app-B/bundle/
+          if-no-files-found: error
+          compression-level: 0
   native-gates:
     if: inputs.stage == 'native'
     runs-on: ubuntu-24.04

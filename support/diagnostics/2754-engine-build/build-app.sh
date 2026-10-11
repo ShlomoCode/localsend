@@ -33,6 +33,14 @@ git -C "$framework_root" fetch --depth=1 origin refs/tags/3.41.9:refs/tags/3.41.
 clone_exact "https://github.com/$GITHUB_REPOSITORY.git" "$LOCALSEND_SHA" "$app_source"
 # Explicit SDK paths and pinned Rust; no codegen or source repair.
 flutter="$framework_root/bin/flutter"
+# The first supported invocation bootstraps the SDK and can write curl progress
+# to stdout. Retain that output separately before asking for strict JSON.
+set +e
+"$flutter" --version > "$output/provenance/flutter-bootstrap.log" 2>&1
+bootstrap_status=$?
+set -e
+printf '%s\n' "$bootstrap_status" > "$output/provenance/flutter-bootstrap-exit-code.txt"
+[[ $bootstrap_status == 0 ]]
 "$flutter" --version --machine > "$output/provenance/flutter-version.json"
 jq -e --arg revision "$FRAMEWORK_SHA" --arg engine "$ENGINE_SHA" \
   '.frameworkVersion == "3.41.9" and .frameworkRevision == $revision and .engineRevision == $engine' \

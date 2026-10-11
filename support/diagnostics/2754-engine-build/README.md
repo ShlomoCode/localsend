@@ -67,6 +67,12 @@ Later cloud runs must establish the complete generated layout, peak resources, a
 
 The app script validates the selected engine manifest, TAR SHA256, and per-file SHA256 list, then restores the output under an isolated `engine/src/out/host_release`. It fetches the exact framework commit and its verified release tag so shallow-checkout version reporting remains 3.41.9. It checks the framework's engine-version file and `flutter --version --machine`, fetches c1ce from the fork repository, and installs Rust 1.97.1 explicitly.
 
+### Run-24 app bootstrap recovery
+
+Run `38153341418` completed both source engines and the native B gate. Its control app stage stopped with `jq: parse error: Invalid numeric literal at line 1, column 4` before compilation. The retained `flutter-version.json` contains a curl progress meter followed by valid 3.41.9 JSON. The pinned `bin/internal/update_dart_sdk.sh` invokes curl with `2>&1`, so the first SDK bootstrap writes that progress to stdout. The consumer now runs the supported `flutter --version` command first, retaining its complete output and exit status, before capturing untouched machine JSON. It does not filter JSON or alter Flutter source.
+
+The `engine-app` stage reuses the complete immutable engine artifacts from that run: control artifact `11709830555` and B artifact `11709241990`. It verifies their original manifests, archive hashes and every transported consumer file, then builds control followed by B in one job. The supported local-engine arguments remain unchanged. The successful engine output is preserved; this retry does not compile engines again. App build success, loaded identity, geometry and the real UI comparison remain separate gates.
+
 Both pub dependency resolutions use `--enforce-lockfile`. Before/after hashes cover workspace pub, Cargo, and standalone cargokit locks. Changed tracked app source or changed locks fail the gate and are retained even on a failed build. No models, codegen, application semantics, or public Dart API are changed.
 
 The Flutter invocation supplies `--local-engine-src-path`, `--local-engine=host_release`, and `--local-engine-host=host_release` before `build linux --release -v`. It records generated CMake configuration and the verbose build, then requires the bundle's `libflutter_linux_gtk.so` SHA256 to match both the source-built output hash and manifest. It retains `libapp.so` and complete bundle hashes. Package the entire release bundle for the Mint transport.
