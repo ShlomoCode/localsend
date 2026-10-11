@@ -2,6 +2,10 @@ name: Diagnose issue 2007 physical original apps
 on:
   workflow_dispatch:
     inputs:
+      video_only_run:
+        type: string
+        default: ''
+        description: Archive an existing run video only, without allocating a device
       device:
         type: choice
         options: ['Vivo Y21', 'Samsung Galaxy S21']
@@ -18,7 +22,7 @@ on:
         description: Fixed fixture run seed for identical bytes across comparison arms
       scenario:
         type: choice
-        options: [unchanged, changed, renamed, provider-probe]
+        options: [unchanged, changed, renamed, provider-probe, same-session]
         default: unchanged
         description: Actual resend file variant after permanent deletion
       deletion_timing:
@@ -46,7 +50,35 @@ on:
         default: downloads
         description: Downloads, per-transfer SAF Documents, or persistent Settings SAF Documents
 jobs:
+  retain-video:
+    if: inputs.video_only_run != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v5
+        with:
+          repository: ShlomoCode/localsend
+          run-id: ${{ inputs.video_only_run }}
+          name: issue-2007-original-app-control-${{ inputs.video_only_run }}
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Preserve recording and packet timestamps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          node --check support/diagnostics/2007-video-evidence.mjs
+          node support/diagnostics/2007-video-evidence.mjs evidence
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue-2007-video-${{ inputs.video_only_run }}
+          path: evidence/
   original-app-control:
+    if: inputs.video_only_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -66,7 +98,7 @@ jobs:
       ISSUE_2007_POST_DELETE_WAIT: ${{ inputs.post_delete_wait_seconds || '0' }}
       ISSUE_2007_RESTART_RECEIVER: ${{ inputs.restart_receiver && '1' || '0' }}
       ISSUE_2007_DESTINATION: ${{ inputs.destination || 'downloads' }}
-      SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-physical-control.mjs
+      SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/${{ inputs.scenario == 'same-session' && '2007-same-session.mjs' || '2007-physical-control.mjs' }}
     steps:
       - uses: actions/checkout@v6
       - name: Verify diagnostic JavaScript syntax before device allocation
@@ -74,6 +106,9 @@ jobs:
           node --check support/diagnostics/2007-physical-control.mjs
           node --check support/diagnostics/native-readiness.mjs
           node --check support/diagnostics/2007-provider-probe.mjs
+          node --check support/diagnostics/2007-same-session.mjs
+          node --check support/diagnostics/2007-video-evidence.mjs
+          python3 -m py_compile support/diagnostics/2007-ui.py
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -94,7 +129,7 @@ jobs:
       - name: Prepare original desktop release and supported runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr python3-pil network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr python3-pil ffmpeg network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
           sudo systemctl start NetworkManager
           mkdir -p evidence released
           if [ "$ISSUE_2007_RELEASE" = current-c1ce ]; then
@@ -127,6 +162,9 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs";const app=JSON.parse(fs.readFileSync("/tmp/helper/upload.json")).app_url;if(!app)throw new Error("Helper upload failed");fs.appendFileSync(process.env.GITHUB_ENV,"HELPER_APP="+app+"\n");'
       - name: Real desktop picker and Android receive control
         run: node support/cloud_transport/mobile-control.mjs
+      - name: Retain actual continuous BrowserStack video
+        if: always()
+        run: node support/diagnostics/2007-video-evidence.mjs evidence
       - uses: actions/upload-artifact@v6
         if: always()
         with:
