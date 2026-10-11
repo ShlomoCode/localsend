@@ -1,6 +1,9 @@
 name: Diagnose 2414 host and VM pair
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2414-many-files]
+    paths: [.github/workflows/diagnose-2414-vm-pair.yml]
 permissions:
   contents: read
 concurrency:

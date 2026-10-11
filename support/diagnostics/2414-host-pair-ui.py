@@ -214,9 +214,11 @@ for count in (5, 5000):
         end = time.monotonic() + 2400
         while time.monotonic() < end:
             saved = guest("verify")
+            with (OUT / (case + "-save-progress.jsonl")).open("a") as progress:
+                progress.write(json.dumps({"host_monotonic": time.monotonic(), **saved}) + "\n")
             if saved["content_valid"]:
                 break
-            time.sleep(2)
+            time.sleep(10)
         result.update(saved)
         if not saved["content_valid"]:
             raise RuntimeError("Saved names or bytes differ from fixture")

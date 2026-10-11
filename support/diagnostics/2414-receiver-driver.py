@@ -1,5 +1,6 @@
 """Guest desktop/process helper; never sends protocol requests."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -87,9 +88,12 @@ def main():
         files = list(Path(state["destination"]).rglob("*"))
         files = [file for file in files if file.is_file()]
         expected = {f"file-{index:05d}.txt" for index in range(state["count"])}
-        print(json.dumps({"saved_files": len(files), "content_valid":
+        expected_hash = hashlib.sha256(CONTENT).hexdigest()
+        complete_files = sum(hashlib.sha256(file.read_bytes()).hexdigest() == expected_hash for file in files)
+        print(json.dumps({"saved_files": len(files), "verified_complete_files": complete_files,
+                          "expected_content_sha256": expected_hash, "guest_monotonic": time.monotonic(), "content_valid":
                           len(files) == state["count"] and {file.name for file in files} == expected
-                          and all(file.read_bytes() == CONTENT for file in files)}))
+                          and complete_files == state["count"]}))
     elif action == "stop":
         for key in ("pid", "sampler_pid"):
             try:
