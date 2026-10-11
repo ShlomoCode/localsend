@@ -120,4 +120,36 @@ foreach($iteration in 1..3){
  Start-Sleep -Seconds 2;Snapshot "zone-relaunch-$iteration-same-pid-user-resize" $app
  Stop-Process -Id $app.Id -Force
 }
+# Reuse genuine history while changing only the supported restore/exclusion setting.
+$genuineHistory=Get-Content $history -Raw
+foreach($case in @('restore-disabled','localsend-excluded','restore-enabled-again')){
+ Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
+ $exitDeadline=[DateTime]::UtcNow.AddSeconds(30)
+ while(Get-Process '*PowerToys*' -ErrorAction SilentlyContinue){if([DateTime]::UtcNow -gt $exitDeadline){throw 'PowerToys did not exit for comparison'};Start-Sleep -Milliseconds 250}
+ $fzConfig=Get-Content $fzFile -Raw|ConvertFrom-Json
+ $fzConfig.properties.fancyzones_appLastZone_moveWindows.value=($case -ne 'restore-disabled')
+ $fzConfig.properties.fancyzones_excluded_apps.value=$(if($case -eq 'localsend-excluded'){'localsend_app.exe'}else{''})
+ [System.IO.File]::WriteAllText($fzFile,($fzConfig|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
+ [System.IO.File]::WriteAllText($history,$genuineHistory,(New-Object System.Text.UTF8Encoding($false)))
+ Copy-Item $fzFile "$EvidenceDirectory/$case-config.json"
+ Copy-Item $history "$EvidenceDirectory/$case-history.json"
+ $power=Start-Process $pt.FullName -PassThru;Start-Sleep -Seconds 10
+ if(!(Get-Process PowerToys.FancyZones -ErrorAction SilentlyContinue)){throw 'FancyZones stopped during comparison'}
+ foreach($iteration in 1..3){
+  Get-Process wsl,WindowsTerminal -ErrorAction SilentlyContinue|Stop-Process -Force
+  $recording=Start-Process $env:FFMPEG2380 -ArgumentList @('-y','-f','gdigrab','-framerate','10','-i','desktop','-t','14','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',"$EvidenceDirectory/$case-$iteration.mp4") -RedirectStandardOutput "$EvidenceDirectory/$case-$iteration-record.log" -RedirectStandardError "$EvidenceDirectory/$case-$iteration-record-error.log" -PassThru
+  $launchUtc=[DateTime]::UtcNow.ToString('o')
+  $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
+  @{case=$case;iteration=$iteration;pid=$app.Id;launchUtc=$launchUtc;recordingPid=$recording.Id}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$case-$iteration-timing.json"
+  Start-Sleep -Seconds 10;Snapshot "$case-$iteration-10s" $app
+  FocusLocalSend $app
+  Start-Sleep -Seconds 2;Snapshot "$case-$iteration-focused" $app
+  if(!$recording.WaitForExit(20000)){$recording.Kill();throw 'Screen recording did not finish'}
+  if($recording.ExitCode -ne 0){throw 'Screen recording failed'}
+  $ffprobe=Join-Path (Split-Path $env:FFMPEG2380) 'ffprobe.exe'
+  & $ffprobe -v error -show_format -show_streams -of json "$EvidenceDirectory/$case-$iteration.mp4" | Set-Content "$EvidenceDirectory/$case-$iteration-recording.json"
+  if($LASTEXITCODE -ne 0){throw 'Screen recording failed decoding metadata'}
+  Stop-Process -Id $app.Id -Force
+ }
+}
 Stop-Transcript

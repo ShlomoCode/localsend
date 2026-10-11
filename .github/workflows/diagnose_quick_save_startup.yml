@@ -4,7 +4,7 @@ on:
 jobs:
   observe:
     runs-on: windows-11-arm
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
       - name: Install official ARM PowerToys and untouched historical LocalSend
@@ -17,8 +17,17 @@ jobs:
           Start-Sleep -Seconds 150
           Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
           Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
+          # Complete the runner's normal WSL setup before input reaches application windows.
+          $wsl = Start-Process wsl.exe -ArgumentList '--update','--web-download' -RedirectStandardOutput "$env:RUNNER_TEMP/wsl-update.log" -RedirectStandardError "$env:RUNNER_TEMP/wsl-update-error.log" -PassThru
+          if (!$wsl.WaitForExit(180000)) { $wsl.Kill(); throw 'Normal WSL update exceeded preparation deadline' }
+          if ($wsl.ExitCode -ne 0) { throw "Normal WSL update failed: $($wsl.ExitCode)" }
+          Get-Process wsl,WindowsTerminal -ErrorAction SilentlyContinue | Stop-Process -Force
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile "$env:RUNNER_TEMP/ffmpeg.zip"
+          Expand-Archive "$env:RUNNER_TEMP/ffmpeg.zip" "$env:RUNNER_TEMP/ffmpeg"
+          $ffmpeg = Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          "FFMPEG2380=$($ffmpeg.FullName)" >> $env:GITHUB_ENV
       - name: Observe genuine desktop and applications
-        timeout-minutes: 12
+        timeout-minutes: 20
         shell: powershell
         run: ./support/diagnostics/2380/observe.ps1 -ReleaseRoot "$env:RUNNER_TEMP/localsend" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2380"
       - uses: actions/upload-artifact@v6
@@ -28,3 +37,4 @@ jobs:
           path: |
             ${{ runner.temp }}/evidence2380
             ${{ runner.temp }}/powertoys-install*.log
+            ${{ runner.temp }}/wsl-update*.log
