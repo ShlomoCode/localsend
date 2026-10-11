@@ -71,7 +71,8 @@ for count in [5,5000]:
         receiver,rwin=apps[0]; sender,swin=apps[1]
         stop=threading.Event(); sampler=threading.Thread(target=metrics,args=(receiver.pid,stop,out/(case+'-metrics.jsonl'))); sampler.start()
         focus(swin); screen(case+'-send-observed'); click(96,188); screen(case+'-folder-observed'); click(514,150)
-        locate('Recent',case+'-picker-ready',10); screen(case+'-picker'); run('xdotool','key','ctrl+l'); run('xdotool','type','--clearmodifiers',str(fixture)); run('xdotool','key','Return'); time.sleep(2); run('xdotool','key','Return'); time.sleep(1)
+        locate('Recent',case+'-picker-ready',10); screen(case+'-picker'); run('xdotool','key','ctrl+l'); run('xdotool','type','--clearmodifiers',str(fixture.parent)); run('xdotool','key','Return'); time.sleep(2)
+        click(*locate(case,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(1048,772); time.sleep(1)
         # GTK directory picker enters the directory; select its Open button.
         words=screen(case+'-picker-entered')
         opens=[w for w in words if w['text'].strip() in ['Open','Select']]
