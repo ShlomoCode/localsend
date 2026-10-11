@@ -100,6 +100,13 @@ def locate_host(label, name, deadline=30):
         for word in words:
             if word['text'].strip() == label:
                 return word['left']+word['width']//2, word['top']+word['height']//2
+            if (SOURCE_PAIR and label == 'Case2414Files5Flat'
+                    and word['text'].strip() == 'Case2414FilesSFlat'):
+                # Retained GTK row frames prove the 5/S OCR confusion. The
+                # generated directory inventory and save hashes still gate it.
+                if not (Path.home()/label).is_dir() or (Path.home()/'Case2414FilesSFlat').exists():
+                    raise RuntimeError('Ambiguous or missing fixture for retained 5/S OCR substitution')
+                return word['left']+word['width']//2, word['top']+word['height']//2
         time.sleep(.5)
     raise RuntimeError('Host UI label not observed: '+label)
 
@@ -259,18 +266,9 @@ def run_case(count):
         locate_host('Recent',case+'-picker-ready',15)
         chooser=desktop('host','xdotool','search','--onlyvisible','--name','Choose Directory')['output'].split()[-1]
         focus('host',chooser)
-        if SOURCE_PAIR:
-            # GTK rendered the exact directory correctly, but full-frame OCR
-            # confused 5 with S. Use the native location field with the exact
-            # fixture path; approval counts and saved hashes qualify selection.
-            desktop('host','xdotool','key','ctrl+l')
-            desktop('host','xdotool','type','--clearmodifiers','--',str(fixture))
-            desktop('host','xdotool','key','Return')
-            time.sleep(2)
-        else:
-            click('host',locate_host('Home',case+'-home'))
-            time.sleep(2)
-            click('host',locate_host(fixture.name,case+'-folder-row'))
+        click('host',locate_host('Home',case+'-home'))
+        time.sleep(2)
+        click('host',locate_host(fixture.name,case+'-folder-row'))
         capture('host',case+'-folder-selected')
         click('host',locate_host('Open',case+'-picker-open'))
         time.sleep(2)
