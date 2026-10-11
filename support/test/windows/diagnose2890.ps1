@@ -165,6 +165,11 @@ function FavoritePencil([string]$snap,[int]$rowY) {
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
 @{imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;architecture=$env:RUNNER_ARCH;run=$env:GITHUB_RUN_ID;virtualScreen=[string][System.Windows.Forms.SystemInformation]::VirtualScreen} | ConvertTo-Json | Set-Content "$EvidenceDirectory/runner.json"
 Get-FileHash $Executable -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/executable-hash.json"
+Get-ChildItem (Split-Path $Executable) -Recurse -File | Where-Object {$_.Extension -in @('.exe','.dll','.so')} | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content "$EvidenceDirectory/binary-hashes.json"
+foreach($marker in @('source-commit.txt','candidate-diff.txt')) {
+ $markerPath=Join-Path (Split-Path $Executable) $marker
+ if(Test-Path $markerPath) {Copy-Item $markerPath "$EvidenceDirectory/$marker"}
+}
 $apps=@{}
 foreach($item in @(@{name="receiver";port=53317},@{name="sender";port=53318})) {
  $folder="$EvidenceDirectory/$($item.name)-app"
