@@ -585,10 +585,11 @@ packages:
   gal:
     dependency: transitive
     description:
-      name: gal
-      sha256: f71e79840fe023a21f2f949771375444b6efcd34b9e625d5f4f5504971380a77
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: "55dabd7b43927e5b0ad87cf0ab3dab06950ebe2f"
+      resolved-ref: "55dabd7b43927e5b0ad87cf0ab3dab06950ebe2f"
+      url: "https://github.com/ShlomoCode/gal.git"
+    source: git
     version: "2.3.3"
   glob:
     dependency: transitive
