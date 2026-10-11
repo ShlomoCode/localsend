@@ -143,4 +143,32 @@ button true
 button false
 sleep 2
 capture 14-manual-address
+for code in 1 9 2 dot 1 6 8 dot 5 1 dot 2; do
+  qevent "{\"execute\":\"human-monitor-command\",\"arguments\":{\"command-line\":\"sendkey $code 50\"}}"
+done
+capture 15-manual-address-filled
+move 565 495
+button true
+button false
+sleep 5
+capture 16-after-manual-confirm
+# Manual discovery returns a peer tile; choosing it is the actual send action.
+move 600 505
+button true
+button false
+sleep 5
+capture 17-after-send
+# Foreground the peer using its exposed strip and retain its approval screen.
+move 975 700
+button true
+button false
+sleep 2
+capture 18-receiver-pending
+# The default receiver requires its actual Accept button.
+move 745 650
+button true
+button false
+sleep 5
+capture 19-after-accept
+/home/runner/513-vm/ssh 'sudo find /home/receiver/Downloads -maxdepth 2 -type f -exec sha256sum {} \; -exec wc -c {} \; ; sha256sum /home/probe/Documents/513-control.txt; cat /home/probe/513-peer.log' > evidence/vm/transfer-result.txt 2>&1
 /home/runner/513-vm/ssh 'cat /home/probe/513-peer.log; flatpak documents; sudo ls -la /home/receiver/Downloads; sudo ip netns exec issue513peer ss -lntup' > evidence/vm/peer-state.txt 2>&1
