@@ -18,6 +18,10 @@ on:
         type: choice
         options: [observe, oneplus-enable-and-restore, samsung-policy-discovery, samsung-enable-and-restore, samsung-observe-optimized]
         default: observe
+      helper_service_mode:
+        type: choice
+        options: [foreground, ordinary]
+        default: foreground
 permissions:
   contents: read
 jobs:
@@ -96,6 +100,7 @@ jobs:
       BS_DEVICE: ${{ inputs.bs_device || 'Google Pixel 9' }}
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
       BACKGROUND_POLICY_EXPERIMENT: ${{ inputs.background_policy || 'observe' }}
+      HELPER_SERVICE_MODE: ${{ inputs.helper_service_mode || 'foreground' }}
       BS_OS: '15.0'
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario3393.mjs
     steps:

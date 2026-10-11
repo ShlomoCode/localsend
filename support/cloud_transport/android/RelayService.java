@@ -1,6 +1,7 @@
 package org.localsend.cloudtransport;
 import android.app.*;
 import android.content.Intent;
+import android.content.Context;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Base64;
@@ -18,18 +19,30 @@ public final class RelayService extends Service {
   private ServerSocket control;
   private final ConcurrentHashMap<String,Socket> sockets=new ConcurrentHashMap<>();
   private void trace(String origin,String id){Log.i("CloudTransport","elapsedNs="+SystemClock.elapsedRealtimeNanos()+" origin="+origin+" peer="+id);}
+  static JSONObject readConfig(Context context)throws Exception{
+    JSONObject config=new JSONObject(read(context.getAssets().open("config.json")));
+    String serviceMode=config.getString("serviceMode");
+    if(!serviceMode.equals("foreground")&&!serviceMode.equals("ordinary"))throw new IllegalArgumentException("Invalid service mode");
+    return config;
+  }
   public IBinder onBind(Intent intent){return null;}
   public int onStartCommand(Intent intent,int flags,int id){
     if(running)return START_NOT_STICKY;
-    NotificationManager nm=getSystemService(NotificationManager.class);
-    nm.createNotificationChannel(new NotificationChannel("relay","Cloud transport",NotificationManager.IMPORTANCE_LOW));
-    startForeground(1,new Notification.Builder(this,"relay").setSmallIcon(android.R.drawable.stat_sys_upload).setContentTitle("LocalSend cloud transport").setContentText("Diagnostic relay active").build());
-    targetPort=intent.getBooleanExtra("control",false)?53319:53317;
-    running=true;
-    trace("service-start","-");
-    new Thread(()->{try{
-      JSONObject config=new JSONObject(read(getAssets().open("config.json")));
+    String serviceMode;
+    try{
+      JSONObject config=readConfig(this);
+      serviceMode=config.getString("serviceMode");
       endpoint=config.getString("endpoint");token=config.getString("token");
+      targetPort=intent.getBooleanExtra("control",false)?53319:53317;
+    }catch(Exception e){trace("config-failure:"+e.getClass().getSimpleName(),"-");Log.e("CloudTransport","Helper config failed: "+e.getClass().getSimpleName());stopSelf();return START_NOT_STICKY;}
+    if(serviceMode.equals("foreground")){
+      NotificationManager nm=getSystemService(NotificationManager.class);
+      nm.createNotificationChannel(new NotificationChannel("relay","Cloud transport",NotificationManager.IMPORTANCE_LOW));
+      startForeground(1,new Notification.Builder(this,"relay").setSmallIcon(android.R.drawable.stat_sys_upload).setContentTitle("LocalSend cloud transport").setContentText("Diagnostic relay active").build());
+    }
+    running=true;
+    trace("service-start:mode="+serviceMode+":target="+targetPort,"-");
+    new Thread(()->{try{
       if(targetPort==53319)startControl();
       while(running){JSONArray batch=new JSONArray(request("GET","/pull",null));for(int i=0;i<batch.length();i++)handle(batch.getJSONObject(i));}
     }catch(Exception e){trace("pull-or-handler-failure:"+e.getClass().getSimpleName(),"-");Log.e("CloudTransport","Relay stopped: "+e.getClass().getSimpleName());stopSelf();}},"relay-pull").start();

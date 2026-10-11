@@ -44,6 +44,7 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
    await returnToOptions(caseName);
    writeFileSync(`evidence/${caseName}-preflight-exposure.json`,JSON.stringify({started:new Date(preflightStarted).toISOString(),returned:new Date().toISOString(),elapsedMs:Date.now()-preflightStarted,separateNativeExposure:true,resetDuringThisPhaseCannotBeAttributedToTimedBatch:true},null,2));
   }
+  if(process.env.HELPER_SERVICE_MODE==='ordinary')await lifecycle(`${caseName}-before-timed-opening`);
   await ui('snapshot',0,0,`windows-${caseName}-before-timed-opening`);
   const edit=await ready(`${caseName}-timed-edit`,editTarget,{sourceIncludes:['pane-title="Options"','/storage/emulated/0/Download']});
   const center=rect=>({x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)});

@@ -5,12 +5,14 @@ import {createHash} from 'node:crypto';
 import {waitForNativeControl} from './native-readiness.mjs';
 import {exactNativeButton} from './native-labels.mjs';
 const exec=promisify(execFile);
-export default async function({session,wd,senderPort,transportStatus}) {
+export default async function({session,wd,senderPort,transportStatus,transportSnapshot}) {
  const results=[];
  const oneplusPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
  const samsungPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-enable-and-restore';
  const samsungPolicyObserved=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-observe-optimized';
  const policyOn=oneplusPolicyOn||samsungPolicyOn;
+ const ordinaryHelper=process.env.HELPER_SERVICE_MODE==='ordinary';
+ if(ordinaryHelper&&!samsungPolicyObserved)throw new Error('Ordinary helper comparison requires the matched Samsung Optimized condition');
  const samsungDiscovery=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-policy-discovery';
  if(samsungDiscovery&&process.env.BS_DEVICE!=='Samsung Galaxy S25')throw new Error('Samsung policy discovery requires Samsung Galaxy S25');
  if(policyOn&&(process.env.BS_DEVICE!==(samsungPolicyOn?'Samsung Galaxy S25':'OnePlus 13R')||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires its selected device and scheduled 20 s');
@@ -20,6 +22,10 @@ export default async function({session,wd,senderPort,transportStatus}) {
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
  async function source(label) { const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
  async function lifecycle(label) {
+  if(ordinaryHelper){
+   const {observeHelper}=await import('./helper-lifecycle3393.mjs');
+   await observeHelper({session,wd,label,transportSnapshot});
+  }
   const failures=[];
   for(const command of ['dumpsys activity -p org.localsend.localsend_app processes','dumpsys activity processes','dumpsys activity']){
    try{
@@ -149,6 +155,6 @@ export default async function({session,wd,senderPort,transportStatus}) {
    if(samsungPolicyOn&&policyAttempted)await policyModule.restore({session,wd,state:samsungPolicyState});
    else if(oneplusPolicyOn&&policyAttempted)await policyModule.setOnePlusBackground({session,wd,enabled:false,label:'policy-restore'});
   }
-  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyOnExperiment:samsungPolicyOn,samsungPolicyObserved,samsungPolicyDiscovery:samsungDiscovery,transport:transportStatus()},null,2));}
+  finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,policyOnExperiment:policyOn,samsungPolicyOnExperiment:samsungPolicyOn,samsungPolicyObserved,samsungPolicyDiscovery:samsungDiscovery,helperServiceMode:process.env.HELPER_SERVICE_MODE||'foreground',transport:transportStatus()},null,2));}
  }
 }

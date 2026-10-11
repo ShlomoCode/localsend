@@ -22,6 +22,9 @@ async function clickText(text){
  await wd('POST',`/session/${session}/element/${e['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
 }
 const results=[];
+const helperMode=process.env.HELPER_SERVICE_MODE||'foreground';
+assert(['foreground','ordinary'].includes(helperMode),'Unknown helper service mode');
+const transportSnapshot=()=>({utc:new Date().toISOString(),status:r.status(),trace:r.trace.map(event=>({...event}))});
 try {
  const localUrl=new URL('https://www.browserstack.com/local/v1/list');localUrl.searchParams.set('auth_token',process.env.BROWSERSTACK_ACCESS_KEY);
  const localResponse=await fetch(localUrl,{signal:AbortSignal.timeout(30000)});
@@ -41,6 +44,7 @@ try {
  await clickText('Start socket control');
  const helperStarted=await wd('GET',`/session/${session}/source`);writeFileSync('evidence/helper-after-start.xml',helperStarted);
  assert(helperStarted.includes('Socket control running'),'Actual helper Start button did not activate the service');
+ assert(helperStarted.includes(`Service mode: ${helperMode}`),'Helper UI did not identify the built service mode');
  await new Promise(ok=>setTimeout(ok,2500));
  for(const size of [0,1,65537,8*1024*1024]){
   const data=randomBytes(size),expected=createHash('sha256').update(data).digest('hex');
@@ -53,11 +57,15 @@ try {
  const drainStart=Date.now();while(r.status().pollPending && Date.now()-drainStart<25000)await new Promise(ok=>setTimeout(ok,250));
  writeFileSync('evidence/helper-poll-drain.json',JSON.stringify({elapsedMs:Date.now()-drainStart,status:r.status()},null,2));
  assert(!r.status().pollPending,'Old helper poll did not drain');await clickText('Relay to LocalSend');
+ if(helperMode==='ordinary'){
+  const {observeHelper}=await import('./helper-lifecycle3393.mjs');
+  await observeHelper({session,wd,label:'relay-before-localsend',transportSnapshot,expectBackground:false});
+ }
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});
  await new Promise(ok=>setTimeout(ok,4000));
  const source=await wd('GET',`/session/${session}/source`);writeFileSync('localsend-source.xml',source);
  console.log('Original LocalSend activated; relay target switched to localhost53317');
- if(process.env.SCENARIO_MODULE){const {pathToFileURL}=await import('node:url');const scenario=await import(pathToFileURL(process.env.SCENARIO_MODULE));await scenario.default({session,wd,senderHost:'127.0.0.1',senderPort,transportStatus:r.status});}
+ if(process.env.SCENARIO_MODULE){const {pathToFileURL}=await import('node:url');const scenario=await import(pathToFileURL(process.env.SCENARIO_MODULE));await scenario.default({session,wd,senderHost:'127.0.0.1',senderPort,transportStatus:r.status,transportSnapshot});}
  const hold=Number(process.env.TRANSPORT_HOLD_SECONDS||0);
  if(hold){console.log('Transport integration window started');for(let i=0;i<hold;i+=20){await new Promise(ok=>setTimeout(ok,Math.min(20,hold-i)*1000));await wd('GET',`/session/${session}/source`);}}
 } catch(error) {
