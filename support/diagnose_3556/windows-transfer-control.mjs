@@ -57,7 +57,7 @@ function decode(text){return text.replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.from
  .replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&quot;/g,'"').replace(/&apos;/g,"'")
  .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
 function nodes(xml){return [...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fromEntries(
- [...m[0].matchAll(/([\w.:-]+)="([^"]*)"/g)].map(a=>[a[1],decode(a[2])])));}
+ [...m[0].matchAll(/([\w.:-]+)=(["'])(.*?)\2/g)].map(a=>[a[1],decode(a[3])])));}
 function labels(xml){return nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);}
 async function waitFor(predicate,timeout,message){
  const end=Date.now()+timeout;
