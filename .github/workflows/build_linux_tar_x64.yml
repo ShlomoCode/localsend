@@ -98,7 +98,7 @@ jobs:
               gh run download 38132747719 --repo ShlomoCode/localsend --name issue2754-c1ce-flutter3419-linux-x64 --dir /tmp/issue2690-source
               echo '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b  /tmp/issue2690-source/source-bundle.tar.gz' | sha256sum -c -
               mkdir /tmp/issue2690-source-app
-              tar -xzf /tmp/issue2690-source/source-bundle.tar.gz -C /tmp/issue2690-source-app localsend_app
+              tar -xzf /tmp/issue2690-source/source-bundle.tar.gz -C /tmp/issue2690-source-app ./localsend_app
               for kind in source packed; do
                 if [[ $kind == source ]]; then executable=/tmp/issue2690-source-app/localsend_app; else executable=/tmp/issue2690-packed/localsend_app; fi
                 {
