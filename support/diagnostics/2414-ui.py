@@ -84,7 +84,9 @@ for count in [5]:
             render=time.monotonic()-started
             screen(case+'-options-visible')
             # Back arrow is visible in the retained Options screenshot; Flutter's native route toolbar.
-            click(30,65); time.sleep(1)
+            focus(rwin); run('xdotool','getwindowgeometry','--shell',rwin)
+            run('xdotool','mousemove','--window',rwin,'28','28','click','1'); time.sleep(1)
+            focus(rwin); screen(case+'-returned-from-options')
             click(*locate('Accept',case+'-accept',10))
             end=time.monotonic()+180
             while time.monotonic()<end and len(list(dest.rglob('*.txt')))<count: time.sleep(1)
@@ -92,7 +94,7 @@ for count in [5]:
             screen(case+'-completed')
             result={'count':count,'options_response_seconds':render,'saved_files':len(files),'content_valid':valid,'failure':None if valid else 'save mismatch'}
         except Exception as e:
-            screen(case+'-failure'); result={'count':count,'failure':str(e),'receiver_exit':receiver.poll()}
+            screen(case+'-failure'); result={'count':count,'failure':str(e),'receiver_exit':receiver.poll(),'options_response_seconds':locals().get('render')}
         stop.set(); sampler.join(); results.append(result); (out/'results.json').write_text(json.dumps(results,indent=2))
         if count==5 and not result.get('content_valid'): raise RuntimeError('Small directory control failed; do not interpret large case')
     finally:
