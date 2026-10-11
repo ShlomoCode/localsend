@@ -1,6 +1,7 @@
 import subprocess, time, pathlib, xml.etree.ElementTree as ET, re, json, urllib.request, hashlib, shlex, signal
 ROOT = pathlib.Path("evidence")
 S, R = "emulator-5556", "emulator-5554"
+SAF = True
 sessions = {}
 
 def adb(serial, *args, binary=False):
@@ -47,6 +48,35 @@ def click(serial, label, name):
             touch(serial, (a+c)//2, (b+d)//2)
             return
     raise RuntimeError("Missing UI label " + label + " at " + name)
+
+def choose_saf_destination():
+    adb(R, "shell", "mkdir", "-p", "/sdcard/Download/Issue2051")
+    click(R, "Settings", "saf-before-settings")
+    for index in range(8):
+        xml = snapshot(R, "saf-settings-" + str(index))
+        if "Downloads" in labels(xml):
+            break
+        request("POST", "/session/" + sessions[R] + "/actions", {"actions": [{"type": "pointer", "id": "scrollfinger", "parameters": {"pointerType": "touch"}, "actions": [{"type": "pointerMove", "duration": 0, "x": 160, "y": 500}, {"type": "pointerDown", "button": 0}, {"type": "pointerMove", "duration": 600, "x": 160, "y": 200}, {"type": "pointerUp", "button": 0}]}]})
+        time.sleep(2)
+    click(R, "Downloads", "saf-before-destination")
+    xml = snapshot(R, "saf-directory-picker")
+    if "Issue2051" not in labels(xml):
+        click(R, "Show roots", "saf-before-roots")
+        click(R, "Downloads", "saf-before-downloads")
+    click(R, "Issue2051", "saf-before-subdirectory")
+    xml = snapshot(R, "saf-before-grant")
+    label = next(v for v in labels(xml) if v.lower() == "use this folder")
+    click(R, label, "saf-before-use-folder")
+    xml = snapshot(R, "saf-grant-dialog")
+    if "ALLOW" in labels(xml):
+        click(R, "ALLOW", "saf-before-allow")
+    elif "Allow" in labels(xml):
+        click(R, "Allow", "saf-before-allow")
+    xml = snapshot(R, "saf-destination-set")
+    if "content://" not in xml:
+        raise RuntimeError("SAF destination not shown in settings")
+    (ROOT / "saf-uri-permissions.txt").write_text(adb(R, "shell", "dumpsys", "activity", "permissions"))
+    click(R, "Receive", "saf-return-receive")
 
 def transfer(content, phase):
     local = ROOT / (phase + "-sent-a.txt")
@@ -117,6 +147,8 @@ try:
     receiver_alias = next(n.get("content-desc") for n in ET.fromstring(receiver_xml).iter() if n.get("content-desc"))
     snapshot(S, "sender-start")
     adb(R, "logcat", "-c")
+    if SAF:
+        choose_saf_destination()
     click(S, "Send", "sender-before-send")
     _, saved = transfer("ISSUE2051_CONTENT_A\n", "A")
     a_viewer = open_actual("a.txt", "A-open")
@@ -136,7 +168,7 @@ try:
     print("RESULT", result, flush=True)
     if not result["viewer_has_A"] and not result["viewer_has_B"]:
         raise RuntimeError("Viewer observation incomplete")
-    if result["viewer_has_B"]:
+    if result["viewer_has_B"] and not SAF:
         adb(R, "shell", "input", "keyevent", "4")
         time.sleep(2)
         click(R, "Done", "B-before-history-done")
