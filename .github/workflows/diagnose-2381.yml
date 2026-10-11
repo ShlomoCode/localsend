@@ -1,5 +1,7 @@
 name: Diagnose 2381 favorite aliases
 on:
+  push:
+    branches: [codex/diagnose-2381-favorite-alias]
   workflow_dispatch:
 jobs:
   release:
