@@ -3,7 +3,7 @@ import csv, io, json, os, subprocess, time, shutil, threading, hashlib, pwd
 from pathlib import Path
 out = Path('evidence'); out.mkdir(exist_ok=True)
 def run(*args):
-    print('INPUT', args, flush=True)
+    print('INPUT', time.monotonic(), args, flush=True)
     return subprocess.check_output(args, text=True)
 def screen(stage):
     p = out / (stage+'.png'); run('scrot',str(p))
@@ -46,11 +46,12 @@ def metrics(pid,stop,path):
                 fields=';'.join(l for l in status.splitlines() if l.startswith(('VmRSS:','VmHWM:','VmSize:','Threads:','State:')))
                 stat=Path('/proc/'+str(pid)+'/stat').read_text()
                 mem=';'.join(l for l in Path('/proc/meminfo').read_text().splitlines() if l.startswith(('MemAvailable:','SwapFree:')))
-                f.write(json.dumps([time.monotonic(),fields,stat,mem])+'\n'); f.flush()
+                pss=';'.join(l for l in Path('/proc/'+str(pid)+'/smaps_rollup').read_text().splitlines() if l.startswith(('Rss:','Pss:','Private_Dirty:')))
+                f.write(json.dumps([time.monotonic(),fields,stat,mem,pss])+'\n'); f.flush()
             except FileNotFoundError: f.write('PROCESS_EXIT\n'); break
             stop.wait(.25)
 results=[]
-for count in [5]:
+for count in [5,5000]:
     case='files-'+str(count); fixture=Path.home()/('Case2414Files'+str(count)); fixture.mkdir(parents=True,exist_ok=True)
     content=b'LocalSend issue 2414 fixed ordinary file content\n'
     for n in range(count): (fixture/('file-%05d.txt'%n)).write_bytes(content)
@@ -72,7 +73,7 @@ for count in [5]:
         stop=threading.Event(); sampler=threading.Thread(target=metrics,args=(rpid,stop,out/(case+'-metrics.jsonl'))); sampler.start()
         focus(swin); screen(case+'-send-observed'); click(96,188); screen(case+'-folder-observed'); click(514,150)
         locate('Recent',case+'-picker-ready',10); chooser=run('xdotool','search','--onlyvisible','--name','Choose Directory').split()[-1]; focus(chooser);
-        (out/(case+'-namespace-fixture.txt')).write_text(run('sudo','ip','netns','exec','issue2414-sender','find',str(fixture.parent),'-maxdepth','2','-type','f'))
+        (out/(case+'-namespace-fixture.txt')).write_text(run('sudo','ip','netns','exec','issue2414-sender','find',str(fixture),'-maxdepth','2','-type','f'))
         screen(case+'-picker'); click(*locate('Home',case+'-picker-home',10)); time.sleep(2)
         click(*locate(fixture.name,case+'-picker-folder-row',10)); screen(case+'-picker-selected'); click(*locate('Open',case+'-picker-open',10)); time.sleep(2)
         screen(case+'-picker-accepted')

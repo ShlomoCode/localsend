@@ -11,3 +11,4 @@ E08	separate sender D-Bus session	5-file directory control	Recent remains; later
 E09	host sender desktop	5-file typed-path chooser control	Recent with autocompleted fixture path and disabled Open; no selection	38106093225	no
 E10	Home browse directory selection	select5→real send→Options	selection and Options proven; absoluteBack misses movedreceiver; savedcontrol not reached	38106331396	no
 E11	receiver-relativeBack	5-fileOptions→approval	Options1.322s; approvalvisiblyshowsAccept butOCRmisseslabel; noacceptclick	38106625564	no
+E12	observedAcceptbounds	5-file directory→send→Options→save	saved5, byte-exactcontenttrue, bothappsFinished	38106985658	yes-control
