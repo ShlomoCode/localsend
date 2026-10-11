@@ -33,6 +33,7 @@ jobs:
           run-id: 38132747719
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: source-artifact
+          merge-multiple: true
       - name: Install ordinary Linux desktop runtime
         run: |
           sudo apt-get update
