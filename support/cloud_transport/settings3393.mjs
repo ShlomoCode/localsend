@@ -12,11 +12,11 @@ export default async function({session,wd}) {
    await wd('POST',`/session/${session}/element/${item['element-6066-11e4-a52e-4f735466cecf']}/click`,{});
    const usage=await capture('app-battery-usage');observations.push({screen:'app-battery-usage',settingsPackageObserved:usage.includes('package="com.android.settings"'),settingValuesVerified:false});
   }
- }catch(error){observations.push({screen:'app-info',error:String(error)});}
+ }catch(error){observations.push({screen:'app-info',unavailable:true,error:String(error)});}
  try{
   await intent('android.settings.BATTERY_SAVER_SETTINGS');
   const saver=await capture('battery-saver');observations.push({screen:'battery-saver',settingsPackageObserved:saver.includes('package="com.android.settings"'),settingValuesVerified:false});
- }catch(error){observations.push({screen:'battery-saver',error:String(error)});}
+ }catch(error){observations.push({screen:'battery-saver',unavailable:true,error:String(error)});}
  writeFileSync('evidence/settings-observations.json',JSON.stringify(observations,null,2));
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});
 }

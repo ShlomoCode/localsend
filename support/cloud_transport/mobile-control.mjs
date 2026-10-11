@@ -8,11 +8,14 @@ const token=process.env.RELAY_TOKEN;
 const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
 const senderPort=Number(process.env.TRANSPORT_SENDER_PORT||53318);
 const r=relay({token,tcpPort:senderPort});await r.start();let session;
-async function wd(method,path,body) {
+async function wd(method,path,body,{timeoutMs=120000}={}) {
  const start=Date.now();
- const res=await fetch('https://hub-cloud.browserstack.com/wd/hub'+path,{method,headers:{authorization:auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(120000)});
- appendFileSync('evidence/webdriver-boundaries.jsonl',JSON.stringify({utc:new Date(start).toISOString(),elapsedMs:Date.now()-start,method,path:path.replace(/\/session\/[^/]+/,'/session/owned'),status:res.status})+'\n');
- const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'').slice(0,600);for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message);}return json.value;
+ let res,error;
+ try {
+  res=await fetch('https://hub-cloud.browserstack.com/wd/hub'+path,{method,headers:{authorization:auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(timeoutMs)});
+  const json=await res.json();if(!res.ok||json.value?.error){let message=String(json.value?.message||'').slice(0,600);for(const secret of [process.env.BROWSERSTACK_USERNAME,process.env.BROWSERSTACK_ACCESS_KEY,token])if(secret)message=message.replaceAll(secret,'[redacted]');throw new Error('WebDriver '+res.status+' '+(json.value?.error||'')+' '+message);}return json.value;
+ }catch(failure){error=String(failure);throw failure;}
+ finally{appendFileSync('evidence/webdriver-boundaries.jsonl',JSON.stringify({utc:new Date(start).toISOString(),elapsedMs:Date.now()-start,timeoutMs,method,path:path.replace(/\/session\/[^/]+/,'/session/owned'),status:res?.status,error})+'\n');}
 }
 async function clickText(text){
  const e=await wd('POST',`/session/${session}/element`,{using:'accessibility id',value:text});
