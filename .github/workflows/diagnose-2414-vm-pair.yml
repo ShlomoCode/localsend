@@ -13,7 +13,7 @@ jobs:
   real-app-pair:
     if: github.repository == 'ShlomoCode/localsend'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Validate diagnostic syntax in cloud
@@ -26,8 +26,96 @@ jobs:
               path = Path('support/diagnostics') / name
               ast.parse(path.read_text(), filename=str(path))
           PY
-      - name: Run five-file control, then 5000-file case
-        run: bash support/diagnostics/2414-vm-pair.sh
+      - name: Start five-file control and 5000-file case in background
+        run: |
+          mkdir -p evidence
+          rm -f /tmp/issue2414-checkpoint-continue evidence/options-checkpoint-ready evidence/workload-exit-code
+          cat > /tmp/issue2414-workload-wrapper.sh <<'SH'
+          #!/usr/bin/env bash
+          set +e
+          trap 'status=$?; printf "%s\n" "$status" > "$GITHUB_WORKSPACE/evidence/workload-exit-code.tmp"; mv "$GITHUB_WORKSPACE/evidence/workload-exit-code.tmp" "$GITHUB_WORKSPACE/evidence/workload-exit-code"' EXIT
+          cd "$GITHUB_WORKSPACE" || exit 1
+          bash support/diagnostics/2414-vm-pair.sh
+          SH
+          nohup bash /tmp/issue2414-workload-wrapper.sh > evidence/vm-pair-run.log 2>&1 < /dev/null &
+          echo "$!" > evidence/workload-wrapper-pid
+      - name: Wait for Options checkpoint or workload exit
+        run: |
+          deadline=$((SECONDS + 35 * 60))
+          next_progress=0
+          while ! test -f evidence/options-checkpoint-ready && ! test -f evidence/workload-exit-code; do
+            if test "$SECONDS" -ge "$deadline"; then
+              echo "Options checkpoint wait exceeded 35 minutes; retain setup evidence and continue the bounded workload wait."
+              exit 1
+            fi
+            if test "$SECONDS" -ge "$next_progress"; then
+              echo "Waiting for Options checkpoint: elapsed ${SECONDS}s"
+              tail -n 5 evidence/vm-pair-run.log || true
+              next_progress=$((SECONDS + 60))
+            fi
+            sleep 5
+          done
+          if test -f evidence/options-checkpoint-ready; then
+            echo "Options/Back checkpoint ready."
+          else
+            echo "Workload ended before Options checkpoint; inspect exit code and retained evidence."
+            cat evidence/workload-exit-code
+          fi
+      - name: Restore runner access before checkpoint upload
+        if: always()
+        run: |
+          if test -d evidence; then
+            sudo chown -R "$(id -u):$(id -g)" evidence
+            sudo chmod -R u+rwX evidence
+            find evidence -type f ! -readable -print -quit | tee /tmp/issue2414-unreadable.txt
+            test ! -s /tmp/issue2414-unreadable.txt
+          fi
+      - name: Retain Options checkpoint before saving
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2414-options-checkpoint-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Resume and wait for completed workload
+        if: always()
+        run: |
+          touch /tmp/issue2414-checkpoint-continue
+          if ! test -f evidence/workload-wrapper-pid; then
+            echo "Workload was not started; inspect preceding syntax/startup step."
+            exit 1
+          fi
+          deadline=$((SECONDS + 50 * 60))
+          next_progress=0
+          while ! test -f evidence/workload-exit-code; do
+            if test "$SECONDS" -ge "$deadline"; then
+              echo "Workload exit wait exceeded 50 minutes; retain partial evidence."
+              exit 1
+            fi
+            if test "$SECONDS" -ge "$next_progress"; then
+              echo "Waiting for workload completion: elapsed ${SECONDS}s"
+              tail -n 5 evidence/vm-pair-run.log || true
+              if test -f evidence/scenario.log; then tail -n 5 evidence/scenario.log || true; fi
+              next_progress=$((SECONDS + 60))
+            fi
+            sleep 5
+          done
+          workload_status=$(cat evidence/workload-exit-code)
+          echo "Workload exit code: $workload_status"
+          case "$workload_status" in
+            ''|*[!0-9]*) echo "Invalid workload exit code"; exit 1 ;;
+          esac
+          exit "$workload_status"
+      - name: Restore runner access before final upload
+        if: always()
+        run: |
+          if test -d evidence; then
+            sudo chown -R "$(id -u):$(id -g)" evidence
+            sudo chmod -R u+rwX evidence
+            find evidence -type f ! -readable -print -quit | tee /tmp/issue2414-unreadable-final.txt
+            test ! -s /tmp/issue2414-unreadable-final.txt
+          fi
       - name: Retain evidence even after failure
         if: always()
         uses: actions/upload-artifact@v4

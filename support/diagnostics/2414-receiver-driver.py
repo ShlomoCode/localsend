@@ -3,6 +3,7 @@ import json
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -84,6 +85,13 @@ def main():
         started = time.monotonic()
         result = command(*argv)
         print(json.dumps({"output": result, "started": started, "completed": time.monotonic()}))
+    elif action == "checkpoint":
+        journal = subprocess.check_output(["sudo", "journalctl", "-k", "--no-pager"], text=True, timeout=20)
+        (OUT / f"files-{state['count']}-kernel-at-options.txt").write_text(journal)
+        (OUT / f"files-{state['count']}-meminfo-at-options.txt").write_text(Path("/proc/meminfo").read_text())
+        lines = [line for line in journal.splitlines() if re.search(r"Out of memory|Killed process|oom-kill", line, re.I)]
+        print(json.dumps({"guest_monotonic": time.monotonic(), "kernel_oom_related_line_count": len(lines),
+                          "kernel_note": "Inspect retained kernel journal; a text match alone does not establish product causality."}))
     elif action == "verify":
         files = list(Path(state["destination"]).rglob("*"))
         files = [file for file in files if file.is_file()]

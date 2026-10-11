@@ -191,6 +191,7 @@ for count in (5, 5000):
         result["options_first_observed_seconds"] = visible["completed"] - clicked["started"]
         result["options_assertion_seconds_including_ocr"] = time.monotonic() - assertion_started
         result["timing_note"] = "First matching screenshot capture completion, including SSH input/capture overhead; not isolated paint latency."
+        print(json.dumps({"phase": "options-observed", **result}), flush=True)
         screen("guest", case + "-options-visible")
         stage = "return-and-accept"
         focus("guest", rwin)
@@ -202,6 +203,23 @@ for count in (5, 5000):
         # that the app responded to Back by showing receiver approval again.
         _, approval_visible = locate("guest", "wants", case + "-accept-ready", 45)
         result["back_first_observed_seconds"] = approval_visible["completed"] - back_clicked["started"]
+        print(json.dumps({"phase": "back-response-observed", **result}), flush=True)
+        if count == 5000:
+            # Preserve the reported Options/input observation before the separate
+            # long save phase. The workflow uploads this checkpoint, then resumes.
+            result["kernel_at_options"] = guest("checkpoint")
+            checkpoint_guest = OUT / "vm" / "checkpoint-guest"
+            checkpoint_guest.parent.mkdir(exist_ok=True)
+            execute(SCP + ["-r", "probe@127.0.0.1:/home/probe/evidence", str(checkpoint_guest)], 90)
+            (OUT / "options-checkpoint-results.json").write_text(json.dumps([*results, result], indent=2))
+            print(json.dumps({"phase": "options-checkpoint-ready", **result}), flush=True)
+            (OUT / "options-checkpoint-ready").write_text("5000-file Options and Back observed; save not started\n")
+            resume = Path("/tmp/issue2414-checkpoint-continue")
+            checkpoint_deadline = time.monotonic() + 300
+            while not resume.exists() and time.monotonic() < checkpoint_deadline:
+                time.sleep(1)
+            if not resume.exists():
+                raise RuntimeError("Workflow did not resume after Options evidence checkpoint (infrastructure)")
         geometry = desktop("guest", "xdotool", "getwindowgeometry", "--shell", rwin)["output"]
         (OUT / (case + "-approval-geometry.txt")).write_text(geometry)
         bounds = dict(line.split("=", 1) for line in geometry.splitlines() if "=" in line)
@@ -219,6 +237,7 @@ for count in (5, 5000):
             saved = guest("verify")
             with (OUT / (case + "-save-progress.jsonl")).open("a") as progress:
                 progress.write(json.dumps({"host_monotonic": time.monotonic(), **saved}) + "\n")
+            print(json.dumps({"phase": "save-progress", "count": count, **saved}), flush=True)
             if saved["content_valid"]:
                 break
             time.sleep(10)

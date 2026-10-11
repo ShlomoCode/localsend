@@ -58,11 +58,20 @@ cleanup() {
   timeout 20 ssh "${opts[@]}" probe@127.0.0.1 "sudo journalctl -k --no-pager; free -m; ip addr; ip route; ps -eo pid,ppid,stat,pcpu,pmem,rss,wchan:32,comm" > evidence/vm/kernel-final.txt 2>&1 || true
   timeout 90 scp -r "${copy_opts[@]}" probe@127.0.0.1:/home/probe/evidence evidence/vm/guest || true
   { df -B1 "$vm_disk_root"; du -B1 "$vm_disk_root"/*; } > evidence/vm/disk-final.txt 2>&1 || true
-  if test -f "$vm_root/qemu.pid"; then sudo kill "$(cat "$vm_root/qemu.pid")" || true; fi
+  if test -f "$vm_root/qemu.pid"; then sudo kill "$(sudo cat "$vm_root/qemu.pid")" || true; fi
+  # QEMU runs as root for its tap device and creates a private serial log.
+  # Restore runner access so upload-artifact can retain every raw evidence file.
+  sudo chown -R "$(id -u):$(id -g)" evidence || true
+  if test -f evidence/results.json; then cat evidence/results.json; fi
   sudo ip link delete tap2414 || true
 }
 trap cleanup EXIT
+touch "$vm_root/qemu.pid" evidence/vm/serial.log
+chmod 600 "$vm_root/qemu.pid" evidence/vm/serial.log
 sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu Skylake-Client,vendor=GenuineIntel,-vmx,-hle,-rtm -smp 2 -m 2048 -drive file="$vm_disk_root/ubuntu.img",if=virtio,format=qcow2 -drive file="$vm_disk_root/seed.iso",media=cdrom,readonly=on -device virtio-vga -netdev user,id=nat,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=nat,mac=52:54:00:24:14:01 -netdev tap,id=peer,ifname=tap2414,script=no,downscript=no -device virtio-net-pci,netdev=peer,mac=52:54:00:24:14:02 -display none -serial file:evidence/vm/serial.log -pidfile "$vm_root/qemu.pid" -daemonize
+sudo chown "$(id -u):$(id -g)" "$vm_root/qemu.pid" evidence/vm/serial.log
+test -r "$vm_root/qemu.pid"
+test -r evidence/vm/serial.log
 ready=0
 for n in $(seq 1 90); do
   if timeout 15 ssh "${opts[@]}" probe@127.0.0.1 "cloud-init status --wait; command -v scrot" > evidence/vm/readiness.log 2>&1; then ready=1; break; fi
@@ -98,4 +107,4 @@ test "$desktop_ready" = 1
 { uname -a; lscpu; free -m; swapon --show; ip addr; ip route; cat /etc/os-release; } > evidence/host-environment.txt
 # No cgroups, process memory caps, artificial pressure, or synthetic OOM.
 vm_pair_stage=real-app-pair
-timeout 3000 dbus-run-session -- xvfb-run -a -s "-screen 0 1200x800x24" bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/host-openbox.log 2>&1 & python3 support/diagnostics/2414-host-pair-ui.py' > evidence/scenario.log 2>&1
+timeout 3000 dbus-run-session -- xvfb-run -a -s "-screen 0 1200x800x24" bash -c 'export LIBGL_ALWAYS_SOFTWARE=1; openbox > evidence/host-openbox.log 2>&1 & python3 support/diagnostics/2414-host-pair-ui.py' 2>&1 | tee evidence/scenario.log
