@@ -12,6 +12,10 @@ on:
         options: ['1.16.1', '1.17.0', 'current-c1ce']
         default: '1.16.1'
         description: Official historical release or exact unmodified current build at both endpoints
+      fixture_seed:
+        type: string
+        default: ''
+        description: Fixed fixture run seed for identical bytes across comparison arms
       scenario:
         type: choice
         options: [unchanged, changed, renamed, provider-probe]
@@ -43,6 +47,7 @@ jobs:
       BASELINE_APP: ${{ inputs.release == 'current-c1ce' && 'bs://8a977c82af1e28db47132169c3e2cf0db7c13dc0' || inputs.release == '1.17.0' && 'bs://59b2370a166b5e36a4c948c50f22b70255046822' || 'bs://e0759f0fb2caac2dc8df57e2555514289dd2e043' }}
       BASELINE_LINUX_SHA256: ${{ inputs.release == 'current-c1ce' && '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b' || inputs.release == '1.17.0' && '6f05e851b72dbeaac764d3446b5a61c34db22f6278baa92607d5b080997f8c81' || '4082de313cc4f2cb123415aa8ed23146930c871b5d6bc14653e47375af46d332' }}
       BASELINE_ANDROID_SHA256: ${{ inputs.release == 'current-c1ce' && '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea' || inputs.release == '1.17.0' && '2c7f5fd4872da25115bb8e5e62f92de94dda47b0f249ff387ac667b13871dc3e' || 'f575c642d1c9ee37475bf0d30e138d2672e0857216addaebc327041339aeb064' }}
+      ISSUE_2007_FIXTURE_SEED: ${{ inputs.fixture_seed }}
       ISSUE_2007_RELEASE: ${{ inputs.release || '1.16.1' }}
       BS_DEVICE: ${{ inputs.device || 'Vivo Y21' }}
       BS_OS: '11.0'

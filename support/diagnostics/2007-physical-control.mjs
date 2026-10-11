@@ -180,6 +180,12 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  writeFileSync('evidence/installed-file-managers.json',JSON.stringify({method:'Read-only Appium isAppInstalled for normal preinstalled file managers',apps:fileManagerInventory},null,2));
  const installedPackages=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'pm list packages'}}),args:[]}).catch(error=>({error:String(error)}));
  writeFileSync('evidence/installed-packages.json',JSON.stringify({method:'Read-only BrowserStack adbShell pm list packages',result:installedPackages},null,2));
+ const environmentProbes=[];
+ for(const command of ['getprop ro.build.fingerprint','getprop ro.build.version.security_patch','dumpsys package '+fileManagerPackage]){
+  const result=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]}).catch(error=>({error:String(error)}));
+  environmentProbes.push({command,result});
+ }
+ writeFileSync('evidence/android-provider-environment.json',JSON.stringify({session,device:process.env.BS_DEVICE,os:process.env.BS_OS,fileManagerPackage,fixtureSeed:process.env.ISSUE_2007_FIXTURE_SEED||process.env.GITHUB_RUN_ID,probes:environmentProbes},null,2));
  if(process.env.ISSUE_2007_VARIANT==='provider-probe'){
   const {probeInstalledProviders}=await import('./2007-provider-probe.mjs');
   await probeInstalledProviders({wd,prefix});
