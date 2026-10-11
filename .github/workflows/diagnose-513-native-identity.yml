@@ -22,6 +22,7 @@ jobs:
           gh run download 38163717100 --repo ShlomoCode/localsend --name issue513-causal-source-packages-38163717100 --dir source-packages
           mkdir -p evidence/identity
           for condition in normal negative positive; do
+            ostree --repo="repo-$condition" init --mode=archive-z2
             flatpak build-import-bundle "repo-$condition" "source-packages/$condition.flatpak"
             ref=$(ostree --repo="repo-$condition" refs | head -n 1)
             ostree --repo="repo-$condition" checkout "$ref" "extracted-$condition"
