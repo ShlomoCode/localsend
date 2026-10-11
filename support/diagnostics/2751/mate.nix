@@ -28,7 +28,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     machine.wait_for_x()
     machine.wait_for_file("${user.home}/.Xauthority")
     machine.succeed("xauth merge ${user.home}/.Xauthority")
-    machine.wait_until_succeeds("pgrep mate-panel && pgrep mate-settings-daemon")
+    machine.wait_until_succeeds("pgrep mate-panel && pgrep -f mate-settings-daemon", timeout=120)
     def user_command(command):
         return machine.succeed("su - alice -c " + shlex.quote("${env} " + command))
     user_command("gsettings set org.mate.screensaver lock-enabled false")
