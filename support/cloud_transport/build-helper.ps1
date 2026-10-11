@@ -31,3 +31,15 @@ try { [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, "
 if ($LASTEXITCODE -ne 0) { throw 'APK signing failed' }
 & "$env:ANDROID_HOME/build-tools/35.0.0/apksigner.bat" verify "$output/cloud-transport-helper.apk"
 if ($LASTEXITCODE -ne 0) { throw 'APK verification failed' }
+$sourceHashes = @($source | ForEach-Object { @{name=[System.IO.Path]::GetFileName($_);sha256=(Get-FileHash $_ -Algorithm SHA256).Hash} })
+@{
+  sourceHead=$env:GITHUB_SHA
+  serviceMode=$serviceMode
+  observationMode=$observationMode
+  targetSdk=35
+  sources=$sourceHashes
+  manifestSha256=(Get-FileHash support/cloud_transport/android/AndroidManifest.xml -Algorithm SHA256).Hash
+  dexSha256=(Get-FileHash "$output/dex/classes.dex" -Algorithm SHA256).Hash
+  apkSha256=(Get-FileHash "$output/cloud-transport-helper.apk" -Algorithm SHA256).Hash
+  configSecretsOmitted=$true
+} | ConvertTo-Json -Depth 5 | Set-Content evidence/helper-build-identity.json
