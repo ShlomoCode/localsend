@@ -72,9 +72,43 @@ sha256sum "${locks[@]}" > "$output/provenance/lock-hashes-before.txt"
 (cd app && "$flutter" pub get --enforce-lockfile)
 (cd packages/localsend_isolates/rust_builder/cargokit/build_tool && "$flutter" pub get --enforce-lockfile)
 sha256sum -c "$output/provenance/lock-hashes-before.txt"
+set +e
 (cd app && timeout --foreground 3600 "$flutter" --local-engine-src-path="$local_engine/engine/src" \
   --local-engine=host_release --local-engine-host=host_release build linux --release -v) \
   2>&1 | tee "$output/provenance/app-build.log"
+build_statuses=("${PIPESTATUS[@]}")
+set -e
+printf 'flutter_exit_status=%s\nlog_capture_exit_status=%s\n' "${build_statuses[0]}" "${build_statuses[1]}" \
+  > "$output/provenance/app-compilation-result.txt"
+[[ ${build_statuses[0]} == 0 && ${build_statuses[1]} == 0 ]]
+# Retain the whole installed build before later observer gates. A failed gate
+# still exits nonzero and leaves this artifact explicitly unverified.
+bundle="$app_source/app/build/linux/x64/release/bundle"
+jq -n --arg variant "$PROBE_VARIANT" --arg app_run "$GITHUB_RUN_ID" \
+  '{variant:$variant,app_build_run_id:$app_run,compilation_completed:true,validation_status:"unverified"}' \
+  > "$output/provenance/bundle-validation.json"
+(cd "$bundle" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$output/provenance/bundle-files-SHA256SUMS"
+tar -czf "$output/source-bundle.tar.gz" -C "$bundle" .
+(cd "$output" && sha256sum source-bundle.tar.gz > source-bundle.tar.gz.sha256)
+cp -a "$variant_artifact/provenance" "$output/provenance/engine"
+# Capture observer inputs without converting a diagnostic-capture failure into
+# validation success. Later checks remain strict and the raw bundle is retained.
+capture_diagnostic() {
+  local record=$1 status
+  shift
+  if "$@" > "$output/provenance/$record" 2>&1; then status=0; else status=$?; fi
+  printf '%s\t%s\n' "$record" "$status" >> "$output/provenance/diagnostic-capture-status.tsv"
+}
+if cp app/linux/flutter/ephemeral/generated_config.cmake "$output/provenance/generated_config.cmake"; then
+  printf 'generated_config.cmake\t0\n' >> "$output/provenance/diagnostic-capture-status.tsv"
+else
+  printf 'generated_config.cmake\t%s\n' "$?" >> "$output/provenance/diagnostic-capture-status.tsv"
+fi
+capture_diagnostic app-source.patch git diff --binary HEAD --
+capture_diagnostic app-source-status.txt git status --porcelain=v1
+capture_diagnostic engine-elf.txt readelf -h -d -n "$bundle/lib/libflutter_linux_gtk.so"
+capture_diagnostic app-elf.txt readelf -h -d -n "$bundle/localsend_app"
+capture_diagnostic app-build-host-ldd.txt ldd "$bundle/localsend_app"
 sha256sum "${locks[@]}" > "$output/provenance/lock-hashes-after.txt"
 cmp "$output/provenance/lock-hashes-before.txt" "$output/provenance/lock-hashes-after.txt"
 git diff --binary HEAD -- > "$output/provenance/app-source.patch"
@@ -86,20 +120,23 @@ cp app/linux/flutter/ephemeral/generated_config.cmake "$output/provenance/genera
 for config_value in "FLUTTER_ENGINE=$local_engine/engine/src" "LOCAL_ENGINE=host_release" "LOCAL_ENGINE_HOST=host_release"; do
   [[ $(grep -Fxc "  \"$config_value\"" "$output/provenance/generated_config.cmake") == 1 ]]
 done
-bundle="$app_source/app/build/linux/x64/release/bundle"
 [[ -x "$bundle/localsend_app" && -f "$bundle/lib/libapp.so" && -f "$bundle/lib/librust_lib_localsend_app.so" ]]
 engine_hash=$(sha256sum "$bundle/lib/libflutter_linux_gtk.so" | awk '{print $1}')
 [[ $engine_hash == "$(cat "$variant_artifact/provenance/engine-sha256.txt")" ]]
 [[ $engine_hash == "$(jq -r .engine_so_sha256 "$variant_artifact/provenance/manifest.json")" ]]
-cp -a "$variant_artifact/provenance" "$output/provenance/engine"
 readelf -h -d -n "$bundle/lib/libflutter_linux_gtk.so" > "$output/provenance/engine-elf.txt"
 readelf -h -d -n "$bundle/localsend_app" > "$output/provenance/app-elf.txt"
 ldd "$bundle/localsend_app" > "$output/provenance/app-build-host-ldd.txt"
-(cd "$bundle" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$output/provenance/bundle-files-SHA256SUMS"
-tar -czf "$output/source-bundle.tar.gz" -C "$bundle" .
-(cd "$output" && sha256sum source-bundle.tar.gz > source-bundle.tar.gz.sha256)
+shader_input_hash=
+if [[ -f "$output/provenance/shader-inputs/manifest.json" ]]; then
+  shader_input_hash=$(sha256sum "$output/provenance/shader-inputs/manifest.json" | awk '{print $1}')
+fi
 jq --arg bundle_hash "$(sha256sum "$output/source-bundle.tar.gz" | awk '{print $1}')" \
   --arg app_hash "$(sha256sum "$bundle/lib/libapp.so" | awk '{print $1}')" \
-  --arg app_run "$GITHUB_RUN_ID" '. + {bundle_sha256:$bundle_hash,libapp_sha256:$app_hash,app_build_run_id:$app_run}' \
+  --arg app_run "$GITHUB_RUN_ID" --arg shader_input_hash "$shader_input_hash" \
+  '. + {bundle_sha256:$bundle_hash,libapp_sha256:$app_hash,app_build_run_id:$app_run,build_validation_status:"pass",
+    shader_input_manifest_sha256:(if $shader_input_hash == "" then null else $shader_input_hash end)}' \
   "$variant_artifact/provenance/manifest.json" > "$output/provenance/manifest.json"
+jq '.validation_status = "pass"' "$output/provenance/bundle-validation.json" > "$output/provenance/bundle-validation.tmp"
+mv "$output/provenance/bundle-validation.tmp" "$output/provenance/bundle-validation.json"
 printf 'Complete c1ce release bundle links the verified %s source-built engine. Guest loading/UI remain unverified.\n' "$PROBE_VARIANT" > "$output/result.txt"
