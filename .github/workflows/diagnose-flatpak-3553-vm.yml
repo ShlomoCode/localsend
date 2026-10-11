@@ -23,7 +23,7 @@ on:
         description: Full controls or focused early-startup discriminators
         default: full
         type: choice
-        options: ['full', 'startup', 'driver']
+        options: ['full', 'startup', 'driver', 'fonts']
 
 jobs:
   full-session:
@@ -431,6 +431,29 @@ jobs:
             modes=(baseline software softpipe)
             timeout 180 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo apt-get install -y --no-install-recommends mesa-utils-bin; mkdir -p /home/probe/3553-graphics-probe; cp /usr/bin/eglinfo.x86_64-linux-gnu /home/probe/3553-graphics-probe/eglinfo; sha256sum /home/probe/3553-graphics-probe/eglinfo; ldd /home/probe/3553-graphics-probe/eglinfo' > evidence/vm/renderer-probe-identity.txt 2>&1
           fi
+          if [ "$PROBE_GROUP" = fonts ]; then
+            modes=(baseline no-host-fonts)
+            timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash -s' > evidence/vm/font-probe-identity.txt 2>&1 <<'FONT_SETUP'
+          set -eu
+          mkdir -p /home/probe/3553-font-probe
+          cat > /home/probe/3553-font-probe/without-host.conf <<'FONT_CONFIG'
+          <?xml version="1.0"?>
+          <fontconfig>
+            <include ignore_missing="no">/etc/fonts/fonts.conf</include>
+            <selectfont>
+              <rejectfont>
+                <glob>/run/host/fonts/*</glob>
+                <glob>/run/host/user-fonts/*</glob>
+              </rejectfont>
+            </selectfont>
+          </fontconfig>
+          FONT_CONFIG
+          cp "$(command -v fc-list)" /home/probe/3553-font-probe/fc-list
+          sha256sum /home/probe/3553-font-probe/*
+          cat /home/probe/3553-font-probe/without-host.conf
+          ldd /home/probe/3553-font-probe/fc-list
+          FONT_SETUP
+          fi
           for mode in "${modes[@]}"; do
             label="matrix-$mode"
             timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode $label" <<'GUEST'
@@ -465,6 +488,7 @@ jobs:
             engine-software) args+=(--env=FLUTTER_LINUX_RENDERER=software) ;;
             no-at-bridge) args+=(--env=NO_AT_BRIDGE=1) ;;
             im-simple) args+=(--env=GTK_IM_MODULE=gtk-im-context-simple) ;;
+            no-host-fonts) args+=(--filesystem=/home/probe/3553-font-probe:ro --env=FONTCONFIG_FILE=/home/probe/3553-font-probe/without-host.conf) ;;
           esac
           if [ "$mode" = software-engine ]; then
             nohup flatpak run org.localsend.localsend_app --enable-software-rendering > "/tmp/localsend-$label.log" 2>&1 < /dev/null &
@@ -487,7 +511,7 @@ jobs:
             ps -T -p "$app_pid" -o pid,tid,stat,pcpu,wchan:32,comm
             cat "/proc/$app_pid/maps"
             printf 'STARTUP_OVERRIDE_ENV\n'
-            tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(FLUTTER_LINUX_RENDERER|NO_AT_BRIDGE|GTK_IM_MODULE|GTK_THEME|GDK_BACKEND|GALLIUM_DRIVER|LIBGL_ALWAYS_SOFTWARE|MESA_LOADER_DRIVER_OVERRIDE)=' || true
+            tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(FLUTTER_LINUX_RENDERER|NO_AT_BRIDGE|GTK_IM_MODULE|GTK_THEME|GDK_BACKEND|GALLIUM_DRIVER|LIBGL_ALWAYS_SOFTWARE|MESA_LOADER_DRIVER_OVERRIDE|FONTCONFIG_FILE)=' || true
             sudo nsenter -t "$app_pid" -n ss -lntup | grep 53317 || true
             printf 'MAIN_TASK_SAMPLE_HZ=%s\n' "$(getconf CLK_TCK)"
             date +%s.%N
@@ -522,6 +546,22 @@ jobs:
           flatpak run "${args[@]}" --command=sh org.localsend.localsend_app -c 'ldd /home/probe/3553-graphics-probe/eglinfo; timeout 20 /home/probe/3553-graphics-probe/eglinfo -B'
           probe_result=$?
           printf 'RUNTIME_EGL_HELPER_EXIT=%s\n' "$probe_result"
+          exit 0
+          GUEST
+            fi
+            if [ "$PROBE_GROUP" = fonts ]; then
+              timeout 60 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash -s -- $mode" > "evidence/vm/$label-runtime-fonts.txt" 2>&1 <<'GUEST'
+          set -eu
+          mode=$1
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          args=(--filesystem=/home/probe/3553-font-probe:ro)
+          if [ "$mode" = no-host-fonts ]; then args+=(--env=FONTCONFIG_FILE=/home/probe/3553-font-probe/without-host.conf); fi
+          # Catalog after the app observation/termination, avoiding a helper warmup before startup.
+          set +e
+          flatpak run "${args[@]}" --command=sh org.localsend.localsend_app -c 'ldd /home/probe/3553-font-probe/fc-list; /home/probe/3553-font-probe/fc-list : file'
+          probe_result=$?
+          printf 'RUNTIME_FONT_HELPER_EXIT=%s\n' "$probe_result"
           exit 0
           GUEST
             fi
