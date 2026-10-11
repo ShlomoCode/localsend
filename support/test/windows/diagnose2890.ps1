@@ -134,7 +134,7 @@ function Word([string]$word,[string]$snap) {
 function PrimaryButton([string]$snap) {
  $bmp = [System.Drawing.Bitmap]::FromFile("$EvidenceDirectory/$snap.png")
  $minX=992; $maxX=0; $minY=720; $maxY=0; $count=0
- for ($y=180;$y -lt 650;$y++) {
+ for ($y=180;$y -lt 710;$y++) {
   for ($x=510;$x -lt 640;$x++) {
    $pixel=$bmp.GetPixel($x,$y)
    if ($pixel.R -lt 30 -and $pixel.G -gt 80 -and $pixel.G -lt 145 -and $pixel.B -gt 60 -and $pixel.B -lt 140) {
@@ -181,6 +181,9 @@ foreach($item in @(@{name="receiver";port=53317},@{name="sender";port=53318})) {
  $apps[$item.name]=$p
 }
 $sender=$apps.sender
+$dpiGraphics=[System.Drawing.Graphics]::FromHwnd($sender.MainWindowHandle)
+@{dpiX=$dpiGraphics.DpiX;dpiY=$dpiGraphics.DpiY;initialWindowWidth=1000;initialWindowHeight=760} | ConvertTo-Json | Set-Content "$EvidenceDirectory/display-scale.json"
+$dpiGraphics.Dispose()
 Word "Send" "sender-initial"
 Screenshot "sender-send"
 Click 576 212
@@ -202,7 +205,7 @@ for($i=1;$i -le 12;$i++) {
  $snap="favorites-$i"
  Screenshot $snap
  $stored=Get-Content "$EvidenceDirectory/sender-app/settings.json" -Raw | ConvertFrom-Json
- if(@($stored.flutter.ls_favorites).Count -ne $i) {throw "Favorite $i was not created through UI"}
+ if(@($stored.'flutter.ls_favorites').Count -ne $i) {throw "Favorite $i was not created through UI"}
  if($i -eq 2) {
   [Desktop2381]::SetCursorPos(450,360) | Out-Null
   [Desktop2381]::mouse_event(0x800,0,0,([uint32]4294966576),[UIntPtr]::Zero)
@@ -210,7 +213,7 @@ for($i=1;$i -le 12;$i++) {
   Screenshot "short-control-after-wheel"
  }
 }
-@($stored.flutter.ls_favorites | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/ui-created-favorites.json"
+@($stored.'flutter.ls_favorites' | ForEach-Object {$_ | ConvertFrom-Json}) | ConvertTo-Json -Depth 5 | Set-Content "$EvidenceDirectory/ui-created-favorites.json"
 foreach($size in @(@{name="report-sized";width=883;height=610},@{name="larger";width=1000;height=760})) {
  [Desktop2381]::MoveWindow($sender.MainWindowHandle,0,0,$size.width,$size.height,$true) | Out-Null
  Start-Sleep -Seconds 2
