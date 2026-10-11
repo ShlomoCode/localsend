@@ -104,31 +104,64 @@ require_switch_state() {
   test "$observed" = "$expected" || return 1
   printf '%s\n' "$y"
 }
+observe_entry_command() {
+  local stage=$1 result=0
+  shift
+  printf '%s label=%s stage=%s remaining=%s command=' "$(date -u --iso-8601=ns)" "${entry_observation_label:-terminal}" "$stage" "$((transition_deadline-SECONDS))" >> "$OUT/entry-observer.txt"
+  printf '%q ' "$@" >> "$OUT/entry-observer.txt"
+  printf '\n' >> "$OUT/entry-observer.txt"
+  run_ui_observer "$@" 2>> "$OUT/entry-observer.txt" || result=$?
+  printf 'stage=%s exit=%s\n' "$stage" "$result" >> "$OUT/entry-observer.txt"
+  return "$result"
+}
+capture_entry_timeout() {
+  # The transition has already failed. This separate eight-second forensic
+  # budget cannot authorize success or issue input, and does not reset its gate.
+  local transition_deadline=$((SECONDS+8)) pid name
+  local entry_observation_label="$1-terminal"
+  printf 'terminal capture: separate diagnostic-only budget=8s\n' >> "$OUT/entry-observer.txt"
+  observe_entry_command processes pgrep -ax localsend >> "$OUT/entry-observer.txt" || true
+  pid=$(observe_entry_command pid pgrep -n -x localsend) || return 0
+  observe_entry_command executable sudo -n readlink "/proc/$pid/exe" >> "$OUT/entry-observer.txt" || true
+  observe_entry_command root sudo -n readlink "/proc/$pid/root" >> "$OUT/entry-observer.txt" || true
+  observe_entry_command package-metadata sudo -n cat "/proc/$pid/root/app/data/flutter_assets/version.json" >> "$OUT/entry-observer.txt" || true
+  observe_entry_command sandbox-directory sudo -n stat "/proc/$pid/root$HOME/.config/autostart" >> "$OUT/entry-observer.txt" || true
+  for name in localsend_app org.localsend.localsend_app; do
+    observe_entry_command "sandbox-stat-$name" sudo -n stat "/proc/$pid/root$HOME/.config/autostart/$name.desktop" >> "$OUT/entry-observer.txt" || true
+    observe_entry_command "sandbox-read-$name" sudo -n cat "/proc/$pid/root$HOME/.config/autostart/$name.desktop" >> "$OUT/entry-observer.txt" || true
+    observe_entry_command "host-stat-$name" stat "$HOME/.config/autostart/$name.desktop" >> "$OUT/entry-observer.txt" || true
+    observe_entry_command "host-read-$name" cat "$HOME/.config/autostart/$name.desktop" >> "$OUT/entry-observer.txt" || true
+  done
+}
 desktop_entry_ready() {
-  local kind=$1 entry="$HOME/.config/autostart/org.localsend.localsend_app.desktop" pid
+  # Native helper uses version.json package_name=localsend_app; Background
+  # portal owns an entry named after the distinct Flatpak application ID.
+  local kind=$1 entry="$HOME/.config/autostart/localsend_app.desktop" pid
+  case "$kind" in host-flatpak-*|host-absent) entry="$HOME/.config/autostart/org.localsend.localsend_app.desktop";; esac
   case "$kind" in
     sandbox-enabled)
-      pid=$(run_ui_observer pgrep -n -x localsend) || return 1
-      run_ui_observer sudo -n test -f "/proc/$pid/root$entry";;
-    host-native-enabled) run_ui_observer test -f "$entry";;
+      pid=$(observe_entry_command pid pgrep -n -x localsend) || return 1
+      observe_entry_command sandbox-readable sudo -n test -r "/proc/$pid/root$entry" && observe_entry_command sandbox-exec sudo -n grep -q '^Exec=' "/proc/$pid/root$entry";;
+    host-native-enabled) observe_entry_command host-readable test -r "$entry" && observe_entry_command host-exec grep -q '^Exec=' "$entry";;
     host-flatpak-visible)
-      run_ui_observer test -f "$entry" && run_ui_observer grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" || return 1
+      observe_entry_command host-readable test -r "$entry" && observe_entry_command host-exec grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" || return 1
       # A timeout/error must never qualify as absence of --hidden.
       local grep_result=0
-      run_ui_observer grep -q -- '--hidden' "$entry" || grep_result=$?
+      observe_entry_command host-hidden grep -q -- '--hidden' "$entry" || grep_result=$?
       [ "$grep_result" = 1 ];;
-    host-flatpak-hidden) run_ui_observer test -f "$entry" && run_ui_observer grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && run_ui_observer grep -q -- '--hidden' "$entry";;
-    host-absent) run_ui_observer test ! -e "$entry";;
+    host-flatpak-hidden) observe_entry_command host-readable test -r "$entry" && observe_entry_command host-exec grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && observe_entry_command host-hidden grep -q -- '--hidden' "$entry";;
+    host-absent) observe_entry_command host-absent test ! -e "$entry";;
     *) return 1;;
   esac
 }
 wait_observed_transition() {
   local phrase=$1 label=$2 expected=$3 entry_kind=$4 result y observed attempt=0
-  local transition_deadline=$((SECONDS+65))
+  local transition_deadline=$((SECONDS+65)) entry_observation_label
   # Only called after one freshly qualified click. Animation/route/modal
   # frames may be unknown; observing them never authorizes another action.
   while [ "$SECONDS" -lt "$transition_deadline" ]; do
     attempt=$((attempt+1))
+    entry_observation_label="$label-attempt-$attempt"
     if result=$(observed_switch_row "$phrase" "$label-attempt-$attempt"); then
       read -r y observed <<< "$result"
       if [ "$observed" = "$expected" ] && desktop_entry_ready "$entry_kind" && [ "$SECONDS" -lt "$transition_deadline" ]; then return 0; fi
@@ -139,6 +172,7 @@ wait_observed_transition() {
     sleep 1
   done
   printf 'transition timeout: %s expected_ui=%s entry=%s\n' "$label" "$expected" "$entry_kind" >> "$OUT/inconclusive-transitions.txt"
+  capture_entry_timeout "$label"
   return 1
 }
 wait_app_exit() {

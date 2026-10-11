@@ -143,7 +143,7 @@ import -window "$wid" evidence/post-login-settings.png
 flatpak kill org.localsend.localsend_app
 flatpak override --user --reset org.localsend.localsend_app
 flatpak uninstall --user --delete-data --noninteractive -y org.localsend.localsend_app
-rm -f "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
+rm -f "$HOME/.config/autostart/localsend_app.desktop" "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 flatpak install --user --noninteractive -y ./candidate.flatpak
 flatpak override --user --show org.localsend.localsend_app > evidence/candidate-overrides.txt
 source /home/mint/portal-gui.sh
