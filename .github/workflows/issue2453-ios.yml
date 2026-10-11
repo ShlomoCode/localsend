@@ -72,15 +72,24 @@ jobs:
           fvm flutter precache --ios
           fvm flutter pub get --enforce-lockfile 2>&1 | tee "$GITHUB_WORKSPACE/evidence/resolve.log"
 
+      - name: Configure supported diagnostic renderer input
+        if: inputs.renderer == 'skia'
+        working-directory: source/app
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c 'Add :FLTEnableImpeller bool false' ios/Runner/Info.plist
+          test "$(plutil -extract FLTEnableImpeller raw ios/Runner/Info.plist)" = false
+          cp ios/Runner/Info.plist "$GITHUB_WORKSPACE/evidence/diagnostic-runner-input.plist"
+          git diff -- ios/Runner/Info.plist > "$GITHUB_WORKSPACE/evidence/diagnostic-input.patch"
+
       - name: Build uninstrumented unsigned device app
         working-directory: source/app
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$HOME/.pub-cache/bin:$PATH"
-          args=()
-          if [[ '${{ inputs.renderer }}' == skia ]]; then args+=(--no-enable-impeller); fi
-          fvm flutter build ios --release --no-codesign "${args[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
+          fvm flutter build ios --release --no-codesign 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
 
       - name: Package the normal device artifact
         working-directory: source
