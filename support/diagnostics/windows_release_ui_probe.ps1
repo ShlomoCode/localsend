@@ -11,7 +11,8 @@ param(
   [string] $FixtureTimestampUtc = '1979-12-31T23:59:58Z',
   [string] $FixtureFileName = 'fixture-old-timestamp.txt',
   [string] $ExecutablePath,
-  [string] $SourceRevision
+  [string] $SourceRevision,
+  [int] $DiagnosticPeerPort = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -311,6 +312,10 @@ namespace LocalSendReleaseUiProbe {
 '@
   Add-Type -TypeDefinition $source -Language CSharp
 
+  if ($DiagnosticPeerPort -gt 0) {
+    $favorite = @{id='issue3393-relay';fingerprint='issue3393-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='Android15 receiver';customAlias=$true} | ConvertTo-Json -Compress
+    @{ls_alias='Windows3393';ls_favorites=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
+  }
   if ($EntryMethod -eq 'SendTo') {
     $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList @('"' + $selectionPath + '"') -PassThru
   } else {
