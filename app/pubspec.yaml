@@ -87,6 +87,12 @@ dev_dependencies:
   test: ^1.30.0
 
 dependency_overrides:
+  tray_manager:
+    # Keep the tray identity stable so desktop visibility preferences survive restarts.
+    git:
+      url: https://github.com/ShlomoCode/tray_manager.git
+      ref: 59985e2aeee26676b3ab64cb042fb92baf3dd98c
+      path: packages/tray_manager
   device_apps:
     # Migrate to another maintained package to fetch installed apps on Android
     git:

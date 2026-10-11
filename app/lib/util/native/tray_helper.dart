@@ -36,7 +36,7 @@ Future<void> initTray() async {
         icon = Assets.img.logo32White.path;
       }
       _logger.info('Using "$icon" as path of system tray icon');
-      await tm.trayManager.setIcon(icon);
+      await tm.trayManager.setIcon(icon, id: 'org.localsend.localsend_app');
     } else {
       await tm.trayManager.setIcon(Assets.img.logo32.path);
     }
