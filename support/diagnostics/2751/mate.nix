@@ -14,10 +14,11 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     networking.networkmanager.enable = true;
     programs.nm-applet.enable = true;
     programs.localsend.enable = true;
-    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick ];
+    environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc ];
     virtualisation.memorySize = 4096;
     virtualisation.cores = 2;
     virtualisation.resolution = { x = 3840; y = 2160; };
+    virtualisation.qemu.options = [ "-device virtio-vga,xres=3840,yres=2160" ];
   };
   testScript = { nodes, ... }: let
     user = nodes.machine.users.users.alice;
@@ -36,6 +37,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     user_command("dconf write /org/mate/screensaver/lock-enabled false")
     user_command("dconf write /org/mate/session/idle-delay 0")
     user_command("gsettings set org.mate.interface window-scaling-factor 1")
+    user_command("gsettings set org.mate.interface gtk-theme BlackMATE")
     machine.sleep(8)
     machine.wait_until_succeeds("pgrep nm-applet")
     machine.succeed("install -d -o alice -g users /tmp/evidence")
@@ -45,6 +47,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     machine.succeed("printf '%s\\n' '${pkgs.localsend}' '${pkgs.mate.mate-panel}' '${pkgs.mate.mate-desktop}' '${pkgs.mate.mate-settings-daemon}' >> /tmp/evidence/environment.txt")
     machine.screenshot("desktop-ready")
     user_command("xrandr --verbose > /tmp/evidence/xrandr.txt")
+    assert "3840x2160" in user_command("xrandr | grep 'current 3840 x 2160\\|3840x2160.*\\*'"), "The display is not running at 4K"
     user_command("dconf dump /org/mate/ > /tmp/evidence/mate-initial.dconf")
     user_command("sh -c 'localsend_app > /tmp/evidence/localsend.log 2>&1 &' ")
     machine.wait_for_window("LocalSend", 60)
@@ -57,7 +60,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
         machine.sleep(8)
         machine.wait_until_succeeds("pgrep mate-panel")
         if restart:
-            machine.succeed("pkill -x localsend_app")
+            machine.succeed("pkill -u alice -f '[l]ocalsend_app'")
             machine.sleep(3)
             user_command("sh -c 'localsend_app >> /tmp/evidence/localsend.log 2>&1 &' ")
             machine.wait_for_window("LocalSend", 60)
@@ -69,6 +72,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
         user_command("busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > /tmp/evidence/" + label + "-items.txt")
         machine.screenshot(label)
         machine.succeed("ps -eo pid,lstart,args > /tmp/evidence/" + label + "-processes.txt")
+        machine.copy_from_vm("/tmp/evidence", "guest-evidence-" + label)
     machine.copy_from_vm("/tmp/evidence", "guest-evidence")
   '';
 })
