@@ -5,6 +5,20 @@ trap 'printf "%s\n" "$?" > "$out/session.done"' EXIT
 env | sort > "$out/session-environment.txt"
 hyprctl version > "$out/hyprland-version.txt"
 hyprctl monitors -j > "$out/monitors.json"
+cat > "$OMARCHY_PATH/shell/Probe3484.qml" <<'PROBE'
+import QtQuick
+import Quickshell
+import qs.Commons
+import qs.Commons as HostCommons
+ShellRoot {
+  Component.onCompleted: {
+    console.log("PROBE3484 Color=" + Color + " bar=" + Color.bar + " background=" + Color.background)
+    console.log("PROBE3484 Alias=" + HostCommons.Color + " bar=" + HostCommons.Color.bar + " background=" + HostCommons.Color.background)
+    console.log("PROBE3484 Style=" + Style + " family=" + Style.font.family)
+  }
+}
+PROBE
+timeout 5 quickshell -p "$OMARCHY_PATH/shell/Probe3484.qml" > "$out/module-probe.log" 2>&1 || true
 quickshell -p "$OMARCHY_PATH/shell/shell.qml" > "$out/quickshell.log" 2>&1 &
 sleep 10
 flameshot > "$out/flameshot.log" 2>&1 &
@@ -15,6 +29,7 @@ for x in 12 24 36 48 60 72; do
   grim "$out/control-${x}.png"
   tesseract "$out/control-${x}.png" "$out/control-${x}" 2>/dev/null
 done
+grep -i -q flameshot "$out"/control-*.txt
 localsend > "$out/localsend.log" 2>&1 &
 app_pid=$!
 printf '%s\n' "$app_pid" > "$out/app-pid.txt"

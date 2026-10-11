@@ -36,6 +36,7 @@ done
 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo mkdir -p /work/support/diagnostics/3484 /work/evidence/cloud; sudo chown -R probe:probe /work'
 scp -i /tmp/tray3484/key -P 2222 -o StrictHostKeyChecking=no support/diagnostics/3484/guest.sh support/diagnostics/3484/wayland-session.sh probe@127.0.0.1:/work/support/diagnostics/3484/
 ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo bash /work/support/diagnostics/3484/guest.sh' > evidence/cloud/provision.log 2>&1
+ssh "${ssh_opts[@]}" probe@127.0.0.1 'sudo reboot' || true
 ready=0
 for i in $(seq 1 120); do
   if ssh "${ssh_opts[@]}" probe@127.0.0.1 'test -f /work/evidence/cloud/session.done'; then ready=1; break; fi
@@ -47,3 +48,4 @@ printf 'screendump %s\n' "$PWD/evidence/cloud/guest-final.ppm" | sudo socat - UN
 sudo chown -R "$(id -u):$(id -g)" evidence/cloud
 convert evidence/cloud/guest-final.ppm evidence/cloud/guest-final.png
 test "$ready" = 1
+test "$(cat evidence/cloud/session.done)" = 0

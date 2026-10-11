@@ -25,6 +25,7 @@ tar -xf omarchy.tar.gz -C omarchy --strip-components=1
 mkdir -p .config/omarchy .local/state/omarchy/current
 cp -a omarchy/themes/tokyo-night .local/state/omarchy/current/next-theme
 export OMARCHY_PATH=/home/investigator/omarchy
+export PATH="$OMARCHY_PATH/bin:$PATH"
 bash omarchy/bin/omarchy-theme-set-templates
 mv .local/state/omarchy/current/next-theme .local/state/omarchy/current/theme
 cat > .config/omarchy/shell.json <<'CONFIG'
@@ -44,7 +45,7 @@ if [ "$(tty)" = /dev/tty1 ]; then
   export OMARCHY_PATH=/home/investigator/omarchy
   export PATH="$OMARCHY_PATH/bin:$PATH"
   export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Hyprland
-  export LIBGL_ALWAYS_SOFTWARE=1
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe QT_QPA_PLATFORM=wayland
   exec dbus-run-session Hyprland --config "$HOME/.config/hypr3484.conf" > /work/evidence/cloud/hyprland.log 2>&1
 fi
 PROFILE
@@ -56,4 +57,4 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin investigator --noclear %I $TERM
 GETTY
 systemctl daemon-reload
-systemctl restart getty@tty1
+systemctl enable getty@tty1
