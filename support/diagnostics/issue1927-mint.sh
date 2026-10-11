@@ -23,6 +23,7 @@ ssh-keygen -q -t ed25519 -N '' -f /tmp/issue1927-mint/id
 cp /tmp/issue1927-mint/id.pub /tmp/issue1927-mint/seed/id.pub
 cp support/diagnostics/issue1927.sh /tmp/issue1927-mint/seed/scenario.sh
 cp support/diagnostics/issue1927-portal-gui.sh /tmp/issue1927-mint/seed/portal-gui.sh
+cp support/diagnostics/issue1927-ui.sh /tmp/issue1927-mint/seed/ui.sh
 cp evidence/packages/{baseline,candidate}.flatpak /tmp/issue1927-mint/seed/
 cat > /tmp/issue1927-mint/seed/bootstrap.sh <<'BOOT'
 #!/bin/bash
@@ -32,6 +33,7 @@ mkdir -p /home/mint/.ssh /home/mint/evidence
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/scenario.sh /home/mint/scenario.sh
 cp /mnt/portal-gui.sh /home/mint/portal-gui.sh
+cp /mnt/ui.sh /home/mint/ui.sh
 cp /mnt/{baseline,candidate}.flatpak /home/mint/
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
@@ -86,6 +88,8 @@ test "$ready" = 1
 timeout 1200 ssh "${opts[@]}" mint@127.0.0.1 'bash -s' > evidence/cloud/scenario.log 2>&1 <<'GUEST'
 set -Eeuxo pipefail
 cd /home/mint
+OUT=$(realpath evidence)
+source /home/mint/ui.sh
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
 tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -132,9 +136,7 @@ session_environment
 flatpak run --user org.localsend.localsend_app > evidence/post-login-app.log 2>&1 &
 sleep 8
 wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1)
-xdotool windowmove "$wid" 0 0
-xdotool windowsize "$wid" 1000 700
-sleep 2
+stabilize_window
 xdotool mousemove --window "$wid" 105 211 click 1
 sleep 2
 import -window "$wid" evidence/post-login-settings.png

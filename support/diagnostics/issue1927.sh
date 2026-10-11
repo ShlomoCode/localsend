@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 mkdir -p evidence
 OUT=$(realpath evidence)
+source /home/mint/ui.sh
 exec > >(tee "$OUT/run.log") 2>&1
 { date -u; uname -a; cat /etc/os-release; flatpak --version; flatpak info --user org.localsend.localsend_app; flatpak info --user --show-metadata org.localsend.localsend_app; } > "$OUT/identity.txt"
 if [ "${EXISTING_DESKTOP:-0}" != 1 ]; then
@@ -18,9 +19,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 test -n "$wid"
-xdotool windowmove "$wid" 0 0
-xdotool windowsize "$wid" 1000 700
-sleep 3
+stabilize_window
 import -window "$wid" "$OUT/receive.png"
 xdotool mousemove --window "$wid" 105 211 click 1
 sleep 3
@@ -40,9 +39,7 @@ launch_settings() {
     sleep 1
   done
   test -n "$wid"
-  xdotool windowmove "$wid" 0 0
-  xdotool windowsize "$wid" 1000 700
-  sleep 3
+  stabilize_window
   xdotool mousemove --window "$wid" 105 211 click 1
   sleep 2
   import -window "$wid" "$OUT/$label-before.png"
@@ -67,17 +64,21 @@ for repeat in 1 2; do
   ffmpeg -nostdin -y -f x11grab -video_size "$screen_size" -framerate 15 -i "$DISPLAY" -t 10 -c:v libx264 -pix_fmt yuv420p "$OUT/$label-toggle.mp4" > "$OUT/$label-recording.log" 2>&1 &
   recording_pid=$!
   date -u --iso-8601=ns > "$OUT/$label-inputs.txt"
-  xdotool mousemove --window "$wid" 825 422 click 1
-  echo 'click window=(825,422): Autostart after login' >> "$OUT/$label-inputs.txt"
+  row_y=$(require_switch_state 'Autostart after login' "$label-before-click" OFF)
+  xdotool mousemove --window "$wid" 825 "$row_y" click 1
+  printf 'click window=(825,%s): OCR-identified Autostart after login\n' "$row_y" >> "$OUT/$label-inputs.txt"
   sleep 3
   state "$label-enabled"
+  require_switch_state 'Autostart after login' "$label-after-click" ON > /dev/null
   xdotool windowactivate "$wid" key alt+F4
   echo 'Alt+F4: actual app close' >> "$OUT/$label-inputs.txt"
   sleep 4
   flatpak ps --columns=instance,application,pid > "$OUT/$label-after-close.txt"
+  if grep -q org.localsend.localsend_app "$OUT/$label-after-close.txt"; then exit 31; fi
   wait "$recording_pid"
   launch_settings "$label-reopened"
   state "$label-reopened"
+  require_switch_state 'Autostart after login' "$label-reopened-observed" OFF > /dev/null
   flatpak kill org.localsend.localsend_app
   sleep 2
 done
@@ -86,12 +87,15 @@ mkdir -p "$HOME/.config/autostart"
 flatpak override --user --filesystem=xdg-config/autostart org.localsend.localsend_app
 flatpak override --user --show org.localsend.localsend_app > "$OUT/permission-control.txt"
 launch_settings permission
-xdotool mousemove --window "$wid" 825 422 click 1
+row_y=$(require_switch_state 'Autostart after login' permission-before-click OFF)
+xdotool mousemove --window "$wid" 825 "$row_y" click 1
 sleep 3
 state permission-enabled
+require_switch_state 'Autostart after login' permission-enabled-observed ON > /dev/null
 xdotool windowactivate "$wid" key alt+F4
 sleep 4
 launch_settings permission-reopened
 state permission-reopened
+require_switch_state 'Autostart after login' permission-reopened-observed ON > /dev/null
 flatpak run --user --command=flatpak-spawn org.localsend.localsend_app --host true > "$OUT/host-spawn-control.txt" 2>&1 || true
 flatpak kill org.localsend.localsend_app
