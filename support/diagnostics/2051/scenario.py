@@ -60,6 +60,11 @@ def choose_saf_destination():
         time.sleep(2)
     click(R, "(Downloads)", "saf-before-destination")
     xml = snapshot(R, "saf-directory-picker")
+    for attempt in range(8):
+        if "Issue2051" in labels(xml) or "Download" in labels(xml) or "Show roots" in labels(xml):
+            break
+        time.sleep(1)
+        xml = snapshot(R, "saf-directory-loaded-" + str(attempt))
     if "Issue2051" not in labels(xml):
         if "Download" in labels(xml):
             if "List view" in labels(xml):
