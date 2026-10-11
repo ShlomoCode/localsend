@@ -43,6 +43,23 @@ function Word([string]$word,[string]$snap) {
  if (-not $row) { throw "OCR word $word missing from $snap" }
  Click (([int]$row.left + [int]$row.width/2)/2) (([int]$row.top + [int]$row.height/2)/2)
 }
+function PrimaryButton([string]$snap) {
+ $bmp = [System.Drawing.Bitmap]::FromFile("$EvidenceDirectory/$snap.png")
+ $minX=992; $maxX=0; $minY=720; $maxY=0; $count=0
+ for ($y=180;$y -lt 650;$y++) {
+  for ($x=510;$x -lt 640;$x++) {
+   $pixel=$bmp.GetPixel($x,$y)
+   if ($pixel.R -lt 30 -and $pixel.G -gt 80 -and $pixel.G -lt 145 -and $pixel.B -gt 60 -and $pixel.B -lt 140) {
+    $minX=[Math]::Min($minX,$x);$maxX=[Math]::Max($maxX,$x)
+    $minY=[Math]::Min($minY,$y);$maxY=[Math]::Max($maxY,$y);$count++
+   }
+  }
+ }
+ $bmp.Dispose()
+ if ($count -lt 150) {throw "Primary filled button unavailable in $snap"}
+ Write-Host "Primary button in $snap: $minX,$minY to $maxX,$maxY"
+ Click (($minX+$maxX)/2) (($minY+$maxY)/2)
+}
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture | ConvertTo-Json | Set-Content "$EvidenceDirectory/environment.json"
 $nic = Get-NetIPInterface -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -match "Loopback"} | Select-Object -First 1
 foreach ($ip in @("10.0.20.2","100.95.193.205")) {
@@ -75,13 +92,18 @@ Click 576 212
 Screenshot "favorites-empty"
 foreach ($favorite in @(@{ip="10.0.20.2";alias="Home LAN"},@{ip="100.95.193.205";alias="NetBird LAN"})) {
  $snapshot = if ($favorite.ip -eq "10.0.20.2") {"favorites-empty"} else {"favorites-first"}
- if ($snapshot -eq "favorites-empty") { Click 578 438 } else { Word "Add" $snapshot }
+ PrimaryButton $snapshot
  Screenshot "add-$($favorite.ip)"
+ Click 500 400
  [System.Windows.Forms.SendKeys]::SendWait($favorite.ip)
- [System.Windows.Forms.SendKeys]::SendWait("{TAB}^a53317+{TAB}+{TAB}^a")
+ Click 500 490
+ [System.Windows.Forms.SendKeys]::SendWait("{HOME}{DELETE 12}")
+ Start-Sleep -Milliseconds 200
+ [System.Windows.Forms.SendKeys]::SendWait("53317")
+ Click 500 310
  [System.Windows.Forms.SendKeys]::SendWait($favorite.alias)
  Screenshot "filled-$($favorite.ip)"
- Word "Confirm" "filled-$($favorite.ip)"
+ PrimaryButton "filled-$($favorite.ip)"
  Start-Sleep -Seconds 3
  Screenshot $(if ($favorite.ip -eq "10.0.20.2") {"favorites-first"} else {"favorites-second"})
 }
