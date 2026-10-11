@@ -31,6 +31,7 @@ public static class Explorer2311 {
  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
+ [DllImport("user32.dll")] public static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
 }
 '@
 $hwnd=[IntPtr]$window[0].HWND
@@ -66,7 +67,9 @@ $exactShellSelection=$shellSelection.Count -eq 1 -and $shellSelection[0] -eq $fi
 $focused=[Windows.Automation.AutomationElement]::FocusedElement
 @{hwnd=$hwnd.ToInt64();foreground=[Explorer2311]::GetForegroundWindow().ToInt64();fixture=$fixture;folder=$window[0].LocationURL;selected=$selected;shellSelectedPaths=$shellSelection;exactShellSelection=$exactShellSelection;focused=$focused.Current.Name;focusedType=$focused.Current.ControlType.ProgrammaticName}|ConvertTo-Json|Set-Content "evidence/context-$Case-selection.json"
 if(!$exactShellSelection -or [Explorer2311]::GetForegroundWindow() -ne $hwnd){throw 'Exact fixture selection or Explorer focus was lost before Shift+F10'}
-[Windows.Forms.SendKeys]::SendWait('+{F10}')
+[Explorer2311]::keybd_event(0x5D,0,0,[UIntPtr]::Zero)
+[Explorer2311]::keybd_event(0x5D,0,2,[UIntPtr]::Zero)
+@{method='Native Windows Context Menu key';virtualKey='VK_APPS 0x5D';fixture=$fixture}|ConvertTo-Json|Set-Content "evidence/context-$Case-request.json"
 Start-Sleep 1
 function Snapshot([string]$phase){
  $all=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
@@ -75,15 +78,30 @@ function Snapshot([string]$phase){
  try{$g.CopyFromScreen($bounds.Location,[Drawing.Point]::Empty,$bounds.Size);$image.Save((Join-Path $PWD "evidence/context-$Case-$phase.png"))}finally{$g.Dispose();$image.Dispose()}
  return $all
 }
-$all=Snapshot 'opened'
-$send=@($all|Where-Object {$_.Current.ControlType -eq [Windows.Automation.ControlType]::MenuItem -and $_.Current.Name -eq 'Send to'}|Select-Object -Last 1)
+function WaitMenuItem([string]$name,[string]$phase){
+ $deadline=[DateTime]::UtcNow.AddSeconds(10);$observations=@()
+ do{
+  $all=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+  $matches=@($all|Where-Object {$_.Current.ControlType.ProgrammaticName -eq 'ControlType.MenuItem' -and $_.Current.Name -eq $name}|Select-Object -Last 1)
+  $observations+=@{utc=[DateTime]::UtcNow.ToString('o');count=$matches.Count}
+  if($matches.Count){break}
+  Start-Sleep -Milliseconds 250
+ }while([DateTime]::UtcNow -lt $deadline)
+ ConvertTo-Json -InputObject $observations -Depth 4|Set-Content "evidence/context-$Case-$phase-readiness.json"
+ $null=Snapshot $phase
+ return $matches
+}
+$send=WaitMenuItem 'Send to' 'opened'
 if($send.Count -ne 1){throw 'Actual Explorer Send to menu is unavailable'}
-try{$send[0].GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()}catch{$send[0].SetFocus();[Windows.Forms.SendKeys]::SendWait('{RIGHT}')}
+$pattern=$null
+if($send[0].TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$pattern)){$pattern.Expand()}
+else{$send[0].SetFocus();if([Windows.Automation.AutomationElement]::FocusedElement.Current.Name -ne 'Send to'){throw 'Send to menu focus was not established'};[Windows.Forms.SendKeys]::SendWait('{RIGHT}')}
 Start-Sleep 1
-$all=Snapshot 'send-to'
-$entry=@($all|Where-Object {$_.Current.ControlType -eq [Windows.Automation.ControlType]::MenuItem -and $_.Current.Name -eq 'LocalSend'}|Select-Object -Last 1)
+$entry=WaitMenuItem 'LocalSend' 'send-to'
 if($entry.Count -ne 1){throw 'LocalSend was not listed in actual Send to submenu'}
-try{$entry[0].GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()}catch{$entry[0].SetFocus();[Windows.Forms.SendKeys]::SendWait('{ENTER}')}
+$pattern=$null
+if($entry[0].TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){$pattern.Invoke()}
+else{$entry[0].SetFocus();if([Windows.Automation.AutomationElement]::FocusedElement.Current.Name -ne 'LocalSend'){throw 'LocalSend submenu focus was not established'};[Windows.Forms.SendKeys]::SendWait('{ENTER}')}
 Start-Sleep 2
 & $ui -Action snapshot -Label "windows-$Case-image-selected"
 & $ui -Action click -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseControlSequence
