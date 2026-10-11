@@ -22,9 +22,14 @@ on:
         description: Exercise Always shown, Open, same-profile handoff and two profiles
         type: boolean
         default: false
+      control_scope:
+        description: Full suite or focused remaining two-instance controls
+        type: choice
+        options: [full, multi_instances]
+        default: full
 jobs:
   api:
-    if: inputs.regression_controls && inputs.source_ref != ''
+    if: inputs.regression_controls && inputs.source_ref != '' && inputs.control_scope != 'multi_instances'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -137,6 +142,7 @@ jobs:
           STABLE_ID: ${{ inputs.stable_id && '1' || '0' }}
           EXPECT_RETAINED: ${{ (inputs.expect_retained || inputs.stable_id) && '1' || '0' }}
           REGRESSION_CONTROLS: ${{ inputs.regression_controls && '1' || '0' }}
+          CONTROL_SCOPE: ${{ inputs.control_scope }}
         run: |
           xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash support/diagnostics/3546/probe.sh
       - uses: actions/upload-artifact@v6

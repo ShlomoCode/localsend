@@ -127,8 +127,13 @@ def prepare_hide(stage):
 
 
 def visible_windows(pid):
-    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(pid), "--name", "^LocalSend$"], capture_output=True, text=True)
-    return result.stdout.split()
+    for _ in range(4):
+        result = subprocess.run(["xdotool", "search", "--all", "--onlyvisible", "--pid", str(pid), "--name", "^LocalSend$"], capture_output=True, text=True)
+        if "X Error" not in result.stderr:
+            assert result.returncode in (0, 1), result.stderr
+            return result.stdout.split()
+        time.sleep(.5)
+    raise RuntimeError(f"X11 window enumeration remained stale: {result.stderr}")
 
 
 def minimize_live_windows():
@@ -142,7 +147,7 @@ def minimize_live_windows():
         time.sleep(.5)
 
 
-def open_via_menu(pid, stage):
+def open_via_menu(pid, stage, other_pid=None):
     item = registered_item(pid)
     service, path = item["address"].split("/", 1)
     bus = dbus.SessionBus()
@@ -162,40 +167,47 @@ def open_via_menu(pid, stage):
     minimize_live_windows()
     time.sleep(1)
     assert not visible_windows(pid), "Target window remained visible before Open"
+    if other_pid is not None:
+        assert not visible_windows(other_pid), "Other profile was not hidden before target Open"
     menu.Event(dbus.Int32(leaves[0]), "clicked", dbus.Int32(0, variant_level=1), dbus.UInt32(0))
     time.sleep(2)
     windows = visible_windows(pid)
-    Path(f"evidence/{stage}-open-api.json").write_text(json.dumps({"item": item, "menu_path": menu_path, "leaf": leaves[0], "visible_windows_after": windows}, indent=2))
+    properties = {window: subprocess.check_output(["xprop", "-id", window, "_NET_WM_PID", "_NET_WM_STATE"], text=True) for window in windows}
+    assert all(f"= {pid}\n" in value for value in properties.values()), "Visible window PID does not match menu owner"
+    other_after = visible_windows(other_pid) if other_pid is not None else None
+    Path(f"evidence/{stage}-open-api.json").write_text(json.dumps({"item": item, "menu_path": menu_path, "leaf": leaves[0], "target_visible_before": False, "other_pid": other_pid, "other_visible_before": False if other_pid is not None else None, "visible_windows_after": windows, "window_properties_after": properties, "other_visible_after": other_after}, indent=2))
     snapshot(stage + "-opened-window")
     assert windows, "Original Open callback did not reveal its application window"
 
 
 def regression_controls(pid):
     app = Path(os.environ["APP_EXE"])
-    before = registered_item(pid)
-    prepare_visibility("control-always-shown", hidden=False)
-    quit_via_menu(pid, "control-always-shown")
-    with Path("evidence/control-always-shown-restart.log").open("w") as logfile:
-        process = subprocess.Popen([str(app)], cwd=app.parent, stdout=logfile, stderr=subprocess.STDOUT)
-    pid = process.pid
-    after = registered_item(pid)
-    time.sleep(3)
-    snapshot("control-always-shown-restarted")
-    assert panel_item() is not None, "Always shown was lost on restart"
-    assert before["id"] == after["id"], "Always shown restart changed identity"
-    click(find("Show hidden icons", "button"))
-    click(find("Configure System Tray...", "button"))
-    click(find("Entries"))
-    snapshot("control-always-shown-restarted-entries")
-    click(find("Cancel", "button"))
-    subprocess.run(["xdotool", "key", "Escape"], check=True)
-    open_via_menu(pid, "control-single")
-    with Path("evidence/control-handoff.log").open("w") as logfile:
-        second = subprocess.Popen([str(app)], cwd=app.parent, stdout=logfile, stderr=subprocess.STDOUT)
-    exit_code = second.wait(timeout=20)
-    assert exit_code == 0, f"Same-profile handoff exited {exit_code}"
-    assert registered_item(pid)["address"] == after["address"], "Handoff replaced original tray"
-    Path("evidence/control-handoff.json").write_text(json.dumps({"original": after, "second_pid": second.pid, "second_exit_code": exit_code}, indent=2))
+    full_controls = os.environ.get("CONTROL_SCOPE") != "multi_instances"
+    if full_controls:
+        before = registered_item(pid)
+        prepare_visibility("control-always-shown", hidden=False)
+        quit_via_menu(pid, "control-always-shown")
+        with Path("evidence/control-always-shown-restart.log").open("w") as logfile:
+            process = subprocess.Popen([str(app)], cwd=app.parent, stdout=logfile, stderr=subprocess.STDOUT)
+        pid = process.pid
+        after = registered_item(pid)
+        time.sleep(3)
+        snapshot("control-always-shown-restarted")
+        assert panel_item() is not None, "Always shown was lost on restart"
+        assert before["id"] == after["id"], "Always shown restart changed identity"
+        click(find("Show hidden icons", "button"))
+        click(find("Configure System Tray...", "button"))
+        click(find("Entries"))
+        snapshot("control-always-shown-restarted-entries")
+        click(find("Cancel", "button"))
+        subprocess.run(["xdotool", "key", "Escape"], check=True)
+        open_via_menu(pid, "control-single")
+        with Path("evidence/control-handoff.log").open("w") as logfile:
+            second = subprocess.Popen([str(app)], cwd=app.parent, stdout=logfile, stderr=subprocess.STDOUT)
+        exit_code = second.wait(timeout=20)
+        assert exit_code == 0, f"Same-profile handoff exited {exit_code}"
+        assert registered_item(pid)["address"] == after["address"], "Handoff replaced original tray"
+        Path("evidence/control-handoff.json").write_text(json.dumps({"original": after, "second_pid": second.pid, "second_exit_code": exit_code}, indent=2))
     quit_via_menu(pid, "control-single")
     processes = []
     items = []
@@ -214,13 +226,13 @@ def regression_controls(pid):
             click(find("Skip", "button"))
         except RuntimeError:
             pass
-    Path("evidence/control-two-profiles.json").write_text(json.dumps(items, indent=2))
+    Path("evidence/control-two-profiles-registrations.json").write_text(json.dumps(items, indent=2))
     snapshot("control-two-profiles")
     assert items[0]["address"] != items[1]["address"], "Two processes shared a D-Bus tray registration"
     assert all(item["id"] == "org.localsend.localsend_app" for item in items), "Application identity changed across profiles"
     for index, process in enumerate(processes):
-        open_via_menu(process.pid, f"control-profile-{index + 1}")
         other = processes[1 - index]
+        open_via_menu(process.pid, f"control-profile-{index + 1}", other.pid)
         assert not visible_windows(other.pid), "Open targeted the other profile's window"
     quit_via_menu(processes[0].pid, "control-profile-1")
     assert registered_item(processes[1].pid)["address"] == items[1]["address"], "Quitting first profile removed the second tray"
@@ -244,7 +256,7 @@ def regression_controls(pid):
     Path("evidence/control-two-profiles-restarted.json").write_text(json.dumps([restarted_first, restarted_second], indent=2))
     quit_via_menu(processes[0].pid, "control-profile-1-final")
     quit_via_menu(processes[1].pid, "control-profile-2-final")
-    Path("evidence/control-result.json").write_text(json.dumps({"always_shown_retained": True, "same_profile_handoff": True, "two_independent_trays": True, "open_targets_owner": True, "quit_preserves_other": True}, indent=2))
+    Path("evidence/control-result.json").write_text(json.dumps({"scope": os.environ.get("CONTROL_SCOPE", "full"), "always_shown_retained": True if full_controls else "not run in focused scope", "same_profile_handoff": True if full_controls else "not run in focused scope", "two_independent_trays": True, "open_targets_owner": True, "quit_preserves_other": True}, indent=2))
 
 
 def quit_via_menu(pid, stage):
@@ -326,7 +338,8 @@ try:
         pid = int(os.environ["APP_PID"])
         expected_lost = os.environ.get("EXPECT_RETAINED") != "1"
         outcomes = []
-        for cycle in range(1, 3):
+        cycles = () if os.environ.get("CONTROL_SCOPE") == "multi_instances" else range(1, 3)
+        for cycle in cycles:
             stage = f"{'baseline' if expected_lost else 'stable-id'}-cycle{cycle}"
             print(f"[3546] {stage} begin", flush=True)
             before = registered_item(pid)
