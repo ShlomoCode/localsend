@@ -113,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.pub-cache/bin:$PATH"
-          fvm flutter build ios --release --no-codesign 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
+          fvm flutter build ios --release --no-codesign --verbose 2>&1 | tee "$GITHUB_WORKSPACE/evidence/build.log"
 
       - name: Package the normal device artifact
         working-directory: source
