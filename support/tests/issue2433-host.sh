@@ -46,7 +46,7 @@ provision)
   guest 'mkdir -p /home/probe/evidence /home/probe/.local/share/gnome-shell/extensions/issue2433-probe@localsend.test'
   scp "${ssh_opts[@]/-p/-P}" support/tests/issue2433-probe/* probe@127.0.0.1:/home/probe/.local/share/gnome-shell/extensions/issue2433-probe@localsend.test/
   scp "${ssh_opts[@]/-p/-P}" support/tests/issue2433-guest.sh probe@127.0.0.1:/home/probe/
-  timeout 2400 guest 'bash issue2433-guest.sh provision' > evidence/cloud/provision.log 2>&1
+  timeout 2400 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh provision' > evidence/cloud/provision.log 2>&1
   ready=0
   for i in $(seq 1 90); do
     if guest 'test -S /run/user/$(id -u)/wayland-0 && pgrep -u $(id -u) gnome-shell' >> evidence/cloud/ready.txt 2>&1; then ready=1; break; fi
@@ -54,11 +54,11 @@ provision)
     sleep 10
   done
   test "$ready" = 1
-  timeout 900 guest 'bash issue2433-guest.sh integrate' > evidence/cloud/integration.log 2>&1
+  timeout 900 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh integrate' > evidence/cloud/integration.log 2>&1
   capture integrated
   ;;
 observe)
-  timeout 600 guest 'bash issue2433-guest.sh observe' > evidence/cloud/observe.log 2>&1
+  timeout 600 ssh "${ssh_opts[@]}" probe@127.0.0.1 'bash issue2433-guest.sh observe' > evidence/cloud/observe.log 2>&1
   capture observation-final
   ;;
 collect)
