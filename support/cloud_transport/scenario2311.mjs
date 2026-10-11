@@ -62,10 +62,11 @@ export default async function({session,wd,senderPort,transportStatus}){
   const installed=await wd('POST',prefix+'/appium/device/app_installed',{appId});
   if(!installed)throw new Error('Google Files is not installed; normal file-manager details require another observed entry');
   await wd('POST',prefix+'/appium/device/activate_app',{appId});
+  await waitForNativeControl({wd,prefix,label:label+'-files-foreground',using:'xpath',value:`//*[@package="${appId}"]`,requireClickable:false});
   for(let attempt=0;attempt<5;attempt++){
    await capture(label+'-files-entry-'+attempt);
    const source=await wd('GET',prefix+'/source');
-   const choice=source.includes('id/agree_button')?{using:'id',value:appId+':id/agree_button'}:source.includes('permission_allow_button')?{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'}:null;
+   const choice=source.includes('id/agree_button')?{using:'id',value:appId+':id/agree_button'}:source.includes('permission_allow_button')?{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'}:source.includes('text="Got it"')?{using:'xpath',value:'//*[@text="Got it"]'}:null;
    if(!choice)break;
    const e=await waitForNativeControl({wd,prefix,label:label+'-files-onboarding-'+attempt,...choice});
    await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
@@ -76,7 +77,7 @@ export default async function({session,wd,senderPort,transportStatus}){
   const browse=await waitForNativeControl({wd,prefix,label:label+'-files-browse',using:'xpath',value:'//*[@text="Browse" or @content-desc="Browse"]',optional:true,timeoutMs:3000});
   if(browse)await wd('POST',prefix+'/element/'+browse['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   await capture(label+'-files-browse');
-  const category=await waitForNativeControl({wd,prefix,label:label+'-files-category',using:'xpath',value:`//*[@text="${desired?'Images':'Downloads'}"]`});
+  const category=await waitForNativeControl({wd,prefix,label:label+'-files-category',using:'xpath',value:`//*[@text="${desired?'Images':'Downloads'}" or @text="${desired?'Pictures':'Download'}"]/ancestor-or-self::*[@clickable="true"][1]`});
   await wd('POST',prefix+'/element/'+category['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
   await capture(label+'-files-category');
   const file=await waitForNativeControl({wd,prefix,label:label+'-files-owned-image',using:'xpath',value:`//*[@text="${filename}" or contains(@content-desc,"${filename}")]`});
@@ -136,7 +137,9 @@ export default async function({session,wd,senderPort,transportStatus}){
    results.push({case:gallery,source,savedPath,savedSha256,byteExact:true,filesystem,mediaStore,normalMetadata});
    writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));
    writeFileSync(`evidence/saved-${gallery}.png`,saved);
-   await fileManagerDetails(filename,gallery,desired);
+   try {await fileManagerDetails(filename,gallery,desired);results.at(-1).fileManagerDetails={captured:true};}
+   catch(error){results.at(-1).fileManagerDetails={captured:false,error:String(error)};await capture(gallery+'-files-detail-blocker');}
+   finally{await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});}
    await click('Done');
   }
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
