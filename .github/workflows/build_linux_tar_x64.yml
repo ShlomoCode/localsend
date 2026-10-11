@@ -1,6 +1,11 @@
 name: Diagnose AppImage 2690 Gentoo
 on:
   workflow_dispatch:
+    inputs:
+      evidence_run:
+        description: Existing run to compact without application workloads
+        type: string
+        default: ''
 jobs:
   gentoo:
     runs-on: ubuntu-24.04
@@ -8,7 +13,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Inspect official artifact and prepare Gentoo
+        if: inputs.evidence_run == ''
         run: bash support/diagnostics/2690/inspect.sh
+      - uses: actions/download-artifact@v6
+        if: inputs.evidence_run != ''
+        with:
+          name: issue2690-evidence-${{ inputs.evidence_run }}
+          path: evidence/cloud
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.evidence_run }}
+      - name: Compact existing evidence
+        if: inputs.evidence_run != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          for screenshot in evidence/cloud/launch/*.xwd; do
+            ffmpeg -loglevel error -y -f xwd_pipe -i "$screenshot" -frames:v 1 "${screenshot%.xwd}.png"
+            rm "$screenshot"
+          done
+          rm evidence/cloud/repacked-*.AppImage
       - uses: actions/upload-artifact@v6
         if: always()
         with:
