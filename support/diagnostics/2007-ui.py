@@ -76,7 +76,7 @@ click(*text('File', 'file-button'))
 screen('file-picker-visible')
 fixture = Path('/tmp/issue-2007/A.txt')
 fixture.parent.mkdir(exist_ok=True)
-fixture.write_text('LocalSend issue 2007 original app control v1\n')
+fixture.write_text('LocalSend issue 2007 original app control v1\nRun: ' + os.environ['GITHUB_RUN_ID'] + '\n')
 run('xdotool', 'key', 'ctrl+l')
 run('xdotool', 'type', '--clearmodifiers', str(fixture))
 run('xdotool', 'key', 'Return')
@@ -114,3 +114,46 @@ while not (out / 'control-completed').exists():
         raise RuntimeError('Receiver app control did not complete')
     time.sleep(1)
 screen('sender-control-completed')
+(out / 'sender-first-finished').touch()
+if os.environ.get('ISSUE_2007_RESEND'):
+    deadline = time.monotonic() + 180
+    while not (out / 'resend-ready').exists():
+        if time.monotonic() > deadline:
+            screen('sender-delete-control-timeout')
+            raise RuntimeError('Real receiver deletion did not complete')
+        time.sleep(0.5)
+    # Observed original Finished screen places the session Done action here.
+    click(938, 680)
+    screen('resend-send-page')
+    click(*text('File', 'resend-file-button'))
+    screen('resend-file-picker-visible')
+    run('xdotool', 'key', 'ctrl+l', 'ctrl+a')
+    run('xdotool', 'type', '--clearmodifiers', str(fixture))
+    run('xdotool', 'key', 'Return')
+    time.sleep(2)
+    resolved = screen('resend-file-location-resolved')
+    if not any(w['text'].strip().startswith('Files:') for w in resolved):
+        click(*text('Open', 'resend-file-picker-open'))
+        time.sleep(2)
+    words = screen('resend-file-selected')
+    if not any(w['text'].strip().startswith('Files:') for w in words):
+        raise RuntimeError('Resend actual file picker did not select A.txt')
+    nearby = [w for w in words if w['text'].strip() in ['Nearby', 'devices']]
+    if len(nearby) < 2:
+        raise RuntimeError('Resend Nearby devices row missing')
+    row_end = max(int(w['left']) + int(w['width']) for w in nearby)
+    row_y = int(nearby[0]['top']) + int(nearby[0]['height']) // 2
+    click(row_end + 70, row_y)
+    text('Enter', 'resend-manual-address-dialog')
+    run('xdotool', 'type', '--clearmodifiers', '127.0.0.1')
+    run('xdotool', 'key', 'Return')
+    time.sleep(2)
+    screen('resend-transfer-requested')
+    (out / 'resend-requested').touch()
+    deadline = time.monotonic() + 120
+    while not (out / 'resend-completed').exists():
+        if time.monotonic() > deadline:
+            screen('sender-resend-timeout')
+            raise RuntimeError('Receiver resend observation did not complete')
+        time.sleep(0.5)
+    screen('sender-resend-completed')

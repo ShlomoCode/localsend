@@ -28,7 +28,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   await new Promise(r=>setTimeout(r,2000));
  }
  assert(receiverReady,'Original Android app did not render Receive within 40 seconds');
- const desktop=spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh']);
+ const before=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
+  if(!String(error).includes('No such file or directory'))throw error;
+  return null;
+ });
+ assert.equal(before,null,'Baseline A.txt already exists on the device; do not mistake an old file for this transfer');
+ writeFileSync('evidence/baseline-path-absence.json',JSON.stringify({path:'/sdcard/Download/A.txt',absent:true,utc:new Date().toISOString()},null,2));
+ const desktop=spawn('dbus-run-session',['--','xvfb-run','-a','-s','-screen 0 1200x800x24','bash','support/diagnostics/2007-physical-sender.sh'],{env:{...process.env,ISSUE_2007_RESEND:'1'}});
  const log=createWriteStream('evidence/desktop-process.log');desktop.stdout.pipe(log);desktop.stderr.pipe(log);
  let proxy;
  try {
@@ -69,8 +75,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   assert.deepEqual(actual,expected,'Saved Android file differs from selected desktop file');
   writeFileSync('evidence/actual-app-control.json',JSON.stringify({device:'Vivo Y21',os:'Android 11',release:'1.18.2',sender:'Original Linux desktop app through real file picker',receiver:'Original Android app, actual Accept action',destination:'/sdcard/Download/A.txt',bytes:actual.length,sha256:createHash('sha256').update(actual).digest('hex'),byteExact:true,transport:transportStatus()},null,2));
   writeFileSync('evidence/control-completed','verified\n');
-  await new Promise(r=>desktop.once('exit',r));
-  assert.equal(desktop.exitCode,0,'Desktop control did not complete');
+  await waitFile('evidence/sender-first-finished',30000);
   // Inspect the physical device's legitimate file-manager entry point only
   // after saved-file byte equality succeeds. No file is deleted here.
   await wd('POST',prefix+'/appium/device/press_keycode',{keycode:3});
@@ -103,6 +108,58 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
    await new Promise(r=>setTimeout(r,1000));
    await snapshot('files-A-selected');
+   const remove=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Delete'});
+   await wd('POST',prefix+'/element/'+remove['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   await new Promise(r=>setTimeout(r,1000));
+   await snapshot('files-delete-dialog');
+   const deleteSource=readFileSync('evidence/android-files-delete-dialog.xml','utf8');
+   const deletionMode=/trash/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
+   const confirm=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE" or @text="Move to trash" or @text="Move to Trash")]'});
+   const deleteUtc=new Date().toISOString();
+   await wd('POST',prefix+'/element/'+confirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   await new Promise(r=>setTimeout(r,1500));
+   await snapshot('files-after-deletion');
+   const absent=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
+    if(!String(error).includes('No such file or directory'))throw error;
+    return null;
+   });
+   assert.equal(absent,null,'Confirmed file-manager deletion did not remove A.txt from its path');
+   writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:'Google Files',deletionMode,utc:deleteUtc,path:'/sdcard/Download/A.txt',pathAbsent:true,confirmation:'android-files-delete-dialog.xml'},null,2));
+   await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
+   await new Promise(r=>setTimeout(r,1500));
+   await snapshot('receiver-return-after-delete');
+   const done=await wd('POST',prefix+'/element',{using:'xpath',value:'//*[@content-desc="Done" and @clickable="true"]'});
+   await wd('POST',prefix+'/element/'+done['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   await snapshot('receiver-ready-for-resend');
+   writeFileSync('evidence/resend-ready','Actual file-manager deletion and path absence verified\n');
+   await waitFile('evidence/resend-requested',90000);
+   let secondAccept;
+   for(let i=0;i<20;i++){
+    await snapshot('resend-request-'+i);
+    secondAccept=await wd('POST',prefix+'/element',{using:'accessibility id',value:'Accept'}).catch(()=>null);
+    if(secondAccept)break;
+    await new Promise(r=>setTimeout(r,1000));
+   }
+   assert(secondAccept,'Actual resend did not render Android approval');
+   const acceptUtc=new Date().toISOString();
+   await wd('POST',prefix+'/element/'+secondAccept['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+   let saved;
+   for(let attempt=0;attempt<10;attempt++){
+    await new Promise(r=>setTimeout(r,1000));
+    await snapshot('after-resend-accept-'+attempt);
+    const value=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Download/A.txt'}).catch(error=>{
+     if(!String(error).includes('No such file or directory'))throw error;
+     return null;
+    });
+    if(value!==null){saved=Buffer.from(value,'base64');break;}
+   }
+   const byteExact=saved?.equals(expected)??false;
+   if(saved)writeFileSync('evidence/android-resaved-A.txt',saved);
+   writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:'1.18.2',deletionMode,deleteUtc,acceptUtc,unchangedFile:true,sameName:'A.txt',sameDestination:'/sdcard/Download/A.txt',accepted:true,saved:saved!==undefined,byteExact,bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
+   writeFileSync('evidence/resend-completed','Resend outcome observed; inspect byteExact and endpoint evidence\n');
+   await new Promise(r=>desktop.once('exit',r));
+   assert.equal(desktop.exitCode,0,'Desktop resend observation did not complete');
+   if(saved)assert(byteExact,'Resaved file differs from selected original file');
   }
  } finally {
   if(desktop.exitCode===null)desktop.kill('SIGTERM');
