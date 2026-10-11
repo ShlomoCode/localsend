@@ -1,0 +1,47 @@
+name: Build 513 normal hosted candidate
+on:
+  workflow_dispatch:
+    inputs:
+      production_ref:
+        description: Production candidate branch in this fork
+        default: codex/bug-513-flatpak-portal
+        type: string
+      phase:
+        description: Resolve lock first, then validate exact committed lock
+        default: resolve
+        type: choice
+        options: [resolve, validate]
+  push:
+    branches: [codex/bug-513-fedora-diagnostics]
+    paths: [.github/workflows/diagnose-513-hosted.yml, support/diagnostics/513-hosted.sh]
+jobs:
+  hosted:
+    if: "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[hosted-build]')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    env:
+      PRODUCTION_REF: ${{ inputs.production_ref || 'codex/bug-513-flatpak-portal' }}
+      HOSTED_PHASE: ${{ inputs.phase || 'resolve' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Prepare pinned tooling
+        run: |
+          dart pub global activate fvm
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+      - name: Prepare normal packaging dependencies
+        if: env.HOSTED_PHASE == 'validate'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev libsecret-1-dev flatpak flatpak-builder ruby
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Resolve or build the hosted candidate without overrides
+        run: bash support/diagnostics/513-hosted.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue513-hosted-source-${{ github.run_id }}
+          path: evidence/hosted/
