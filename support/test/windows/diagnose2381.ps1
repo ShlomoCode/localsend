@@ -462,7 +462,12 @@ if($FallbackControl) {
   Start-Sleep -Seconds 2
   Screenshot "$prefix-request"
   $alreadyReceived=@(Get-ChildItem $destination -File | Where-Object {$oldPaths -notcontains $_.FullName -and $_.Length -eq (Get-Item $fixture).Length -and (Get-FileHash $_.FullName -Algorithm SHA256).Hash -eq $originalHash}).Count -gt 0
-  if(-not $alreadyReceived) {Word "Accept" "$prefix-request"}
+  if(-not $alreadyReceived) {
+   $requestWords=Import-Csv "$EvidenceDirectory/$prefix-request.tsv" -Delimiter "`t"
+   if(@($requestWords | Where-Object {$_.text -eq "wants"}).Count -lt 1) {throw "Live incoming control request not visible"}
+   # Actual incoming request screenshot verifies Accept at x511-614/y683-719; OCR clips this bottom-edge label.
+   Click 566 702
+  }
   @{freshMatchingFileBeforeAccept=$alreadyReceived;acceptClicked=(-not $alreadyReceived)} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$prefix-accept-behavior.json"
   Start-Sleep -Seconds 5
   Screenshot "$prefix-completed"
