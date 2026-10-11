@@ -7,7 +7,11 @@ sudo apt-get update
 sudo apt-get install -y qemu-system-x86 qemu-utils sshpass python3-pip imagemagick
 pip install vncdotool
 if ! test -f "$mxroot/mx.iso"; then
-  curl -fL --retry 3 --max-time 900 -o "$mxroot/mx.iso" https://downloads.sourceforge.net/project/mx-linux/Old/MX-23.2/Xfce/MX-23.2_x64.iso
+  downloaded=0
+  for attempt in 1 2 3; do
+    if curl -fL --continue-at - --connect-timeout 30 --max-time 900 -o "$mxroot/mx.iso" https://downloads.sourceforge.net/project/mx-linux/Old/MX-23.2/Xfce/MX-23.2_x64.iso; then downloaded=1; break; fi
+  done
+  test "$downloaded" = 1
 fi
 curl -fL --retry 3 -o "$mxroot/MX-23.2_x64.iso.sha256" https://downloads.sourceforge.net/project/mx-linux/Old/MX-23.2/Xfce/MX-23.2_x64.iso.sha256
 sha256sum "$mxroot/mx.iso" > evidence/mx/iso-sha256.txt
