@@ -208,7 +208,8 @@ class SendTab extends StatelessWidget {
                 ),
               ),
             ...vm.nearbyDevices.map((device) {
-              final favoriteEntry = vm.favoriteDevices.findDevice(device);
+              final favoriteEntry = vm.favoriteDevices.firstWhereOrNull((e) => e.fingerprint == device.fingerprint && e.ip == device.ip) ??
+                  vm.favoriteDevices.findDevice(device);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10, left: _horizontalPadding, right: _horizontalPadding),
                 child: Hero(
