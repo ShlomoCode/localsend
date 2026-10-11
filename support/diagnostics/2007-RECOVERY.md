@@ -35,3 +35,11 @@ Storage-observer attempt 38162572542 compiled and passed transport controls, the
 Run 38163020641 completed a real same-allocation Trash failure, native owned-item permanent purge with empty-bin observation, and failing same-name retry after 45,023 ms. A fresh-name receive on the same allocation then saved identical 62-byte content (SHA-256 `ebb5d621f4219dc8ed2fe8cf83306c5386134d0b4b38f005a2ae6b4b8004b845`). The observer had all-files and read permissions and could stat the initial file, but its MediaStore queries were empty even before Trash. Query sensitivity was not established, so those empty results cannot prove row removal or absence.
 
 The refined observer removes the Download-only filter, matches either the unique exact name or exact original path, includes pending rows, and pre-registers returned owned row IDs for later queries after name/path changes. A known-present baseline must have a visible row before any Trash action; otherwise the next experiment stops as an observer visibility failure rather than repeating a non-discriminating resend.
+
+## Comparison with issue 2793 and fork PR 5
+
+The full issue 2793 body and four comments describe Windows 10 x64 / Android 11, both LocalSend 1.17. The reporter's log names `/storage/emulated/0/Download/android-release-unsigned.apk`, `PathExistsException`, `_File.open`, and `_FileStreamConsumer.addStream`, with errno 17. Later comments narrow the failure to APK names starting with `android-release-`, while other names work. No deletion/Trash trigger is documented.
+
+Fork PR 5 changes MIME arguments only inside the SAF content-URI and SD-card branches. The official 1.17 source sends plain internal Download paths to `File(destinationPath).openWrite()` without either MIME argument. Therefore that patch does not affect the demonstrated direct-path error. Its PackageManager-scanning explanation is not established by the report or this source comparison.
+
+The missing-visible-file/name-specific errno-17 observation resembles issue 2007. APK/prefix sensitivity, the 99% display and Oplus/ColorOS log evidence differ from our observed Samsung Trash trigger. Keep the reports separate pending actual causal evidence. Raw files are retained at `/tmp/localsend-2007-recovered/issue2793.json`, `forkPR5.json`, `forkPR5.diff` and `file_saver-v1.17.dart`.

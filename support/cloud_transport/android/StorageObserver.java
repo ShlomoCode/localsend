@@ -13,8 +13,48 @@ import java.nio.charset.StandardCharsets;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Read-only diagnostic; queries only exact runner-owned fixture names. */
+/** Scoped diagnostic: observes owned fixtures and explicitly scans only allowlisted received files. */
 final class StorageObserver {
+  interface ScanCallback { void completed(JSONObject result); }
+
+  static void finalizeOwnedFile(Activity activity, String name, ScanCallback callback) throws Exception {
+    JSONObject config = new JSONObject(new String(readAsset(activity), StandardCharsets.UTF_8));
+    String run = config.getString("observerRun");
+    boolean allowed = false;
+    JSONArray names = config.getJSONArray("observerNames");
+    for (int i = 0; i < names.length(); i++) if (name.equals(names.getString(i))) allowed = true;
+    if (!run.matches("[0-9]+") || !name.matches("2007-" + run + "-[a-z]+\\.txt") || !allowed)
+      throw new IllegalArgumentException("Refuse scan outside exact runner-owned fixtures");
+    File path = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name);
+    if (!path.isFile()) throw new IllegalStateException("Scan intervention requires the received file to exist");
+    JSONObject result = new JSONObject();
+    result.put("action", "MediaScannerConnection.scanFile");
+    result.put("initiatingPackage", activity.getPackageName());
+    result.put("path", path.getAbsolutePath());
+    result.put("startedUnixMillis", System.currentTimeMillis());
+    result.put("beforeNativeStat", stat(path));
+    android.media.MediaScannerConnection.scanFile(activity, new String[]{path.getAbsolutePath()}, null, (scannedPath, uri) -> {
+      try {
+        result.put("callbackUnixMillis", System.currentTimeMillis());
+        result.put("callbackPath", scannedPath);
+        result.put("callbackUri", uri == null ? JSONObject.NULL : uri.toString());
+        result.put("afterNativeStat", stat(path));
+        result.put("afterRows", collect(activity));
+        File output = new File(activity.getExternalFilesDir(null), "storage-scan.json");
+        try (FileOutputStream stream = new FileOutputStream(output)) { stream.write(result.toString(2).getBytes(StandardCharsets.UTF_8)); }
+        activity.runOnUiThread(() -> callback.completed(result));
+      } catch (Exception error) {
+        android.util.Log.e("OwnedStorageScan", "Failed callback observation", error);
+        try {
+          result.put("callbackObservationError", error.toString());
+          File output = new File(activity.getExternalFilesDir(null), "storage-scan.json");
+          try (FileOutputStream stream = new FileOutputStream(output)) { stream.write(result.toString(2).getBytes(StandardCharsets.UTF_8)); }
+        } catch (Exception writeError) { android.util.Log.e("OwnedStorageScan", "Failed error retention", writeError); }
+        activity.runOnUiThread(() -> callback.completed(result));
+      }
+    });
+  }
+
   static JSONObject collect(Activity activity) throws Exception {
     JSONObject config = new JSONObject(new String(readAsset(activity), StandardCharsets.UTF_8));
     JSONArray names = config.getJSONArray("observerNames");
@@ -26,6 +66,22 @@ final class StorageObserver {
     report.put("unixMillis", System.currentTimeMillis());
     report.put("sdk", android.os.Build.VERSION.SDK_INT);
     report.put("targetSdk", activity.getApplicationInfo().targetSdkVersion);
+    report.put("buildFingerprint", android.os.Build.FINGERPRINT);
+    JSONObject provider = new JSONObject();
+    report.put("mediaProvider", provider);
+    try {
+      android.content.pm.ProviderInfo info = activity.getPackageManager().resolveContentProvider("media", 0);
+      if (info == null) provider.put("error", "Media provider resolution returned null");
+      else {
+        android.content.pm.PackageInfo pkg = activity.getPackageManager().getPackageInfo(info.packageName, 0);
+        provider.put("packageName", info.packageName);
+        provider.put("className", info.name);
+        provider.put("authority", info.authority);
+        provider.put("versionName", pkg.versionName);
+        provider.put("longVersionCode", pkg.getLongVersionCode());
+        provider.put("sourceDir", info.applicationInfo.sourceDir);
+      }
+    } catch (Exception error) { provider.put("error", error.toString()); }
     report.put("allFilesAccess", Environment.isExternalStorageManager());
     report.put("readExternalStorageGranted", activity.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED);
     JSONArray observations = new JSONArray();

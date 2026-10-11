@@ -43,5 +43,22 @@ export function storageObserver({wd,prefix,session}) {
   await activate('org.localsend.localsend_app');
   return observe('before-baseline');
  }
- return {observe,prepare};
+ async function finalize(fixtureName){
+  const previous=await wd('GET',prefix+'/appium/device/current_package');
+  await activate('org.localsend.cloudtransport');
+  const input=await waitForNativeControl({wd,prefix,using:'accessibility id',value:'Owned scan filename',label:'owned-scan-filename'});
+  const element=prefix+'/element/'+input['element-6066-11e4-a52e-4f735466cecf'];
+  await wd('POST',element+'/clear',{});
+  await wd('POST',element+'/value',{text:fixtureName});
+  const requestedUtc=new Date().toISOString();
+  await click('accessibility id','Finalize owned received file','owned-scan-request');
+  await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="Scan completed"]',label:'owned-scan-callback',timeoutMs:30000});
+  const encoded=await wd('POST',prefix+'/appium/device/pull_file',{path:'/sdcard/Android/data/org.localsend.cloudtransport/files/storage-scan.json'});
+  const result=JSON.parse(Buffer.from(encoded,'base64').toString());
+  assert.equal(result.callbackPath,'/storage/emulated/0/Download/'+fixtureName,'Callback must refer to this exact owned fixture');
+  writeFileSync('evidence/native-scan-intervention.json',JSON.stringify({session,requestedUtc,result},null,2));
+  await activate(previous);
+  return result;
+ }
+ return {observe,prepare,finalize};
 }

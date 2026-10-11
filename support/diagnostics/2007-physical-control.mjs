@@ -263,6 +263,20 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    const visibility=await storage.observe('before-trash');
    const owned=visibility.observations.find(observation=>observation.name===fixtureName);
    assert(owned&&owned.exists&&owned.queries.some(query=>query.rows.some(row=>row._id)),'Known-present owned file has no observable MediaStore row; refuse to interpret later empty rows');
+   const intervention=process.env.ISSUE_2007_FINALIZE_INTERVENTION;
+   if(intervention){
+    assert(['wait','scan'].includes(intervention),'Pre-Trash finalization intervention must be wait or scan');
+    const startedMs=Date.now(),targetMs=startedMs+45000;
+    const record={intervention,startedUtc:new Date(startedMs).toISOString(),targetUtc:new Date(targetMs).toISOString(),matchedDelayMs:45000};
+    if(intervention==='scan')record.scan=await storage.finalize(fixtureName);
+    else await storage.observe('wait-helper-switch-control');
+    const remainingMs=Math.max(0,targetMs-Date.now());
+    if(remainingMs)await new Promise(r=>setTimeout(r,remainingMs));
+    record.releasedUtc=new Date().toISOString();record.actualElapsedMs=Date.now()-startedMs;
+    record.deadlineOverrunMs=Math.max(0,Date.now()-targetMs);
+    writeFileSync('evidence/matched-pretrash-intervention.json',JSON.stringify(record,null,2));
+    await storage.observe('after-finalization-before-trash');
+   }
   }
   if(process.env.ISSUE_2007_BASELINE_ONLY==='1'){
    await closeReceiverFinished();
@@ -502,6 +516,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    return result;
    }
    const firstResult=await receiveResend('resend');
+   if(storage&&process.env.ISSUE_2007_FINALIZE_INTERVENTION)await storage.observe('after-resend');
    if(repeatResend){
     assert(firstResult.receiverFailed&&!firstResult.resendSucceeded&&firstResult.observedResultUtc,'Matched intervention requires the immediate resend to fail in the receiver UI');
     const intervention=process.env.ISSUE_2007_RETRY_INTERVENTION;

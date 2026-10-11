@@ -19,6 +19,9 @@ public final class MainActivity extends Activity {
     permission.setOnClickListener(v->startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.parse("package:"+getPackageName()))));
     Button observe=new Button(this);observe.setText("Observe owned storage");observe.setContentDescription("Observe owned storage");layout.addView(observe);
     observe.setOnClickListener(v->{try {org.json.JSONObject report=StorageObserver.collect(this);text.setText("Observer complete; allFilesAccess="+report.getBoolean("allFilesAccess"));}catch(Exception error){text.setText("Observer failed: "+error);}});
+    EditText scanName=new EditText(this);scanName.setContentDescription("Owned scan filename");layout.addView(scanName);
+    Button scan=new Button(this);scan.setText("Finalize owned received file");scan.setContentDescription("Finalize owned received file");layout.addView(scan);
+    scan.setOnClickListener(v->{text.setText("Scan pending");try {StorageObserver.finalizeOwnedFile(this,scanName.getText().toString(),result->text.setText("Scan completed"));}catch(Exception error){text.setText("Scan failed: "+error);}});
     setContentView(layout);
   }
 }

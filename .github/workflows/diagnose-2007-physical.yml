@@ -22,7 +22,7 @@ on:
         description: Fixed fixture run seed for identical bytes across comparison arms
       scenario:
         type: choice
-        options: [unchanged, changed, renamed, provider-probe, same-session, storage-session]
+        options: [unchanged, changed, renamed, provider-probe, same-session, storage-session, scan-session]
         default: unchanged
         description: Actual resend file variant after permanent deletion
       deletion_timing:
@@ -98,7 +98,8 @@ jobs:
       ISSUE_2007_POST_DELETE_WAIT: ${{ inputs.post_delete_wait_seconds || '0' }}
       ISSUE_2007_RESTART_RECEIVER: ${{ inputs.restart_receiver && '1' || '0' }}
       ISSUE_2007_DESTINATION: ${{ inputs.destination || 'downloads' }}
-      SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/${{ inputs.scenario == 'storage-session' && '2007-storage-session.mjs' || inputs.scenario == 'same-session' && '2007-same-session.mjs' || '2007-physical-control.mjs' }}
+      ISSUE_2007_SCAN_COMPARISON: ${{ inputs.scenario == 'scan-session' && '1' || '0' }}
+      SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/${{ (inputs.scenario == 'storage-session' || inputs.scenario == 'scan-session') && '2007-storage-session.mjs' || inputs.scenario == 'same-session' && '2007-same-session.mjs' || '2007-physical-control.mjs' }}
     steps:
       - uses: actions/checkout@v6
       - name: Verify diagnostic JavaScript syntax before device allocation
