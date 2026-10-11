@@ -48,6 +48,9 @@ jobs:
     if: inputs.scenario == 'prepare-media-fixtures'
     runs-on: windows-2022
     timeout-minutes: 15
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Generate one immutable image and video fixture artifact
@@ -59,6 +62,11 @@ jobs:
             $env:PATH = "$env:ChocolateyInstall/bin;$env:PATH"
           }
           ./support/diagnostics/windows2311-fixtures.ps1 -OutputDirectory media-fixtures
+      - name: Retain supported device inventory before choosing Android 29 receiver
+        shell: pwsh
+        run: |
+          curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/devices.json -o media-fixtures/supported-devices.json
+          if ($LASTEXITCODE -ne 0) { throw 'Supported BrowserStack inventory retrieval failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
