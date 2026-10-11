@@ -53,7 +53,30 @@ jobs:
           # Container shares the host kernel. It never creates/enables swap or
           # claims to validate VM capacity. The VM mode retains those assertions.
           su -s /bin/bash probe -c 'bash /home/probe/2414-memory-preflight.sh container-tools'
-          su -s /bin/bash probe -c 'id; printf "PATH=%s\n" "$PATH"; command -v bash python3 stat findmnt getconf free ps journalctl cloud-init readelf scrot xdotool; /sbin/swapon --version; /sbin/ldconfig --version; journalctl -k -o short-monotonic --no-pager; cloud-init status --long; cat /proc/pressure/memory' > /home/probe/evidence/utility-contracts.txt 2>&1
+          su -s /bin/bash probe -c 'bash -s' > /home/probe/evidence/utility-contracts.txt 2>&1 <<'SH'
+          set -euo pipefail
+          id
+          printf 'PATH=%s\n' "$PATH"
+          for tool in bash python3 stat findmnt getconf free ps journalctl cloud-init readelf scrot xdotool; do command -v "$tool"; done
+          /sbin/swapon --version
+          /sbin/ldconfig --version
+          journalctl --help > /home/probe/evidence/journalctl-help.txt
+          cloud-init status --help > /home/probe/evidence/cloud-init-status-help.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          assert all(flag in Path('/home/probe/evidence/journalctl-help.txt').read_text() for flag in ('--dmesg', '--output', '--no-pager'))
+          assert '--long' in Path('/home/probe/evidence/cloud-init-status-help.txt').read_text()
+          PY
+          # Runtime services are absent in this container; preserve their exits
+          # explicitly. Help parsing is the CLI contract gate, not these exits.
+          set +e
+          journalctl -k -o short-monotonic --no-pager
+          printf 'journalctl_container_exit=%s\n' "$?"
+          cloud-init status --long
+          printf 'cloud_init_container_exit=%s\n' "$?"
+          set -e
+          cat /proc/pressure/memory
+          SH
       - name: Exercise proc reader on an ordinary sleep process
         run: |
           su -s /bin/bash probe -c 'python3 -' <<'PY'
@@ -72,6 +95,7 @@ jobs:
           sampler = subprocess.Popen(['python3', str(path), 'sample', json.dumps(state)])
           time.sleep(2)
           stage = driver.stage(state, 'container-sleep')
+          assert stage['pss_valid']
           assert stage['expected_starttime'] == stage['observed_starttime']
           assert isinstance(stage['smaps_rollup'], str) and 'SwapPss:' in stage['smaps_rollup']
           sampler.terminate()

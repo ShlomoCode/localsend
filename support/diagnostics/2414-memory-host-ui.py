@@ -31,7 +31,10 @@ def run(argv, timeout=30):
 
 def guest(action, *args):
     argv = ['python3', '/home/probe/2414-memory-receiver-driver.py', action, *map(str,args)]
-    return json.loads(run(SSH + ['source /home/probe/desktop-env.sh; '+shlex.join(argv)], 60))
+    result = json.loads(run(SSH + ['source /home/probe/desktop-env.sh; '+shlex.join(argv)], 60))
+    if action == 'stage' and not result['pss_valid']:
+        raise RuntimeError('PSS stage unavailable or process identity changed: '+str(args))
+    return result
 
 
 def desktop(side, *argv):
@@ -308,6 +311,9 @@ def run_case(count):
             raise RuntimeError('Receiver process exited; inspect supervisor and kernel evidence')
         if not result['receiver_final_status']['sampler_alive']:
             raise RuntimeError('Receiver sampler exited before case completion')
+        if not (result['receiver_final_status']['kernel']['journal_read_succeeded']
+                and result['receiver_final_status']['kernel']['baseline_read_succeeded']):
+            raise RuntimeError('Kernel evidence unavailable; no OOM absence claim is qualified')
     except Exception as error:
         result.update({'failure':str(error),'classification':'unknown-cause-or-infrastructure-failure'})
         for side in ('host','guest'):

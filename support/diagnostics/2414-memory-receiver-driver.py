@@ -56,16 +56,31 @@ def vmstat():
 
 def journal(state, label):
     started = time.monotonic()
+    read_succeeded = True
+    read_error = None
     try:
         data = subprocess.check_output(['sudo', 'journalctl', '-k', '--no-pager', '-o', 'short-monotonic'], text=True, timeout=25)
     except Exception as error:
         data = str(error)
+        read_succeeded = False
+        read_error = str(error)
     (OUT / f"files-{state['count']}-{label}-kernel.txt").write_text(data)
+    metadata = OUT / f"files-{state['count']}-{label}-kernel-read.json"
+    write(metadata, {'read_succeeded': read_succeeded, 'error': read_error})
     baseline = read(OUT / f"files-{state['count']}-baseline-kernel.txt")
+    baseline_metadata = OUT / f"files-{state['count']}-baseline-kernel-read.json"
+    try:
+        baseline_succeeded = json.loads(baseline_metadata.read_text())['read_succeeded']
+    except (OSError, ValueError, KeyError):
+        baseline_succeeded = False
     baseline_lines = set(baseline.splitlines()) if isinstance(baseline, str) else set()
-    oom_lines = [line for line in data.splitlines() if line not in baseline_lines and re.search('out of memory|killed process|oom-kill', line, re.I)]
-    victims = [line for line in oom_lines if re.search(r'Killed process\s+' + str(state['pid']) + r'\b', line, re.I)]
+    oom_lines = ([line for line in data.splitlines() if line not in baseline_lines and re.search('out of memory|killed process|oom-kill', line, re.I)]
+                 if read_succeeded and baseline_succeeded else None)
+    victims = ([line for line in oom_lines if re.search(r'Killed process\s+' + str(state['pid']) + r'\b', line, re.I)]
+               if oom_lines is not None else None)
     return {'oom_lines_since_baseline': oom_lines, 'matching_pid_victim_lines': victims,
+            'journal_read_succeeded': read_succeeded, 'journal_read_error': read_error,
+            'baseline_read_succeeded': baseline_succeeded,
             'started': started, 'completed': time.monotonic(),
             'interpretation': 'PID-matched kernel evidence; correlate event time with launch/starttime before claiming OOM'}
 
@@ -109,6 +124,9 @@ def stage(state, name):
               'vmstat': vmstat()}
     record['read_completed'] = time.monotonic()
     record['read_duration_seconds'] = record['read_completed'] - start
+    record['pss_valid'] = (isinstance(pss, str) and record['observed_starttime'] == state['starttime']
+                           and all(re.search(r'^' + key + r':\s+\d+ kB$', pss, re.M)
+                                   for key in ('Rss', 'Pss', 'Swap', 'SwapPss')))
     with (OUT / f"files-{state['count']}-stages.jsonl").open('a') as output:
         output.write(json.dumps(record) + '\n')
     return record
