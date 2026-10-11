@@ -60,7 +60,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     }
     res.writeHead(404);res.end('{}');
   });
-  return {token,metrics,trace,record,status:()=>({...metrics,queued,peak,peers:peers.size}),
+  return {token,metrics,trace,record,status:()=>({...metrics,queued,peak,peers:peers.size,polling:!!waiter}),
     start:async()=>{if(!reverseTargetPort)await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
     stop:async()=>{record('relay-stop');if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}for(const [id,p] of peers){record('relay-stop-close',id);p.destroy();}server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),...(reverseTargetPort?[]:[new Promise(r=>tcp.close(r))])]);}};
 }

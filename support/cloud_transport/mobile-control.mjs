@@ -37,7 +37,12 @@ try {
   assert.equal(reply.count,size);assert.equal(reply.sha256,expected);results.push({bytes:size,byteExact:true,replyAfterHalfClose:true});console.log('Physical control passed '+size+' bytes');
  }
  writeFileSync('mobile-control-results.json',JSON.stringify({device:caps['appium:deviceName'],os:caps['appium:platformVersion'],results,metrics:r.status()},null,2));
- await clickText('Stop helper');await clickText('Relay to LocalSend');
+ await clickText('Stop helper');
+ const handoffStart=Date.now(),handoffBefore=r.status();
+ while(r.status().polling&&Date.now()-handoffStart<20000)await new Promise(ok=>setTimeout(ok,200));
+ writeFileSync('evidence/relay-handoff.json',JSON.stringify({before:handoffBefore,after:r.status(),waitMs:Date.now()-handoffStart,utc:new Date().toISOString()}));
+ assert(!r.status().polling,'Old helper long poll did not end before handoff deadline');
+ await clickText('Relay to LocalSend');
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});
  await new Promise(ok=>setTimeout(ok,4000));
  const source=await wd('GET',`/session/${session}/source`);writeFileSync('localsend-source.xml',source);
