@@ -1,0 +1,47 @@
+name: Issue 1054 pinned source-build replay
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-1054-reselection-diagnostic]
+    paths:
+      - .github/workflows/diagnose-1054-replay.yml
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-1054-linux
+  cancel-in-progress: false
+jobs:
+  real-app-comparison:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: 11712906143
+          run-id: 38166398926
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: source-evidence
+          merge-multiple: true
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils openbox xdotool scrot tesseract-ocr imagemagick iproute2 dbus-x11 libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0t64 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 jq ffmpeg
+      - name: Replay both immutable source builds through ordinary app UI
+        env:
+          ISSUE1054_SOURCE_RUN: '38166398926'
+        run: bash support/diagnostics/1054-source/compare.sh
+      - name: Restore evidence access
+        if: always()
+        run: |
+          if test -d evidence; then
+            sudo chown -R "$(id -u):$(id -g)" evidence
+            sudo chmod -R u+rwX evidence
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue1054-pinned-comparison-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14

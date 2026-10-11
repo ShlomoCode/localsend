@@ -6,7 +6,7 @@ cp -a source-artifact/provenance evidence/source-provenance
 if [[ -n ${ISSUE1054_CONTROLLED_VARIANT:-} ]]; then
   (cd source-artifact && sha256sum -c source-bundle.tar.gz.sha256)
   [[ $(jq -r .variant source-artifact/provenance/build-inputs.json) == "$ISSUE1054_CONTROLLED_VARIANT" ]]
-  [[ $(jq -r .run_url source-artifact/provenance/build-inputs.json) == "https://github.com/ShlomoCode/localsend/actions/runs/$GITHUB_RUN_ID" ]]
+  [[ $(jq -r .run_url source-artifact/provenance/build-inputs.json) == "https://github.com/ShlomoCode/localsend/actions/runs/${ISSUE1054_SOURCE_RUN:-$GITHUB_RUN_ID}" ]]
   cmp source-artifact/provenance/source-diff-before.patch source-artifact/provenance/source-diff-after.patch
   if [[ $ISSUE1054_CONTROLLED_VARIANT == baseline ]]; then
     [[ ! -s source-artifact/provenance/source-diff-after.patch ]]

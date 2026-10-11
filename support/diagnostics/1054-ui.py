@@ -294,6 +294,10 @@ try:
         wid = window(pid)
         apps.append((process, wid, pid))
         focus(wid)
+        # Initial native frame restoration can arrive after window mapping.
+        # Wait for actual app content before asserting the normalized frame.
+        locate("LocalSend", role + "-content-ready", 30)
+        time.sleep(3)
         normalize(wid, role + "-startup-normalized")
         # A fresh valid profile opens the ordinary release-notes page. Finish
         # it through its rendered Done control before checking the home alias.
