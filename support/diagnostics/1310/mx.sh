@@ -37,6 +37,12 @@ apt-get update
 apt-get install -y openssh-server
 service ssh start
 ss -lntp
+ufw status verbose
+iptables -S
+# Permit this isolated QEMU host to reach observation SSH using the distro's
+# normal firewall configuration. Preserve all other firewall rules.
+ufw allow from 10.0.2.2 to any port 22 proto tcp
+ufw status verbose
 date -u
 BOOTSTRAP
 genisoimage -quiet -r -o "$mxroot/bootstrap.iso" -V OBSERVATION "$mxroot/bootstrap"
@@ -74,7 +80,7 @@ if ! timeout 12 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then
     if timeout 10 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then ready=1; break; fi
     if (( n % 6 == 0 )); then
       vncdo -s localhost::5900 key shift capture "evidence/mx/bootstrap-progress-$n.png"
-      tail -n 30 evidence/mx/serial.log
+      sudo tail -n 30 evidence/mx/serial.log
     fi
     sleep 5
   done
