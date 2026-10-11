@@ -52,8 +52,8 @@ done
 phase=apt-update
 timeout 240 apt-get update
 phase=ssh-install
-# A previous 600-second run remained at libc-bin triggers; this run diagnoses that stall.
-timeout 240 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
+# APT uses the live terminal; a separate timeout process group stopped it during job control.
+timeout --foreground 240 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
 phase=ssh-start
 systemctl start ssh
 systemctl show ssh -p ActiveState -p SubState
@@ -116,7 +116,10 @@ timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tes
 curl -fL --connect-timeout 20 --max-time 180 https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-linux-x86-64.deb -o /tmp/localsend.deb
 sha256sum /tmp/localsend.deb > evidence/release-sha256.txt
 timeout 120 sudo apt-get install -y /tmp/localsend.deb
-export DISPLAY=:0 XAUTHORITY=/home/mint/.Xauthority XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
+# Use the actual Cinnamon login bus, which need not equal the systemd user bus.
+desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
+tr '\0' '\n' < "/proc/$desktop_pid/environ" | grep -E '^(DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)=' > evidence/session-environment.txt
+while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
 uname -a > evidence/environment.txt
 cat /etc/os-release >> evidence/environment.txt
 cinnamon --version >> evidence/environment.txt
@@ -130,7 +133,7 @@ if [ "$status" = 0 ]; then
 timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
-export DISPLAY=:0 XAUTHORITY=/home/mint/.Xauthority XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
+while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
 screen_size=$(xrandr | sed -n "s/.*current \([0-9]*\) x \([0-9]*\),.*/\1x\2/p")
 ffmpeg -y -f x11grab -framerate 10 -video_size "$screen_size" -i :0 -c:v libx264 -preset ultrafast evidence/scenario.mp4 > evidence/video.log 2>&1 &
 video_pid=$!
