@@ -1,6 +1,8 @@
 name: Diagnose Flatpak autostart 1927
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/bug-1927-diagnostics]
 jobs:
   baseline:
     runs-on: ubuntu-24.04
