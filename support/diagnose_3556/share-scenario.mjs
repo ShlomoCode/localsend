@@ -24,6 +24,46 @@ export default async function shareScenario({session,wd,output}){
   [...m[0].matchAll(/([\w.:-]+)=(["'])(.*?)\2/g)].map(a=>[a[1],decode(a[3])])));
  const labels=xml=>nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);
  const source=()=>wd('GET',base+'/source');
+ let nativeLogsUnavailable=false,nextNativeLogs=0;
+ async function nativeLogs(name){
+  if(nativeLogsUnavailable||Date.now()<nextNativeLogs)return;
+  nextNativeLogs=Date.now()+30000;
+  try{save(name+'-native-logcat.json',{utc:new Date().toISOString(),entries:await wd('POST',base+'/log',{type:'logcat'}),
+   limit:'Provider log format is retained; thread identity is only established when the raw record exposes it. No thread stacks or CPU are inferred.'});}
+  catch(error){nativeLogsUnavailable=true;save('native-logcat-unavailable.json',{utc:new Date().toISOString(),error:redact(error.message)});}
+ }
+ const foregroundMethods=new Map();
+ async function foreground(name){
+  const result={utc:new Date().toISOString(),documentation:'https://github.com/appium/appium-uiautomator2-driver#mobile-getcurrentpackage'};
+  for(const [key,command,route] of [['package','getCurrentPackage','current_package'],['activity','getCurrentActivity','current_activity']]){
+   if(foregroundMethods.get(key)==='unavailable'){result[key+'Unavailable']=true;continue;}
+   try{
+    result[key]=foregroundMethods.get(key)==='legacy'?await wd('GET',base+'/appium/device/'+route):
+     await wd('POST',base+'/execute/sync',{script:'mobile: '+command,args:[{}]});
+    foregroundMethods.set(key,foregroundMethods.get(key)||'mobile');
+   }catch(error){
+    result[key+'Error']=redact(error.message);
+    if(/unknown command|unsupported|not implemented|unknown mobile command/i.test(error.message)){
+     try{result[key]=await wd('GET',base+'/appium/device/'+route);foregroundMethods.set(key,'legacy');}
+     catch(fallback){result[key+'FallbackError']=redact(fallback.message);foregroundMethods.set(key,'unavailable');}
+    }
+   }
+  }
+  save(name+'-foreground.json',result);return result;
+ }
+ async function shareObservation(name){
+  // Screenshot and focused package/activity do not depend on a successful accessibility tree.
+  const png=Buffer.from(await wd('GET',base+'/screenshot'),'base64');writeFileSync(path.join(directory,name+'.png'),png);
+  assert(png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Screenshot is not PNG');
+  const metadata={name,utc:new Date().toISOString(),width:png.readUInt32BE(16),height:png.readUInt32BE(20),foreground:await foreground(name)};
+  await nativeLogs(name);
+  try{metadata.xml=await source();save(name+'.xml',metadata.xml);metadata.primarypackage=nodes(metadata.xml).find(n=>n.package)?.package||null;}
+  catch(error){
+   metadata.sourceError=redact(error.message);save(name+'-source-error.json',{utc:new Date().toISOString(),error:metadata.sourceError});
+   if(!/Timed out after \d+ms waiting for the root AccessibilityNodeInfo/.test(error.message))throw error;
+  }
+  report.snapshots.push({...metadata,xml:undefined});return metadata;
+ }
  async function snap(name,xml){
   const text=xml||await source();save(name+'.xml',text);
   const png=Buffer.from(await wd('GET',base+'/screenshot'),'base64');writeFileSync(path.join(directory,name+'.png'),png);
@@ -80,7 +120,7 @@ export default async function shareScenario({session,wd,output}){
   return {name,uri,bytes,sha256,mediaDurationMs,decodedFrame:{width:Number(frame[1]),height:Number(frame[2])},availableBytes,details};
  }
  function selected(xml,bytes){
-  return labels(xml).some(v=>v.includes('Selection\nFiles: 1\nSize: '+(bytes===1048576?'1.0 MB':'16.0 GB')));
+  return labels(xml).some(v=>v.includes('Selection\nFiles: 1\nSize: '+(bytes===1048576?'1.0 MB':bytes===67108864?'67.1 MB':'16.0 GB')));
  }
  function manualResponse(xml){
   const text=labels(xml);
@@ -297,9 +337,9 @@ export default async function shareScenario({session,wd,output}){
   const chooser=await findChooserTarget(entry,name);
   await snap(name+'-chooser-ready',chooser.xml);entry.chooserLocalSendInputUtc=new Date().toISOString();
   await touch(await bounds('-android uiautomator','new UiSelector().text("LocalSend").enabled(true)'),'Observed native chooser LocalSend target',chooser);
-  const first=await snap(name+'-first-frame');entry.selectionObserved=selected(first.xml,fixture.bytes);
+  const first=await shareObservation(name+'-first-frame');entry.selectionObserved=Boolean(first.xml&&selected(first.xml,fixture.bytes));
   // Do not touch old coordinates after a rotation or layout change. Re-observe the semantic control.
-  const currentManual=await bounds('accessibility id','Manual sending').catch(()=>null);
+  const currentManual=first.xml&&labels(first.xml).includes('Manual sending')?await bounds('accessibility id','Manual sending').catch(()=>null):null;
   entry.layoutComparison={before:{width:prepared.before.width,height:prepared.before.height,manual:prepared.manual},
    after:{width:first.width,height:first.height,manual:currentManual}};
   if(!currentManual){
@@ -315,13 +355,18 @@ export default async function shareScenario({session,wd,output}){
   const start=Date.now(),deadline=start+seconds*1000;
   let selectionInputChecked=entry.selectionObserved&&Boolean(entry.nextInputUtc),index=0,nextCpu=0;
   do{
-   const xml=await source(),names=labels(xml),anr=/isn.t responding|not responding/i.test(names.join('\n'));
+   const shot=await shareObservation(name+'-observe-'+String(index++).padStart(3,'0'));
+   if(!shot.xml){
+    entry.observations.push({utc:shot.utc,elapsedMs:Date.now()-start,sourceUnavailable:true,sourceError:shot.sourceError,foreground:shot.foreground,
+     width:shot.width,height:shot.height});save(name+'-result.json',entry);save('progress.json',report);
+    if(Date.now()>=deadline)break;await sleep(Math.min(5000,deadline-Date.now()));continue;
+   }
+   const xml=shot.xml,names=labels(xml),anr=/isn.t responding|not responding/i.test(names.join('\n'));
    entry.selectionObserved=entry.selectionObserved||selected(xml,fixture.bytes);
    const response=manualResponse(xml);if(response)entry.manualResponse=response;
-   const shot=await snap(name+'-observe-'+String(index++).padStart(3,'0'),xml);
    if(Date.now()>=nextCpu){await sampleCpu(name+'-observe-'+index);nextCpu=Date.now()+30000;}
    entry.observations.push({utc:shot.utc,elapsedMs:Date.now()-start,anr,selection:selected(xml,fixture.bytes),manualResponse:response,
-    width:shot.width,height:shot.height,primarypackage:shot.primarypackage});
+    width:shot.width,height:shot.height,primarypackage:shot.primarypackage,foreground:shot.foreground});
    if(anr){await ui('textMatches("(?i)wait")');entry.waitActions++;}
    else if(response){
     if(selectionInputChecked&&response==='Enter address')entry.responseAfterSelection=true;
@@ -342,7 +387,7 @@ export default async function shareScenario({session,wd,output}){
   entry.finishedUtc=new Date().toISOString();
   entry.outcome=entry.waitActions?'anr-observed':entry.selectionObserved&&entry.responseAfterSelection?'selection-and-input-response-observed':'selection-or-input-response-not-established';
   save(name+'-result.json',entry);
-  if(fixture.bytes===1048576)assert(entry.selectionObserved&&entry.responseAfterSelection,'Small share control did not establish Selection 1.0 MB and a real Enter address response');
+  if(fixture.bytes!==16000000000)assert(entry.selectionObserved&&entry.responseAfterSelection,'Share size control did not establish Selection and a real Enter address response');
   }catch(error){
    entry.outcome='incomplete';entry.error=redact(error.stack||error);
    if(entry.chooserSearch&&entry.chooserSearch.status!=='target-observed'){
@@ -366,6 +411,10 @@ export default async function shareScenario({session,wd,output}){
   report.actualControlPrecondition={verified:true,bytes:1048576,sha256:fixture.sha256};
   await editCancel(fixture,'small-edit-cancel');
   await warmShare(fixture,'small-share-control',30);
+  await activate('org.localsend.fixture3556');await helperClick('Stage 64MiB video');
+  const moderateXml=await waitFor(s=>labels(s).some(v=>/READY name=.*67108864\.mp4/.test(v)),120000,'64MiB share fixture staging did not become ready');
+  await snap('moderate-fixture-ready',moderateXml);const moderate=parseFixture(moderateXml,67108864);save('moderate-fixture.json',moderate);
+  await warmShare(moderate,'moderate-share-control',60);
   await activate('org.localsend.fixture3556');await helperClick('Refresh capacity');
   const capacity=await snap('large-capacity-before'),text=labels(capacity.xml).join('\n');
   const beforeFree=Number(text.match(/availableBytes=(\d+)/)?.[1]);
@@ -391,7 +440,8 @@ export default async function shareScenario({session,wd,output}){
   report.largeStaging.status='ready';report.largeStaging.finishedUtc=new Date().toISOString();report.largeStaging.fixture=large;
   save('large-staging-result.json',report.largeStaging);
   await editCancel(large,'large-edit-cancel');
-  await warmShare(large,'large-share-warm',300);
+  report.cacheGrowthUnavailable='No ordinary provider API for release-app private cache byte size or native thread stacks is established; ordinary logcat records are retained if available, without shell permission changes or private-cache payload pull.';
+  await warmShare(large,'large-share-warm',900);
   report.status=report.errors.length?'observed-with-incomplete-stages':'observed';report.finishedUtc=new Date().toISOString();return report;
  }catch(error){
   report.status='incomplete';report.errors.push(redact(error.stack||error));
