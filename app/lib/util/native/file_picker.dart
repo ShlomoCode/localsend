@@ -18,6 +18,7 @@ import 'package:localsend_app/util/native/pick_directory_path.dart';
 import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/ui/asset_picker_translated_text_delegate.dart';
 import 'package:localsend_app/util/ui/diagnostic_asset_picker_delegate.dart';
+import 'package:localsend_app/util/ui/diagnostic_picker_focus_trace.dart';
 import 'package:localsend_app/widget/dialogs/loading_dialog.dart';
 import 'package:localsend_app/widget/dialogs/message_input_dialog.dart';
 import 'package:localsend_app/widget/dialogs/no_permission_dialog.dart';
@@ -277,9 +278,18 @@ Future<void> _pickMedia(BuildContext context, Ref ref) async {
         .dispatchAsync(
           AddFilesAction(
             files: result,
-            converter: CrossFileConverters.convertAssetEntity,
+            converter: (AssetEntity asset) async {
+              final file = await CrossFileConverters.convertAssetEntity(asset);
+              if (const bool.fromEnvironment('ISSUE1864_TRACE')) {
+                tracePicker('converted-file', {'id': asset.id, 'name': file.name, 'size': file.size, 'path': file.path});
+              }
+              return file;
+            },
           ),
         );
+    if (const bool.fromEnvironment('ISSUE1864_TRACE')) {
+      tracePicker('send-files-added', {'files': ref.read(selectedSendingFilesProvider).map((file) => {'name': file.name, 'size': file.size}).toList()});
+    }
   }
 }
 

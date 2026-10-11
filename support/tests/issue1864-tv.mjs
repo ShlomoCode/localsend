@@ -25,6 +25,7 @@ const sessionData = await response.json();
 fs.writeFileSync(`${out}/appium-session.json`, JSON.stringify(sessionData, null, 2));
 const session = sessionData.value?.sessionId;
 if (!session) throw new Error('Appium did not create a UI snapshot session');
+if(process.env.ISSUE1864_TRACE==='true') adb('logcat','-c');
 async function snapshot(name) {
   const source = await (await fetch(`http://127.0.0.1:4723/session/${session}/source`)).json();
   if (typeof source.value !== 'string') throw new Error(`No XML snapshot for ${name}`);
@@ -241,6 +242,39 @@ await pause(2000);
 await snapshot('fresh-media-before-dpad');
 await replay('fresh-media-dpad-original');
 const freshAfter=await snapshot('fresh-media-after-dpad');
+let returnedFileControl;
+if(process.env.ISSUE1864_TRACE==='true') {
+  // This mouse confirmation control is separate from the unchanged D-pad
+  // observations above. It proves the picker-to-Send file return path only.
+  const before=selectedCount(freshAfter,'fresh-media-after-dpad');
+  if(before===0) await mousePhoto();
+  else if(before!==1) throw new Error('Returned-file control has unexpected initial selection');
+  const ready=await snapshot('returned-file-before-confirm');
+  if(selectedCount(ready,'returned-file-before-confirm')!==1) throw new Error('Returned-file control needs exactly one selected photo');
+  await mouseNode('Confirm (1/999)','returned-file-confirm');
+  await pause(2500);
+  const send=await snapshot('returned-file-send-list');
+  const labels=nodes(send).map(node=>node['content-desc'] || node.text || '').join(' ');
+  const visible=labels.match(/\b(?:orange|green|yellow|purple|blue|red)\.jpg\b/);
+  const pickerStillPresent=nodes(send).some(node=>/^Image\d+,/.test(node['content-desc'] ?? ''));
+  if(!visible || pickerStillPresent || !nodes(send).some(node=>node.text==='Send' || node['content-desc']?.startsWith('Send&#10;Tab'))) {
+    throw new Error('Picker did not close to a visible Send file row');
+  }
+  const currentPid=adb('shell','pidof','org.localsend.localsend_app').trim();
+  if(!/^\d+$/.test(currentPid)) throw new Error('Returned-file control has no unique current app PID');
+  const deviceLog=adb('logcat','-d','-v','threadtime',`--pid=${currentPid}`);
+  fs.writeFileSync(`${out}/focus-trace-logcat.txt`,deviceLog);
+  const traces=deviceLog.split('\n').filter(line=>line.includes('ISSUE1864_TRACE ')).map(line=>JSON.parse(line.split('ISSUE1864_TRACE ')[1]));
+  fs.writeFileSync(`${out}/focus-trace-events.json`,JSON.stringify(traces,null,2));
+  const returnedIndex=traces.findLastIndex(trace=>trace.stage==='picker-return' && Array.isArray(trace.ids) && trace.ids.length===1);
+  const returned=traces[returnedIndex];
+  const converted=traces.slice(returnedIndex+1).find(trace=>trace.stage==='converted-file' && trace.id===returned?.ids[0]
+    && trace.name===visible[0] && trace.size>0 && typeof trace.path==='string');
+  const added=traces.slice(returnedIndex+1).find(trace=>trace.stage==='send-files-added'
+    && trace.files?.some(file=>file.name===converted?.name && file.size===converted?.size));
+  if(returnedIndex<0 || !converted || !added) throw new Error('Visible Send filename lacks correlated picker return/conversion/added evidence');
+  returnedFileControl={method:'native mouse Confirm after D-pad observations; not a D-pad success claim',name:converted.name,size:converted.size,path:converted.path};
+}
 async function freshEntry(name) {
   adb('shell','am','force-stop','org.localsend.localsend_app');
   adb('shell','am','start','-n','org.localsend.localsend_app/.MainActivity');
@@ -289,6 +323,7 @@ fs.writeFileSync(`${out}/outcome.json`, JSON.stringify({
   mouseSelected: true,
   apkTarget:process.env.ISSUE1864_APK ?? 'original',
   phase:pairedCore ? 'paired-core' : 'full-diagnostic',
+  returnedFileControl,
   supplementaryScenarios:pairedCore ? 'not requested in paired-core; retained in previous diagnostic runs' : 'no-input, extended-arrows, keyboard-control',
   visualAssertions,
   selectedPhotosAfterDpad: nodes(after).filter(n => /Image\d+,/.test(n['content-desc'] ?? '') && n.selected === 'true'),
