@@ -33,6 +33,19 @@ def snap(name):
     for row in rows:
         for dimension in ('left', 'top', 'width', 'height'):
             row[dimension] = str(int(row[dimension])//2)
+    # Whole-screen layout segmentation omits the rendered sidebar labels even
+    # at 2x. The retained initial screenshot establishes this navigation ROI.
+    sidebar = out/(name+'-sidebar.png')
+    original.crop((110, 155, 275, 300)).resize((495, 435)).save(sidebar)
+    sidebar_result = run('tesseract', str(sidebar), 'stdout', '--psm', '6', 'tsv')
+    (out/(name+'-sidebar.tsv')).write_text(sidebar_result)
+    sidebar_rows = [r for r in csv.DictReader(io.StringIO(sidebar_result), delimiter='\t') if r['text'].strip()]
+    for row in sidebar_rows:
+        row['left'] = str(int(row['left'])//3+110)
+        row['top'] = str(int(row['top'])//3+155)
+        row['width'] = str(int(row['width'])//3)
+        row['height'] = str(int(row['height'])//3)
+    rows.extend(sidebar_rows)
     record('screenshot', stage=stage, name=name, labels=[r['text'] for r in rows])
     return rows
 
