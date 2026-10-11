@@ -26,7 +26,7 @@ jobs:
           cp "$ISSUE_AVD_DIR/config.ini" evidence-cloud/avd-default.ini
           curl -fsSL https://github.com/kdbhalala/avdslim/releases/download/v1.0.15/avdslim_v1.0.15_linux_amd64.tar.gz -o /tmp/avdslim.tar.gz
           tar -xzf /tmp/avdslim.tar.gz -C /tmp
-          sudo install /tmp/avdslim /usr/local/bin/avdslim
+          sudo install /tmp/avdslim_v1.0.15_linux_amd64/avdslim /usr/local/bin/avdslim
           avdslim help > evidence-cloud/avdslim-help.txt
           avdslim enable dpad issue1864-tv29
           cp "$ISSUE_AVD_DIR/config.ini" evidence-cloud/avd-dpad.ini
