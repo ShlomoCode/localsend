@@ -65,7 +65,7 @@ in {
     session_data = machine.succeed("${pkgs.coreutils}/bin/tr '\\0' '\\n' < /proc/$(${pkgs.procps}/bin/pgrep -u alice -f mate-session | ${pkgs.coreutils}/bin/head -1)/environ | ${pkgs.gnused}/bin/sed -n 's/^XDG_DATA_DIRS=//p'").strip()
     assert session_data, "MATE session XDG_DATA_DIRS was not recovered"
     def user_command(command):
-        return machine.succeed("${pkgs.util-linux}/bin/su - alice -c " + shlex.quote("${env} XDG_DATA_DIRS=" + shlex.quote(session_data) + " " + command))
+        return machine.succeed("${pkgs.shadow}/bin/su - alice -c " + shlex.quote("${env} XDG_DATA_DIRS=" + shlex.quote(session_data) + " " + command))
     user_command("dconf write /org/mate/screensaver/lock-enabled false")
     user_command("dconf write /org/mate/session/idle-delay 0")
     user_command("gsettings set org.mate.interface window-scaling-factor 1")
