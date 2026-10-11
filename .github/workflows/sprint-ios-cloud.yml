@@ -100,7 +100,7 @@ jobs:
           diagnostic="$GITHUB_WORKSPACE/harness/support/diagnostics/3197-ios-share"
           out="$GITHUB_WORKSPACE/evidence/share-observation"
           mkdir -p "$out/plugin-before" "$out/plugin-after"
-          cp "$diagnostic/manifest.json" "$diagnostic/share-handler-observation.patch" "$diagnostic/apply-observation.mjs" "$diagnostic/README.md" "$out/"
+          cp "$diagnostic/manifest.json" "$diagnostic/share-handler-observation.patch" "$diagnostic/apply-observation.mjs" "$diagnostic/README.md" "$diagnostic/installed-signature-reader.swift.inc" "$out/"
           package_directory="$(node --input-type=module - "$PWD/.dart_tool/package_config.json" <<'NODE'
           import fs from 'node:fs';
           import {fileURLToPath, pathToFileURL} from 'node:url';
