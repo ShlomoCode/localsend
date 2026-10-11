@@ -73,7 +73,28 @@ public final class RelayService extends Service {
       trace("target-connected",id);
       new Thread(()->readSocket(id,s,"target-read"),"relay-response").start();
     }else if(kind.equals("data")){sockets.get(id).getOutputStream().write(Base64.decode(e.getString("data"),Base64.NO_WRAP));}
-    else if(kind.equals("eof")){trace("sender-eof-command",id);sockets.get(id).shutdownOutput();}
+    else if(kind.equals("eof")){
+      trace("sender-eof-command",id);Socket s=sockets.get(id);
+      if(s==null||s.isClosed()||s.isOutputShutdown()){
+        trace("sender-eof-ignored:"+(s==null?"missing":s.isClosed()?"closed":"output-shutdown"),id);
+        Log.i("CloudTransport","peer="+id+" eofIgnored active="+new java.util.TreeSet<>(sockets.keySet()));return;
+      }
+      try{s.shutdownOutput();}
+      catch(IOException ex){
+        // A completed HTTP peer must not stop the pull loop and close a separate live upload.
+        trace("sender-eof-shutdown-failed:"+ex.getClass().getSimpleName(),id);
+        String activeBefore=new java.util.TreeSet<>(sockets.keySet()).toString();
+        sockets.remove(id,s);
+        try{s.close();}catch(IOException closeError){trace("sender-eof-close-failed:"+closeError.getClass().getSimpleName(),id);}
+        String message=String.valueOf(ex.getMessage()).replace('\n',' ').replace('\r',' ');
+        if(token!=null&&!token.isEmpty())message=message.replace(token,"[redacted]");
+        if(endpoint!=null&&!endpoint.isEmpty())message=message.replace(endpoint,"[redacted endpoint]");
+        message=message.replaceAll("https?://\\S+","[redacted URL]");
+        if(message.length()>240)message=message.substring(0,240);
+        Log.i("CloudTransport","peer="+id+" eofException="+ex.getClass().getSimpleName()+" message="+message
+          +" activeBefore="+activeBefore+" activeAfter="+new java.util.TreeSet<>(sockets.keySet()));
+      }
+    }
     else if(kind.equals("close")||kind.equals("error")){trace("relay-command:"+kind,id);Socket s=sockets.remove(id);if(s!=null)s.close();}
   }
   private void push(JSONObject e)throws Exception{request("POST","/push",e.toString());}

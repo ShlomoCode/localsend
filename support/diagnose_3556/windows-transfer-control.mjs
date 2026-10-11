@@ -367,6 +367,14 @@ try{
   }
   report.observations.push({utc:new Date(now).toISOString(),elapsedMs:now-sendStart,anr,androidFinished:finished,receiverStatus:result?.status,transport:r.status()});
   save('transfer-progress.json',report);
+  if(names.some(v=>v.includes('Finished with error'))){
+   await snap('android-transfer-error',xml);
+   if(names.includes('Advanced')){
+    await click('Advanced');const details=await snap('android-transfer-error-advanced');
+    save('android-transfer-error-labels.json',labels(details));
+   }
+   throw Error('Original Android reported Finished with error; inspect saved details and transport/device logs');
+  }
   if(anr){waits++;await ui('textMatches("(?i)wait")');}
   if(receiverExit&&receiverExit.code!==0)throw Error('Windows receiver failed; inspect results and both UI states');
   if(androidFinished&&verifiedAt){
