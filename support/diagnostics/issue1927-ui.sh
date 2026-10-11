@@ -29,11 +29,20 @@ stabilize_window() {
   sleep 2
   xdotool getwindowgeometry --shell "$wid" > "$OUT/window-geometry.txt"
 }
+run_ui_observer() {
+  local budget=8 remaining
+  if [ -n "${transition_deadline:-}" ]; then
+    remaining=$((transition_deadline-SECONDS))
+    [ "$remaining" -gt 0 ] || return 124
+    if [ "$remaining" -lt "$budget" ]; then budget=$remaining; fi
+  fi
+  timeout -s KILL "$budget" "$@"
+}
 settings_row_y() {
   local phrase=$1 label=$2 y
-  import -window "$wid" "$OUT/$label-locate.png" || return 1
-  test "$(identify -format '%wx%h' "$OUT/$label-locate.png")" = 1000x700 || return 1
-  tesseract "$OUT/$label-locate.png" "$OUT/$label-locate" tsv > "$OUT/$label-ocr.log" 2>&1 || return 1
+  run_ui_observer import -window "$wid" "$OUT/$label-locate.png" || return 1
+  test "$(run_ui_observer identify -format '%wx%h' "$OUT/$label-locate.png")" = 1000x700 || return 1
+  run_ui_observer tesseract "$OUT/$label-locate.png" "$OUT/$label-locate" tsv > "$OUT/$label-ocr.log" 2>&1 || return 1
   row_y_from_tsv "$phrase" "$label"
 }
 row_y_from_tsv() {
@@ -42,7 +51,7 @@ row_y_from_tsv() {
     'Minimize to') phrase='Minimize to the System Tray/Menu Bar when closing';;
     'Start hidden') phrase='Autostart: Start hidden';;
   esac
-  y=$(awk -F '\t' -v phrase="$phrase" '
+  y=$(run_ui_observer awk -F '\t' -v phrase="$phrase" '
     NR > 1 && $1 == 5 && $11 >= 50 && $7 >= 340 && $7+$9 < 745 {
       key=$2 "/" $3 "/" $4 "/" $5
       text[key]=text[key] " " $12
@@ -58,11 +67,11 @@ observed_switch_state() {
   local y=$1 label=$2 image="$OUT/$2-locate.png" state left right
   # The retained source renders establish the switch at x=798..849 for
   # this checked 1000x700 layout. Preserve its entire row association/crop.
-  convert "$image" -crop "64x40+790+$((y-20))" "$OUT/$label-switch-$y.png" || return 1
-  left=$(convert "$image" -crop "4x4+812+$((y-2))" -scale 1x1! -format '%[fx:r] %[fx:g] %[fx:b]' info:) || return 1
-  right=$(convert "$image" -crop "4x4+834+$((y-2))" -scale 1x1! -format '%[fx:r] %[fx:g] %[fx:b]' info:) || return 1
+  run_ui_observer convert "$image" -crop "64x40+790+$((y-20))" "$OUT/$label-switch-$y.png" || return 1
+  left=$(run_ui_observer convert "$image" -crop "4x4+812+$((y-2))" -scale 1x1! -format '%[fx:r] %[fx:g] %[fx:b]' info:) || return 1
+  right=$(run_ui_observer convert "$image" -crop "4x4+834+$((y-2))" -scale 1x1! -format '%[fx:r] %[fx:g] %[fx:b]' info:) || return 1
   printf '%s row_y=%s left_rgb=%s right_rgb=%s\n' "$label" "$y" "$left" "$right" >> "$OUT/switch-colors.txt"
-  state=$(awk -v left="$left" -v right="$right" 'BEGIN {
+  state=$(run_ui_observer awk -v left="$left" -v right="$right" 'BEGIN {
     split(left,l," "); split(right,r," ");
     white=(r[1]>.9 && r[2]>.9 && r[3]>.9);
     teal=(l[1]<.08 && l[2]>.33 && l[2]<.50 && l[3]>.29 && l[3]<.46);
@@ -99,24 +108,34 @@ desktop_entry_ready() {
   local kind=$1 entry="$HOME/.config/autostart/org.localsend.localsend_app.desktop" pid
   case "$kind" in
     sandbox-enabled)
-      pid=$(pgrep -n -x localsend) || return 1
-      sudo test -f "/proc/$pid/root$entry";;
-    host-native-enabled) test -f "$entry";;
-    host-flatpak-visible) test -f "$entry" && grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && ! grep -q -- '--hidden' "$entry";;
-    host-flatpak-hidden) test -f "$entry" && grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && grep -q -- '--hidden' "$entry";;
-    host-absent) test ! -e "$entry";;
+      pid=$(run_ui_observer pgrep -n -x localsend) || return 1
+      run_ui_observer sudo -n test -f "/proc/$pid/root$entry";;
+    host-native-enabled) run_ui_observer test -f "$entry";;
+    host-flatpak-visible)
+      run_ui_observer test -f "$entry" && run_ui_observer grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" || return 1
+      # A timeout/error must never qualify as absence of --hidden.
+      local grep_result=0
+      run_ui_observer grep -q -- '--hidden' "$entry" || grep_result=$?
+      [ "$grep_result" = 1 ];;
+    host-flatpak-hidden) run_ui_observer test -f "$entry" && run_ui_observer grep -q '^Exec=.*flatpak.*org.localsend.localsend_app' "$entry" && run_ui_observer grep -q -- '--hidden' "$entry";;
+    host-absent) run_ui_observer test ! -e "$entry";;
     *) return 1;;
   esac
 }
 wait_observed_transition() {
-  local phrase=$1 label=$2 expected=$3 entry_kind=$4 result y observed attempt
-  for attempt in $(seq 1 65); do
-    result=$(observed_switch_row "$phrase" "$label-attempt-$attempt") || {
-      printf 'unknown UI/geometry/label: %s attempt=%s\n' "$label" "$attempt" >> "$OUT/inconclusive-transitions.txt"
-      return 1
-    }
-    read -r y observed <<< "$result"
-    if [ "$observed" = "$expected" ] && desktop_entry_ready "$entry_kind"; then return 0; fi
+  local phrase=$1 label=$2 expected=$3 entry_kind=$4 result y observed attempt=0
+  local transition_deadline=$((SECONDS+65))
+  # Only called after one freshly qualified click. Animation/route/modal
+  # frames may be unknown; observing them never authorizes another action.
+  while [ "$SECONDS" -lt "$transition_deadline" ]; do
+    attempt=$((attempt+1))
+    if result=$(observed_switch_row "$phrase" "$label-attempt-$attempt"); then
+      read -r y observed <<< "$result"
+      if [ "$observed" = "$expected" ] && desktop_entry_ready "$entry_kind" && [ "$SECONDS" -lt "$transition_deadline" ]; then return 0; fi
+    else
+      printf '%s unknown UI/geometry/label: %s attempt=%s\n' "$(date -u --iso-8601=ns)" "$label" "$attempt" >> "$OUT/transition-observations.txt"
+    fi
+    [ "$SECONDS" -lt "$transition_deadline" ] || break
     sleep 1
   done
   printf 'transition timeout: %s expected_ui=%s entry=%s\n' "$label" "$expected" "$entry_kind" >> "$OUT/inconclusive-transitions.txt"

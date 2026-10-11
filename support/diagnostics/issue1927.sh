@@ -25,7 +25,7 @@ xdotool mousemove --window "$wid" 105 211 click 1
 sleep 3
 import -window "$wid" "$OUT/settings.png"
 tesseract "$OUT/settings.png" "$OUT/settings" tsv
-flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "HOME=%s\nXDG_CONFIG_HOME=%s\n" "$HOME" "$XDG_CONFIG_HOME"; ls -ld "$HOME/.config" "$XDG_CONFIG_HOME"; command -v localsend; ls -l /app/localsend_app; cat /.flatpak-info' > "$OUT/sandbox.txt"
+flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "HOME=%s\nXDG_CONFIG_HOME=%s\n" "$HOME" "$XDG_CONFIG_HOME"; for path in "$HOME/.config" "$XDG_CONFIG_HOME"; do if [ -e "$path" ]; then ls -ld "$path"; else printf "ABSENT: %s\n" "$path"; fi; done; command -v localsend; ls -l /app/localsend_app; cat /.flatpak-info' > "$OUT/sandbox.txt"
 find "$HOME/.config/autostart" "$HOME/.var/app/org.localsend.localsend_app/config" -maxdepth 2 -type f -print > "$OUT/files.txt" 2>&1 || true
 flatpak kill org.localsend.localsend_app
 sleep 2
