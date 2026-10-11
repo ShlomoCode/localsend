@@ -84,10 +84,13 @@ function SendToReceiver([string]$Ip) {
   Start-Sleep -Milliseconds 600
   $dialog=Snapshot 'address-dialog'
   ClickIpAddressTab $dialog
+  $mode=Snapshot 'ip-mode'
+  ClickWord $mode 'IP:'
   [Windows.Forms.Clipboard]::SetText($Ip)
   [Windows.Forms.SendKeys]::SendWait('^a')
   [Windows.Forms.SendKeys]::SendWait('^v')
   $confirmation=Snapshot 'address-filled'
+  if($confirmation.text -notmatch [regex]::Escape($Ip)) { throw 'Receiver IP was not visibly entered; no Confirm or Send.' }
   ClickWord $confirmation 'Confirm'
   Start-Sleep -Seconds 1
   [void](Snapshot 'after-send')
@@ -108,6 +111,7 @@ try {
   $linuxRoot=(& wsl -d Ubuntu-24.04 -u tester -- wslpath -a (Get-Location).Path.Replace('\','/')).Trim()
   $ip=(& wsl -d Ubuntu-24.04 -u tester -- bash -lc "hostname -I | cut -d' ' -f1").Trim()
   if($ip -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'No valid WSL receiver IPv4 address.' }
+  $ip | Set-Content (Join-Path $evidence 'target-ip.txt')
   $manifest=Get-Content C:/2230/manifest.json -Raw | ConvertFrom-Json
   foreach($case in $manifest) {
     $currentCase=$case.id
