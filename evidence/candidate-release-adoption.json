@@ -1,0 +1,12 @@
+{
+  "candidate": "76a356a2dd12404d2ce482b8b6aa4cf3afc7b6be",
+  "release_ref": "refs/tags/v1.18.0",
+  "release_commit": "82471a523411906d52f410e71503093c563ba44a",
+  "provider_compare": {
+    "status": "ahead",
+    "ahead_by": 39,
+    "behind_by": 0,
+    "merge_base_sha": "76a356a2dd12404d2ce482b8b6aa4cf3afc7b6be"
+  },
+  "evidence": "Read-only GitHub ref and compare APIs on 2026-10-11. Candidate is ancestor of v1.18.0. This proves code inclusion only; runtime causal comparison remains pending and original reporter environment/version remain unknown."
+}
