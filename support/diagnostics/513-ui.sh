@@ -40,6 +40,11 @@ capture 03-downloads-drag-overlay
 button false
 sleep 8
 capture 04-downloads-drop
+move 910 126
+button true
+button false
+sleep 2
+capture 04b-downloads-app-result
 # Relaunch the application to avoid keeping an earlier selection.
 /home/runner/513-vm/ssh 'flatpak kill org.localsend.localsend_app; export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus WAYLAND_DISPLAY=wayland-0; nohup flatpak run org.localsend.localsend_app >>/home/probe/513-app.log 2>&1 </dev/null &'
 sleep 10
@@ -62,3 +67,29 @@ capture 06-documents-drag-overlay
 button false
 sleep 8
 capture 07-documents-drop
+move 920 100
+button true
+button false
+sleep 2
+capture 07b-documents-app-result
+# Repeat the exact Documents condition in fresh application processes.
+for repetition in 2 3; do
+  /home/runner/513-vm/ssh "printf '\\nDOCUMENTS_REPEAT_$repetition\\n' >> /home/probe/513-app.log; flatpak kill org.localsend.localsend_app; export XDG_RUNTIME_DIR=/run/user/\$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus WAYLAND_DISPLAY=wayland-0; nohup flatpak run org.localsend.localsend_app >>/home/probe/513-app.log 2>&1 </dev/null &"
+  sleep 10
+  move 400 55
+  button true
+  button false
+  move 330 155
+  button true
+  move 350 175
+  move 500 400
+  move 600 650
+  capture "repeat-$repetition-overlay"
+  button false
+  sleep 5
+  # A click on the exposed app content foregrounds it without changing settings.
+  move 600 705
+  button true
+  button false
+  capture "repeat-$repetition-result"
+done
