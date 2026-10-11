@@ -9,6 +9,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
  const prefix=`/session/${session}`;
  const deletionTiming=process.env.ISSUE_2007_DELETE_TIMING||'absence';
  const requestedDeletionAction=process.env.ISSUE_2007_DELETE_ACTION||'permanent';
+ const purgeTrash=requestedDeletionAction==='trash-purge';
  const persistentSaf=process.env.ISSUE_2007_DESTINATION==='saf-documents-persistent';
  const safDocuments=persistentSaf||process.env.ISSUE_2007_DESTINATION==='saf-documents';
  const deviceFolder=safDocuments?'/sdcard/Documents':'/sdcard/Download';
@@ -313,7 +314,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    await snapshot('files-delete-dialog');
    const deleteSource=readFileSync('evidence/android-files-delete-dialog.xml','utf8');
    const deletionMode=/trash/i.test(deleteSource)?'trash':/permanent/i.test(deleteSource)?'permanent':'delete confirmation; permanence unspecified';
-   assert.equal(deletionMode,requestedDeletionAction,'Native confirmation does not match the requested deletion action; do not substitute another deletion mode');
+   assert.equal(deletionMode,purgeTrash?'trash':requestedDeletionAction,'Native confirmation does not match the requested deletion action; do not substitute another deletion mode');
    await waitFile('evidence/resend-address-ready',90000);
    const deleteUtc=new Date().toISOString();
    await wd('POST',prefix+'/element/'+confirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
@@ -355,6 +356,33 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(deletionTiming==='acknowledged')assert(firstToastObservedUtc||firstEmptyListObservedUtc,'Native UI never acknowledged deletion');
    const pathAbsenceUtc=absent===null?absenceObservations.at(-1).pathObservedUtc:null;
    writeFileSync('evidence/actual-deletion.json',JSON.stringify({app:fileManagerName,package:fileManagerPackage,deletionMode,deletionTiming,utc:deleteUtc,deleteClickReturnedUtc,path:deviceFolder+'/A.txt',pathAbsent:absent===null,pathAbsenceUtc,firstToastObservedUtc,firstEmptyListObservedUtc,toastToAbsenceObservedMs:firstToastObservedUtc&&pathAbsenceUtc?Date.parse(pathAbsenceUtc)-Date.parse(firstToastObservedUtc):null,absenceError,confirmation:'android-files-delete-dialog.xml'},null,2));
+   if(samsungFiles&&purgeTrash){
+    assert.equal(deletionTiming,'absence','Permanent trash purge control requires observed path absence before opening Trash');
+    async function nativeClick(using,value,label){
+     const element=await waitForNativeControl({wd,prefix,using,value,label});
+     await wd('POST',prefix+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+    }
+    await nativeClick('accessibility id','Go to My Files home','purge-my-files-home');
+    await nativeClick('xpath','//*[starts-with(@content-desc,"More options")]','purge-my-files-menu');
+    await nativeClick('xpath','//*[@text="Trash"]','purge-trash-entry');
+    const trashFile=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="A.txt"]',label:'purge-trash-owned-A',stableRect:true});
+    await snapshot('trash-retained-A');
+    assert.equal(await wd('GET',prefix+'/appium/device/current_package'),fileManagerPackage,'Trash foreground provider differs');
+    const trashRect=await wd('GET',prefix+'/element/'+trashFile['element-6066-11e4-a52e-4f735466cecf']+'/rect');
+    await wd('POST',prefix+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(trashRect.x+trashRect.width/2),y:Math.round(trashRect.y+trashRect.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:1000},{type:'pointerUp',button:0}]}]});
+    await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="1 selected"]',label:'purge-single-owned-file-selection'});
+    await snapshot('trash-owned-A-selected');
+    await nativeClick('id','com.sec.android.app.myfiles:id/menu_delete','purge-selected-trash-file');
+    const purgeConfirm=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@clickable="true" and (@text="Delete" or @text="DELETE")]',label:'purge-permanent-confirmation'});
+    await snapshot('trash-permanent-delete-dialog');
+    const purgeSource=readFileSync('evidence/android-trash-permanent-delete-dialog.xml','utf8');
+    assert(/permanent|forever/i.test(purgeSource),'Trash file purge confirmation does not explicitly establish permanent deletion');
+    const purgeUtc=new Date().toISOString();
+    await wd('POST',prefix+'/element/'+purgeConfirm['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+    await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[@text="No files or folders"]',label:'purge-empty-trash'});
+    await snapshot('trash-after-owned-A-purge');
+    writeFileSync('evidence/actual-trash-purge.json',JSON.stringify({package:fileManagerPackage,ownedFile:'A.txt',retainedFileObserved:true,oneSelected:true,permanentConfirmation:true,purgeUtc,emptyTrashObserved:true,confirmation:'android-trash-permanent-delete-dialog.xml'},null,2));
+   }
    await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
    if(deletionTiming==='absence'){
     await closeReceiverFinished();
@@ -404,6 +432,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
    if(saved)writeFileSync('evidence/android-resaved-'+resendInput.name,saved);
    writeFileSync('evidence/actual-resend-result.json',JSON.stringify({release:process.env.ISSUE_2007_RELEASE||'1.18.2',deletionMode,deletionTiming,deleteUtc,deleteClickReturnedUtc,firstToastObservedUtc,firstEmptyListObservedUtc,submissionUtc:submission.utc,acceptUtc,deleteToSubmissionMs:Date.parse(submission.utc)-Date.parse(deleteUtc),deleteToAcceptMs:Date.parse(acceptUtc)-Date.parse(deleteUtc),variant:resendInput.variant,unchangedFile:resendInput.variant!=='changed',sameName:resendInput.name==='A.txt',fileName:resendInput.name,destination:resendDestination,accepted:true,saved:saved!==undefined,byteExact,receiverFileDone,actualSavedPath,sameDestination:actualSavedPath===resendDestination,numberedPathExists:numbered!==null,numberedByteExact,numberedSha256:numbered?createHash('sha256').update(numbered).digest('hex'):null,resendSucceeded:(byteExact||numberedByteExact)&&receiverFileDone,expectedBytes:resendExpected.length,expectedSha256:createHash('sha256').update(resendExpected).digest('hex'),baselineSha256:createHash('sha256').update(expected).digest('hex'),bytes:saved?.length??null,sha256:saved?createHash('sha256').update(saved).digest('hex'):null,transport:transportStatus()},null,2));
    writeFileSync('evidence/resend-completed','Resend outcome observed; inspect byteExact and endpoint evidence\n');
+   if(receiverSource.includes('Finished with error')){
+    const errorRow=await waitForNativeControl({wd,prefix,using:'xpath',value:'//*[contains(@content-desc,"A.txt") and contains(@content-desc,"Error") and @clickable="true"]',label:'receiver-file-error-details',optional:true});
+    if(errorRow){
+     await wd('POST',prefix+'/element/'+errorRow['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+     await snapshot('resend-file-error-details');
+    }
+   }
    if(desktop.exitCode===null)await new Promise(r=>desktop.once('exit',r));
    assert.equal(desktop.exitCode,0,'Desktop resend observation did not complete');
    if(saved&&!numberedByteExact)assert(byteExact,'Resaved file differs from selected original file');

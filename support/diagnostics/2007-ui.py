@@ -194,4 +194,10 @@ if os.environ.get('ISSUE_2007_RESEND'):
             screen('sender-resend-timeout')
             raise RuntimeError('Receiver resend observation did not complete')
         time.sleep(0.5)
-    screen('sender-resend-completed')
+    resend_words = screen('sender-resend-completed')
+    resend_errors = [w for w in resend_words if w['text'].strip() == 'Error']
+    if resend_errors:
+        # The observed file row info icon is immediately after its Error label.
+        error = resend_errors[0]
+        click(int(error['left']) + int(error['width']) + 20, int(error['top']) + int(error['height']) // 2)
+        screen('sender-resend-error-details')

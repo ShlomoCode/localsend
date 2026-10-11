@@ -24,9 +24,9 @@ on:
         description: Release resend after observed absence, native deletion acknowledgement, or Delete request
       deletion_action:
         type: choice
-        options: [permanent, trash]
+        options: [permanent, trash, trash-purge]
         default: permanent
-        description: Require the actual native permanent deletion or trash operation
+        description: Require native permanent deletion, trash retention, or trash then permanent purge
       destination:
         type: choice
         options: [downloads, saf-documents, saf-documents-persistent]
