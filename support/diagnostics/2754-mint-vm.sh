@@ -3,10 +3,23 @@ set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_OS:-} == Linux ]] || { echo "Requires the authorized Linux cloud Actions runner" >&2; exit 8; }
 mkdir -p evidence/cloud /home/runner/issue2754-mint /tmp/issue2754-mint/seed
 probe_bridge_variant=${PROBE_BRIDGE_VARIANT:-system}
+probe_engine_variant=${PROBE_ENGINE_VARIANT:-official}
+probe_bundle_run_id=${PROBE_BUNDLE_RUN_ID:-}
+probe_engine_patch_hash=unused
+case "$probe_engine_variant" in
+ official) ;;
+ control|B)
+  test "${PROBE_APP_SOURCE:-official-deb}" = c1ce
+  [[ "$probe_bundle_run_id" =~ ^[0-9]+$ ]]
+  [[ "$probe_bridge_variant" = system || "$probe_bridge_variant" = A ]]
+  probe_engine_patch_hash=$(sha256sum support/diagnostics/2754-engine-build/B-with-tests.patch | awk '{print $1}')
+  ;;
+ *) echo "Unsupported engine variant: $probe_engine_variant" >&2; exit 2 ;;
+esac
 probe_capture_geometry=${PROBE_CAPTURE_GEOMETRY:-0}
 case "$probe_capture_geometry" in
  0) ;;
- 1) [[ "$probe_bridge_variant" == stock || "$probe_bridge_variant" == A ]] || { echo "Geometry capture requires a stock or A bridge run" >&2; exit 2; } ;;
+ 1) [[ "$probe_bridge_variant" == stock || "$probe_bridge_variant" == A || "$probe_engine_variant" != official ]] || { echo "Geometry capture requires a bridge or source-built engine run" >&2; exit 2; } ;;
  *) echo "Unsupported geometry capture flag: $probe_capture_geometry" >&2; exit 2 ;;
 esac
 case "$probe_bridge_variant" in
@@ -46,6 +59,9 @@ sed "s@/home/probe@/home/mint@g" support/diagnostics/2754-ui.py > /tmp/issue2754
 if [ "$probe_capture_geometry" = 1 ]; then
  cp -a support/diagnostics/2754-accessibility /tmp/issue2754-mint/seed/
 fi
+if [ "$probe_engine_variant" != official ]; then
+ cp support/diagnostics/2754-engine-build/verify-loaded-engine.sh /tmp/issue2754-mint/seed/
+fi
 cat > /tmp/issue2754-mint/seed/bootstrap.sh <<"BOOT"
 #!/bin/bash
 set -euxo pipefail
@@ -58,6 +74,9 @@ cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/ui.py /home/mint/support/diagnostics/2754-ui.py
 if [ -d /mnt/2754-accessibility ]; then
  cp -a /mnt/2754-accessibility /home/mint/support/diagnostics/
+fi
+if [ -f /mnt/verify-loaded-engine.sh ]; then
+ cp /mnt/verify-loaded-engine.sh /home/mint/support/diagnostics/
 fi
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/support
 chmod 700 /home/mint/.ssh
@@ -161,7 +180,7 @@ if [ "$probe_bridge_variant" != system ]; then
  scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known /tmp/issue2754-mint/diagnostic-bridge mint@127.0.0.1:/home/mint/diagnostic-bridge
 fi
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
@@ -170,13 +189,34 @@ if [ "$PROBE_CAPTURE_GEOMETRY" = 1 ]; then
  geometry_packages=(build-essential pkg-config libatspi2.0-dev libglib2.0-dev jq)
  test -f support/diagnostics/2754-accessibility/capture-geometry.sh
 fi
-timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}"
+engine_packages=()
+if [ "$PROBE_ENGINE_VARIANT" != official ]; then
+ engine_packages=(jq)
+ test -f support/diagnostics/verify-loaded-engine.sh
+fi
+timeout 600 sudo apt-get install -y -o DPkg::Lock::Timeout=120 xdotool scrot tesseract-ocr xclip ffmpeg gdb strace binutils "${geometry_packages[@]}" "${engine_packages[@]}"
 printf 'capture_geometry=%s\n' "$PROBE_CAPTURE_GEOMETRY" > evidence/geometry-capture-setting.txt
 if [ "$PROBE_APP_SOURCE" = c1ce ]; then
  cd /home/mint/source-artifact
  sha256sum -c source-bundle.tar.gz.sha256 > /home/mint/evidence/source-bundle-verified.txt
  mkdir -p /home/mint/source-bundle
  tar -xzf source-bundle.tar.gz -C /home/mint/source-bundle
+ if [ "$PROBE_ENGINE_VARIANT" != official ]; then
+  provenance=/home/mint/source-artifact/provenance
+  jq -e --arg variant "$PROBE_ENGINE_VARIANT" --arg run_id "$PROBE_BUNDLE_RUN_ID" --arg patch_hash "$PROBE_ENGINE_PATCH_HASH" \
+   '.variant == $variant and .app_build_run_id == $run_id and .run_id == $run_id and
+    .engine_sha == "42d3d75a56efe1a2e9902f52dc8006099c45d937" and
+    .framework_sha == "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694" and
+    .localsend_sha == "c1ce322fb3acf08e44f329b8b7208b8b0d91e244" and
+    .depot_tools_sha == "a03dfbf7f2d1cefa2795d81d59ca4f16c8616a8f" and
+    .deps_sha256 == "0d0b2b9c4b103613bb242635328497bc8a47d64f31309f2dfa93e66abb20d4f3" and
+    .experiment_patch_sha256 == $patch_hash and .runtime_mode == "release"' "$provenance/manifest.json" \
+   > /home/mint/evidence/engine-manifest-check.txt
+  test "$(sha256sum source-bundle.tar.gz | awk '{print $1}')" = "$(jq -er .bundle_sha256 "$provenance/manifest.json")"
+  test "$(sha256sum "$provenance/engine/bootstrap/records-SHA256SUMS" | awk '{print $1}')" = "$(jq -er .bootstrap_records_sha256 "$provenance/manifest.json")"
+  (cd "$provenance/engine/bootstrap" && sha256sum -c records-SHA256SUMS) > /home/mint/evidence/engine-bootstrap-check.txt
+  (cd /home/mint/source-bundle && sha256sum -c "$provenance/bundle-files-SHA256SUMS") > /home/mint/evidence/engine-bundle-files-check.txt
+ fi
  cp -a /home/mint/source-artifact /home/mint/evidence/source-artifact
  ldd /home/mint/source-bundle/localsend_app > /home/mint/evidence/source-main-ldd.txt
  if grep -q 'not found' /home/mint/evidence/source-main-ldd.txt; then
@@ -197,6 +237,8 @@ else
  printf 'localsend_app\n' > /home/mint/evidence/app-executable.txt
 fi
 printf 'bridge_variant=%s\n' "$PROBE_BRIDGE_VARIANT" > /home/mint/evidence/bridge-variant.txt
+printf 'engine_variant=%s\nbundle_run_id=%s\n' "$PROBE_ENGINE_VARIANT" "$PROBE_BUNDLE_RUN_ID" > /home/mint/evidence/engine-selection.txt
+printf '%s\n' "$PROBE_ENGINE_VARIANT" > /home/mint/evidence/engine-variant.txt
 if [ "$PROBE_BRIDGE_VARIANT" != system ]; then
  for package in libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64; do
   test "$(dpkg-query -W -f='${Version}' "$package")" = 2.52.0-1build1
@@ -206,17 +248,23 @@ if [ "$PROBE_BRIDGE_VARIANT" != system ]; then
  ldd /home/mint/diagnostic-bridge/libatk-bridge-2.0.so.0 > /home/mint/evidence/bridge-library-ldd.txt
  ! grep -q 'not found' /home/mint/evidence/bridge-library-ldd.txt
  readelf -n /home/mint/diagnostic-bridge/libatk-bridge-2.0.so.0 > /home/mint/evidence/bridge-library-build-id.txt
+fi
+if [ "$PROBE_BRIDGE_VARIANT" != system ] || [ "$PROBE_ENGINE_VARIANT" != official ]; then
  cp /home/mint/evidence/app-executable.txt /home/mint/evidence/app-real-executable.txt
  cat > /home/mint/support/diagnostics/2754-bridge-app <<'LAUNCH'
 #!/bin/bash
 set -euo pipefail
 real_executable=$(cat /home/mint/evidence/app-real-executable.txt)
-variant=$(cat /home/mint/diagnostic-bridge/variant.txt)
-case "$variant" in stock|A) ;; *) exit 2 ;; esac
+variant=system
+if [ -f /home/mint/diagnostic-bridge/variant.txt ]; then variant=$(cat /home/mint/diagnostic-bridge/variant.txt); fi
+engine_variant=$(cat /home/mint/evidence/engine-variant.txt)
+case "$variant" in system|stock|A) ;; *) exit 2 ;; esac
+case "$engine_variant" in official|control|B) ;; *) exit 2 ;; esac
 app_pid=$$
 printf '%s\n' "$app_pid" > /home/mint/evidence/bridge-app-pid.txt
 printf 'launcher=%s\nreal_executable=%s\nbridge_variant=%s\n' "$0" "$real_executable" "$variant" > /home/mint/evidence/bridge-launch.txt
 # Observe the same PID after exec; no library override leaks to the UI harness.
+if [ "$variant" != system ]; then
 (
  set -euo pipefail
  trap 'observer_status=$?; if [ "$observer_status" != 0 ]; then printf "observer_exit_status=%s\n" "$observer_status" >> /home/mint/evidence/bridge-process-map-check.txt; kill "$app_pid" 2>/dev/null || true; fi' EXIT
@@ -243,7 +291,48 @@ printf 'launcher=%s\nreal_executable=%s\nbridge_variant=%s\n' "$0" "$real_execut
  readelf -n "$mapped_library" > /home/mint/evidence/bridge-process-build-id.txt
  printf 'mapped_selected_bridge=true\nactual_app_pid=%s\n' "$app_pid" > /home/mint/evidence/bridge-process-map-check.txt
 ) > /home/mint/evidence/bridge-map-observer.log 2>&1 &
-if [ "$variant" = A ]; then
+fi
+if [ "$engine_variant" != official ]; then
+ # Fail closed before the driver's first UI action even if hashing stalls.
+ (
+  sleep 13
+  if ! grep -qx 'mapped_selected_engine=true' /home/mint/evidence/engine-process-map-check.txt 2>/dev/null ||
+     ! grep -qx 'mapped_selected_aot=true' /home/mint/evidence/engine-process-map-check.txt 2>/dev/null ||
+     { [ "$variant" != system ] && ! grep -qx 'mapped_selected_bridge=true' /home/mint/evidence/bridge-process-map-check.txt 2>/dev/null; }; then
+   printf 'loader_gate_deadline_failed=true\nactual_app_pid=%s\n' "$app_pid" > /home/mint/evidence/engine-loader-deadline.txt
+   if [ "$(readlink "/proc/$app_pid/exe" 2>/dev/null || true)" = "$real_executable" ]; then kill "$app_pid" 2>/dev/null || true; fi
+  else
+   printf 'loader_gate_before_ui=true\nactual_app_pid=%s\n' "$app_pid" > /home/mint/evidence/engine-loader-deadline.txt
+  fi
+ ) > /home/mint/evidence/engine-loader-deadline.log 2>&1 &
+ (
+  set -euo pipefail
+  trap 'observer_status=$?; if [ "$observer_status" != 0 ]; then printf "observer_exit_status=%s\n" "$observer_status" >> /home/mint/evidence/engine-process-map-check.txt; kill "$app_pid" 2>/dev/null || true; fi' EXIT
+  loaded=0
+  # The driver waits 15 seconds after launching. Bound loader observation to 10 seconds.
+  for attempt in $(seq 1 100); do
+   if [ "$(readlink "/proc/$app_pid/exe" 2>/dev/null || true)" = "$real_executable" ] &&
+      awk '$6 == "/home/mint/source-bundle/lib/libflutter_linux_gtk.so" { found=1 } END { exit !found }' "/proc/$app_pid/maps" 2>/dev/null &&
+      awk '$6 == "/home/mint/source-bundle/lib/libapp.so" { found=1 } END { exit !found }' "/proc/$app_pid/maps" 2>/dev/null; then
+    loaded=1
+    break
+   fi
+   sleep 0.1
+  done
+  test "$loaded" = 1
+  timeout 3 bash /home/mint/support/diagnostics/verify-loaded-engine.sh "$app_pid" /home/mint/source-bundle /home/mint/source-artifact/provenance /home/mint/evidence/engine-loaded
+  awk '/\/libapp[.]so/ { for (i=6; i<=NF; i++) printf "%s%s", $i, (i==NF ? "\n" : " ") }' /home/mint/evidence/engine-loaded/process-maps.txt | sort -u > /home/mint/evidence/engine-loaded/mapped-aot-paths.txt
+  test "$(cat /home/mint/evidence/engine-loaded/mapped-aot-paths.txt)" = /home/mint/source-bundle/lib/libapp.so
+  expected_executable=$(awk '$2 == "./localsend_app" { print $1 }' /home/mint/source-artifact/provenance/bundle-files-SHA256SUMS)
+  [[ "$expected_executable" =~ ^[0-9a-f]{64}$ ]]
+  test "$(sha256sum "/proc/$app_pid/exe" | awk '{print $1}')" = "$expected_executable"
+  tr '\0' '\n' < "/proc/$app_pid/environ" | grep -E '^(LD_LIBRARY_PATH|G_MESSAGES_DEBUG)=' > /home/mint/evidence/engine-loaded/process-loader-env.txt || true
+  printf 'mapped_selected_engine=true\nmapped_selected_aot=true\nactual_app_pid=%s\n' "$app_pid" > /home/mint/evidence/engine-process-map-check.txt
+ ) > /home/mint/evidence/engine-map-observer.log 2>&1 &
+fi
+if [ "$variant" = system ]; then
+ exec "$real_executable"
+elif [ "$variant" = A ]; then
  exec env LD_LIBRARY_PATH=/home/mint/diagnostic-bridge:/home/mint/source-bundle/lib G_MESSAGES_DEBUG=all "$real_executable"
 else
  exec env -u G_MESSAGES_DEBUG LD_LIBRARY_PATH=/home/mint/diagnostic-bridge:/home/mint/source-bundle/lib "$real_executable"
@@ -267,7 +356,7 @@ echo UI_PROVISION_READY
 GUEST
 status=$?
 if [ "$status" = 0 ]; then
-timeout 1500 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout 1500 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -282,6 +371,11 @@ PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPT
 status=$?
 if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ]; then
  grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1
+fi
+if [ "$PROBE_ENGINE_VARIANT" != official ]; then
+ grep -qx 'mapped_selected_engine=true' evidence/engine-process-map-check.txt || status=1
+ grep -qx 'mapped_selected_aot=true' evidence/engine-process-map-check.txt || status=1
+ grep -qx 'loader_gate_before_ui=true' evidence/engine-loader-deadline.txt || status=1
 fi
 kill -INT "$video_pid"
 wait "$video_pid"

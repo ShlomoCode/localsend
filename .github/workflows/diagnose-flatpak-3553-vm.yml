@@ -15,8 +15,13 @@ on:
         type: choice
         default: official-deb
         options: [official-deb, c1ce]
+      engine_variant:
+        description: 'Official engine or exact source-built c1ce control/B bundle'
+        type: choice
+        default: official
+        options: [official, control, B]
       bundle_run_id:
-        description: 'Optional completed diagnostic run containing the exact c1ce build artifact'
+        description: 'Completed bundle run; required for source-built engine control/B'
         type: string
         required: false
         default: ''
@@ -73,7 +78,7 @@ jobs:
           path: evidence/native/
           if-no-files-found: error
   build-c1ce:
-    if: (inputs.stage || 'vm') == 'vm' && inputs.app_source == 'c1ce' && inputs.bundle_run_id == ''
+    if: (inputs.stage || 'vm') == 'vm' && inputs.app_source == 'c1ce' && (inputs.engine_variant || 'official') == 'official' && inputs.bundle_run_id == ''
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -113,7 +118,7 @@ jobs:
           if-no-files-found: warn
   cinnamon-vm:
     needs: build-c1ce
-    if: ${{ !cancelled() && (inputs.stage || 'vm') == 'vm' && ((inputs.app_source || 'official-deb') == 'official-deb' || inputs.bundle_run_id != '' || needs.build-c1ce.result == 'success') }}
+    if: ${{ !cancelled() && (inputs.stage || 'vm') == 'vm' && ((inputs.app_source || 'official-deb') == 'official-deb' || (inputs.engine_variant || 'official') != 'official' || inputs.bundle_run_id != '' || needs.build-c1ce.result == 'success') }}
     permissions:
       contents: read
       actions: read
@@ -121,6 +126,30 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+      - name: Select explicit app engine artifact
+        id: engine_selection
+        env:
+          ENGINE_VARIANT: ${{ inputs.engine_variant || 'official' }}
+          APP_SOURCE: ${{ inputs.app_source || 'official-deb' }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+          BRIDGE_VARIANT: ${{ inputs.bridge_variant || 'system' }}
+          PROBE_ENVIRONMENT: ${{ inputs.environment || 'mint' }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/cloud/build
+          case "$ENGINE_VARIANT" in
+            official) artifact_name=issue2754-c1ce-flutter3419-linux-x64 ;;
+            control|B)
+              test "$APP_SOURCE" = c1ce
+              test "$PROBE_ENVIRONMENT" = mint
+              [[ "$BUNDLE_RUN_ID" =~ ^[0-9]+$ ]]
+              [[ "$BRIDGE_VARIANT" = system || "$BRIDGE_VARIANT" = A ]]
+              artifact_name="issue2754-c1ce-engine-$ENGINE_VARIANT-linux-x64"
+              ;;
+            *) echo "Unsupported engine variant: $ENGINE_VARIANT" >&2; exit 2 ;;
+          esac
+          printf 'engine_variant=%s\nartifact_name=%s\nbundle_run_id=%s\n' "$ENGINE_VARIANT" "$artifact_name" "$BUNDLE_RUN_ID" > evidence/cloud/build/engine-selection.txt
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
       - name: Validate bridge experiment inputs and completed native run
         if: (inputs.bridge_variant || 'system') != 'system'
         env:
@@ -130,10 +159,17 @@ jobs:
           APP_SOURCE: ${{ inputs.app_source }}
           BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
           PROBE_ENVIRONMENT: ${{ inputs.environment }}
+          ENGINE_VARIANT: ${{ inputs.engine_variant || 'official' }}
         run: |
           test "$APP_SOURCE" = c1ce
           test "$PROBE_ENVIRONMENT" = mint
-          test "$BUNDLE_RUN_ID" = 38132747719
+          if [ "$ENGINE_VARIANT" = official ]; then
+            test "$BUNDLE_RUN_ID" = 38132747719
+          else
+            # The exact source-built bundle manifest is validated before any VM starts.
+            [[ "$BUNDLE_RUN_ID" =~ ^[0-9]+$ ]]
+            test "$BRIDGE_VARIANT" = A
+          fi
           [[ "$BRIDGE_VARIANT" = stock || "$BRIDGE_VARIANT" = A ]]
           [[ "$BRIDGE_RUN_ID" =~ ^[0-9]+$ ]]
           mkdir -p evidence/cloud/bridge
@@ -188,7 +224,7 @@ jobs:
         if: inputs.app_source == 'c1ce'
         uses: actions/download-artifact@v4
         with:
-          name: issue2754-c1ce-flutter3419-linux-x64
+          name: ${{ steps.engine_selection.outputs.artifact_name }}
           path: /tmp/issue2754-build
           run-id: ${{ inputs.bundle_run_id || github.run_id }}
           github-token: ${{ github.token }}
@@ -199,7 +235,9 @@ jobs:
           PROBE_BUNDLE_TAR: /tmp/issue2754-build/source-bundle.tar.gz
           PROBE_BRIDGE_VARIANT: ${{ inputs.bridge_variant || 'system' }}
           PROBE_BRIDGE_ARTIFACT: /tmp/issue2754-native-gates/A
-          PROBE_CAPTURE_GEOMETRY: ${{ (inputs.bridge_variant != '' && inputs.bridge_variant != 'system') && '1' || '0' }}
+          PROBE_ENGINE_VARIANT: ${{ inputs.engine_variant || 'official' }}
+          PROBE_BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+          PROBE_CAPTURE_GEOMETRY: ${{ ((inputs.bridge_variant != '' && inputs.bridge_variant != 'system') || (inputs.engine_variant != '' && inputs.engine_variant != 'official')) && '1' || '0' }}
         run: |
           if [ "$PROBE_APP_SOURCE" = c1ce ]; then
             test "$PROBE_ENVIRONMENT" = mint
@@ -212,6 +250,27 @@ jobs:
             grep -qx 'exit_status=0' /tmp/issue2754-build/provenance/build-result.txt
             cmp /tmp/issue2754-build/provenance/lock-hashes-before.txt /tmp/issue2754-build/provenance/lock-hashes-after.txt
             test ! -s /tmp/issue2754-build/provenance/source-diff-after.patch
+            if [ "$PROBE_ENGINE_VARIANT" != official ]; then
+              provenance=/tmp/issue2754-build/provenance
+              jq -e --arg variant "$PROBE_ENGINE_VARIANT" --arg run_id "$PROBE_BUNDLE_RUN_ID" \
+                --arg patch_hash "$(sha256sum support/diagnostics/2754-engine-build/B-with-tests.patch | awk '{print $1}')" \
+                '.variant == $variant and .app_build_run_id == $run_id and .run_id == $run_id and
+                 .engine_sha == "42d3d75a56efe1a2e9902f52dc8006099c45d937" and
+                 .framework_sha == "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694" and
+                 .localsend_sha == "c1ce322fb3acf08e44f329b8b7208b8b0d91e244" and
+                 .depot_tools_sha == "a03dfbf7f2d1cefa2795d81d59ca4f16c8616a8f" and
+                 .deps_sha256 == "0d0b2b9c4b103613bb242635328497bc8a47d64f31309f2dfa93e66abb20d4f3" and
+                 .experiment_patch_sha256 == $patch_hash and .runtime_mode == "release" and
+                 (.engine_so_sha256 | test("^[0-9a-f]{64}$")) and
+                 (.libapp_sha256 | test("^[0-9a-f]{64}$"))' "$provenance/manifest.json"
+              test "$(sha256sum /tmp/issue2754-build/source-bundle.tar.gz | awk '{print $1}')" = "$(jq -er .bundle_sha256 "$provenance/manifest.json")"
+              test "$(sha256sum "$provenance/engine/bootstrap/records-SHA256SUMS" | awk '{print $1}')" = "$(jq -er .bootstrap_records_sha256 "$provenance/manifest.json")"
+              (cd "$provenance/engine/bootstrap" && sha256sum -c records-SHA256SUMS)
+              cmp "$provenance/lock-hashes-before.txt" "$provenance/lock-hashes-after.txt"
+              jq -e '.engineRevision == "42d3d75a56efe1a2e9902f52dc8006099c45d937"' "$provenance/flutter-version.json"
+              grep -q '^release: 1.97.1$' "$provenance/rustc-version.txt"
+              printf 'source_built_manifest_verified=true\n' > evidence/cloud/build/engine-manifest-check.txt
+            fi
           fi
           if [ "$PROBE_ENVIRONMENT" = mint ]; then
             bash support/diagnostics/2754-mint-vm.sh
