@@ -22,6 +22,12 @@ click_label() {
       if test -n "$point"; then printf 'Send anchored one reviewed sidebar row above observed Settings label\n' >> evidence/input.log; fi
     fi
   fi
+  if test -z "$point" && test "$word" = Folder; then
+    # The retained chooser row shows Folder between File and Text. Use those
+    # two current labels as bounds if OCR omits only the middle label.
+    point=$(awk -F '\t' '$12=="File" && $11>60{fx=$7+$9/2;fy=$8+$10/2} $12=="Text" && $11>60{tx=$7+$9/2;ty=$8+$10/2} END{if(fx && tx>fx && tx-fx<300 && ty-fy<20 && fy-ty<20) print int((fx+tx)/2),int((fy+ty)/2)}' "evidence/$snap.tsv")
+    if test -n "$point"; then printf 'Folder anchored between observed File and Text controls\n' >> evidence/input.log; fi
+  fi
   test -n "$point"
   printf '%s %s %s\n' "$(date --iso-8601=ns)" "$word" "$point" >> evidence/input.log
   xdotool mousemove --sync $point click 1
