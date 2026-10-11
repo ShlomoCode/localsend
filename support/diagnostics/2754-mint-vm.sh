@@ -17,16 +17,32 @@ cat > /tmp/issue2754-mint/seed/bootstrap.sh <<"BOOT"
 #!/bin/bash
 set -euxo pipefail
 exec > >(tee /tmp/issue2754-bootstrap.log /dev/ttyS0) 2>&1
+phase=files
+trap 'status=$?; echo "BOOTSTRAP_EXIT phase=$phase status=$status"' EXIT
 mkdir -p /home/mint/.ssh /home/mint/evidence /home/mint/support/diagnostics
 cp /mnt/id.pub /home/mint/.ssh/authorized_keys
 cp /mnt/ui.py /home/mint/support/diagnostics/2754-ui.py
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/support
 chmod 700 /home/mint/.ssh
 chmod 600 /home/mint/.ssh/authorized_keys
-apt-get update
-apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
+phase=apt-sources
+# The live ISO enables an unregistered cdrom source; retain it and disable only that source.
+cp -a /etc/apt /home/mint/evidence/apt-before
+for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+  test -f "$source" || continue
+  sed -i '/^[[:space:]]*deb.*cdrom:/s/^/# Diagnostic live-media source disabled: /' "$source"
+done
+phase=apt-update
+timeout 240 apt-get update
+phase=ssh-install
+timeout 240 apt-get install -y -o DPkg::Lock::Timeout=120 openssh-server
+phase=ssh-start
 systemctl start ssh
+systemctl show ssh -p ActiveState -p SubState
+ss -ltnp 'sport = :22'
+timeout 10 ssh-keyscan 127.0.0.1
 touch /home/mint/evidence/bootstrap-complete
+phase=complete
 BOOT
 genisoimage -quiet -o /home/runner/issue2754-mint/probe.iso -V PROBE -r /tmp/issue2754-mint/seed
 sudo qemu-system-x86_64 -machine accel=kvm:tcg -cpu host -smp 2 -m 4096 -boot d -drive file=/home/runner/issue2754-mint/mint.iso,media=cdrom,readonly=on -drive file=/home/runner/issue2754-mint/probe.iso,media=cdrom,readonly=on -device virtio-vga -usb -device usb-tablet -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2275-:22 -device virtio-net-pci,netdev=net0 -display none -monitor unix:/tmp/issue2754-mint/monitor,server,nowait -serial file:evidence/cloud/serial.log -daemonize
@@ -61,15 +77,17 @@ sleep 3
 printf "screendump %s/evidence/cloud/terminal-checkpoint.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor > evidence/cloud/checkpoint-monitor.log
 opts=(-i /tmp/issue2754-mint/id -p 2275 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known -o ConnectTimeout=5)
 ready=0
-for n in $(seq 1 12); do
- if timeout 10 ssh "${opts[@]}" mint@127.0.0.1 "test -f /home/mint/evidence/bootstrap-complete && pgrep -x cinnamon && command -v tesseract" > evidence/cloud/readiness.log 2>&1; then ready=1; break; fi
+for n in $(seq 1 30); do
+ date -u '+%FT%TZ' >> evidence/cloud/readiness.log
+ if timeout 10 ssh "${opts[@]}" mint@127.0.0.1 "test -f /home/mint/evidence/bootstrap-complete && pgrep -x cinnamon" >> evidence/cloud/readiness.log 2>&1; then ready=1; break; fi
+ if grep -Eq 'BOOTSTRAP_EXIT.*status=[1-9]' evidence/cloud/serial.log; then break; fi
  sleep 15
 done
 printf "screendump %s/evidence/cloud/bootstrap.ppm\n" "$GITHUB_WORKSPACE" | sudo socat - UNIX-CONNECT:/tmp/issue2754-mint/monitor
 sudo chown -R "$(id -u):$(id -g)" evidence/cloud
 if [ "$ready" != 1 ]; then exit 1; fi
 set +e
-timeout 600 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
