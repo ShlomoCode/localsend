@@ -31,6 +31,16 @@ fi
 [[ "$1" == build ]]
 rustup toolchain install "$rust" --profile minimal
 export RUSTUP_TOOLCHAIN="$rust"
+# The historical Cargokit explicitly runs stable Cargo and ignores the
+# source rust-toolchain.toml. Cargo's supported compiler configuration pins
+# rustc without replacing Cargokit or rewriting any generated output.
+export CARGO_BUILD_RUSTC="$(rustup which --toolchain "$rust" rustc)"
+export CARGO_BUILD_RUSTDOC="$(rustup which --toolchain "$rust" rustdoc)"
+export CARGO_TERM_VERBOSE=true
+stable_cargo="$(rustup run stable cargo -V)"
+[[ "$($CARGO_BUILD_RUSTC --version)" == "rustc $rust "* ]]
+[[ "$($CARGO_BUILD_RUSTDOC --version)" == "rustdoc $rust "* ]]
+printf '%s\n' "$stable_cargo" > "$out/cargokit-cargo-version.txt"
 {
   printf 'selection=%s\nrunner=%s\nimage=%s\nimage_version=%s\n' "$REVISION" "$RUNNER_OS/$RUNNER_ARCH" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
   uname -a
@@ -38,6 +48,8 @@ export RUSTUP_TOOLCHAIN="$rust"
   flutter --version --machine
   rustc -Vv
   cargo -V
+  rustup run stable cargo -V
+  "$CARGO_BUILD_RUSTC" -Vv
   clang --version
   cmake --version
   ninja --version
@@ -52,11 +64,15 @@ for i in "${!refs[@]}"; do
   git -C "$source_dir" clean -ffdx
   git -C "$source_dir" checkout --detach "$ref"
   [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$ref" ]]
+  [[ "$(rustup run stable cargo -V)" == "$stable_cargo" ]]
   [[ "$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$source_dir/packages/localsend_isolates/rust-toolchain.toml")" == "$rust" ]]
   {
     printf 'label=%s\nsource_sha=%s\nsource_tree=%s\n' "$label" "$ref" "$(git -C "$source_dir" rev-parse HEAD^{tree})"
     printf 'application_version=%s\n' "$(sed -n 's/^version: //p' "$source_dir/app/pubspec.yaml")"
     printf 'flutter_pin=%s\nrust_pin=%s\n' "$(jq -r .flutter "$source_dir/.fvmrc")" "$rust"
+    printf 'cargokit_cargo=%s\ncargokit_compiler=%s\n' "$stable_cargo" "$CARGO_BUILD_RUSTC"
+    printf 'cargokit_rustdoc=%s\ncargo_verbose=%s\n' "$CARGO_BUILD_RUSTDOC" "$CARGO_TERM_VERBOSE"
+    echo 'build_flags=flutter build linux --release --verbose; CARGO_NET_OFFLINE=true'
     echo 'artifact_kind=rebuilt source diagnostic; not the published 1.17 release'
     echo 'codegen=committed generated sources; no build_runner or FRB regeneration'
   } > "$dest/identity.txt"
@@ -70,7 +86,7 @@ for i in "${!refs[@]}"; do
   trap 'git -C "$source_dir" diff --binary > "$dest/source-after-build.diff"; git -C "$source_dir" status --short > "$dest/source-after-build.status"' EXIT
   (cd "$source_dir/app"; flutter pub get --enforce-lockfile) 2>&1 | tee "$dest/pub-get.log"
   (cd "$source_dir"; cargo fetch --locked --manifest-path packages/localsend_isolates/rust/Cargo.toml) 2>&1 | tee "$dest/cargo-fetch.log"
-  (cd "$source_dir/app"; CARGO_NET_OFFLINE=true flutter build linux --release) 2>&1 | tee "$dest/build.log"
+  (cd "$source_dir/app"; CARGO_NET_OFFLINE=true flutter build linux --release --verbose) 2>&1 | tee "$dest/build.log"
   git -C "$source_dir" diff --binary > "$dest/source-after-build.diff"
   git -C "$source_dir" status --short > "$dest/source-after-build.status"
   (cd "$source_dir"; git ls-files '*pubspec.lock' Cargo.lock | xargs sha256sum) > "$dest/committed-locks-after.txt"
