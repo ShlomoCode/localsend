@@ -1,0 +1,15 @@
+plugins { id 'com.android.library' version '8.7.3' }
+android {
+    namespace 'org.localsend.diagnostic.gal2311'
+    compileSdk 35
+    defaultConfig { minSdk 26 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+    testOptions { unitTests.includeAndroidResources = true }
+}
+dependencies {
+    implementation 'androidx.annotation:annotation:1.9.1'
+    implementation 'androidx.core:core:1.15.0'
+    implementation 'org.apache.commons:commons-imaging:1.0-alpha3'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+}

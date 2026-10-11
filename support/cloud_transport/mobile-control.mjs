@@ -33,7 +33,13 @@ try {
  const plan=await planResponse.json();writeFileSync('evidence/plan-before-session.json',JSON.stringify(plan,null,2));
  const limit=Math.min(5,Number(plan.parallel_sessions_max_allowed),Number(plan.team_parallel_sessions_max_allowed));
  if(Number(plan.parallel_sessions_running)>=limit||Number(plan.queued_sessions)>0)throw new Error('BrowserStack capacity is occupied; no session was created');
- const caps={platformName:'Android','appium:deviceName':process.env.BS_DEVICE||'Vivo Y21','appium:platformVersion':process.env.BS_OS||'11.0','appium:automationName':'UiAutomator2','appium:app':process.env.BASELINE_APP,'appium:otherApps':[process.env.HELPER_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend issue2311',buildName:'issue2311-'+process.env.GITHUB_RUN_ID,sessionName:'issue2311 Windows1.17 Android15 direct-accept control',idleTimeout:300,debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
+ const deviceResponse=await fetch('https://api-cloud.browserstack.com/app-automate/devices.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
+ if(!deviceResponse.ok)throw new Error('Could not verify supported BrowserStack device/OS');
+ const devices=await deviceResponse.json();
+ writeFileSync('evidence/supported-devices-before-session.json',JSON.stringify(devices,null,2));
+ const requestedDevice=process.env.BS_DEVICE||'Vivo Y21',requestedOs=process.env.BS_OS||'11.0';
+ if(!Array.isArray(devices)||!devices.some(device=>device.device===requestedDevice&&Number(device.os_version)===Number(requestedOs)))throw new Error('Requested device/OS is not in current supported inventory; no session was created');
+ const caps={platformName:'Android','appium:deviceName':requestedDevice,'appium:platformVersion':requestedOs,'appium:automationName':'UiAutomator2','appium:app':process.env.BASELINE_APP,'appium:otherApps':[process.env.HELPER_APP],'appium:autoGrantPermissions':true,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend issue2311',buildName:'issue2311-'+process.env.GITHUB_RUN_ID,sessionName:`issue2311 Windows1.17 Android${requestedOs} ${process.env.SOURCE_APK_KIND||'control'}`,idleTimeout:300,debug:true,networkLogs:false,video:true,appiumVersion:'2.15.0'}};
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}});
  session=created.sessionId;
  assert(session,'Session ID missing');writeFileSync(process.platform==='win32'?'C:/tmp/helper/session-id':'/tmp/helper/session-id',session);

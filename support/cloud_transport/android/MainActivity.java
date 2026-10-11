@@ -35,7 +35,8 @@ public final class MainActivity extends Activity {
       else runGalleryDiagnostic();
     });
     metadata.setOnClickListener(v->{
-      String permission=android.os.Build.VERSION.SDK_INT>=33?"android.permission.READ_MEDIA_IMAGES":"android.permission.READ_EXTERNAL_STORAGE";
+      metadataOutput.setText("Image metadata running");metadataOutput.setContentDescription("Image metadata running");
+      String permission=android.os.Build.VERSION.SDK_INT>=33?(metadataFilename.getText().toString().endsWith(".mp4")?"android.permission.READ_MEDIA_VIDEO":"android.permission.READ_MEDIA_IMAGES"):"android.permission.READ_EXTERNAL_STORAGE";
       if(checkSelfPermission(permission)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{permission},2311);}
       else readMetadata();
     });

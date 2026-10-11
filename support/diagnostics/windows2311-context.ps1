@@ -1,15 +1,20 @@
-param([string]$Case='on', [switch]$CompletePrevious)
+param([string]$Case='on', [switch]$CompletePrevious, [string]$FixtureSource='', [string]$FixtureExtension='png', [string]$FixtureModifiedUtc='2025-02-13T14:11:00Z')
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Windows.Forms,System.Drawing
 $ui="$PSScriptRoot/windows3393-ui.ps1"
 if($CompletePrevious){& $ui -Action click -X 318 -Y 423 -Label "windows-$Case-done"}
 $report=Get-Content evidence/release-ui-report.json -Raw|ConvertFrom-Json
 $exe=$report.executable.path
-$fixture=Join-Path $PWD "evidence/issue2311-$env:GITHUB_RUN_ID-$Case.png"
-Copy-Item app/assets/img/logo-128.png $fixture
-$old=[DateTime]::Parse('2025-02-13T14:11:00Z').ToUniversalTime()
+if($FixtureExtension -notin @('png','jpg','mp4')){throw 'Unsupported diagnostic fixture extension'}
+$fixture=Join-Path $PWD "evidence/issue2311-$env:GITHUB_RUN_ID-$Case.$FixtureExtension"
+if(!$FixtureSource){$FixtureSource='app/assets/img/logo-128.png'}
+Copy-Item $FixtureSource $fixture
+$requested=[DateTimeOffset]::Parse($FixtureModifiedUtc).ToUniversalTime()
+$old=$requested.UtcDateTime
 [IO.File]::SetLastWriteTimeUtc($fixture,$old)
-@{path=$fixture;sha256=(Get-FileHash $fixture).Hash;bytes=(Get-Item $fixture).Length;mtimeUtc=[IO.File]::GetLastWriteTimeUtc($fixture).ToString('o')}|ConvertTo-Json|Set-Content "evidence/source-$Case.json"
+$actual=[DateTimeOffset]::new([IO.File]::GetLastWriteTimeUtc($fixture))
+@{path=$fixture;sha256=(Get-FileHash $fixture).Hash;bytes=(Get-Item $fixture).Length;mtimeUtc=$actual.UtcDateTime.ToString('o');mtimeMs=$actual.ToUnixTimeMilliseconds();requestedMtimeUtc=$requested.UtcDateTime.ToString('o');requestedMtimeMs=$requested.ToUnixTimeMilliseconds();systemTimezone=[TimeZoneInfo]::Local.Id}|ConvertTo-Json|Set-Content "evidence/source-$Case.json"
+if($actual.UtcDateTime.Ticks -ne $requested.UtcDateTime.Ticks){throw 'Windows fixture did not retain the requested timestamp exactly; source report preserved'}
 # Prepare the supported SendTo shortcut exactly as LocalSend's context-menu helper does.
 $shell=New-Object -ComObject WScript.Shell
 $shortcut=$shell.CreateShortcut((Join-Path $env:APPDATA 'Microsoft/Windows/SendTo/LocalSend.lnk'))

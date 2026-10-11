@@ -4,12 +4,16 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [software-emulator, windows11-sender-ui, physical-control]
+        options: [software-emulator, windows11-sender-ui, physical-control, prepare-media-fixtures]
         default: software-emulator
       bs_device:
         type: choice
-        options: [Google Pixel 9, OnePlus 13R, Samsung Galaxy S25]
+        options: [Google Pixel 9, OnePlus 13R, Samsung Galaxy S25, Google Pixel 4, Samsung Galaxy S20]
         default: Google Pixel 9
+      bs_os:
+        type: choice
+        options: ['15.0', '10.0']
+        default: '15.0'
       picker_dwell_ms:
         type: choice
         options: ['10000', '20000', '30000']
@@ -23,16 +27,45 @@ on:
         default: ''
       source_apk_kind:
         type: choice
-        options: [original-release, control, tagged]
+        options: [original-release, control, tagged, baseline, candidate]
         default: original-release
       source_family:
         type: choice
-        options: [historical, current]
+        options: [historical, current, candidate]
         default: historical
+      validation_suite:
+        type: choice
+        options: [png, extended]
+        default: png
+      media_fixture_run_id:
+        type: string
+        default: ''
 permissions:
   contents: read
   actions: read
 jobs:
+  media-fixtures:
+    if: inputs.scenario == 'prepare-media-fixtures'
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate one immutable image and video fixture artifact
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --version=7.1.1 -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned FFmpeg provisioning failed' }
+            $env:PATH = "$env:ChocolateyInstall/bin;$env:PATH"
+          }
+          ./support/diagnostics/windows2311-fixtures.ps1 -OutputDirectory media-fixtures
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2311-media-fixtures-${{ github.run_id }}
+          path: media-fixtures/
+          if-no-files-found: error
+          retention-days: 30
   windows-android:
     if: inputs.scenario == 'software-emulator'
     runs-on: windows-latest
@@ -108,10 +141,14 @@ jobs:
       BASELINE_APP: bs://59b2370a166b5e36a4c948c50f22b70255046822
       BS_DEVICE: ${{ inputs.bs_device || 'Google Pixel 9' }}
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
-      BS_OS: '15.0'
+      BS_OS: ${{ inputs.bs_os || '15.0' }}
+      VALIDATION_SUITE: ${{ inputs.validation_suite || 'png' }}
+      MEDIA_FIXTURE_DIRECTORY: ${{ github.workspace }}/media-fixtures
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2311.mjs
       SOURCE_APK_KIND: ${{ inputs.source_apk_kind || 'original-release' }}
       SOURCE_APP_FAMILY: ${{ inputs.source_family || 'historical' }}
+      EXPECTED_CANDIDATE_SOURCE: bd8140f493240c3f76701af998a8b9e94f2f99d7
+      EXPECTED_GAL_SOURCE: 55dabd7b43927e5b0ad87cf0ab3dab06950ebe2f
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -129,7 +166,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.source_run_id }}
-          pattern: ${{ inputs.source_family == 'current' && 'issue2311-current-boundary-*' || 'issue2311-source-boundary-*' }}
+          pattern: ${{ inputs.source_family == 'candidate' && format('issue2311-candidate-build-pair-{0}-1', inputs.source_run_id) || inputs.source_family == 'current' && 'issue2311-current-boundary-*' || 'issue2311-source-boundary-*' }}
           merge-multiple: true
           path: source-artifact
       - name: Upload selected source-build APK for real receiver workflow
@@ -137,19 +174,39 @@ jobs:
         shell: pwsh
         run: |
           $version=if($env:SOURCE_APP_FAMILY -eq 'current'){'current'}else{'1.17.0'}
-          $apk="source-artifact/localsend-$version-source-$env:SOURCE_APK_KIND-arm64.apk"
+          $apk=if($env:SOURCE_APP_FAMILY -eq 'candidate'){"source-artifact/localsend-candidate-pair-$env:SOURCE_APK_KIND-arm64.apk"}else{"source-artifact/localsend-$version-source-$env:SOURCE_APK_KIND-arm64.apk"}
           if(-not (Test-Path $apk)){throw 'Selected source APK missing'}
           $identity=Get-Content source-artifact/identity.txt -Raw
-          $expected=if($env:SOURCE_APP_FAMILY -eq 'current'){'current_source=c1ce322fb3acf08e44f329b8b7208b8b0d91e244'}else{'historical_source=7f21d1f9082a43803e05c37f021912e012145aa5'}
-          if($identity -notmatch $expected){throw 'Source identity differs from selected family'}
           New-Item -ItemType Directory evidence/source-lineage -Force|Out-Null
-          Copy-Item source-artifact/*.txt,source-artifact/*.sha256,source-artifact/*.diff,source-artifact/file_saver*.dart evidence/source-lineage/
+          if($env:SOURCE_APP_FAMILY -eq 'candidate'){
+            $contract=Get-Content source-artifact/artifact-contract.json -Raw|ConvertFrom-Json
+            $candidateRef=[string]$contract.candidate_source;$galRef=[string]$contract.gal_source
+            if($candidateRef -notmatch '^[0-9a-f]{40}$' -or $galRef -notmatch '^[0-9a-f]{40}$'){throw 'Immutable candidate inputs required'}
+            if($env:EXPECTED_CANDIDATE_SOURCE -notmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_GAL_SOURCE -notmatch '^[0-9a-f]{40}$'){throw 'Final reviewed candidate and Gal source refs must be set before runtime validation'}
+            if($candidateRef -ne $env:EXPECTED_CANDIDATE_SOURCE -or $galRef -ne $env:EXPECTED_GAL_SOURCE){throw 'Candidate pair refs differ from the final reviewed source refs'}
+            if($contract.source_family -ne 'candidate' -or $contract.baseline_source -ne 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244'){throw 'Candidate pair source identity differs'}
+            $entries=@($contract.artifacts|Where-Object {$_.kind -eq $env:SOURCE_APK_KIND})
+            if($entries.Count -ne 1 -or $entries[0].filename -ne (Split-Path $apk -Leaf) -or $entries[0].sha256 -ne (Get-FileHash $apk).Hash.ToLowerInvariant()){throw 'Candidate APK hash/identity differs from contract'}
+            Get-ChildItem source-artifact|Where-Object {$_.Name -notlike '*.apk'}|Copy-Item -Destination evidence/source-lineage/ -Recurse
+          }else{
+            $expected=if($env:SOURCE_APP_FAMILY -eq 'current'){'current_source=c1ce322fb3acf08e44f329b8b7208b8b0d91e244'}else{'historical_source=7f21d1f9082a43803e05c37f021912e012145aa5'}
+            if($identity -notmatch $expected){throw 'Source identity differs from selected family'}
+            Copy-Item source-artifact/*.txt,source-artifact/*.sha256,source-artifact/*.diff,source-artifact/file_saver*.dart evidence/source-lineage/
+          }
           Get-FileHash $apk | ConvertTo-Json | Set-Content evidence/source-receiver-apk.json
           curl.exe --fail --silent --show-error -u "$($env:BROWSERSTACK_USERNAME):$($env:BROWSERSTACK_ACCESS_KEY)" https://api-cloud.browserstack.com/app-automate/upload -F "file=@$apk" -o C:/tmp/helper/source-upload.json
           if($LASTEXITCODE -ne 0){throw 'Source APK upload failed'}
           $app=(Get-Content C:/tmp/helper/source-upload.json|ConvertFrom-Json).app_url
           if(-not $app){throw 'No source app URL returned'}
           "BASELINE_APP=$app" | Add-Content $env:GITHUB_ENV
+      - name: Retrieve exact shared media fixtures
+        if: inputs.validation_suite == 'extended'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.media_fixture_run_id }}
+          name: issue2311-media-fixtures-${{ inputs.media_fixture_run_id }}
+          path: media-fixtures
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

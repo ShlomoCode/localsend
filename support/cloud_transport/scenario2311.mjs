@@ -1,11 +1,26 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readFileSync,writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {waitForNativeControl} from './native-readiness.mjs';
 const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}){
- const prefix=`/session/${session}`,results=[];
+ const prefix=`/session/${session}`,results=[],precisionFailures=[],mtimeFailures=[];
+ const extended=process.env.VALIDATION_SUITE==='extended';
+ const fixtureDirectory=process.env.MEDIA_FIXTURE_DIRECTORY;
+ const fixtureManifest=extended?JSON.parse(readFileSync(join(fixtureDirectory||'__missing_media_fixture_artifact__','manifest.json'))):null;
+ const cases=['on','off','on-repeat','off-repeat'].map(label=>({label,gallery:label.startsWith('on'),extension:'png'}));
+ if(extended){
+  cases.push({label:'precision-on',gallery:true,extension:'png',fixtureModifiedUtc:'2025-02-13T14:11:00.123Z'});
+  for(const [type,extension,artifactName] of [['jpeg','jpg','capture.jpg'],['video','mp4','capture.mp4']]){
+   const fixtureSource=join(fixtureDirectory,artifactName),bytes=readFileSync(fixtureSource);
+   const sourceMetadata=fixtureManifest.files.find(file=>file.name===artifactName);
+   if(!sourceMetadata||createHash('sha256').update(bytes).digest('hex')!==sourceMetadata.sha256||bytes.length!==sourceMetadata.bytes)throw new Error('Immutable media fixture artifact mismatch: '+artifactName);
+   for(const gallery of [true,false])cases.push({label:type+'-'+(gallery?'on':'off'),gallery,extension,fixtureSource,sourceMetadata});
+  }
+  writeFileSync('evidence/media-fixture-manifest.json',JSON.stringify(fixtureManifest,null,2));
+ }
  const target=label=>({using:'accessibility id',value:label});
  async function click(label){const e=await waitForNativeControl({wd,prefix,label:'2311-'+label,...target(label)});await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});}
  async function capture(label){writeFileSync(`evidence/${label}.xml`,await wd('GET',prefix+'/source'));writeFileSync(`evidence/${label}.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));}
@@ -48,7 +63,7 @@ export default async function({session,wd,senderPort,transportStatus}){
   const input=await waitForNativeControl({wd,prefix,label:label+'-metadata-filename',using:'accessibility id',value:'Metadata filename'});
   await wd('POST',prefix+'/element/'+input['element-6066-11e4-a52e-4f735466cecf']+'/value',{text:filename});
   await click('Read image metadata');
-  const outputTarget={using:'xpath',value:'//*[@package="org.localsend.cloudtransport" and starts-with(@content-desc,"Image metadata: ")]'};
+  const outputTarget={using:'xpath',value:`//*[@package="org.localsend.cloudtransport" and starts-with(@content-desc,"Image metadata: ") and contains(@content-desc,"${filename}")]`};
   const choices=[outputTarget,{using:'xpath',value:'//*[contains(@resource-id,"permission_allow_all_button") or contains(@resource-id,"permission_allow_button")]'}];
   let e=await waitForNativeControl({wd,prefix,label:label+'-metadata-or-permission',choices,requireClickable:false});
   if(e.readiness.choice===1){await capture(label+'-normal-media-permission');await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});e=await waitForNativeControl({wd,prefix,label:label+'-metadata-output',...outputTarget,requireClickable:false});}
@@ -123,17 +138,20 @@ export default async function({session,wd,senderPort,transportStatus}){
   if(!bytes.equals(expected))throw new Error('Control saved bytes mismatch');
   results.push({case:'known-working-control',byteExact:true,sha256:createHash('sha256').update(bytes).digest('hex')});
   await click('Done');
-  for(const [index,gallery] of ['on','off','on-repeat','off-repeat'].entries()){
-   const desired=gallery.startsWith('on');
+  for(const testCase of cases){
+   const gallery=testCase.label,desired=testCase.gallery;
    await globalGallery(desired,gallery);
    // The control also leaves the Windows sender on its Finished route.
    // Close that route before every Explorer Send to invocation.
-   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,'-CompletePrevious']);
+   const contextArgs=['-NoProfile','-File','support/diagnostics/windows2311-context.ps1','-Case',gallery,'-CompletePrevious'];
+   if(testCase.fixtureSource)contextArgs.push('-FixtureSource',testCase.fixtureSource,'-FixtureExtension',testCase.extension);
+   if(testCase.fixtureModifiedUtc)contextArgs.push('-FixtureModifiedUtc',testCase.fixtureModifiedUtc);
+   await exec('pwsh',contextArgs);
    await waitForNativeControl({wd,prefix,label:gallery+'-pending',...target('Accept')});
    await click('Options');await capture(gallery+'-options-before');
    // Current Flutter merges this section into one semantics node. Inspect its
    // exact gallery label/value lines; no click or inferred screen coordinate.
-   const merged=process.env.SOURCE_APP_FAMILY==='current';
+   const merged=['current','candidate'].includes(process.env.SOURCE_APP_FAMILY);
    const galleryLocator={using:'xpath',value:merged
     ?'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Save media to gallery") and contains(@content-desc,"Save to folder") and @clickable="true"]'
     :'//*[@package="org.localsend.localsend_app" and (@content-desc="On" or @content-desc="Off") and @clickable="true"]'};
@@ -150,23 +168,100 @@ export default async function({session,wd,senderPort,transportStatus}){
    await capture(gallery+'-options-selected');await wd('POST',prefix+'/back',{});
    await click('Accept');await waitForNativeControl({wd,prefix,label:gallery+'-complete',...target('Done')});
    await capture(gallery+'-completed');
-   const filename=`issue2311-${process.env.GITHUB_RUN_ID}-${gallery}.png`;
-   const savedPath=`/sdcard/${desired?'Pictures':'Download'}/${filename}`;
-   const saved=Buffer.from(await wd('POST',prefix+'/appium/device/pull_file',{path:savedPath}),'base64');
+   const filename=`issue2311-${process.env.GITHUB_RUN_ID}-${gallery}.${testCase.extension}`;
+   const savedPath=`/sdcard/${desired?(testCase.extension==='mp4'?'Movies':'Pictures'):'Download'}/${filename}`;
+   if(testCase.fixtureModifiedUtc){
+    const source=JSON.parse(readFileSync(`evidence/source-${gallery}.json`));
+    const normalMetadata=await helperMetadata(filename,gallery);
+    const observed=[];
+    for(const file of normalMetadata.filesystem||[]){
+     if(file.error||!file.sha256)continue;
+     const entry={...file};
+     try{
+      const bytes=Buffer.from(await wd('POST',prefix+'/appium/device/pull_file',{path:file.path}),'base64');
+      entry.pulledSha256=createHash('sha256').update(bytes).digest('hex');entry.pulledBytes=bytes.length;
+      entry.byteExact=entry.pulledSha256===source.sha256.toLowerCase()&&file.sha256===entry.pulledSha256&&file.size===bytes.length;
+      const directory=file.path.includes('/Pictures/')?'gallery':'fallback';writeFileSync(`evidence/saved-${gallery}-${directory}.png`,bytes);
+     }catch(error){entry.pullError=String(error);}
+     observed.push(entry);
+    }
+    const requestedMtimeMs=Date.parse(testCase.fixtureModifiedUtc);
+    const sourceExact=source.mtimeMs===requestedMtimeMs&&source.requestedMtimeMs===requestedMtimeMs;
+    const galleryFile=observed.find(file=>file.path===savedPath),fallbackFile=observed.find(file=>file.path===`/sdcard/Download/${filename}`);
+    const galleryRows=normalMetadata.mediaStore?.filter(row=>row._display_name===filename&&row._data?.endsWith('/Pictures/'+filename));
+    const expectedModifiedSeconds=Math.floor(source.mtimeMs/1000);
+    const mediaStoreModifiedSeconds=(galleryRows||[]).map(row=>row.date_modified==null?null:Number(row.date_modified));
+    const filesystemEqual=Number.isFinite(source.mtimeMs)&&galleryFile?.filesystemMtimeMs===source.mtimeMs;
+    const mediaStoreEqual=!normalMetadata.mediaStoreError&&galleryRows?.length===1&&Number.isFinite(mediaStoreModifiedSeconds[0])&&mediaStoreModifiedSeconds[0]===expectedModifiedSeconds;
+    const required=process.env.SOURCE_APP_FAMILY==='candidate'&&process.env.SOURCE_APK_KIND==='candidate';
+    const mtimeVerdict={expectedMtimeMs:source.mtimeMs,expectedModifiedSeconds,filesystemMtimeMs:galleryFile?.filesystemMtimeMs??null,filesystemEqual,
+     mediaStoreApplicable:true,mediaStoreModifiedSeconds,mediaStoreEqual,fallbackObserved:!!fallbackFile,required,passed:filesystemEqual&&mediaStoreEqual&&!fallbackFile};
+    const strictGalleryResult=sourceExact&&galleryFile?.byteExact===true&&mtimeVerdict.passed;
+    const precision={case:gallery,mediaType:'png',source,expectedSavedPath:savedPath,requestedMtimeMs,observed,normalMetadata,sourceExact,strictGalleryResult,mtimeVerdict,
+     saveOutcome:galleryFile?(fallbackFile?'gallery-and-fallback-observed':'gallery-observed'):(fallbackFile?'directory-fallback-observed':'no-saved-file-observed')};
+    results.push(precision);writeFileSync(`evidence/${gallery}-precision-result.json`,JSON.stringify(precision,null,2));
+    writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));
+    if(!sourceExact)throw new Error('Precision source Windows timestamp differs from the requested milliseconds; raw evidence retained');
+    if(!strictGalleryResult&&required)precisionFailures.push(precision);
+    await click('Done');continue;
+   }
+   let actualSavedPath=savedPath,saved,galleryPullError=null;
+   try{saved=Buffer.from(await wd('POST',prefix+'/appium/device/pull_file',{path:savedPath}),'base64');}
+   catch(error){
+    if(!desired)throw error;
+    galleryPullError=String(error);actualSavedPath=`/sdcard/Download/${filename}`;
+    try{saved=Buffer.from(await wd('POST',prefix+'/appium/device/pull_file',{path:actualSavedPath}),'base64');}
+    catch(fallbackError){
+     writeFileSync(`evidence/${gallery}-missing-save.json`,JSON.stringify({case:gallery,expectedSavedPath:savedPath,fallbackPath:actualSavedPath,galleryPullError,fallbackPullError:String(fallbackError)},null,2));
+     throw fallbackError;
+    }
+   }
+   writeFileSync(`evidence/saved-${gallery}.${testCase.extension}`,saved);
    const source=JSON.parse(readFileSync(`evidence/source-${gallery}.json`));
+   if(testCase.sourceMetadata&&source.sha256.toLowerCase()!==testCase.sourceMetadata.sha256)throw new Error('Explorer selected a different fixture than the immutable artifact');
    const savedSha256=createHash('sha256').update(saved).digest('hex');
-   if(savedSha256!==source.sha256.toLowerCase())throw new Error('Image saved bytes mismatch');
-   const filesystem=await shell(`stat -c '%n|%s|%Y|%y' '${savedPath}'`,gallery+'-filesystem');
-   const mediaStore=await shell(`content query --uri content://media/external/images/media --projection _id:_display_name:_data:date_modified:date_added:datetaken --where "_display_name='${filename}'"`,gallery+'-mediastore');
+   if(savedSha256!==source.sha256.toLowerCase())throw new Error('Saved media bytes mismatch');
+   const filesystem=await shell(`stat -c '%n|%s|%Y|%y' '${actualSavedPath}'`,gallery+'-filesystem');
+   const collection=testCase.extension==='mp4'?'video':'images';
+   const mediaStore=await shell(`content query --uri content://media/external/${collection}/media --projection _id:_display_name:_data:date_modified:date_added:datetaken --where "_display_name='${filename}'"`,gallery+'-mediastore');
    const normalMetadata=await helperMetadata(filename,gallery);
-   results.push({case:gallery,source,savedPath,savedSha256,byteExact:true,filesystem,mediaStore,normalMetadata});
+   const measuredFile=normalMetadata.filesystem?.find(file=>file.path===actualSavedPath);
+   const rows=normalMetadata.mediaStore?.filter(row=>row._display_name===filename)||[];
+   const expectedMtimeMs=source.mtimeMs,expectedModifiedSeconds=Math.floor(expectedMtimeMs/1000);
+   const filesystemEqual=Number.isFinite(expectedMtimeMs)&&measuredFile?.filesystemMtimeMs===expectedMtimeMs;
+   const mediaStoreModifiedSeconds=rows.map(row=>row.date_modified==null?null:Number(row.date_modified));
+   const mediaStoreEqual=!desired||(!normalMetadata.mediaStoreError&&rows.length===1&&Number.isFinite(mediaStoreModifiedSeconds[0])&&mediaStoreModifiedSeconds[0]===expectedModifiedSeconds);
+   const fallbackObserved=desired&&(actualSavedPath!==savedPath||(normalMetadata.filesystem||[]).some(file=>file.path===`/sdcard/Download/${filename}`&&!file.error&&file.sha256));
+   const required=!desired||(process.env.SOURCE_APP_FAMILY==='candidate'&&process.env.SOURCE_APK_KIND==='candidate');
+   const mtimeVerdict={expectedMtimeMs,expectedModifiedSeconds,filesystemMtimeMs:measuredFile?.filesystemMtimeMs??null,filesystemEqual,
+    mediaStoreApplicable:desired,mediaStoreModifiedSeconds,mediaStoreEqual,fallbackObserved,required,passed:filesystemEqual&&mediaStoreEqual&&!fallbackObserved};
+   const result={case:gallery,mediaType:testCase.extension,source,savedPath,actualSavedPath,savedSha256,byteExact:true,filesystem,mediaStore,normalMetadata,
+    fixtureArtifact:testCase.sourceMetadata||null,galleryPullError,mtimeVerdict,saveOutcome:fallbackObserved?'directory-fallback-observed':(desired?'gallery-observed':'directory-observed')};
+   results.push(result);writeFileSync(`evidence/${gallery}-mtime-result.json`,JSON.stringify(result,null,2));
    writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));
-   writeFileSync(`evidence/saved-${gallery}.png`,saved);
-   try {await fileManagerDetails(filename,gallery,desired);results.at(-1).fileManagerDetails={captured:true};}
+   if(required&&!mtimeVerdict.passed)mtimeFailures.push({case:gallery,mtimeVerdict});
+   if(extended&&(!measuredFile||measuredFile.error||measuredFile.sha256!==savedSha256||measuredFile.size!==saved.length))throw new Error('Independent normal-permission filesystem observation did not verify saved bytes/path');
+   if(extended&&normalMetadata.mediaStoreError)throw new Error('Correct-collection MediaStore observation failed: '+normalMetadata.mediaStoreError);
+   if(extended&&desired&&!fallbackObserved){
+    const directory=testCase.extension==='mp4'?'Movies':'Pictures';
+    if(rows?.length!==1||!rows[0]._data?.endsWith('/'+directory+'/'+filename))throw new Error('Owned gallery item did not appear in expected MediaStore collection/directory');
+   }
+   if(testCase.extension==='jpg'){
+    if(measuredFile.rawExifError||measuredFile.rawExif?.DateTimeOriginal!==fixtureManifest.jpeg.dateTimeOriginal||measuredFile.rawExif?.DateTimeDigitized!==fixtureManifest.jpeg.dateTimeDigitized)throw new Error('Saved JPEG capture EXIF differs from the immutable source artifact');
+   }
+   if(testCase.extension==='mp4'){
+    const raw=measuredFile.rawVideoMetadata;
+    if(measuredFile.rawVideoMetadataError||!raw?.date||!(Number(raw.durationMs)>0)||Number(raw.width)!==32||Number(raw.height)!==24)throw new Error('Saved video native metadata is missing or differs from fixture dimensions/duration');
+    const normalized=raw.date.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(.*)$/,'$1-$2-$3T$4:$5:$6$7');
+    if(Date.parse(normalized)!==Date.parse(fixtureManifest.video.format.tags.creation_time))throw new Error('Saved video capture time differs from immutable source artifact');
+   }
+   try {if(testCase.extension==='mp4')results.at(-1).fileManagerDetails={captured:false,reason:'Raw native video metadata and filesystem observations collected separately'};else{await fileManagerDetails(filename,gallery,desired);results.at(-1).fileManagerDetails={captured:true};}}
    catch(error){results.at(-1).fileManagerDetails={captured:false,error:String(error)};await capture(gallery+'-files-detail-blocker');}
    finally{await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});}
    await click('Done');
   }
   await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
+  if(precisionFailures.length)throw new Error('Candidate strict gallery millisecond preservation failed; precision result and gallery/fallback artifacts retained');
+  if(mtimeFailures.length)throw new Error('Required media modification-time verdicts failed: '+mtimeFailures.map(result=>result.case).join(', ')+'; raw per-case results retained');
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
 }
