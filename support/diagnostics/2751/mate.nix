@@ -17,7 +17,7 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     programs.localsend.enable = true;
     environment.systemPackages = with pkgs; [ xorg.xrandr xorg.xwininfo xorg.xprop xdotool imagemagick psmisc
       (writeScriptBin "mate-scale-ui" ''
-        #!${(python3.withPackages (p: [ p.pyatspi ])).interpreter}
+        #!${(python3.withPackages (p: [ p.pyatspi p.pygobject3 ])).interpreter}
         ${builtins.readFile ./mate-scale-ui.py}
       '')
     ];
@@ -74,19 +74,19 @@ import (nixpkgs + "/nixos/tests/make-test-python.nix") ({ pkgs, ... }: {
     machine.wait_for_window("LocalSend", 60)
     machine.wait_for_open_port(53317)
     for label, scale, restart in [
-        ("100-live-first", 1, False), ("200-live", 2, False),
+        ("100-live-first", 1, False), ("200-gui", 2, False), ("100-gui", 1, False),
+        ("200-live", 2, False),
         ("100-live-return", 1, False), ("200-fresh", 2, True),
         ("100-fresh", 1, True), ("200-live-repeat", 2, False),
         ("200-fresh-repeat", 2, True), ("100-fresh-final", 1, True),
-        ("200-panel-replace", 2, False), ("100-panel-replace", 1, False),
-        ("200-gui", 2, False), ("100-gui", 1, False)]:
+        ("200-panel-replace", 2, False), ("100-panel-replace", 1, False)]:
         if label == "200-gui":
             user_command("sh -c 'mate-display-properties > /tmp/evidence/display-ui.log 2>&1 &' ")
             machine.wait_for_window("Monitor Preferences", 60)
             machine.screenshot("100-gui-before")
         if label.endswith("gui"):
             try:
-                user_command("mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1 || { cat /tmp/evidence/display-ui-actions.log; exit 1; }")
+                user_command("GI_TYPELIB_PATH=${pkgs.at-spi2-core}/lib/girepository-1.0:${pkgs.glib}/lib/girepository-1.0 mate-scale-ui " + str(scale * 100) + " >> /tmp/evidence/display-ui-actions.log 2>&1 || { cat /tmp/evidence/display-ui-actions.log; exit 1; }")
             finally:
                 machine.copy_from_vm("/tmp/evidence", "guest-gui-attempt-" + label)
             machine.sleep(3)
