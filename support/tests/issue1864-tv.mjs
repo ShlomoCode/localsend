@@ -45,17 +45,22 @@ async function remote(key) {
   await pause(650);
 }
 async function record(name, action) {
-  const process = spawn('adb', ['shell', 'screenrecord', '--time-limit', '15', `/sdcard/${name}.mp4`]);
+  const path = `/sdcard/issue1864-recordings/${name}.mp4`;
+  const process = spawn('adb', ['shell', 'screenrecord', '--time-limit', '15', path]);
+  const finished = new Promise(resolve => process.once('exit', (code, signal) => resolve({ code, signal })));
+  process.stderr.on('data', data => fs.appendFileSync(`${out}/${name}-screenrecord.log`, data));
   log({ type: 'recording', action: 'start', name });
   await pause(900);
   await action();
   await pause(1200);
   adb('shell', 'pkill', '-INT', 'screenrecord');
-  await new Promise(resolve => process.on('exit', resolve));
-  adb('pull', `/sdcard/${name}.mp4`, `${out}/${name}.mp4`);
+  await finished;
+  adb('pull', path, `${out}/${name}.mp4`);
   log({ type: 'recording', action: 'end', name });
 }
 adb('shell', 'settings', 'put', 'system', 'show_touches', '1');
+adb('shell', 'mkdir', '-p', '/sdcard/issue1864-recordings');
+adb('shell', 'touch', '/sdcard/issue1864-recordings/.nomedia');
 adb('shell', 'am', 'start', '-a', 'android.settings.SETTINGS');
 await pause(2500);
 await snapshot('native-control-before');
@@ -66,9 +71,11 @@ adb('shell', 'am', 'start', '-n', 'org.localsend.localsend_app/.MainActivity');
 await pause(2500);
 await mouseNode('Send', 'open-send');
 await mouseNode('Media', 'open-media');
+await pause(3000);
 const media = await snapshot('media-initial');
-const photo = nodes(media).find(n => n['content-desc']?.startsWith('Image1,'));
+const photo = nodes(media).find(n => /^Image\d+,/.test(n['content-desc'] ?? ''));
 if (!photo) throw new Error('First seeded photo is absent; inspect media-initial.png');
+const photoLabel = photo['content-desc'].split(',')[0] + ',';
 const bounds = [...photo.bounds.matchAll(/\d+/g)].map(n => Number(n[0]));
 // The original picker's selection indicator occupies the thumbnail's top end.
 // Read the actual semantic bounds rather than substitute an accessibility click.
@@ -81,7 +88,7 @@ async function mousePhoto() {
 }
 await record('mouse-photo-control', mousePhoto);
 const selected = await snapshot('mouse-photo-selected');
-const selectedPhoto = nodes(selected).find(n => n['content-desc']?.startsWith('Image1,'));
+const selectedPhoto = nodes(selected).find(n => n['content-desc']?.startsWith(photoLabel));
 if (selectedPhoto?.selected !== 'true') throw new Error('Mouse control did not select the first photo');
 await mousePhoto();
 await snapshot('media-reset-before-dpad');
