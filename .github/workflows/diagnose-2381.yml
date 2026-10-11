@@ -25,4 +25,6 @@ jobs:
         if: always()
         with:
           name: evidence2381
-          path: ${{ runner.temp }}/evidence2381
+          path: |
+            ${{ runner.temp }}/evidence2381
+            !${{ runner.temp }}/evidence2381/*-app/**
