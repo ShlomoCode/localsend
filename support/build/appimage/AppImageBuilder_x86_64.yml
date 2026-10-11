@@ -13,6 +13,8 @@ AppDir:
     version: 1.18.2
     exec: localsend_app
     exec_args: $@
+  after_runtime:
+    - printf '\nStartupWMClass=org.localsend.localsend_app\n' >> "$TARGET_APPDIR/org.localsend.localsend_app.desktop"
   apt:
     arch:
       - amd64
