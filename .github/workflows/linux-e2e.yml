@@ -4,15 +4,12 @@ on:
 jobs:
   arch-tray:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-      - name: Arch package and real Quickshell hover
+      - name: Arch Hyprland VM and real Quickshell hover
         run: |
-          mkdir -p evidence/cloud
-          docker pull archlinux:base
-          docker image inspect archlinux:base > evidence/cloud/container-identity.json
-          docker run --name tray3484 --shm-size=1g -v "$PWD:/work" -w /work archlinux:base bash support/diagnostics/3484/arch.sh
+          bash support/diagnostics/3484/vm.sh
       - name: Preserve evidence
         if: always()
         uses: actions/upload-artifact@v6
