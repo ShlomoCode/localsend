@@ -33,12 +33,12 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(401);res.end();return;}
     res.setHeader('content-type','application/json');
     if(req.method==='GET' && req.url==='/pull') {
-      if(waiter){res.writeHead(409);res.end();return;}
+      record('poll-open');if(waiter){record('poll-conflict');res.writeHead(409);res.end();return;}
       if(events.length){res.end(JSON.stringify(dequeue()));return;}
       const w={res,timer:setTimeout(()=>{record('poll-renewal');if(waiter===w)waiter=null;res.end('[]');},15000)};
-      waiter=w;res.on('close',()=>{if(waiter===w){clearTimeout(w.timer);waiter=null;}});return;
+      waiter=w;res.on('close',()=>{record('poll-close');if(waiter===w){clearTimeout(w.timer);waiter=null;}});return;
     }
-    if(req.method==='GET' && req.url==='/status'){res.end(JSON.stringify({...metrics,queued,peak,peers:peers.size}));return;}
+    if(req.method==='GET' && req.url==='/status'){res.end(JSON.stringify({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter}));return;}
     if(req.method==='POST' && req.url==='/push') {
       let raw=''; req.on('data',d=>{raw+=d;if(raw.length>256*1024)req.destroy();});
       req.on('end',()=>{
@@ -60,7 +60,7 @@ export function relay({httpPort=8080,tcpPort=53318,reverseTargetPort=null,token=
     }
     res.writeHead(404);res.end('{}');
   });
-  return {token,metrics,trace,record,status:()=>({...metrics,queued,peak,peers:peers.size}),
+  return {token,metrics,trace,record,status:()=>({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter}),
     start:async()=>{if(!reverseTargetPort)await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
     stop:async()=>{record('relay-stop');if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}for(const [id,p] of peers){record('relay-stop-close',id);p.destroy();}server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),...(reverseTargetPort?[]:[new Promise(r=>tcp.close(r))])]);}};
 }

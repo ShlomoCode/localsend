@@ -37,6 +37,10 @@ try {
  // request finish before the replacement service starts another pull.
  console.log('Waiting for prior helper long-pull lifecycle to finish');
  await new Promise(ok=>setTimeout(ok,16000));
+ const drainDeadline=Date.now()+15000;
+ while(r.status().pollPending&&Date.now()<drainDeadline)await new Promise(ok=>setTimeout(ok,100));
+ assert(!r.status().pollPending,'Prior helper poll did not drain after Stop');
+ r.record('helper-old-poll-drained');
  await clickText('Relay to LocalSend');
  await wd('POST',`/session/${session}/appium/device/activate_app`,{appId:'org.localsend.localsend_app'});
  await new Promise(ok=>setTimeout(ok,4000));
@@ -55,6 +59,7 @@ try {
   writeFileSync('evidence/android-logcat.json',JSON.stringify(logcat,null,2));
  }
  writeFileSync('mobile-control-final-status.json',JSON.stringify({results,metrics:r.status()},null,2));
+ writeFileSync('evidence/relay-trace.json',JSON.stringify(r.trace,null,2));
  if(session)await wd('DELETE',`/session/${session}`).catch(()=>{});
  await r.stop();
 }
