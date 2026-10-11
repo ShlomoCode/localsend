@@ -5,7 +5,7 @@ import {waitForNativeControl} from './native-readiness.mjs';
 // surrogate or replace a system provider. This is not a transfer experiment.
 export async function probeInstalledProviders({wd,prefix}) {
  const observations=[];
- const providers=['com.google.android.apps.nbu.files','com.google.android.documentsui','com.yozo.vivo.office','com.vivo.easyshare'];
+ const providers=['com.google.android.apps.nbu.files','com.sec.android.app.myfiles','com.google.android.documentsui','com.yozo.vivo.office','com.vivo.easyshare'];
  for(let index=0;index<providers.length;index++){
   const appId=providers[index],label='provider-probe-'+index,record={appId,utc:new Date().toISOString(),observations:[],transferTrial:false};
   observations.push(record);
