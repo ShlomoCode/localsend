@@ -1,33 +1,48 @@
-name: Diagnose 2861 translated Settings labels
+name: Diagnose 2861 SDK font attribution
 on:
   workflow_dispatch:
 jobs:
-  release:
-    runs-on: windows-11-arm
-    timeout-minutes: 20
+  probe-build:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      max-parallel: 1
+      matrix:
+        sdk: ['3.24.5', '3.38.10', '3.41.9']
     steps:
       - uses: actions/checkout@v6
-      - name: Download legitimate releases (historical x64 under emulation)
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ matrix.sdk }}
+          cache: true
+      - name: Build identical diagnostic component
         shell: pwsh
         run: |
-          foreach ($version in @('1.17.0','1.18.2')) {
-            Invoke-WebRequest "https://github.com/localsend/localsend/releases/download/v$version/LocalSend-$version-windows-x86-64.zip" -OutFile "$env:RUNNER_TEMP/$version.zip"
-            Expand-Archive "$env:RUNNER_TEMP/$version.zip" "$env:RUNNER_TEMP/releases/$version"
-          }
-      - name: Download exact untouched current baseline
-        uses: actions/download-artifact@v6
+          $folder="$env:RUNNER_TEMP/font_probe"
+          flutter create --platforms windows --project-name font_probe $folder
+          Copy-Item support/diagnostics/font-probe/main.dart "$folder/lib/main.dart"
+          Set-Location $folder
+          flutter build windows --release
+          flutter --version | Out-File build/windows/x64/runner/Release/sdk.txt
+      - uses: actions/upload-artifact@v6
         with:
-          name: baseline2890-c1ce
-          run-id: 38132668217
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/releases/current
-      - name: Render actual Settings in controlled windows
+          name: font-probe-${{ matrix.sdk }}
+          path: ${{ runner.temp }}/font_probe/build/windows/x64/runner/Release
+  observe:
+    needs: probe-build
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: font-probe-*
+          path: ${{ runner.temp }}/probes
+      - name: Observe same components on same Windows font installation
         shell: powershell
-        run: ./support/diagnostics/windows2861.ps1 -ReleaseRoot $env:RUNNER_TEMP/releases -EvidenceDirectory $env:RUNNER_TEMP/evidence2861
+        run: ./support/diagnostics/font-probe/observe.ps1 -ReleaseRoot $env:RUNNER_TEMP/probes -EvidenceDirectory $env:RUNNER_TEMP/font-evidence
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: evidence2861
-          path: |
-            ${{ runner.temp }}/evidence2861
-            !${{ runner.temp }}/evidence2861/*-app/**
+          name: font-evidence
+          path: ${{ runner.temp }}/font-evidence
