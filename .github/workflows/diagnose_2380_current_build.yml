@@ -1,0 +1,68 @@
+name: Build exact issue 2380 current control
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: source
+      - name: Record exact source
+        working-directory: source
+        shell: pwsh
+        run: |
+          git rev-parse HEAD > source-identity.txt
+          git status --porcelain >> source-identity.txt
+          if ((git rev-parse HEAD) -ne 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244') { throw 'Wrong source control' }
+          git config --system core.longpaths true
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Build supported MSIX helper
+        working-directory: source
+        shell: pwsh
+        run: |
+          $makepri = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makepri.exe' | Select-Object -Last 1
+          & $makepri.FullName new /pr support\build\msix\content /cf support\build\msix\priconfig.xml /mn support\build\msix\content\AppxManifest.xml /of support\build\msix\content\resources.pri /o
+          if ($LASTEXITCODE -ne 0) { throw 'makepri failed' }
+          & 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\makeappx.exe' pack /o /d support\build\msix\content /nv /p app\windows\localsend_msix_helper.msix
+          if ($LASTEXITCODE -ne 0) { throw 'makeappx failed' }
+      - name: Compile pinned normal Windows application
+        working-directory: source/app
+        shell: pwsh
+        run: |
+          dart pub global activate fvm
+          if ($LASTEXITCODE -ne 0) { throw 'FVM setup failed' }
+          $pubCache = if ($env:PUB_CACHE) { $env:PUB_CACHE } else { "$env:LOCALAPPDATA/Pub/Cache" }
+          $fvm = Join-Path $pubCache 'bin/fvm.bat'
+          & $fvm use 3.41.9 --skip-pub-get
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Flutter selection failed' }
+          & $fvm flutter --version > ../flutter-identity.txt
+          rustup toolchain install 1.97.1 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Rust setup failed' }
+          & $fvm flutter pub get
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency resolution failed' }
+          & $fvm flutter build windows --release
+          if ($LASTEXITCODE -ne 0) { throw 'Normal Windows build failed' }
+          Copy-Item ../support/build/windows/x64/msvcp140.dll build/windows/x64/runner/Release/
+          Copy-Item ../support/build/windows/x64/vcruntime140.dll build/windows/x64/runner/Release/
+          Copy-Item ../support/build/windows/x64/vcruntime140_1.dll build/windows/x64/runner/Release/
+          Set-Content -Encoding utf8NoBOM build/windows/x64/runner/Release/settings.json '{}'
+          Remove-Item build/windows/x64/runner/Release/localsend_msix_helper.msix
+          Remove-Item build/windows/x64/runner/Release/install_msix_helper.ps1
+          Remove-Item build/windows/x64/runner/Release/localsend_app.exe.manifest
+          Get-FileHash build/windows/x64/runner/Release/localsend_app.exe | ConvertTo-Json > ../exe-identity.json
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue2380-current-c1ce-build
+          path: |
+            source/app/build/windows/x64/runner/Release
+            source/source-identity.txt
+            source/flutter-identity.txt
+            source/exe-identity.json
+          if-no-files-found: error
