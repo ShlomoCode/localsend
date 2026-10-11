@@ -58,10 +58,11 @@ export default async function({session,wd,senderPort,transportStatus}) {
     await wd("POST",`/session/${session}/actions`,{actions:[{type:"pointer",id:"receiver-touch",parameters:{pointerType:"touch"},actions}]});
     await pause(800);await snapshot(`${name}-after-${interaction}`);
     if(interaction==="select"){
-     const dismiss=[{type:"pointerMove",duration:0,x,y:top-120},{type:"pointerDown",button:0},{type:"pointerUp",button:0}];
-     event("receiver-selection-dismiss",{name,x,y:top-120});
+     const dismiss=[{type:"pointerMove",duration:0,x:left+80,y:top+40},{type:"pointerDown",button:0},{type:"pointerUp",button:0}];
+     event("receiver-selection-dismiss",{name,x:left+80,y:top+40});
      await wd("POST",`/session/${session}/actions`,{actions:[{type:"pointer",id:"receiver-touch",parameters:{pointerType:"touch"},actions:dismiss}]});
-     await snapshot(`${name}-selection-dismissed`);
+     const dismissed=await snapshot(`${name}-selection-dismissed`);
+     if(dismissed.includes('content-desc="Share"')||dismissed.includes('content-desc="Read aloud"'))throw new Error("Selection toolbar still overlays the main Copy button; diagnostic cannot target it yet");
     }
    }
    if(interaction==="none")await click("Copy");
