@@ -12,6 +12,11 @@ move_pointer() {
   done
   return 1
 }
+capture_ocr() {
+  grim "$1.png"
+  magick "$1.png" -crop 1280x80+0+0 -resize 300% "$1-ocr.png"
+  tesseract "$1-ocr.png" "$1" --psm 11 2>/dev/null
+}
 env | sort > "$out/session-environment.txt"
 hyprctl version > "$out/hyprland-version.txt"
 hyprctl monitors -j > "$out/monitors.json"
@@ -36,8 +41,7 @@ sleep 8
 for x in 12 24 36 48 60 72; do
   move_pointer "$x" 16
   sleep 2
-  grim "$out/control-${x}.png"
-  tesseract "$out/control-${x}.png" "$out/control-${x}" 2>/dev/null
+  capture_ocr "$out/control-${x}"
 done
 grep -i -q flameshot "$out"/control-*.txt
 for app_case in release current-base; do
@@ -51,6 +55,16 @@ kill -0 "$app_pid"
 quickshell -p "$OMARCHY_PATH/shell/shell.qml" ipc call shell debugBarGeometry > "$out/bar-geometry.txt" 2>&1 || true
 busctl --user list > "$out/$app_case/dbus-names.txt"
 busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems > "$out/$app_case/tray-items.txt"
+for service in $(awk -v pid="$app_pid" '$2 == pid {print $1}' "$out/$app_case/dbus-names.txt"); do
+  busctl --user tree --list "$service" > "$out/$app_case/dbus-tree-${service}.txt" || true
+  while read -r object_path; do
+    if [[ "$object_path" = /org/ayatana/NotificationItem/* ]]; then
+      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Title > "$out/$app_case/sni-title.txt"
+      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem Id > "$out/$app_case/sni-id.txt"
+      busctl --user get-property "$service" "$object_path" org.kde.StatusNotifierItem ToolTip > "$out/$app_case/sni-tooltip.txt" || true
+    fi
+  done < "$out/$app_case/dbus-tree-${service}.txt"
+done
 grim "$out/$app_case/before-hover.png"
 for repeat in 1 2; do
   move_pointer 1000 700
@@ -58,8 +72,7 @@ for repeat in 1 2; do
   for x in 12 24 36 48 60 72 84 96 108 120; do
     move_pointer "$x" 16
     sleep 2
-    grim "$out/$app_case/hover-${repeat}-${x}.png"
-    tesseract "$out/$app_case/hover-${repeat}-${x}.png" "$out/$app_case/hover-${repeat}-${x}" 2>/dev/null
+    capture_ocr "$out/$app_case/hover-${repeat}-${x}"
   done
 done
 kill -0 "$app_pid"
