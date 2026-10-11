@@ -46,7 +46,13 @@ export default async function({session,wd,senderHost,senderPort,transportStatus}
   // actual activity/intent and allow one Back/reopen from the verified Options
   // page; never treat an ordinary Documents browser as directory selection.
   for(let launch=0;launch<2;launch++){
-   const activity=await wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'dumpsys activity activities'}}),args:[]});
+   const activity={};
+   for(const field of ['current_activity','current_package']){
+    activity[field]=await wd('GET',prefix+'/appium/device/'+field).catch(error=>{
+     if(!/unsupported|unknown command|not implemented/i.test(String(error)))throw error;
+     return {unsupported:String(error)};
+    });
+   }
    writeFileSync('evidence/'+stage+'-native-activity-'+launch+'.json',JSON.stringify(activity,null,2));
    if(/text="(?:Use this folder|USE THIS FOLDER)"/.test(nativeSource))break;
    const footerDeadline=Date.now()+3000;
