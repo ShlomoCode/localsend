@@ -85,23 +85,39 @@ done
 set +e
 expect <<'EXPECT' > >(tee "$OUT/serial.log") 2>&1
 set timeout 240
+set send_slow {1 0.01}
 log_user 1
 spawn socat -,raw,echo=0 UNIX-CONNECT:$env(SERIAL)
 expect {
-  -re {root@[^#]*# ?} {}
-  -re {# ?$} {}
+  -re {root@localsend-mint:[^#]*# ?} {}
   timeout { puts "Timed out waiting for Mint debug shell"; exit 21 }
   eof { puts "Serial console closed before debug shell"; exit 22 }
 }
-send -- {stty -echo; mkdir -p /mnt/input /mnt/evidence /mnt/flatpak-data; mount -t 9p -o trans=virtio,version=9p2000.L,ro localsend_input /mnt/input; mount -t 9p -o trans=virtio,version=9p2000.L localsend_evidence /mnt/evidence; mount -t ext4 /dev/vda /mnt/flatpak-data; bash /mnt/input/mint-vm-guest.sh /mnt/input /mnt/evidence /mnt/flatpak-data; guest_status=$?; echo MINT_VM_DONE:$guest_status}
-send -- "\r"
-set timeout 1500
-expect {
-  -re {(^|[\r\n])MINT_VM_DONE:0[\r\n]} { exit 0 }
-  -re {(^|[\r\n])MINT_VM_DONE:[1-9][0-9]*[\r\n]} { puts "Guest returned a nonzero status"; exit 25 }
-  timeout { puts "Timed out waiting for guest completion marker"; exit 23 }
-  eof { puts "Serial console closed before guest completion"; exit 24 }
+proc run_step {command marker} {
+  global timeout send_slow expect_out
+  set line [format {%s; printf '\n%s:%%s\n' $?} $command $marker]
+  send -s -- $line
+  send -s -- "\r"
+  set pattern [format {(^|[\r\n])%s:([0-9]+)[\r\n]} $marker]
+  expect {
+    -re $pattern {
+      if {$expect_out(2,string) != 0} { puts "$marker returned nonzero status"; exit 25 }
+    }
+    timeout { puts "Timed out waiting for $marker"; exit 23 }
+    eof { puts "Serial console closed before $marker"; exit 24 }
+  }
 }
+# Early boot can reset the TTY. Pace input and verify each short command.
+after 20000
+set timeout 60
+run_step {stty -echo} MINT_SERIAL_READY
+run_step {mkdir -p /mnt/input /mnt/evidence /mnt/flatpak-data} MINT_DIRS_READY
+run_step {mount -t 9p -o trans=virtio,version=9p2000.L,ro localsend_input /mnt/input} MINT_INPUT_READY
+run_step {mount -t 9p -o trans=virtio,version=9p2000.L localsend_evidence /mnt/evidence} MINT_EVIDENCE_READY
+run_step {mount -t ext4 /dev/vda /mnt/flatpak-data} MINT_DATA_READY
+set timeout 1500
+run_step {bash /mnt/input/mint-vm-guest.sh /mnt/input /mnt/evidence /mnt/flatpak-data} MINT_VM_DONE
+exit 0
 EXPECT
 expect_status=$?
 set -e
