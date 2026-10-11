@@ -1,1 +1,1 @@
-{"round":10,"actions":[{"kind":"click","x":906,"y":345},{"kind":"wait","seconds":5}]}
+{"round":11,"actions":[{"kind":"key","value":"alt+Tab"},{"kind":"wait","seconds":3}]}
