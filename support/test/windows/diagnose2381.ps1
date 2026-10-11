@@ -9,13 +9,16 @@ public static class Desktop2381 {
  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(WindowPoint point);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,System.Text.StringBuilder value,int size);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h,uint message,IntPtr wParam,string value);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h,uint message,IntPtr wParam,System.Text.StringBuilder value);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,System.Text.StringBuilder value,int size);
  public static string NativeFilename(string value) {
   var h=WindowFromPoint(new WindowPoint {x=400,y=442});
   var name=new System.Text.StringBuilder(128);GetClassName(h,name,name.Capacity);
   if(name.ToString()!="Edit") throw new Exception("Filename point is not a native Edit control: "+name);
   SendMessage(h,12,IntPtr.Zero,value);
-  var actual=new System.Text.StringBuilder(2048);GetWindowText(h,actual,actual.Capacity);
+  // GetWindowText cannot retrieve another process's Edit contents. WM_GETTEXT
+  // is the documented cross-process control-text API and returns displayed text.
+  var actual=new System.Text.StringBuilder(2048);SendMessage(h,13,(IntPtr)actual.Capacity,actual);
   return actual.ToString();
  }
  [StructLayout(LayoutKind.Sequential)] public struct KeyboardInput {public ushort vk,scan;public uint flags,time;public UIntPtr extra;}
@@ -99,7 +102,7 @@ function FillNativeFilename([string]$path,[string]$snapshot) {
   # Some hosted native dialogs expose no UI Automation ValuePattern. The
   # documented Win32 Edit-control API provides the same input/readback action.
   $actual=[Desktop2381]::NativeFilename($fullPath)
-  $inputApi="native Win32 Edit WM_SETTEXT/GetWindowText (class verified)"
+  $inputApi="native Win32 Edit WM_SETTEXT/WM_GETTEXT (class verified)"
  }
  @{inputApi=$inputApi;requested=$fullPath;displayed=$actual;timestampUtc=(Get-Date).ToUniversalTime().ToString("o")} | ConvertTo-Json | Set-Content "$EvidenceDirectory/$snapshot-filename-input.json"
  if($actual -cne $fullPath) {throw "Native filename control did not retain the exact fixture path"}
