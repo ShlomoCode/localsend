@@ -4,7 +4,7 @@ Eight distinct long-text content conditions, one supplementary scroll condition,
 
 The report describes Windows Send → Clipboard → target followed by Android freezing. It does not specify tapping, scrolling, selecting, or Copy. Every content experiment below uses original 1.17.0 applications and actual Windows Clipboard → Favorites → target actions, followed by Android Preview. Copy supplements the reported trigger with responsiveness and content verification. Scroll and selection are explicitly supplementary scenarios.
 
-The parent has accepted four conditions after inspecting raw screenshots and independently checking content hashes. Remaining rows are review candidates, not accepted canonical evidence.
+The parent has accepted nine conditions after inspecting raw screenshots and independently checking content hashes. The first four and the five additional completed rows are accepted; selection awaits raw review. For CJK/emoji, acceptance covers full Preview content and responsiveness only, not clipboard readback. Parent review is retained at /tmp/localsend-sprint/2830-parent-pending-review.json.
 
 ## Parent-accepted conditions
 
@@ -15,9 +15,9 @@ The parent has accepted four conditions after inspecting raw screenshots and ind
 | 38109605530 / c3bc4478 | ASCII length 105000 → 107520 (105 KiB); same S23 environment | Same reported sender flow and receiver Preview | Preview and responsive Copy; complete clipboard readback equals 107520-byte source | `kib-38109605530/issue2830-physical-control/evidence/` |
 | 38113374423 / 8ef99127 | Matching Xiaomi short control → ASCII105000; same Note 11 / Android 11 and 10000 ms discovery setting | Same reported sender flow and receiver Preview | Preview and responsive Copy; complete clipboard readback equals 105000-byte source | `xiaomi-ascii-10s-38113374423/issue2830-physical-control/evidence/` |
 
-## Candidates awaiting parent raw review
+## Five additional accepted conditions and selection pending review
 
-These six conditions bring the proposed matrix to ten exercised conditions; the selection row does not claim completed Copy or content readback. They remain outside the accepted canonical set until the parent reviews their raw evidence.
+The five completed rows below are now parent accepted. Selection brings the proposed matrix to ten exercised conditions, but its corrected repeat remains pending raw review. The failed first selection attempt does not claim completed Copy or content readback.
 
 | Run | Single changed input or action | Reported scenario exercised | Investigator observation and limitation | Raw evidence directory |
 | --- | --- | --- | --- | --- |

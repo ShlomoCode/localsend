@@ -1,6 +1,6 @@
 # Issue 2830: evidence summary
 
-The reported Android freeze is not reproduced in nine completed long-text conditions so far. Two additional short controls are excluded from that count. Selection is active. The parent has accepted four conditions; remaining raw evidence awaits parent review (see REVIEW_MATRIX.md). Original LocalSend 1.17.0 applications complete four fixtures on Galaxy S23 / Android 13, plus short, ASCII105000, and multiline105000 on Xiaomi Redmi Note 11 / Android 11. Unbroken105000 also passes on Xiaomi. No production fix or PR is justified by these results.
+The reported Android freeze is not reproduced in nine completed long-text conditions so far. Two additional short controls are excluded from that count. Selection is active. The parent has accepted nine conditions; corrected selection raw evidence awaits parent review (see REVIEW_MATRIX.md). Original LocalSend 1.17.0 applications complete four fixtures on Galaxy S23 / Android 13, plus short, ASCII105000, and multiline105000 on Xiaomi Redmi Note 11 / Android 11. Unbroken105000 also passes on Xiaomi. No production fix or PR is justified by these results.
 
 The observed flow is Windows Send → Clipboard → Favorites → target, then Android message preview. Copy is supplementary responsiveness and full-content verification; the report does not require scrolling, selection, or Copy to trigger the freeze. Android Quick Save is Off in inspected screenshots.
 
