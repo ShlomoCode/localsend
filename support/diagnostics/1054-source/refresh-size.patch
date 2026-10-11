@@ -1,0 +1,44 @@
+diff --git a/app/lib/model/cross_file.dart b/app/lib/model/cross_file.dart
+index 4680bf0c..86d3a5eb 100644
+--- a/app/lib/model/cross_file.dart
++++ b/app/lib/model/cross_file.dart
+@@ -1,3 +1,4 @@
++import 'dart:io';
+ import 'dart:typed_data';
+ 
+ import 'package:dart_mappable/dart_mappable.dart';
+@@ -32,6 +33,21 @@ class CrossFile with CrossFileMappable {
+     required this.lastAccessed,
+   });
+ 
++  /// Refreshes a native file's size before negotiating a new transfer.
++  Future<CrossFile> refreshSize() async {
++    final filePath = path;
++    if (filePath == null || bytes != null || filePath.startsWith('content://')) {
++      return this;
++    }
++
++    try {
++      return copyWith(size: await File(filePath).length());
++    } on FileSystemException {
++      // Preserve the existing upload error handling for missing or unreadable files.
++      return this;
++    }
++  }
++
+   /// Custom toString() to avoid printing the bytes.
+   @override
+   String toString() {
+diff --git a/app/lib/provider/network/send_provider.dart b/app/lib/provider/network/send_provider.dart
+index d4adf330..9db60f40 100644
+--- a/app/lib/provider/network/send_provider.dart
++++ b/app/lib/provider/network/send_provider.dart
+@@ -90,6 +90,8 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
+     required List<CrossFile> files,
+     required bool background,
+   }) async {
++    files = await Future.wait(files.map((file) => file.refreshSize()));
++
+     // Pinned to the device the user picked, so the request is not sent at all
+     // if someone else answers on that address.
+     final client = ref.read(httpProvider).pinnedTo(target.fingerprint);

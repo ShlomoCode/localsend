@@ -3,11 +3,23 @@ set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true ]] || { echo "Cloud-only harness" >&2; exit 2; }
 mkdir -p evidence released/base
 cp -a source-artifact/provenance evidence/source-provenance
-printf "%s  %s\n" 98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b source-artifact/source-bundle.tar.gz | sha256sum -c -
+if [[ -n ${ISSUE1054_CONTROLLED_VARIANT:-} ]]; then
+  (cd source-artifact && sha256sum -c source-bundle.tar.gz.sha256)
+  [[ $(jq -r .variant source-artifact/provenance/build-inputs.json) == "$ISSUE1054_CONTROLLED_VARIANT" ]]
+  [[ $(jq -r .run_url source-artifact/provenance/build-inputs.json) == "https://github.com/ShlomoCode/localsend/actions/runs/$GITHUB_RUN_ID" ]]
+  cmp source-artifact/provenance/source-diff-before.patch source-artifact/provenance/source-diff-after.patch
+  if [[ $ISSUE1054_CONTROLLED_VARIANT == baseline ]]; then
+    [[ ! -s source-artifact/provenance/source-diff-after.patch ]]
+  else
+    cmp support/diagnostics/1054-source/refresh-size.patch source-artifact/provenance/source-diff-after.patch
+  fi
+else
+  printf "%s  %s\n" 98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b source-artifact/source-bundle.tar.gz | sha256sum -c -
+  [[ $(jq -r .run_url source-artifact/provenance/build-inputs.json) == https://github.com/ShlomoCode/localsend/actions/runs/38132747719 ]]
+  [[ ! -s source-artifact/provenance/source-diff-after.patch ]]
+fi
 [[ $(jq -r .source_sha source-artifact/provenance/build-inputs.json) == c1ce322fb3acf08e44f329b8b7208b8b0d91e244 ]]
-[[ $(jq -r .run_url source-artifact/provenance/build-inputs.json) == https://github.com/ShlomoCode/localsend/actions/runs/38132747719 ]]
 [[ $(jq -r .flutter_version source-artifact/provenance/build-inputs.json) == 3.41.9 ]]
-[[ ! -s source-artifact/provenance/source-diff-after.patch ]]
 sha256sum source-artifact/source-bundle.tar.gz > evidence/source-bundle-sha256.txt
 tar -xzf source-artifact/source-bundle.tar.gz -C released/base
 ldd released/base/localsend_app > evidence/executable-ldd.txt

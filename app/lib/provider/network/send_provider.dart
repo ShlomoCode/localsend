@@ -90,6 +90,8 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     required List<CrossFile> files,
     required bool background,
   }) async {
+    files = await Future.wait(files.map((file) => file.refreshSize()));
+
     // Pinned to the device the user picked, so the request is not sent at all
     // if someone else answers on that address.
     final client = ref.read(httpProvider).pinnedTo(target.fingerprint);

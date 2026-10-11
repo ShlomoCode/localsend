@@ -1,0 +1,78 @@
+name: Issue 1054 source-only size comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-1054-reselection-diagnostic]
+    paths:
+      - .github/workflows/diagnose-1054-source.yml
+      - support/diagnostics/1054-source/**
+      - app/lib/model/cross_file.dart
+      - app/lib/provider/network/send_provider.dart
+      - app/test/unit/model/cross_file_test.dart
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-1054-linux
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: diagnostic
+      - uses: actions/checkout@v4
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: source
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev pkg-config binutils jq
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+      - run: |
+          dart pub global activate fvm
+          rustup toolchain install 1.97.1 --profile minimal
+      - name: Build identical pinned baseline and source-only candidate sequentially
+        env:
+          RUSTUP_TOOLCHAIN: 1.97.1
+        run: bash diagnostic/support/diagnostics/1054-source/build.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue1054-source-bundles-${{ github.run_id }}
+          path: source-evidence/
+  real-app-comparison:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue1054-source-bundles-${{ github.run_id }}
+          path: source-evidence
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils openbox xdotool scrot tesseract-ocr imagemagick iproute2 dbus-x11 libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0t64 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0 jq ffmpeg
+      - name: Replay identical actual-app workflows against baseline then candidate
+        run: bash support/diagnostics/1054-source/compare.sh
+      - name: Restore evidence access
+        if: always()
+        run: |
+          if test -d evidence; then
+            sudo chown -R "$(id -u):$(id -g)" evidence
+            sudo chmod -R u+rwX evidence
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue1054-source-comparison-${{ github.run_id }}
+          path: |
+            evidence/
+            source-evidence/
+          retention-days: 14

@@ -17,6 +17,8 @@ import time
 OUT = Path("evidence")
 OUT.mkdir(exist_ok=True)
 RESULTS = []
+VARIANT = os.environ.get("ISSUE1054_CONTROLLED_VARIANT", "baseline")
+EXPECT_REFRESH = VARIANT == "candidate"
 
 
 def run(*args):
@@ -170,7 +172,17 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
     focus(swin)
     normalize(swin, stage + "-sender-normalized")
     screen(stage + "-before-send-selection")
-    click(locate("Receiver", stage + "-target", 60))
+    target = locate("Receiver", stage + "-target", 60)
+    recording = None
+    if os.environ.get("ISSUE1054_CONTROLLED_VARIANT") and repeat == 1 and phase == "edited14MB-without-reselection":
+        command = ["ffmpeg", "-y", "-f", "x11grab", "-framerate", "15", "-video_size", "1200x800",
+                   "-i", os.environ["DISPLAY"], "-t", "30", "-c:v", "libx264", "-preset", "ultrafast",
+                   "-pix_fmt", "yuv420p", str(OUT / (stage + "-continuous.mp4"))]
+        (OUT / (stage + "-recording.json")).write_text(json.dumps({"monotonic": time.monotonic(), "argv": command}))
+        recording = subprocess.Popen(command, stdout=subprocess.DEVNULL,
+                                     stderr=(OUT / (stage + "-ffmpeg.log")).open("w"))
+        time.sleep(1)
+    click(target)
     focus(rwin)
     normalize(rwin, stage + "-receiver-normalized")
     locate("Options", stage + "-approval", 30)
@@ -193,6 +205,7 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
     result["terminal_observed"] = bool(observed and any(label.lower() == "finished" for label in observed[-1]["labels"]) and any(label.lower() == "done" for label in observed[-1]["labels"]))
     screen(stage + "-receiver-outcome")
     result["receiver_status_words"] = observed[-1]["labels"] if observed else []
+    result["transfer_successful"] = result["content_valid"] and result["terminal_observed"] and not any(label.lower() == "error" for label in result["receiver_status_words"])
     # Per-file Error has an adjacent ordinary info action. Anchor to its actual
     # rendered token, retain the modal details, then close before Done.
     if result["terminal_observed"]:
@@ -225,7 +238,7 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
     click(locate("Done", stage + "-receiver-done", 15))
     locate("Receiver", stage + "-receiver-home", 15)
     focus(swin)
-    if not result["content_valid"]:
+    if not result["transfer_successful"]:
         # In multiple mode a failed target opens its retained session. Close
         # that ordinary session through Done before attempting a new transfer.
         click(locate("Receiver", stage + "-sender-failed-target", 15))
@@ -242,7 +255,11 @@ def transfer(swin, rwin, dest, fixture, repeat, phase, expected, required):
         row = action[0]
         click((row["left"] + row["width"] // 2, row["top"] + row["height"] // 2))
     locate("Selection", stage + "-sender-selection-retained", roi=(200, 20, 800, 350))
-    if required and not result["content_valid"]:
+    if recording is not None:
+        recording.wait(timeout=35)
+        if recording.returncode:
+            raise RuntimeError("Continuous recording failed: " + stage)
+    if required and not result["transfer_successful"]:
         raise RuntimeError("Required real transfer control failed: " + stage)
     if not result["terminal_observed"]:
         raise RuntimeError("Unclassified transfer deadline: " + stage)
@@ -302,10 +319,21 @@ try:
         updated = overwrite(fixture, 14_000_000, 2)
         (OUT / f"repeat-{repeat}-ordinary-overwrite.json").write_text(json.dumps({"before": initial, "after": updated, "same_path": True}, indent=2))
         screen(f"repeat-{repeat}-stale-selection-after-edit")
-        transfer(swin, rwin, dest, fixture, repeat, "edited14MB-without-reselection", updated, False)
+        grown = transfer(swin, rwin, dest, fixture, repeat, "edited14MB-without-reselection", updated, EXPECT_REFRESH)
+        if grown["transfer_successful"] != EXPECT_REFRESH:
+            raise RuntimeError("Growth comparison did not distinguish retained-size behavior")
         clear_selection(swin, f"repeat-{repeat}-clear")
         select_file(swin, fixture, f"repeat-{repeat}-reselection-picker")
         transfer(swin, rwin, dest, fixture, repeat, "edited14MB-reselected", updated, True)
+        if os.environ.get("ISSUE1054_CONTROLLED_VARIANT") and repeat == 1:
+            shrunk = overwrite(fixture, 11_000_000, 3)
+            screen("repeat-1-retained-14MB-selection-after-shrink")
+            shrinking = transfer(swin, rwin, dest, fixture, repeat, "shrunk11MB-without-reselection", shrunk, EXPECT_REFRESH)
+            if shrinking["transfer_successful"] != EXPECT_REFRESH:
+                raise RuntimeError("Shrink comparison did not distinguish retained-size behavior")
+            clear_selection(swin, "repeat-1-shrink-clear")
+            select_file(swin, fixture, "repeat-1-shrink-reselection")
+            transfer(swin, rwin, dest, fixture, repeat, "shrunk11MB-reselected", shrunk, True)
         if repeat == 1:
             clear_selection(swin, "repeat-1-final-clear")
     (OUT / "completed").write_text("Both initial and reselected controls passed; inspect middle outcomes.\n")
