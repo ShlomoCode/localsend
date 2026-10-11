@@ -1,0 +1,28 @@
+name: Diagnose Plasma tray persistence 3546
+on:
+  workflow_dispatch:
+jobs:
+  plasma:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Plasma 6 and official release
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y plasma-desktop plasma-workspace xvfb dbus-x11 xdotool imagemagick qdbus-qt6 libgtk-3-0 libayatana-appindicator3-1 libcanberra-gtk3-module
+          if apt-cache show plasma-workspace-x11 >/dev/null 2>&1; then sudo apt-get install -y plasma-workspace-x11; fi
+          mkdir -p evidence release
+          curl -fL https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.tar.gz -o release.tar.gz
+          echo '287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16  release.tar.gz' | sha256sum -c -
+          tar -xzf release.tar.gz -C release
+          dpkg-query -W plasma-workspace plasma-desktop > evidence/environment.txt
+          git rev-parse HEAD >> evidence/environment.txt
+      - name: Observe actual application and Plasma settings
+        run: |
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash support/diagnostics/3546/probe.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: tray-3546-${{ github.run_id }}
+          path: evidence/
