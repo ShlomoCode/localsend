@@ -69,6 +69,8 @@ export default async function({session,wd,senderPort,transportStatus}){
   if(e.readiness.choice===1){await capture(label+'-normal-media-permission');await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});e=await waitForNativeControl({wd,prefix,label:label+'-metadata-output',...outputTarget,requireClickable:false});}
   const value=await wd('GET',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/attribute/content-desc');
   const result=JSON.parse(value.slice('Image metadata: '.length));writeFileSync(`evidence/${label}-normal-metadata.json`,JSON.stringify(result,null,2));await capture(label+'-normal-metadata');
+  const expectedSdk=Number(process.env.BS_OS)===10?29:(Number(process.env.BS_OS)===15?35:null);
+  if(expectedSdk!==null&&result.androidSdk!==expectedSdk)throw new Error('Native Android SDK differs from selected receiver; raw metadata retained');
   await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});
   return result;
  }

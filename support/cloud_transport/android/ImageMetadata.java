@@ -22,6 +22,7 @@ public final class ImageMetadata {
   JSONObject result=new JSONObject();JSONArray files=new JSONArray(),rows=new JSONArray();
   try{
    result.put("filename",filename);result.put("utcMs",System.currentTimeMillis());
+   result.put("androidSdk",android.os.Build.VERSION.SDK_INT);result.put("androidRelease",android.os.Build.VERSION.RELEASE);result.put("androidModel",android.os.Build.MODEL);
    TimeZone timezone=TimeZone.getDefault();result.put("systemTimezone",timezone.getID());result.put("systemTimezoneOffsetAtObservationMs",timezone.getOffset(System.currentTimeMillis()));
    if(!filename.matches("issue2311-[a-zA-Z0-9-]+\\.(png|jpg|mp4)"))throw new IllegalArgumentException("Unexpected diagnostic filename");
    boolean video=filename.endsWith(".mp4");
