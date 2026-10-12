@@ -7,24 +7,29 @@ param(
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $coldFileDiagnostic=$env:COLD_FILE_DIAGNOSTIC -eq '1'
+$coldShareDiagnostic=$env:COLD_SHARE_DIAGNOSTIC -eq '1'
+$coldDiagnostic=$coldFileDiagnostic -or $coldShareDiagnostic
+$historicalShareReference=$coldShareDiagnostic -and -not [string]::IsNullOrWhiteSpace($env:COLD_SHARE_HISTORICAL_HELPER_APP)
 if(-not $EvidenceDirectory) { $EvidenceDirectory=Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'evidence/windows-transfer' }
 $EvidenceDirectory=[IO.Path]::GetFullPath($EvidenceDirectory)
 [void][IO.Directory]::CreateDirectory($EvidenceDirectory)
-$required=@('BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','FIXTURE_3556_APK')
-if($coldFileDiagnostic){$required+=@('COLD_JOB_DEADLINE_UTC')}
+$required=@('BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY')
+if(-not $historicalShareReference){$required+=@('FIXTURE_3556_APK')}
+if($coldDiagnostic){$required+=@('COLD_JOB_DEADLINE_UTC')}
 else{$required+=@('BS_LOCAL_ID','RELAY_TOKEN','CLOUD_TRANSPORT_APK')}
 foreach($name in $required) {
  if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Required process environment variable missing: $name" }
 }
-$requiredFiles=@($env:FIXTURE_3556_APK)
-if(-not $coldFileDiagnostic){$requiredFiles+=@($BrowserStackLocalPath,$env:CLOUD_TRANSPORT_APK)}
+$requiredFiles=@()
+if(-not $historicalShareReference){$requiredFiles+=@($env:FIXTURE_3556_APK)}
+if(-not $coldDiagnostic){$requiredFiles+=@($BrowserStackLocalPath,$env:CLOUD_TRANSPORT_APK)}
 foreach($file in $requiredFiles) {
  if(-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'A required BrowserStack Local executable or helper APK is missing.' }
 }
 $private=Join-Path ([IO.Path]::GetTempPath()) ('issue3556-transfer-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($private)
 $local=$null; $stdoutStream=$null; $stderrStream=$null; $copyTasks=@(); $exitCode=1
-$secretValues=@($env:BROWSERSTACK_USERNAME,$env:BROWSERSTACK_ACCESS_KEY,$env:RELAY_TOKEN)
+$secretValues=@($env:BROWSERSTACK_USERNAME,$env:BROWSERSTACK_ACCESS_KEY,$env:RELAY_TOKEN,$env:COLD_SHARE_HISTORICAL_HELPER_APP)
 function Redact([string]$Text) {
  foreach($value in $secretValues) { if($value) { $Text=$Text.Replace($value,'[redacted]') } }
  return $Text
@@ -48,15 +53,15 @@ function Upload-App {
  return [string]$response.app_url
 }
 try {
- if($coldFileDiagnostic){
-  foreach($module in @('windows-transfer-control.mjs','cold-file-scenario.mjs')){
+ if($coldDiagnostic){
+  foreach($module in @('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs')){
    & node --check (Join-Path $PSScriptRoot $module)
    if($LASTEXITCODE -ne 0){throw "Syntax failed before provider upload: $module"}
   }
-  if($env:LARGE_TRANSFER_DIAGNOSTIC -eq '1' -or $env:MODERATE_TRANSFER_CONTROL -eq '1' -or $env:SHARE_AFTER_CONTROL -eq '1'){throw 'Cold File rejects transfer and Share controls before provider upload.'}
+  if(($coldFileDiagnostic -and $coldShareDiagnostic) -or $env:LARGE_TRANSFER_DIAGNOSTIC -eq '1' -or $env:MODERATE_TRANSFER_CONTROL -eq '1' -or $env:SHARE_AFTER_CONTROL -eq '1'){throw 'Cold File rejects transfer and Share controls before provider upload.'}
   [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'cold-workflow-binding.json'),(ConvertTo-Json @{
-   scenario='cold-file-onset'; fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
-   syntaxChecked=@('windows-transfer-control.mjs','cold-file-scenario.mjs'); sourceCommit=$env:GITHUB_SHA
+   scenario=$(if($coldShareDiagnostic){'cold-share-onset'}else{'cold-file-onset'}); fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
+   syntaxChecked=@('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs'); sourceCommit=$env:GITHUB_SHA
    cleanupAgeMinutes=25; artifactRetentionMinutes=5; workflowMinutes=45; deadlineUtc=$env:COLD_JOB_DEADLINE_UTC; requiredMinutesBeforeSessionPost=30
    outcomeGate='First touch and full ten-minute onset coverage remain unverified until original decoded video frames align with native input/log evidence.'
   }),[Text.UTF8Encoding]::new($false))
@@ -97,9 +102,36 @@ try {
    method='Foreground owned native process readiness message; same step lifetime'
   }),[Text.UTF8Encoding]::new($false))
  }
- $env:HELPER_APP=Upload-App -ApkPath $env:FIXTURE_3556_APK -Label 'fixture'
- if(-not $coldFileDiagnostic){$env:RELAY_APP=Upload-App -ApkPath $env:CLOUD_TRANSPORT_APK -Label 'relay'}
- if($coldFileDiagnostic -or ($env:RELAY_TRANSPORT -and $env:RELAY_TRANSPORT -ne 'legacy')){
+ if($coldShareDiagnostic -and -not $historicalShareReference){
+  if((Get-Item -LiteralPath $env:FIXTURE_3556_APK).Length -ne 24984 -or (Get-FileHash -LiteralPath $env:FIXTURE_3556_APK -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af'){throw 'Historical helper APK unavailable or identity differs; no session allocation.'}
+  $archive=[IO.Compression.ZipFile]::OpenRead($env:FIXTURE_3556_APK)
+  try{
+   $seed=$archive.GetEntry('assets/seed.mp4')
+   if(-not $seed -or $seed.Length -ne 7355){throw 'Historical embedded seed missing or wrong size.'}
+   $seedStream=$seed.Open();$sha=[Security.Cryptography.SHA256]::Create()
+   try{$seedHash=[Convert]::ToHexString($sha.ComputeHash($seedStream)).ToLowerInvariant()}finally{$seedStream.Dispose();$sha.Dispose()}
+   if($seedHash -ne 'a5b810580805d9ef75e40d4dc9f3088fcaacd67fa48680019778587af1170a33'){throw 'Historical embedded seed differs; no session allocation.'}
+  }finally{$archive.Dispose()}
+ }
+ if($historicalShareReference){
+  $env:HELPER_APP=$env:COLD_SHARE_HISTORICAL_HELPER_APP
+  $seedHash='a5b810580805d9ef75e40d4dc9f3088fcaacd67fa48680019778587af1170a33'
+ }else{$env:HELPER_APP=Upload-App -ApkPath $env:FIXTURE_3556_APK -Label 'fixture'}
+ if($coldShareDiagnostic){
+  $referenceBytes=[Text.Encoding]::UTF8.GetBytes($env:HELPER_APP);$sha=[Security.Cryptography.SHA256]::Create()
+  try{$referenceHash=[Convert]::ToHexString($sha.ComputeHash($referenceBytes)).ToLowerInvariant()}finally{$sha.Dispose()}
+  if($historicalShareReference -and $referenceHash -ne '35b26d081e501726490aba415889ac6eb52f8220c86b053a2a01dc5dc276cfe3'){throw 'Configured historical helper reference differs from admitted provenance binding.'}
+  [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'cold-share-helper.json'),(ConvertTo-Json @{
+   apkSha256='1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af';apkBytes=24984
+   seedSha256=$seedHash;seedBytes=7355;uploadReferenceSha256=$referenceHash;uploadAccepted=(-not $historicalShareReference)
+   uploadUtc=$(if($historicalShareReference){'2026-10-12T00:15:47Z'}else{[DateTime]::UtcNow.ToString('o')})
+   runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;route=$(if($historicalShareReference){'historical-private-reference'}else{'verified-local-apk-upload'})
+   provenance=$(if($historicalShareReference){'Root-admitted build receipt -> immutable upload step -> prior session metadata -> authenticated recent app record; local APK, raw upload response, and server-side binary hash unavailable'}else{'Exact local APK and embedded seed verified before supported private upload'})
+   fixtureByteEquality='Recipe identity only; prior 16GB file/hash unavailable'
+  }),[Text.UTF8Encoding]::new($false))
+ }
+ if(-not $coldDiagnostic){$env:RELAY_APP=Upload-App -ApkPath $env:CLOUD_TRANSPORT_APK -Label 'relay'}
+ if($coldDiagnostic -or ($env:RELAY_TRANSPORT -and $env:RELAY_TRANSPORT -ne 'legacy')){
   $baselinePath=Join-Path $private 'original-1.18.2-arm64.apk'
   Invoke-WebRequest $BaselineUrl -OutFile $baselinePath -TimeoutSec 120
   $baselineHash=(Get-FileHash $baselinePath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -110,6 +142,13 @@ try {
   }),[Text.UTF8Encoding]::new($false))
   $env:BASELINE_APP=Upload-App -ApkPath $baselinePath -Label 'baseline'
  }else{$env:BASELINE_APP=Upload-App -RemoteUrl $BaselineUrl -Label 'baseline'}
+ if($coldShareDiagnostic -and -not $historicalShareReference){
+  if((Get-Item -LiteralPath $env:FIXTURE_3556_APK).Length -ne 24984 -or (Get-FileHash -LiteralPath $env:FIXTURE_3556_APK -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af'){throw 'Historical local helper bytes changed before controller admission.'}
+  $receiptPath=Join-Path $EvidenceDirectory 'cold-share-helper.json';$receipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+  $receipt | Add-Member -NotePropertyName prePostIdentityUtc -NotePropertyValue ([DateTime]::UtcNow.ToString('o'))
+  $receipt | Add-Member -NotePropertyName localApkVerifiedBeforeController -NotePropertyValue $true
+  [IO.File]::WriteAllText($receiptPath,(ConvertTo-Json $receipt),[Text.UTF8Encoding]::new($false))
+ }
  $env:TRANSFER_EVIDENCE_DIRECTORY=$EvidenceDirectory
  & node (Join-Path $PSScriptRoot 'windows-transfer-control.mjs')
  $exitCode=$LASTEXITCODE

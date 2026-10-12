@@ -9,28 +9,31 @@ import {relay} from '../cloud_transport/relay.mjs';
 import shareScenario from './share-scenario.mjs';
 import {runTransportControls} from './stream-controls.mjs';
 import {runColdFileScenario,recordingPreflight,retainColdRecording} from './cold-file-scenario.mjs';
+import {runColdShareScenario,coldShareRecordingPreflight,retainColdShareRecording} from './cold-share-scenario.mjs';
 
 // Drive the unmodified apps. The moderate control measures throughput; neither size proves 16GB behavior.
 const largeDiagnostic=process.env.LARGE_TRANSFER_DIAGNOSTIC==='1';
 const coldFileDiagnostic=process.env.COLD_FILE_DIAGNOSTIC==='1';
-assert(!(largeDiagnostic&&coldFileDiagnostic),'Diagnostic modes are mutually exclusive');
-assert(!coldFileDiagnostic||(process.env.SHARE_AFTER_CONTROL!=='1'&&process.env.MODERATE_TRANSFER_CONTROL!=='1'),'Cold File is incompatible with Share/moderate controls');
-const boundedDiagnostic=largeDiagnostic||coldFileDiagnostic;
-if(coldFileDiagnostic)assert(/^\d+$/.test(process.env.GITHUB_RUN_ID||'')&&/^\d+$/.test(process.env.GITHUB_RUN_ATTEMPT||''),'Cold File requires exact workflow run/attempt ownership');
-const ownedBuildName='issue3556-'+process.env.GITHUB_RUN_ID+(coldFileDiagnostic?'-attempt-'+process.env.GITHUB_RUN_ATTEMPT:'');
+const coldShareDiagnostic=process.env.COLD_SHARE_DIAGNOSTIC==='1';
+assert([largeDiagnostic,coldFileDiagnostic,coldShareDiagnostic].filter(Boolean).length<=1,'Diagnostic modes are mutually exclusive');
+const coldDiagnostic=coldFileDiagnostic||coldShareDiagnostic;
+assert(!coldDiagnostic||(process.env.SHARE_AFTER_CONTROL!=='1'&&process.env.MODERATE_TRANSFER_CONTROL!=='1'),'Cold onset is incompatible with Share/moderate controls');
+const boundedDiagnostic=largeDiagnostic||coldDiagnostic;
+if(coldDiagnostic)assert(/^\d+$/.test(process.env.GITHUB_RUN_ID||'')&&/^\d+$/.test(process.env.GITHUB_RUN_ATTEMPT||''),'Cold onset requires exact workflow run/attempt ownership');
+const ownedBuildName='issue3556-'+process.env.GITHUB_RUN_ID+(coldDiagnostic?'-attempt-'+process.env.GITHUB_RUN_ATTEMPT:'');
 const minute=60000,reserveBytes=2*1024*1024*1024;
 let controlBytes=(largeDiagnostic||process.env.MODERATE_TRANSFER_CONTROL==='1')?64*1024*1024:1048576;
 let controlName=controlBytes===1048576?'1 MiB':'64 MiB';
 let controlSizeLabel=controlBytes===1048576?'1.0 MB':'67.1 MB';
 const transportMode=process.env.RELAY_TRANSPORT||'legacy';
 assert(['legacy','stream','coalesced'].includes(transportMode),'Unknown diagnostic transport mode');
-if(!coldFileDiagnostic&&transportMode!=='legacy')assert.equal(controlBytes,67108864,'Improved transport must run the exact 64 MiB original-app gate');
+if(!coldDiagnostic&&transportMode!=='legacy')assert.equal(controlBytes,67108864,'Improved transport must run the exact 64 MiB original-app gate');
 const here=path.dirname(fileURLToPath(import.meta.url));
 const output=path.resolve(process.env.TRANSFER_EVIDENCE_DIRECTORY||'evidence/windows-transfer');
 const windowsRoot=path.join(output,'windows');
 let windowsOutput=largeDiagnostic?path.join(windowsRoot,'moderate'):windowsRoot;
 mkdirSync(windowsOutput,{recursive:true});
-const required=['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','HELPER_APP','BASELINE_APP',...(coldFileDiagnostic?['COLD_JOB_DEADLINE_UTC']:['BS_LOCAL_ID','RELAY_TOKEN','RELAY_APP'])];
+const required=['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','HELPER_APP','BASELINE_APP',...(coldDiagnostic?['COLD_JOB_DEADLINE_UTC']:['BS_LOCAL_ID','RELAY_TOKEN','RELAY_APP'])];
 for(const key of required) assert(process.env[key],key+' is required');
 const secrets=required.filter(k=>!['BS_LOCAL_ID','COLD_JOB_DEADLINE_UTC'].includes(k)).map(k=>process.env[k]);
 const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
@@ -49,16 +52,16 @@ const report={status:'preparing',startedUtc:new Date().toISOString(),device:'Sam
  release:'1.18.2',requestedTransport:transportMode,scenario:'Actual '+controlName+' MP4 Android File/Recent selection, favorite registration/send, Windows UI Accept and saved hash',
  boundaries:['Windows Server differs from reported Windows 10 Pro','Reverse cloud relay differs from reported shared LAN','One control cannot establish sustained 16GB throughput or behavior'],
  fixture:null,observations:[],actions:[],receiverExit:null,sendUtc:null,verifiedUtc:null,elapsedSendToVerifiedMs:null};
-let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer;
+let session,receiver,receiverExit,receiverDone,receiverLogs=[],startedRelay=false,physicalServer,coldShareRecordingReferences;
 let sessionCreationAttempted=false,sessionStart=null,phaseDeadline=Infinity,wdBusy=false,imageCount=0,observationCount=0,sourceCount=0;
 const androidSourceLimit=200,windowsObservationLimit=100;
 let windowsImagesRemaining=60,windowsObservationsRemaining=windowsObservationLimit,windowsLargeReceiverStarted=false;
 const sessionAge=()=>sessionStart===null?0:Date.now()-sessionStart;
-function remaining(){return boundedDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+(coldFileDiagnostic?25:110)*minute)-Date.now()):Infinity;}
+function remaining(){return boundedDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+(coldDiagnostic?25:110)*minute)-Date.now()):Infinity;}
 function admit(){assert(!largeDiagnostic||sessionAge()<20*minute,'Large stage/controls/selection/Send admission exceeded session age 20 minutes');}
-function commandLimit(url){if(coldFileDiagnostic&&url!=='/session')return 10000;if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
+function commandLimit(url){if(coldDiagnostic&&url!=='/session')return 10000;if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
-const r=coldFileDiagnostic?null:relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
+const r=coldDiagnostic?null:relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
 async function wd(method,url,body,attempt=0,readDeadline=Infinity,terminalRead=false){
  const started=Date.now();
  assert(!wdBusy,'WebDriver commands must remain serial');
@@ -131,7 +134,7 @@ async function recoverOwnedStartupSession(){
  }
 }
 async function snap(name,xml){
- const terminal=/android-finished|failure|transfer-error|hash-ready|cold-terminal/.test(name);
+ const terminal=/android-finished|failure|transfer-error|hash-ready|cold-terminal|cold-share-terminal/.test(name);
  const text=xml||await source(Infinity,terminal);save(name+'.xml',text);
  if(boundedDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name:artifactName(name),utc:new Date().toISOString(),sourceOnly:true,reason:'Android image budget reserved or exhausted'});return text;}
  imageCount++;const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
@@ -406,31 +409,60 @@ async function addFavorite(){
  await snap('favorite-registered',registered);
 }
 try{
- if(coldFileDiagnostic){
+ if(coldDiagnostic){
   const provenance=JSON.parse(readFileSync(path.join(output,'original-android-apk.json'),'utf8'));
   assert(provenance.release==='1.18.2'&&provenance.architecture==='arm64v8'&&provenance.sha256==='82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3'&&provenance.bytes>0,'Cold File requires verified unchanged original APK provenance before provider allocation');
   report.originalApk=provenance;
+ }
+ if(coldShareDiagnostic){
+  const helperReceipt=JSON.parse(readFileSync(path.join(output,'cold-share-helper.json'),'utf8'));
+  assert(helperReceipt.apkSha256==='1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af'&&helperReceipt.apkBytes===24984&&helperReceipt.seedSha256==='a5b810580805d9ef75e40d4dc9f3088fcaacd67fa48680019778587af1170a33'&&helperReceipt.seedBytes===7355,'Historical helper bytes/seed pin missing');
+  assert(helperReceipt.uploadReferenceSha256===createHash('sha256').update(process.env.HELPER_APP).digest('hex')&&helperReceipt.runId===process.env.GITHUB_RUN_ID&&helperReceipt.runAttempt===process.env.GITHUB_RUN_ATTEMPT,'Historical helper provenance receipt does not match this attempt/reference');
+  if(helperReceipt.route==='historical-private-reference')assert(helperReceipt.uploadReferenceSha256==='35b26d081e501726490aba415889ac6eb52f8220c86b053a2a01dc5dc276cfe3'&&helperReceipt.uploadAccepted===false&&helperReceipt.uploadUtc==='2026-10-12T00:15:47Z','Historical private reference differs from root-admitted binding');
+  else assert(helperReceipt.route==='verified-local-apk-upload'&&helperReceipt.uploadAccepted===true,'Helper installation route is not admitted');
+  report.historicalHelper=helperReceipt;
  }
  const planResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
  assert(planResponse.ok,'BrowserStack plan request failed');const plan=await planResponse.json();
  save('plan.json',{parallel_sessions_running:plan.parallel_sessions_running,parallel_sessions_max_allowed:plan.parallel_sessions_max_allowed});
  assert(Number.isFinite(plan.parallel_sessions_running)&&Number.isFinite(plan.parallel_sessions_max_allowed),'BrowserStack live capacity is unavailable');
  assert(plan.parallel_sessions_running<plan.parallel_sessions_max_allowed,'No live BrowserStack slot');
- if(!coldFileDiagnostic){await r.start();startedRelay=true;}
- if(coldFileDiagnostic){
+ if(!coldDiagnostic){await r.start();startedRelay=true;}
+ if(coldDiagnostic){
   const deadline=Date.parse(process.env.COLD_JOB_DEADLINE_UTC);
   assert(Number.isFinite(deadline)&&deadline-Date.now()>=30*minute,'Cold provider allocation requires 30 minutes remaining for owned cleanup and retention');
+  if(coldShareDiagnostic&&report.historicalHelper.route==='historical-private-reference'){
+   const check=report.historicalHelper.availability={status:'incomplete',startedUtc:new Date().toISOString(),method:'Authenticated documented recent_apps limit=100 offset=0',
+    referenceSha256:report.historicalHelper.uploadReferenceSha256,limit:100,offset:0,
+    qualification:'Account-visible exact historical reference/provenance only; no recovered local bytes, raw upload response, server hash, or future installation guarantee'};
+   try{
+    const response=await fetch('https://api-cloud.browserstack.com/app-automate/recent_apps?limit=100&offset=0',{headers:{authorization:auth},signal:AbortSignal.timeout(10000)});
+    check.httpStatus=response.status;check.headers=Object.fromEntries(['date','content-type','content-length'].map(key=>[key,response.headers.get(key)]).filter(([,value])=>value!==null));
+    const chunks=[];let bytes=0;for await(const chunk of response.body){bytes+=chunk.length;assert(bytes<=1024*1024,'Historical recent-app metadata byte cap exceeded');chunks.push(Buffer.from(chunk));}
+    check.responseBytes=bytes;assert(response.ok,'Historical recent-app metadata request failed');let records;
+    try{records=JSON.parse(Buffer.concat(chunks).toString());}catch{throw Error('Historical recent-app response is not valid JSON');}
+    assert(Array.isArray(records)&&records.length<=100,'Historical recent-app metadata shape unavailable');check.recordsReturned=records.length;
+    const matches=records.filter(record=>record.app_url===process.env.HELPER_APP);check.exactMatches=matches.length;
+    assert(matches.length===1,'Exact historical helper reference absent or ambiguous in bounded recent-app page');
+    const uploaded=Date.parse(String(matches[0].uploaded_at).replace(/ UTC$/,'Z').replace(' ','T'));
+    assert(uploaded===Date.parse('2026-10-12T00:15:47Z'),'Historical helper upload timestamp differs from admitted binding');
+    const age=Date.now()-uploaded;assert(age>=0&&age<30*24*60*minute,'Historical helper outside documented thirty-day retention window');
+    check.uploadedUtc=new Date(uploaded).toISOString();check.uploadAgeMs=age;check.status='exact-reference-account-visible';
+   }catch(error){check.error=redact(error.message);throw error;}
+   finally{check.finishedUtc=new Date().toISOString();save('cold-share-helper-availability.json',check);}
+   assert(deadline-Date.now()>=30*minute,'Historical availability read left insufficient owned cleanup/retention budget');
+  }else if(coldShareDiagnostic)assert(report.historicalHelper.localApkVerifiedBeforeController===true&&Date.now()-Date.parse(report.historicalHelper.prePostIdentityUtc)<minute&&Date.now()-Date.parse(report.historicalHelper.uploadUtc)<10*minute,'Historical helper identity/upload availability receipt stale before POST');
   report.coldWorkflowBudget={deadlineUtc:new Date(deadline).toISOString(),remainingBeforePostMs:deadline-Date.now(),requiredRemainingMs:30*minute,sessionCleanupAgeMs:25*minute,retentionMs:5*minute};
  }
- sessionCreationAttempted=true;sessionStart=Date.now();if(boundedDiagnostic)phaseDeadline=sessionStart+(coldFileDiagnostic?10:20)*minute;
+ sessionCreationAttempted=true;sessionStart=Date.now();if(boundedDiagnostic)phaseDeadline=sessionStart+(coldDiagnostic?10:20)*minute;
  report.sessionStartBeforePostUtc=new Date(sessionStart).toISOString();
  report.largeDeadlinePolicy=largeDiagnostic?{officialSessionMaxMinutes:120,admissionMinutes:20,transferSessionAgeMinutes:100,verificationAgeMinutes:105,cleanupAgeMinutes:110,observationsMax:300,imagesMax:120,androidImagesMax:60,androidHierarchyReadsMax:androidSourceLimit,windowsUiObservationsMax:windowsObservationLimit}:null;
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{
   platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2',
-  'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,...(coldFileDiagnostic?[]:[process.env.RELAY_APP])],
+  'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,...(coldDiagnostic?[]:[process.env.RELAY_APP])],
   'appium:autoGrantPermissions':true,'appium:newCommandTimeout':1200,
-  'bstack:options':{...(coldFileDiagnostic?{local:false}:{local:true,localIdentifier:process.env.BS_LOCAL_ID}),idleTimeout:300,projectName:'LocalSend bug sprint',
-   buildName:ownedBuildName,sessionName:coldFileDiagnostic?'issue3556-S20-cold-File':'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
+  'bstack:options':{...(coldDiagnostic?{local:false}:{local:true,localIdentifier:process.env.BS_LOCAL_ID}),idleTimeout:300,projectName:'LocalSend bug sprint',
+   buildName:ownedBuildName,sessionName:coldShareDiagnostic?'issue3556-S20-cold-Share':coldFileDiagnostic?'issue3556-S20-cold-File':'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
   firstMatch:[{}]}});
  session=created.sessionId;assert(session,'No BrowserStack session ID');save('session.json',{session,device:report.device,android:report.android});
  await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});
@@ -438,9 +470,11 @@ try{
  assert.equal(report.initialObservedOrientation,'PORTRAIT','The small transfer control requires initial portrait orientation');
  await wd('POST',base()+'/timeouts',{implicit:5000});
  await wd('POST',base()+'/appium/settings',{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
- if(coldFileDiagnostic){
-  report.coldRecording=await recordingPreflight({session,auth,save});
-  await runColdFileScenario({wd,base,source,snap,nodes,labels,touch,activate,save,report,sleep,sessionStart,
+ if(coldDiagnostic){
+  if(coldShareDiagnostic){const preflight=await coldShareRecordingPreflight({session,auth,save});report.coldRecording=preflight.receipt;coldShareRecordingReferences=preflight.references;}
+  else report.coldRecording=await recordingPreflight({session,auth,save});
+  const runColdScenario=coldShareDiagnostic?runColdShareScenario:runColdFileScenario;
+  await runColdScenario({wd,base,source,snap,nodes,labels,touch,activate,save,report,sleep,sessionStart,output,session,
    counters:()=>({sourceCount,imageCount}),setDeadline:value=>{phaseDeadline=value;}});
  }else{
  report.scenario=largeDiagnostic?'Actual 64 MiB control followed by valid 16,000,000,000-byte MP4 Android File/Recent selection, real Send, Windows Accept/save and late Android/Windows hash verification':report.scenario;
@@ -644,11 +678,11 @@ try{
  }
 }catch(error){
  report.status='incomplete';report.error=redact(error.stack||error);
- if(session&&(!boundedDiagnostic||remaining()>=(coldFileDiagnostic?30000:2*minute)))await source(Date.now()+30000,true).then(xml=>snap('failure',xml)).catch(()=>{});
+ if(session&&(!boundedDiagnostic||remaining()>=(coldDiagnostic?30000:2*minute)))await source(Date.now()+30000,true).then(xml=>snap('failure',xml)).catch(()=>{});
  process.exitCode=1;
 }finally{
- if(boundedDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+(coldFileDiagnostic?25:110)*minute;
- if(coldFileDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});}catch(error){report.cleanupErrors.push('Original terminate: '+redact(error.message));}
+ if(boundedDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+(coldDiagnostic?25:110)*minute;
+ if(coldDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});}catch(error){report.cleanupErrors.push('Original terminate: '+redact(error.message));}
  if(boundedDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.fixture3556'});}catch(error){report.cleanupErrors.push('Fixture helper terminate: '+redact(error.message));}
  try{await stopPhysicalServer();}catch(error){report.cleanupErrors.push('Temporary control server stop: '+redact(error.message));process.exitCode=1;}
  try{if(receiver&&!receiverExit){
@@ -684,9 +718,9 @@ try{
    try{await wd('DELETE',base());}catch(retryError){report.cleanupErrors.push('Owned session delete retry: '+redact(retryError.message));process.exitCode=1;}
   }
  }
- if(coldFileDiagnostic&&session){try{await retainColdRecording({session,auth,save,output,report});}catch(error){report.status='incomplete';report.cleanupErrors.push('Continuous recording retention: '+redact(error.message));process.exitCode=1;}}
+ if(coldDiagnostic&&session){try{await (coldShareDiagnostic?retainColdShareRecording:retainColdRecording)({session,auth,save,output,report,preflightReferences:coldShareRecordingReferences});}catch(error){report.status='incomplete';report.cleanupErrors.push('Continuous recording retention: '+redact(error.message));process.exitCode=1;}}
  if(startedRelay){try{await r.stop();}catch(error){report.cleanupErrors.push('Relay stop: '+redact(error.message));process.exitCode=1;}}
- save('reverse-physical-controls.json',report.physicalReverseControl||{status:coldFileDiagnostic?'not-run-cold-selection-only':'incomplete',scope:'Transport proof only; actual LocalSend transfer gate not passed',windows:physicalCases});
+ save('reverse-physical-controls.json',report.physicalReverseControl||{status:coldDiagnostic?'not-run-cold-selection-only':'incomplete',scope:'Transport proof only; actual LocalSend transfer gate not passed',windows:physicalCases});
  save('reverse-physical-trace.json',physicalTrace);
  save('relay-trace.json',r?r.trace:[]);save('relay-final-status.json',r?r.status():{status:'not-run-cold-selection-only',constructed:false});save('results.json',report);
 }
