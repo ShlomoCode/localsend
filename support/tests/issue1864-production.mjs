@@ -105,14 +105,53 @@ function nativeSettingsState(name,xml,{appDetails=false}={}) {
   }).filter(row=>row.labels.length);
   // Summary changes such as Calculating -> size do not prove navigation.
   const signature=JSON.stringify({focusedRows:rows.map(row=>[row.id,row.class,row.title,row.bounds]),rowPositions:visible.filter(n=>n.focusable==='true').map(n=>[n['resource-id'],n.class,n.bounds])});
-  return {identity:identity?.slice(1).join(' ') ?? '',visible,named,rows,signature};
+  return {identity:identity?.slice(1).join(' ') ?? '',component:identity?.[2] ?? '',visible,named,rows,signature};
+}
+function cachedPermissionPage(state) {
+  if(!/^[^/]*permissioncontroller\/com\.android\.permissioncontroller\.permission\.ui\.ManagePermissionsActivity$/.test(state.component)) return '';
+  const texts=state.named.map(n=>n.text || n['content-desc'] || '');
+  const one=text=>texts.filter(t=>t===text).length===1;
+  if(!one('LocalSend') || !one('Photos and videos')) return '';
+  const detailSummary='Photos and videos access for this app';
+  if(one('App permissions') && one(detailSummary) && one('Allow') && one('Don’t allow') && !texts.includes('Files')) return 'media-detail';
+  if(one('Additional permissions') && one('Files') && !texts.includes('Allow') && !texts.includes(detailSummary)) return 'permissions-overview';
+  return '';
 }
 async function settingsLabel(pattern,name,{navigate=false,until}={}) {
   remaining(until);const waitUntil=Math.min(until,Date.now()+(navigate ? 40000 : 20000)),started=Date.now();
   let previous='',stable=0,bootstrap=false,moves=0,pending='';
+  let routePrevious='',routeStable=0,backCount=0,backPending=null,recoveryComplete=false;
+  const consumedPages=new Set();
   for(let poll=0;Date.now()<waitUntil;poll++) {
-    const pollName=`${name}-poll-${poll}`,xml=await snapshot(pollName,waitUntil),state=nativeSettingsState(pollName,xml,{appDetails:navigate});
+    const pollName=`${name}-poll-${poll}`,xml=await snapshot(pollName,waitUntil),observedState=nativeSettingsState(pollName,xml,{appDetails:navigate});
+    const selectedApp=!navigate || observedState.named.filter(n=>(n.text || n['content-desc'] || '')==='LocalSend').length===1;
+    // AppManagement can describe another app; never admit its Permissions or Down.
+    const state=selectedApp ? observedState : {...observedState,identity:'',named:[],rows:[]};
     stable=state.identity && state.identity===previous ? stable+1 : state.identity ? 1 : 0;previous=state.identity;
+    if(navigate && !recoveryComplete) {
+      const front=nativeSettingsState(pollName,xml),page=state.identity ? 'app-info' : cachedPermissionPage(front);
+      const routeIdentity=page ? `${front.identity}:${page}` : '';
+      routeStable=routeIdentity && routeIdentity===routePrevious ? routeStable+1 : routeIdentity ? 1 : 0;routePrevious=routeIdentity;
+      log({type:'settings-route-readiness',name,poll,identity:front.identity,page,stable:routeStable,backCount,pendingPage:backPending?.page ?? '',snapshot:pollName,waitUntil});
+      if(page && routeStable>=2) {
+        // A Back must reach a different observed page before another is admitted.
+        if(backPending && (page==='app-info' || (backPending.page==='media-detail' && page==='permissions-overview'))) {
+          requireObservation(pollName,`${name}-back-after`);
+          log({type:'settings-route-back-result',name,beforeSnapshot:backPending.snapshot,afterSnapshot:pollName,beforePage:backPending.page,page,identity:front.identity,backCount});
+          backPending=null;
+          if(page==='app-info') recoveryComplete=true;
+          // Preserve a separate fresh snapshot for the next input's manifest role.
+          continue;
+        }
+        if(page==='app-info') recoveryComplete=true;
+        else if(!backPending && !consumedPages.has(page) && backCount<2) {
+          requireObservation(pollName,`${name}-back-before`);
+          consumedPages.add(page);backCount++;backPending={page,snapshot:pollName};
+          log({type:'settings-route-back',name,snapshot:pollName,identity:front.identity,page,backCount,waitUntil});
+          await key(4,waitUntil);routePrevious='';routeStable=0;continue;
+        }
+      }
+    }
     const candidates=state.named.filter(n=>pattern.test(n.text || n['content-desc'] || ''));
     log({type:'settings-readiness',name,poll,identity:state.identity,stable,rows:state.rows,moves,pendingProgress:!!pending,waitUntil,routeUntil:until});
     if(candidates.length>1) throw new Error(`Visible Settings label ${pattern} ambiguous (${candidates.length}); inspect ${pollName}`);
