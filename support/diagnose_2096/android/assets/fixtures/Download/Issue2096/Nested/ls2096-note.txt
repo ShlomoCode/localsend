@@ -1,0 +1,2 @@
+LocalSend issue 2096 nested fixture.
+This file has the same basename as the root fixture and different contents.

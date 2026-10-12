@@ -1,0 +1,2 @@
+LocalSend issue 2096 root fixture.
+This file lives directly in the ordinary Download directory.
