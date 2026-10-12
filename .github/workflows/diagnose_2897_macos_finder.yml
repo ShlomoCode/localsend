@@ -1,6 +1,10 @@
 name: Diagnose 2897 macOS Finder handover
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/bug-2897-finder-diagnostic]
+    paths:
+      - .github/workflows/diagnose_2897_macos_finder.yml
 permissions:
   contents: read
 concurrency:
