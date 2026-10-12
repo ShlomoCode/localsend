@@ -3,11 +3,79 @@ import json
 import sys
 import pyatspi
 
+discovery_fields = ("XDG_DATA_DIRS", "XDG_DATA_HOME", "XDG_CURRENT_DESKTOP")
+
+def manager_discovery_environment():
+    import subprocess
+    values = {}
+    for line in subprocess.check_output(["systemctl", "--user", "show-environment"], timeout=5, text=True).splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key in discovery_fields:
+            values[key] = value
+    return {key: values.get(key) for key in discovery_fields}
+
+def discovery_environment():
+    import os
+    from gi.repository import Gio, GLib
+    manager = manager_discovery_environment()
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    def primary_pid(name="org.gnome.Nautilus"):
+        return bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                             "GetConnectionUnixProcessID", GLib.Variant("(s)", (name,)),
+                             GLib.VariantType.new("(u)"), Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
+    owner_pid = primary_pid()
+    file_manager_pid = primary_pid("org.freedesktop.FileManager1")
+    with open(f"/proc/{owner_pid}/environ", "rb") as source:
+        values = dict(value.split(b"=", 1) for value in source.read().split(b"\0") if b"=" in value)
+    with open(f"/proc/{owner_pid}/stat") as source:
+        stat = source.read()
+    actual = {key: values.get(key.encode(), b"").decode() or None for key in discovery_fields}
+    start_time = stat.rsplit(")", 1)[1].split()[19]
+    result = {"caller": {key: os.environ.get(key) for key in discovery_fields}, "manager": manager,
+              "primary": {"pid": owner_pid, "file_manager_pid": file_manager_pid, "stat": stat,
+                          "start_time": start_time, "uid": os.stat(f"/proc/{owner_pid}").st_uid,
+                          "exe": os.readlink(f"/proc/{owner_pid}/exe"), "environment": actual}}
+    print(json.dumps(result), flush=True)
+    with open(f"/proc/{owner_pid}/stat") as source:
+        current_start = source.read().rsplit(")", 1)[1].split()[19]
+    if (actual != manager or result["primary"]["exe"] != "/usr/bin/nautilus"
+            or result["primary"]["uid"] != os.getuid() or current_start != start_time
+            or primary_pid() != owner_pid or file_manager_pid != owner_pid):
+        raise RuntimeError("Actual Nautilus primary does not inherit the admitted discovery environment")
+    return result
+
+if len(sys.argv) > 1 and sys.argv[1] == "discovery":
+    discovery_environment()
+    sys.exit(0)
+
 # Read installed application metadata, without launching an application.
 if len(sys.argv) > 1 and sys.argv[1] == "appnames":
+    import hashlib
+    import os
     from gi.repository import Gio
-    print(json.dumps(sorted({app.get_name() for app in Gio.AppInfo.get_all()
-                             if app.should_show()})))
+    apps = Gio.AppInfo.get_all()
+    targets = [app for app in apps if app.get_id() == "org.localsend.localsend_app.desktop"]
+    if len(targets) != 1 or not targets[0].should_show() or targets[0].get_name() != "LocalSend":
+        raise RuntimeError("Official LocalSend desktop ID is not uniquely visible in the session metadata")
+    exported = "/var/lib/flatpak/exports/share/applications/org.localsend.localsend_app.desktop"
+    if os.path.realpath(targets[0].get_filename()) != os.path.realpath(exported):
+        raise RuntimeError("Discovered LocalSend metadata does not identify the installed system export")
+    with open(exported, "rb") as source:
+        payload = source.read()
+    with open("/home/probe/3417-provenance/exported-desktop-entry.txt", "rb") as source:
+        if source.read() != payload:
+            raise RuntimeError("System-exported desktop entry differs from the qualified deployment export")
+    environment = {key: os.environ.get(key) for key in discovery_fields}
+    if environment != manager_discovery_environment():
+        raise RuntimeError("Metadata service does not inherit admitted manager discovery fields")
+    receipt = {"environment": environment,
+               "desktop_id": targets[0].get_id(), "name": targets[0].get_name(),
+               "filename": targets[0].get_filename(), "should_show": targets[0].should_show(),
+               "exported_path": exported, "sha256": hashlib.sha256(payload).hexdigest(),
+               "exported_desktop_entry": payload.decode()}
+    with open("/home/probe/3417-metadata-discovery.json", "w") as target:
+        json.dump(receipt, target)
+    print(json.dumps(sorted({app.get_name() for app in apps if app.should_show()})))
     sys.exit(0)
 
 visited = []

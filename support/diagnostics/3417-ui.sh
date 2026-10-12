@@ -41,7 +41,7 @@ visual_row() {
     "evidence/vm/$label-anchor-ocr.tsv" "evidence/vm/$label-region-receipt.json" > "evidence/vm/$label-bounds.json"
   geometry=$(node support/diagnostics/3417-visual.cjs crop "evidence/vm/$label-bounds.json")
   convert "evidence/vm/$label.png" -crop "$geometry" +repage "evidence/vm/$label-dialog.png"
-  timeout 15 tesseract "evidence/vm/$label-dialog.png" "evidence/vm/$label-ocr" --psm 6 tsv > "evidence/vm/$label-ocr.log" 2>&1
+  timeout 15 tesseract "evidence/vm/$label-dialog.png" "evidence/vm/$label-ocr" --psm 11 tsv > "evidence/vm/$label-ocr.log" 2>&1
   node support/diagnostics/3417-visual.cjs "$mode" "evidence/vm/$label-bounds.json" \
     "evidence/vm/$label-ocr.tsv" evidence/vm/installed-appnames.json "evidence/vm/$label-visual.json" > "evidence/vm/$label-point.txt"
 }
@@ -117,13 +117,16 @@ guest "nohup flatpak run org.localsend.localsend_app >/home/probe/3417-app.log 2
 sleep 12
 capture 02-running-empty
 identity 02-running-empty
-guest "nohup nautilus /home/probe/Documents >/home/probe/3417-nautilus.log 2>&1 </dev/null &"
+guest "timeout 15 gdbus call --session --dest org.freedesktop.FileManager1 --object-path /org/freedesktop/FileManager1 --method org.freedesktop.FileManager1.ShowFolders \"['file:///home/probe/Documents']\" ''" > evidence/vm/03-native-files-activation.txt 2>&1
 sleep 8
 # V7 first-login update prompts stole the foreground before file selection.
 # Retain their qualified native dismissal, then request Files' normal activation.
 action 03-desktop-prompts desktop
-guest "nohup nautilus /home/probe/Documents >>/home/probe/3417-nautilus.log 2>&1 </dev/null &"
+guest "timeout 15 gdbus call --session --dest org.freedesktop.FileManager1 --object-path /org/freedesktop/FileManager1 --method org.freedesktop.FileManager1.ShowFolders \"['file:///home/probe/Documents']\" ''" > evidence/vm/03-native-files-reactivation.txt 2>&1
 sleep 3
+guest timeout 20 python3 /home/probe/3417-accessibility.py discovery > evidence/vm/03-native-discovery-environment.json 2>&1
+guest "timeout 20 systemd-run --user --quiet --wait --pipe --collect --unit=localsend3417-metadata --property=Type=exec --property=RuntimeMaxSec=15s /usr/bin/python3 /home/probe/3417-accessibility.py appnames" > evidence/vm/installed-appnames.json 2> evidence/vm/03-native-metadata-service.log
+guest cat /home/probe/3417-metadata-discovery.json > evidence/vm/03-native-metadata-discovery.json
 record running-open-with
 capture 03-visible-file
 [[ "$(identify -format '%wx%h' evidence/vm/03-visible-file.png)" == 1280x800 ]]
@@ -150,7 +153,6 @@ action 05-dialog-gate dialog
 # Nautilus 46.4 exposes other apps directly in Open File; it has no reported
 # View All Applications step. This is an explicitly recorded sequence variant.
 printf 'Nautilus 46.4 native variant: Open With -> Open File; no View All Applications control.\n' > evidence/vm/native-sequence-boundary.txt
-guest timeout 20 python3 /home/probe/3417-accessibility.py appnames > evidence/vm/installed-appnames.json
 visual_row 06-visible-app row
 click_row 06-visible-app
 action 06-focused-dialog-gate dialog
