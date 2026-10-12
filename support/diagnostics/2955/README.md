@@ -1,10 +1,18 @@
 # Capture issue 2955 on an official release
 
-This manual workflow prepares five finite transfers between the official LocalSend v1.17.0 Linux x86-64 sender and Android x64 receiver. It does not build or modify LocalSend. Source preparation has not established runtime compatibility or reproduced the report.
+This diagnostic workflow prepares five finite transfers between the official LocalSend v1.17.0 Linux x86-64 sender and Android x64 receiver. It does not build or modify LocalSend. Source preparation has not established runtime compatibility or reproduced the report.
 
 The receiver uses stock Android 16 API 36 x86_64. This differs from the reported Samsung S22, OneUI 8, and ARM64. The reporter did not identify their exact LocalSend version, sender, installer, Quick Save state, orientation, or font scale. v1.17.0 was the latest published release before the report date. The chosen sender and emulator cannot establish Samsung-specific behavior.
 
-The workflow uses one job with a 60-minute limit. The runner stops earlier if release assets, ABI, native accessibility, UI controls, forwarding, completion, or saved-file verification fails. Missing or ambiguous native controls produce an infrastructure failure; the harness does not guess coordinates. Android taps use bounds from the currently visible semantic tree. Linux actions use AT-SPI or its exposed component bounds. Settings are changed only through visible application UI. Native file selection uses the GTK file chooser and its keyboard location command.
+The workflow uses one job with a 60-minute limit and a 35-minute application step. The runner stops earlier if release assets, ABI, native accessibility, UI controls, forwarding, completion, or saved-file verification fails. Missing or ambiguous native controls stop the diagnostic; the harness does not guess coordinates. Android taps use bounds from the currently visible semantic tree. Linux actions use native AT-SPI controls. Settings are changed only through visible application UI. Native file selection uses the GTK file chooser and its keyboard location command.
+
+## Native readiness and chooser focus
+
+ADB must report **device** for the exact receiver serial through `get-state` within 120 seconds. The boot property must then explicitly report `sys.boot_completed=1` within 240 seconds. Every probe retains stdout, stderr, exit code, and timestamp. Only known not-ready values and four exact transient messages retry: device not found for the selected serial, device offline, no devices/emulators found, and closed. Each message may have the native `error:` or `adb:` prefix. Unknown failures and command timeouts stop the diagnostic; `failure.json` retains native command details.
+
+Openbox starts inside the existing D-Bus session before the Linux application. To focus the picker, the harness observes the native **Open File** chooser ancestor through AT-SPI, retains the sender's actual process PID, and requires one visible X11 window matching both that PID and the observed title. Openbox activates that window through `xdotool windowactivate --sync`; `getactivewindow` must return the same window ID before Ctrl+L. The input log records PID, title, window IDs, and activation result. This avoids requiring the **Open** button to accept focus before a file has been selected.
+
+After Ctrl+L, editable-field lookup is restricted to the native chooser's accessible ancestry and requires one field. The requested file path must match the field's native text within five seconds. The harness records both the text action's acceptance and the queried contents. Ambiguous fields, rejected actions, and mismatched text stop the diagnostic.
 
 ## Source compatibility checks
 
@@ -16,8 +24,11 @@ The following v1.17.0 source paths support the chosen route:
 - `common/lib/model/dto/info_register_dto.dart` accepts the sender port without range validation. The receive controller consumes the sender identity and saves the incoming stream; it does not call a sender server for this transfer.
 - `app/lib/widget/dialogs/address_input_dialog.dart` uses the sender's unchanged default settings port 53317 for manual-IP discovery. After **Stop**, `adb forward tcp:53317 tcp:53317` routes `127.0.0.1` to the emulator. No protocol client substitutes for the sender.
 - `app/lib/pages/language_page.dart` and `settings_tab.dart` expose real **Language**, **English**, **العربية**, and **Quick Save** controls. `quick_save_notice.dart` exposes **Close** for the notice.
+- v1.17.0 `app/pubspec.lock` pins `file_selector_linux` 0.9.3+1. That exact package's `linux/file_selector_plugin.cc` constructs the native open chooser with title **Open File** and confirm label `_Open` at lines 105–106. The retained source is `recovered/2955/file-selector-linux-0.9.3+1.cc`; this check does not depend on the adjacent cached 0.9.3 version.
 
 The runtime must independently observe AT-SPI on the official Linux release and Android UIAutomator semantics on the official APK. Source support is not proof that either accessibility bridge works. The workflow fails closed if they do not.
+
+The tagged Android manifest targets API 34 and does not declare `MANAGE_EXTERNAL_STORAGE`; receiving calls the supported storage-permission request. The harness can accept an observed stock `com.android.permissioncontroller` **Allow** button. The API 36 Google image's runtime permission-controller package remains unverified. An unexpected package or Settings permission flow stops the diagnostic with its UI evidence; the harness does not grant permissions through shell commands.
 
 ## Cases and evidence
 

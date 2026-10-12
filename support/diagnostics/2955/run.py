@@ -23,6 +23,7 @@ ledger = []
 serial = 'emulator-5554'
 PACKAGE = 'org.localsend.localsend_app'
 original_show_touches = None
+sender_process = None
 
 
 def write(name, value):
@@ -41,6 +42,40 @@ def cmd(*args, timeout=30, binary=False):
 
 def adb(*args, **kwargs):
     return cmd('adb', '-s', serial, *args, **kwargs)
+
+
+def native_output(value):
+    return value.decode(errors='replace') if isinstance(value, bytes) else value
+
+
+def wait_native_adb(phase, args, expected, not_ready, seconds):
+    deadline = time.monotonic() + seconds
+    command = ['adb', '-s', serial, *args]
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=min(5, max(.1, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired as error:
+            log('native-adb-readiness', {'phase': phase, 'command': command, 'returncode': None, 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr), 'error': 'TimeoutExpired'})
+            raise
+        stdout = native_output(result.stdout)
+        stderr = native_output(result.stderr)
+        log('native-adb-readiness', {'phase': phase, 'command': command, 'returncode': result.returncode, 'stdout': stdout, 'stderr': stderr})
+        if result.returncode == 0:
+            if stdout.strip() == expected:
+                return
+            if stdout.strip() not in not_ready:
+                raise RuntimeError(f'Unexpected native ADB {phase} output: {stdout!r}')
+        else:
+            errors = [line.strip() for line in stderr.splitlines() if line.strip() and not line.startswith('* daemon')]
+            transient = {
+                prefix + message
+                for prefix in ('error: ', 'adb: ')
+                for message in (f"device '{serial}' not found", 'device offline', 'no devices/emulators found', 'closed')
+            }
+            if not errors or any(line not in transient for line in errors):
+                raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
+        time.sleep(min(.25, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f'Timed out waiting for native ADB {phase} after {seconds} seconds')
 
 
 def spawn(args, filename):
@@ -226,13 +261,68 @@ def desktop_tap(label, role=None):
     time.sleep(.4)
 
 
-def desktop_text(text):
+def desktop_chooser_ancestor(node):
+    # file_selector_linux constructs GtkFileChooserNative with this title.
+    # AT-SPI exposes parent ancestry without relying on window coordinates.
+    for _ in range(20):
+        if node.getRoleName() in ('dialog', 'file chooser') and node.name == 'Open File':
+            return node
+        node = node.parent
+        if node is None:
+            break
+    raise RuntimeError('Native Open action has no identifiable Open File chooser ancestor')
+
+
+def desktop_in_chooser(node):
+    try:
+        desktop_chooser_ancestor(node)
+        return True
+    except RuntimeError:
+        return False
+
+
+def desktop_focus_chooser():
+    desktop_snapshot()
+    node, row = desktop_find('Open', role='push button')
+    chooser = desktop_chooser_ancestor(node)
+    if sender_process is None or sender_process.poll() is not None:
+        raise RuntimeError('Actual Linux sender process is unavailable for chooser focus')
+    title = chooser.name
+    window_ids = cmd('xdotool', 'search', '--all', '--onlyvisible', '--pid', str(sender_process.pid), '--name', '^' + re.escape(title) + '$', timeout=5).split()
+    log('desktop-chooser-window-search', {'sender_pid': sender_process.pid, 'observed_chooser_title': title, 'chooser_role': chooser.getRoleName(), 'window_ids': window_ids})
+    if len(window_ids) != 1:
+        raise RuntimeError('Expected one visible native chooser window matching sender PID and observed title')
+    window_id = window_ids[0]
+    actual_title = cmd('xdotool', 'getwindowname', window_id, timeout=5).strip()
+    if actual_title != title:
+        raise RuntimeError('Native X11 chooser title differs from its observed semantic title')
+    log('desktop-chooser-activate', {'window_id': window_id, 'sender_pid': sender_process.pid, 'title': actual_title, 'command': 'xdotool windowactivate --sync'})
+    cmd('xdotool', 'windowactivate', '--sync', window_id, timeout=5)
+    active_window = cmd('xdotool', 'getactivewindow', timeout=5).strip()
+    log('desktop-chooser-focus-result', {'requested_window_id': window_id, 'active_window_id': active_window, 'sender_pid': sender_process.pid, 'title': actual_title})
+    if active_window != window_id:
+        raise RuntimeError('Native chooser window did not become the active X11 window')
+    desktop_snapshot()
+
+
+def desktop_text(text, chooser_only=False):
     desktop_snapshot()
     fields = [(node, row) for node, row in desktop_nodes() if row['role'] in ('entry', 'text') and node.getState().contains(pyatspi.STATE_EDITABLE)]
+    if chooser_only:
+        fields = [(node, row) for node, row in fields if desktop_in_chooser(node)]
     if len(fields) != 1:
         raise RuntimeError('Expected one editable desktop field')
     log('desktop-text', {'target': fields[0][1], 'text': text})
-    fields[0][0].queryEditableText().setTextContents(text)
+    node = fields[0][0]
+    accepted = node.queryEditableText().setTextContents(text)
+    if accepted is False:
+        log('desktop-text-result', {'accepted': accepted, 'current_text': node.queryText().getText(0, -1)})
+        raise RuntimeError('Native editable text action rejected the requested content')
+    def matches_requested_text():
+        current = node.queryText().getText(0, -1)
+        log('desktop-text-result', {'accepted': accepted, 'current_text': current})
+        return current == text
+    until(matches_requested_text, 5)
 
 
 def android_setting(label, checkable=False):
@@ -286,11 +376,11 @@ def case(name, quick, arabic, apk):
     desktop_tap('Send')
     desktop_tap('File')
     desktop_find('Open', role='push button')
-    desktop_snapshot()
+    desktop_focus_chooser()
     log('desktop-key', 'GTK file chooser Ctrl+L')
     cmd('xdotool', 'key', 'ctrl+l')
     time.sleep(.3)
-    desktop_text(str(fixture))
+    desktop_text(str(fixture), chooser_only=True)
     desktop_tap('Open', role='push button')
     # Recording precedes manual recipient selection and every request to send.
     stage = name + '-record-before-recipient'
@@ -413,8 +503,8 @@ try:
     if "name='org.localsend.localsend_app'" not in identity or "versionName='1.17.0'" not in identity or "native-code: 'x86_64'" not in identity:
         raise RuntimeError('Official APK package/version/ABI mismatch')
     stage = 'boot-receiver'
-    until(lambda: cmd('adb', 'devices').count(serial) == 1, 120)
-    until(lambda: adb('shell', 'getprop', 'sys.boot_completed').strip() == '1', 240)
+    wait_native_adb('transport', ['get-state'], 'device', {'offline', 'unknown'}, 120)
+    wait_native_adb('boot-completed', ['shell', 'getprop', 'sys.boot_completed'], '1', {'', '0'}, 240)
     props = adb('shell', 'getprop')
     (OUT / 'receiver-properties.txt').write_text(props)
     if adb('shell', 'getprop', 'ro.build.version.sdk').strip() != '36' or adb('shell', 'getprop', 'ro.product.cpu.abi').strip() != 'x86_64':
@@ -431,6 +521,10 @@ try:
     spawn(['adb', '-s', serial, 'logcat', '-v', 'threadtime'], 'receiver-logcat.txt')
     write('receiver-display.json', {k: adb('shell', *args) for k, args in {'size': ['wm', 'size'], 'density': ['wm', 'density'], 'font_scale': ['settings', 'get', 'system', 'font_scale'], 'rotation': ['settings', 'get', 'system', 'user_rotation']}.items()})
     stage = 'launch-linux-sender'
+    window_manager = spawn(['openbox', '--sm-disable'], 'openbox.log')
+    time.sleep(.5)
+    if window_manager.poll() is not None:
+        raise RuntimeError('Openbox exited before the Linux sender launched')
     root = OUT / 'linux-release'
     root.mkdir()
     cmd('tar', '-xzf', str(linux), '-C', str(root))
@@ -439,7 +533,7 @@ try:
         raise RuntimeError('Expected one official Linux executable')
     write('sender-executable.json', {'path': str(executables[0]), **digest(executables[0])})
     cmd('gsettings', 'set', 'org.gnome.desktop.interface', 'toolkit-accessibility', 'true')
-    spawn([str(executables[0])], 'sender-app.txt')
+    sender_process = spawn([str(executables[0])], 'sender-app.txt')
     desktop_find('Settings', seconds=60)
     stage = 'stop-sender-server-ui'
     desktop_tap('Settings')
@@ -486,7 +580,12 @@ try:
     case('05-english-return', True, False, apk)
     write('result.json', {'delivery': 'all five verified', 'alignment': 'requires root review of original rendered media', 'stage': stage})
 except BaseException as error:
-    write('failure.json', {'stage': stage, 'error_type': type(error).__name__, 'message': str(error), 'time': time.time(), 'classification': 'unresolved infrastructure or control failure; no product verdict'})
+    failure = {'stage': stage, 'error_type': type(error).__name__, 'message': str(error), 'time': time.time()}
+    if isinstance(error, subprocess.CalledProcessError):
+        failure.update({'command': error.cmd, 'returncode': error.returncode, 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr)})
+    elif isinstance(error, subprocess.TimeoutExpired):
+        failure.update({'command': error.cmd, 'timeout': error.timeout, 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr)})
+    write('failure.json', failure)
     write('cases.json', ledger)
     raise
 finally:
