@@ -109,7 +109,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const [work, raw] = process.argv.slice(2);
-const manifest = { status: 'UNAVAILABLE', partition: '/dev/sda3', selection: 'owned_unattend_GPT_partition_3', logs: [] };
+const manifest = { status: 'UNAVAILABLE', partition: null, selection: 'unique_NTFS_partition_on_owned_sda', logs: [] };
 const driver = fs.openSync(path.join(raw, 'driver.txt'), 'w');
 let diagnosticBytes = 0;
 function diagnostic(value) {
@@ -153,8 +153,22 @@ const quote = value => JSON.stringify(value);
     await command('set-pgroup false');
     await command('run');
     manifest.filesystems = await command('list-filesystems');
-    if (!/^\/dev\/sda3:\s+ntfs\s*$/m.test(manifest.filesystems)) throw new Error('owned partition is not NTFS');
-    await command('mount-ro /dev/sda3 /');
+    // Retain the observed inventory even when selection is refused or mounting fails.
+    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
+    const inventory = manifest.filesystems.split('\n').filter(line => line.length > 0);
+    if (manifest.filesystems.length > 8192 || inventory.length === 0 || inventory.length > 128) {
+      throw new Error('owned partition inventory exceeded bounds or is empty');
+    }
+    const partitions = inventory.map(line => line.match(/^(\/dev\/sda[1-9]\d*):\s+([a-zA-Z0-9_-]+)$/));
+    if (partitions.some(entry => entry === null) || new Set(partitions.map(entry => entry[1])).size !== partitions.length) {
+      throw new Error('unexpected or duplicate device in owned partition inventory');
+    }
+    manifest.ntfsCandidates = partitions.filter(entry => entry[2] === 'ntfs').map(entry => entry[1]);
+    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
+    if (manifest.ntfsCandidates.length !== 1) throw new Error('expected exactly one NTFS partition on owned disk');
+    manifest.partition = manifest.ntfsCandidates[0];
+    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
+    await command(`mount-ro ${manifest.partition} /`);
     if (await command('is-dir /Windows') !== 'true') throw new Error('owned Windows directory unavailable');
     for (const [name, filename] of [
       ['SrtTrail.txt', '/Windows/System32/LogFiles/Srt/SrtTrail.txt'],
