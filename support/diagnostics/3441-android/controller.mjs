@@ -63,7 +63,7 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  async function source(){assert(++sourceReads<=1800,'Hierarchy budget exhausted');return wd('GET',base()+'/source');}
  async function snap(name,xml){save(name+'.xml',xml||await source());assert(++screenshots<=90,'Screenshot budget exhausted');const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');writeFileSync(path.join(output,name+'.png'),png);assert(png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Provider screenshot is not PNG');return {width:png.readUInt32BE(16),height:png.readUInt32BE(20)};}
  async function wait(predicate,timeout=30000){const end=Math.min(deadline,Date.now()+timeout);do{const xml=await source();if(predicate(xml))return xml;await sleep(Math.min(timeout>60000?3000:750,Math.max(0,end-Date.now())));}while(Date.now()<end);throw Error('Expected observable UI not reached');}
- let activePackage,activationCount=0,touchCount=0;
+ let activePackage,activationCount=0,touchCount=0,establishedUi;
  function geometry(xml,viewport) {
   const root=nodes(xml).find(n=>n.class==='hierarchy');
   const width=Number(root?.width),height=Number(root?.height),rotation=Number(root?.rotation);
@@ -83,15 +83,24 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
    const valid=currentPackage===expectedPackage&&orientation==='PORTRAIT'&&g&&(!selector||control&&control.package===expectedPackage&&control.enabled!=='false'&&control.displayed!=='false'&&inBounds(rect(control),g));
    const key=valid?JSON.stringify({currentPackage,orientation,g,bounds:control?.bounds,label:control?label(control):null}):null;
    observed={xml,currentPackage,orientation,geometry:g,control,key};
-   if(key&&key===previousKey)return observed;
+   if(key&&key===previousKey){establishedUi=observed;return observed;}
    previousKey=key;await sleep(Math.min(500,Math.max(0,end-Date.now())));
   }while(Date.now()<end);
   if(observed)save('ui-settlement-failure.xml',observed.xml);
   throw Error('Expected active package, portrait geometry and exact in-bounds control did not settle');
  }
- async function tapNode(node,reason,{expectedPackage=activePackage}={}) {
+ async function tapNode(node,reason,{expectedPackage=activePackage,selectIndicator=false}={}) {
   const selector=n=>label(n)===label(node)&&n.class===node.class&&(!node['resource-id']||n['resource-id']===node['resource-id'])&&Boolean(n.bounds);
-  let state=await settledUi(expectedPackage,selector);
+  let state;
+  if(selectIndicator&&establishedUi?.currentPackage===expectedPackage) {
+   // Fresh native geometry/package checks reuse the established portrait context;
+   // GET orientation takes about 2 seconds on this provider and is reserved for transitions.
+   const xml=await source(),currentPackage=await wd('GET',base()+'/appium/device/current_package'),viewport=await wd('GET',base()+'/window/rect');
+   const g=geometry(xml,viewport),matches=nodes(xml).filter(selector);
+   if(currentPackage===expectedPackage&&g&&JSON.stringify(g)===JSON.stringify(establishedUi.geometry)&&matches.length===1&&matches[0].package===expectedPackage&&matches[0].enabled==='true'&&matches[0].displayed==='true'&&matches[0].selected!=='true'&&inBounds(rect(matches[0]),g))
+    state={xml,currentPackage,orientation:establishedUi.orientation,geometry:g,control:matches[0],orientationObservation:'Established at full transition guard; live root rotation/dimensions and package checked for this touch'};
+  }
+  if(!state)state=await settledUi(expectedPackage,selector);
   const name='touch-'+String(++touchCount).padStart(4,'0')+'-before';save(name+'.xml',state.xml);
   let preActionScreenshot,pixelGeometry;
   if(!reason.startsWith('Select Media source ')) {
@@ -106,9 +115,17 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
    assert(matches,'Exact pre-touch screenshot and fresh portrait control did not agree');save(name+'-final.xml',state.xml);
   }
   const r=rect(state.control);assert(inBounds(r,state.geometry),'Exact touch control exceeds observed portrait bounds');
-  const x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);
+  if(selectIndicator) {
+   assert(state.control.selected!=='true','Fresh source is already selected; do not toggle it');
+   assert(Math.abs(r.width-r.height)<=1,'Fresh media cell is clipped; do not infer its indicator position');
+  }
+  // v1.18.2 pins picker10.1.3: gridCount4, indicatorSize=width/4/3,
+  // top/end selector outer hitbox=indicatorSize*1.5 including its margins.
+  const indicatorOffset=state.geometry.width/4/3*.75;
+  const x=Math.round(selectIndicator?r.x+r.width-indicatorOffset:r.x+r.width/2),y=Math.round(selectIndicator?r.y+indicatorOffset:r.y+r.height/2);
+  assert(x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height,'Source-defined touch target exceeds exact control');
   assert(x>=0&&x<state.geometry.width&&y>=0&&y<state.geometry.height,'Exact touch center is outside the observed viewport');
-  report.actions.push({utc:new Date().toISOString(),reason,label:label(state.control),rect:r,geometry:state.geometry,currentPackage:state.currentPackage,orientation:state.orientation,preActionXml:name+(reason.startsWith('Select Media source ')?'.xml':'-final.xml'),preActionScreenshot,pixelGeometry});
+  report.actions.push({utc:new Date().toISOString(),reason,label:label(state.control),rect:r,touchPoint:{x,y},target:selectIndicator?'picker10.1.3 top/end selectIndicator hitbox':'exact control center',geometry:state.geometry,currentPackage:state.currentPackage,orientation:state.orientation,orientationObservation:state.orientationObservation||'Fresh full settlement',preActionXml:name+(reason.startsWith('Select Media source ')?'.xml':'-final.xml'),preActionScreenshot,pixelGeometry});
   await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'finger3441',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,origin:'viewport',x,y},{type:'pointerDown',button:0},{type:'pause',duration:100},{type:'pointerUp',button:0}]}]});
  }
  async function click(exact){const xml=await source(),matches=nodes(xml).filter(n=>label(n)===exact&&n.enabled!=='false'&&n.bounds);assert(matches.length===1,'Expected one visible control: '+exact);await tapNode(matches[0],exact);}
@@ -136,36 +153,52 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
    const permission=nodes(xml).find(n=>n['resource-id']?.match(/permission_allow_(foreground_only_)?button$/));
    if(!permission)break;await snap(c.id+'-permission-'+attempt,xml);await tapNode(permission,'Allow normal media permission',{expectedPackage:permission.package});xml=await source();
   }
-  xml=await wait(value=>nodes(value).some(n=>/change path/.test(label(n))));await snap(c.id+'-picker-open',xml);
-  const pathControl=nodes(xml).filter(n=>/change path/.test(label(n)));assert(pathControl.length===1,'Picker path switch must be unambiguous');await tapNode(pathControl[0],'Open Media album selector');
-  xml=await wait(value=>nodes(value).some(n=>label(n).includes('Issue3441_'+c.id)));
-  const album=nodes(xml).filter(n=>label(n).includes('Issue3441_'+c.id)&&label(n).includes('count'));
-  assert(album.length===1&&label(album[0]).includes('count: '+c.names.length),'Observed album count mismatch');await tapNode(album[0],'Select exact fixture album');
-  const selected=[];
-  for(const name of c.names){
-   let found=false;
-   for(let scroll=0;scroll<25;scroll++) {
-    xml=await source();const matches=nodes(xml).filter(n=>label(n).includes(name)&&/^(Image|Video)/.test(label(n))&&n.bounds);
-    assert(matches.length<=1,'Duplicate observable media title');
-    if(matches.length){
-     const node=matches[0];assert(node.selected!=='true','Unexpected preselected source');
-     selected.push({order:selected.length+1,name,observedLabel:label(node),bounds:node.bounds});
-     // The original picker exposes onTap select semantics; check its selected state immediately.
-     await tapNode(node,'Select Media source '+name);
-     const checked=await source();assert(nodes(checked).some(n=>label(n).includes(name)&&n.selected==='true'),'Media tap did not select source; inspect live picker');
-     found=true;break;
+  await snap(c.id+'-picker-raw',xml);
+  // Android exports the current path name, not the picker's onTapHint.
+  const pathNames=new Set(['Recent',...manifest.cases.map(row=>'Issue3441_'+row.id)]);
+  const pathMatch=n=>n.class==='android.view.View'&&n.package===original&&pathNames.has(label(n))&&n.clickable==='true'&&n.enabled==='true'&&n.displayed==='true';
+  xml=await wait(value=>nodes(value).some(pathMatch));await snap(c.id+'-picker-open',xml);
+  const pathControl=nodes(xml).filter(pathMatch);assert(pathControl.length===1,'Observed current path control must be unique');await tapNode(pathControl[0],'Open Media album selector');
+  xml=await source();await snap(c.id+'-album-list-raw',xml);
+  const albumLabel='Issue3441_'+c.id+', count: '+c.names.length;
+  xml=await wait(value=>nodes(value).some(n=>label(n)===albumLabel));await snap(c.id+'-album-list',xml);
+  const album=nodes(xml).filter(n=>label(n)===albumLabel&&n.clickable==='true'&&n.enabled==='true'&&n.displayed==='true');
+  assert(album.length===1,'Exact source album name/count must be uniquely observable');await tapNode(album[0],'Select exact fixture album');
+  await wait(value=>nodes(value).some(n=>pathMatch(n)&&label(n)==='Issue3441_'+c.id));
+  const albumState=await settledUi(original);save(c.id+'-album-transition-settled.xml',albumState.xml);
+  const selected=[],remaining=new Set(c.names);
+  const mediaName=n=>/^(Image|Video)\d+, /.test(label(n))?label(n).split(', ').at(-1):null;
+  for(let scroll=0;scroll<60&&remaining.size;scroll++) {
+    xml=await source();save(c.id+'-grid-'+scroll+'.xml',xml);
+    if(scroll===0)await snap(c.id+'-album-grid-raw',xml);
+    const candidates=nodes(xml).filter(n=>remaining.has(mediaName(n))&&n.bounds&&n.clickable==='true'&&n.enabled==='true'&&n.displayed==='true'&&Math.abs(rect(n).width-rect(n).height)<=1);
+    assert(new Set(candidates.map(mediaName)).size===candidates.length,'Duplicate observable exact media title');
+    candidates.sort((a,b)=>rect(a).y-rect(b).y||rect(a).x-rect(b).x);
+    for(const node of candidates) {
+     const name=mediaName(node);assert(node.selected!=='true','Unexpected preselected source');
+     await tapNode(node,'Select Media source '+name,{selectIndicator:true});
+     let checked=await source();save(c.id+'-selected-'+(selected.length+1)+'-raw.xml',checked);
+     const postSelected=value=>nodes(value).some(n=>mediaName(n)===name&&n.selected==='true')&&nodes(value).some(n=>label(n)==='Confirm ('+(selected.length+1)+'/999)'&&n.enabled==='true');
+     if(!postSelected(checked))checked=await wait(postSelected,5000);
+     save(c.id+'-selected-'+(selected.length+1)+'.xml',checked);
+     assert(nodes(checked).some(n=>mediaName(n)===name&&n.selected==='true'),'Actual selector touch did not set selected state');
+     assert(nodes(checked).some(n=>label(n)==='Confirm ('+(selected.length+1)+'/999)'&&n.enabled==='true'),'Picker selected count did not increment');
+     const action=report.actions.at(-1);selected.push({order:selected.length+1,name,observedLabel:action.label,bounds:action.rect,touchPoint:action.touchPoint});remaining.delete(name);
+     save(c.id+'-media-selection-order.json',selected);
     }
+    if(!remaining.size)break;
     const swipeState=await settledUi(original),{width,height}=swipeState.geometry;
     save(c.id+'-scroll-before-'+selected.length+'-'+scroll+'.xml',swipeState.xml);
     await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'finger3441',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(width/2),y:Math.round(height*.72)},{type:'pointerDown',button:0},{type:'pointerMove',duration:500,x:Math.round(width/2),y:Math.round(height*.32)},{type:'pointerUp',button:0}]}]});
-   }
-   assert(found,'Expected Media source not exposed in observed album: '+name);
   }
+  assert(!remaining.size,'Exact expected media sources remain unselected: '+[...remaining].join(','));
   save(c.id+'-media-selection-order.json',selected);
-  xml=await source();const confirm=nodes(xml).filter(n=>/^Confirm/.test(label(n))&&label(n).includes('('+c.names.length+'/'));
-  assert(confirm.length===1,'Picker does not declare complete selected count before confirmation');await snap(c.id+'-picker-selected',xml);await tapNode(confirm[0],'Confirm exact selected count');
-  const selectedApp=await wait(value=>nodes(value).some(n=>label(n).includes('Selection\nFiles: '+c.names.length+'\nSize: ')));
-  save(c.id+'-selection-summary.json',nodes(selectedApp).map(label).filter(v=>v.includes('Selection\nFiles:')));
+  xml=await source();await snap(c.id+'-picker-selected',xml);const confirm=nodes(xml).filter(n=>label(n)==='Confirm ('+c.names.length+'/999)'&&n.enabled==='true'&&n.clickable==='true');
+  assert(confirm.length===1,'Picker does not declare complete selected count before confirmation');await tapNode(confirm[0],'Confirm exact selected count');
+  await snap(c.id+'-selection-return-raw');
+  const summaryLines=value=>nodes(value).filter(n=>n.displayed!=='false').flatMap(n=>label(n).split(/\r?\n/)).map(line=>line.trim());
+  const selectedApp=await wait(value=>{const lines=summaryLines(value);return lines.includes('Selection')&&lines.includes('Files: '+c.names.length)&&lines.some(line=>/^Size: \S/.test(line));});
+  save(c.id+'-selection-summary.json',summaryLines(selectedApp).filter(line=>line==='Selection'||line.startsWith('Files: ')||line.startsWith('Size: ')));
   await snap(c.id+'-app-before-send',selectedApp);return selected;
  }
  try {
@@ -237,7 +270,20 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
     assert(caseReport.receiver.passed,'Working one-file app control did not verify');
    }
    // Preserve batch errors and inventories before continuing to the same original retry sources.
-   if(c.id!=='retry73'){await click('Done');await wait(value=>nodes(value).some(n=>label(n)==='Send\nTab 2 of 3'));}
+   if(c.id!=='retry73') {
+    // Pinned SendPage's terminal control is general.close, not a file-row Done.
+    await click('Close');
+    let returned=await wait(value=>nodes(value).some(n=>label(n)==='Send\nTab 2 of 3'));
+    await snap(c.id+'-after-close-raw',returned);
+    // closeSession clears successful single-mode selections only. Error sessions
+    // keep them, so use the source's Edit -> Delete all UI before the next case.
+    if(nodes(returned).some(n=>label(n).split(/\r?\n/).some(line=>/^Files: \d+$/.test(line.trim())))) {
+     await click('Edit');await wait(value=>nodes(value).some(n=>label(n)==='Delete all'));
+     await snap(c.id+'-selection-clear-raw');await click('Delete all');
+    }
+    returned=await wait(value=>nodes(value).some(n=>label(n)==='Media'&&n.clickable==='true'&&n.enabled==='true')&&!nodes(value).some(n=>label(n).split(/\r?\n/).some(line=>/^Files: \d+$/.test(line.trim()))));
+    await snap(c.id+'-selection-reset',returned);stage(c.id+'-selection-reset-observed');
+   }
   }
   report.status='completed-original-app-cases';
  } catch(error) {report.status='incomplete';report.error=redact(error.stack);if(session)await snap('failure').catch(()=>{});throw error;}

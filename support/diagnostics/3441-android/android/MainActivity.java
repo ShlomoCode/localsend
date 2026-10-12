@@ -100,7 +100,7 @@ public final class MainActivity extends Activity {
       if(uri==null) {
         ContentValues values=new ContentValues(); values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);
         values.put(MediaStore.MediaColumns.MIME_TYPE,mime);values.put(MediaStore.MediaColumns.RELATIVE_PATH,"DCIM/Issue3441_unselected");
-        // Descending timestamps make explicit manifest order the Media picker order.
+        // Timestamp hints do not guarantee picker order; selection records the observed order.
         values.put(MediaStore.MediaColumns.DATE_ADDED,1700000000L-i);
         values.put(MediaStore.MediaColumns.DATE_MODIFIED,1700000000L-i);
         values.put("datetaken",1700000000000L-i*1000L);
