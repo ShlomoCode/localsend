@@ -53,6 +53,22 @@ func normalized(_ value: String) -> String {
 let args = CommandLine.arguments
 guard args.count >= 3 else { fail("usage: ax BUNDLE dump|press|menu|contains|absent|key [LABEL]") }
 let mode = args[2]
+if mode == "displays" {
+    var count: UInt32 = 0
+    let countResult = CGGetActiveDisplayList(0, nil, &count)
+    guard countResult == .success, count > 0 else { fail("No active native displays", 31) }
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    let listResult = ids.withUnsafeMutableBufferPointer { CGGetActiveDisplayList(count, $0.baseAddress, &count) }
+    guard listResult == .success else { fail("Active display enumeration failed", 31) }
+    try emit(["mainDisplayID": CGMainDisplayID(), "activeDisplayCount": count,
+        "displays": ids.prefix(Int(count)).map { id in
+            let bounds = CGDisplayBounds(id)
+            return ["displayID": id, "main": CGDisplayIsMain(id) != 0, "online": CGDisplayIsOnline(id) != 0,
+                "pixelsWide": CGDisplayPixelsWide(id), "pixelsHigh": CGDisplayPixelsHigh(id),
+                "bounds": ["x": bounds.origin.x, "y": bounds.origin.y, "width": bounds.width, "height": bounds.height]] as [String: Any]
+        }])
+    exit(0)
+}
 if mode == "capability" {
     print("accessibilityTrusted=\(AXIsProcessTrusted()) screenCaptureAllowed=\(CGPreflightScreenCaptureAccess())")
     guard AXIsProcessTrusted(), CGPreflightScreenCaptureAccess() else { fail("Native GUI permission unavailable", 10) }

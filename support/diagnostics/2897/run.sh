@@ -12,6 +12,7 @@ bundle=""
 executable=""
 recorder=""
 video_case=""
+capture_qualified=false
 video_start=0
 logger=""
 installed=false
@@ -155,25 +156,55 @@ ready_app() {
 }
 video() {
   local start=$SECONDS
+  [[ $capture_qualified == true ]]
   # Keep the original continuous capture through the case result, with a native hard cap.
   video_start=$SECONDS
   video_case=$1
   printf "event\tscript_seconds\tutc\nrecord_start\t%s\t%s\n" "$SECONDS" "$(date -u +%FT%TZ)" > "$out/$1-timeline.tsv"
   # Bash background commands can inherit ignored SIGINT. Reset it before exec,
   # so the unchanged native capture command can finalize on the later SIGINT.
-  /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die $!;' /usr/sbin/screencapture -v -V 240 "$out/$1.mov" > "$out/$1-video.stdout.txt" 2> "$out/$1-video.stderr.txt" &
+  /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die $!;' /usr/sbin/screencapture -v -V 240 -D 1 "$out/$1.mov" > "$out/$1-video.stdout.txt" 2> "$out/$1-video.stderr.txt" &
   recorder=$!
   sleep 2
   kill -0 "$recorder"
-  while [[ ! -s $out/$1.mov ]]; do
-    if ! kill -0 "$recorder" 2>/dev/null || (( SECONDS - start >= 12 )); then
-      printf 'alive_or_movie_health_failed=true\nmovie_bytes=%s\n' "$(stat -f %z "$out/$1.mov" 2>/dev/null || printf 0)" > "$out/$1-video-health.txt"
+  # Normal-completion qualification proves this native main-display mechanism
+  # can yield playable video. A live MOV can remain empty before finalization;
+  # its size is an observation, while final playback remains mandatory.
+  while (( SECONDS - start < 12 )); do
+    if ! kill -0 "$recorder" 2>/dev/null; then
+      printf 'recorder_alive=false\nmovie_bytes=%s\n' "$(stat -f %z "$out/$1.mov" 2>/dev/null || printf 0)" > "$out/$1-video-health.txt"
       return 1
     fi
     sleep 1
   done
-  printf 'recorder_pid=%s\nmovie_bytes=%s\n' "$recorder" "$(stat -f %z "$out/$1.mov")" > "$out/$1-video-health.txt"
+  kill -0 "$recorder"
+  printf 'recorder_pid=%s\nrecorder_alive=true\nmain_display_normal_completion_qualified=true\nmovie_bytes=%s\n' "$recorder" "$(stat -f %z "$out/$1.mov" 2>/dev/null || printf 0)" > "$out/$1-video-health.txt"
   printf "action_start\t%s\t%s\n" "$SECONDS" "$(date -u +%FT%TZ)" >> "$out/$1-timeline.tsv"
+}
+qualify_capture() {
+  local kind capture_code metadata_code bytes explicit_pass=false
+  printf 'case\tcapture_exit\tmovie_bytes\tmetadata_exit\n' > "$out/capture-qualification.tsv"
+  run native-active-displays 10 "$ax" com.apple.finder displays
+  # Hold the native capture command, duration, and signal disposition constant.
+  # Only explicit selection of the documented main display differs between trials.
+  for kind in implicit main-display; do
+    capture_code=0; metadata_code=missing_movie
+    if [[ $kind == implicit ]]; then
+      if run "capture-qualification-$kind" 30 /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die $!;' /usr/sbin/screencapture -v -V 8 "$out/capture-qualification-$kind.mov"; then :; else capture_code=$?; fi
+    else
+      if run "capture-qualification-$kind" 30 /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die $!;' /usr/sbin/screencapture -v -V 8 -D 1 "$out/capture-qualification-$kind.mov"; then :; else capture_code=$?; fi
+    fi
+    bytes=$(stat -f %z "$out/capture-qualification-$kind.mov" 2>/dev/null || printf 0)
+    if [[ -s $out/capture-qualification-$kind.mov ]]; then
+      if run "capture-qualification-$kind-metadata" 30 "$scratch/media" "$out/capture-qualification-$kind.mov" 7; then metadata_code=0; else metadata_code=$?; fi
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$kind" "$capture_code" "$bytes" "$metadata_code" >> "$out/capture-qualification.tsv"
+    if [[ $kind == main-display && $capture_code == 0 && $metadata_code == 0 ]]; then explicit_pass=true; fi
+  done
+  # Both raw trials survive a failure. No app case begins without a playable,
+  # normally completed main-display movie and its decoded inspection frames.
+  [[ $explicit_pass == true ]] || return 1
+  capture_qualified=true
 }
 end_video() {
   local code=0 final=$SECONDS stop_start
@@ -289,6 +320,8 @@ log stream --style compact --level debug --predicate "process == \"$executable\"
 logger=$!
 stage=native_gui_qualification
 run native-permissions 10 "$ax" com.apple.finder capability
+stage=native_capture_qualification
+qualify_capture
 stage=picker_control
 run launch-control 20 open -a "$app"
 ready_app control-startup
