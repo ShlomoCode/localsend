@@ -132,17 +132,46 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  async function activate(appId){await wd('POST',base()+'/appium/device/activate_app',{appId});await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});activePackage=appId;const state=await settledUi(appId);await snap('activation-'+String(++activationCount).padStart(2,'0')+'-settled',state.xml);}
  async function configureFavorite(){
   await click('Favorites');await click('Add');
-  const all=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.EditText'});assert(all.length===3,'Favorite requires three observed fields');
-  const fields=[];for(const item of all){const id=elementId(item);fields.push({id,rect:await wd('GET',base()+'/element/'+id+'/rect')});}fields.sort((a,b)=>a.rect.y-b.rect.y);
+  await snap('favorite-dialog-open-raw');
+  const keyboardShown=()=>wd('POST',base()+'/execute/sync',{script:'mobile: isKeyboardShown',args:[]});
+  async function visibleFields(reason) {
+   const shown=await keyboardShown();assert(typeof shown==='boolean','Keyboard visibility must be observable');
+   if(shown) {
+    report.actions.push({utc:new Date().toISOString(),reason:'Dismiss observed favorite keyboard',stage:reason});
+    await wd('POST',base()+'/execute/sync',{script:'mobile: hideKeyboard',args:[]});
+   }
+   const end=Math.min(deadline,Date.now()+5000);let hidden=false;
+   do {const current=await keyboardShown();assert(typeof current==='boolean','Keyboard visibility must be observable');if(!current){hidden=true;break;}await sleep(250);}while(Date.now()<end);
+   assert(hidden,'Favorite keyboard did not become hidden');
+   const state=await settledUi(original),observed=nodes(state.xml);
+   save('favorite-'+reason+'-fields.xml',state.xml);
+   assert(observed.some(n=>label(n)==='Add to favorites'),'Favorite edit dialog disappeared while hiding keyboard');
+   const nativeFields=observed.filter(n=>n.class==='android.widget.EditText'&&n.package===original&&n.enabled==='true'&&n.displayed==='true'&&n.bounds).sort((a,b)=>rect(a).y-rect(b).y);
+   assert(nativeFields.length===3&&nativeFields.every(n=>inBounds(rect(n),state.geometry)),'Favorite requires three fresh visible in-bounds fields');
+   const labels=['Device name','IP Address','Port'];
+   for(let i=0;i<3;i++) {
+    const matches=observed.filter(n=>label(n)===labels[i]&&n.displayed==='true'&&n.bounds);
+    assert(matches.length===1&&inBounds(rect(matches[0]),state.geometry)&&rect(matches[0]).y+rect(matches[0]).height<=rect(nativeFields[i]).y,'Favorite field label/order mismatch');
+   }
+   const all=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.EditText'});assert(all.length===3,'Favorite requires three observed fields');
+   const fields=[];for(const item of all){const id=elementId(item);fields.push({id,rect:await wd('GET',base()+'/element/'+id+'/rect')});}fields.sort((a,b)=>a.rect.y-b.rect.y);
+   for(let i=0;i<3;i++)assert(['x','y','width','height'].every(key=>fields[i].rect[key]===rect(nativeFields[i])[key]),'Fresh favorite element and native geometry disagree');
+   assert(await keyboardShown()===false,'Favorite keyboard reopened before field action');
+   return fields;
+  }
   const values=['issue3441-cloud-receiver','127.0.0.1','53318'];
   for(const i of [2,0,1]) {
+   const fields=await visibleFields('before-input-'+i);
    const text=values[i];report.actions.push({utc:new Date().toISOString(),reason:'Focus favorite field',index:i,rect:fields[i].rect});
    await wd('POST',base()+'/element/'+fields[i].id+'/click',{});
    assert(await wd('GET',base()+'/element/'+fields[i].id+'/attribute/focused')==='true','Favorite field did not gain focus');
    await wd('POST',base()+'/element/'+fields[i].id+'/clear',{});await wd('POST',base()+'/element/'+fields[i].id+'/value',{text,value:[...text]});
    assert(await wd('GET',base()+'/element/'+fields[i].id+'/text')===text,'Favorite field value changed');
   }
+  let fields=await visibleFields('before-blur');
   await wd('POST',base()+'/element/'+fields[0].id+'/click',{});
+  assert(await wd('GET',base()+'/element/'+fields[0].id+'/attribute/focused')==='true','Favorite blur target did not gain focus');
+  fields=await visibleFields('after-blur');
   for(let i=0;i<3;i++)assert(await wd('GET',base()+'/element/'+fields[i].id+'/text')===values[i],'Favorite value changed after blur');
   await snap('favorite-filled');await click('Confirm');await wait(xml=>nodes(xml).some(n=>label(n).includes('issue3441-cloud-receiver')));
  }
