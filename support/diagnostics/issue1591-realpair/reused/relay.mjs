@@ -7,12 +7,12 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
   const peers=new Map(); const events=[]; let waiter=null; let queued=0; let peak=0; let next=0;let nextSeq=0;let pendingBatch=null;
   const faults=[],peerBytes={};
   const metrics={opened:0,fromSender:0,fromDevice:0,paused:0};
-  const trace=[];const started=process.hrtime.bigint();
+  const trace=[];const started=process.hrtime.bigint();const timingLimit=4000;let timingRecords=0;let timingDropped=0;
   const healthSamples=[];let healthDropped=0;
   const elapsedMs=()=>Number(process.hrtime.bigint()-started)/1e6;
   const health=()=>({lastHealth:healthSamples.at(-1)||null,healthAgeMs:healthSamples.length?elapsedMs()-healthSamples.at(-1).receivedElapsedMs:null,
     healthGeneration:healthSamples.at(-1)?.payload.generation||null,healthSamples:healthSamples.length,healthDropped});
-  const status=()=>({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter,pendingAckSeq:pendingBatch?.at(-1)?.seq||null,peerBytes,faults,...health()});
+  const status=()=>({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter,pendingAckSeq:pendingBatch?.at(-1)?.seq||null,peerBytes,faults,timingLimit,timingRecords,timingDropped,...health()});
   function fault(kind,detail={}){const entry={utc:new Date().toISOString(),elapsedMs:elapsedMs(),kind,...detail};faults.push(entry);record('transport-fault',undefined,entry);}
   function validHealth(value){
     return value&&Number.isInteger(value.pid)&&value.pid>0&&Number.isFinite(value.elapsedSeconds)&&value.elapsedSeconds>=0&&
@@ -23,10 +23,21 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
         typeof peer.ready==='boolean'&&Number.isSafeInteger(peer.toLocalSendBytes)&&peer.toLocalSendBytes>=0&&
         Number.isSafeInteger(peer.fromLocalSendBytes)&&peer.fromLocalSendBytes>=0&&typeof peer.inputEOF==='boolean'&&typeof peer.outputEOF==='boolean');
   }
-  function record(origin,id,detail={}){trace.push({elapsedMs:Number(process.hrtime.bigint()-started)/1e6,origin,id,...detail});}
+  function record(origin,id,detail={}){
+    trace.push({elapsedMs:elapsedMs(),utc:new Date().toISOString(),origin,id,...detail});
+  }
+  function recordTiming(origin,id,detail={}){
+    if(timingRecords>=timingLimit){timingDropped++;return;}
+    timingRecords++;record(origin,id,detail);
+  }
+  const timingID=value=>typeof value==='string'&&value.length<=160&&/^[A-Za-z0-9:-]+$/.test(value)?value:null;
   const socketState=p=>({writableEnded:p.writableEnded,destroyed:p.destroyed,readableEnded:p.readableEnded});
-  function batch() {pendingBatch=events.slice(0,8);return pendingBatch;}
-  function wake() {if(waiter && events.length&&!pendingBatch) {const w=waiter;waiter=null;clearTimeout(w.timer);w.res.end(JSON.stringify(batch()));}}
+  function batch(reason) {
+    pendingBatch=events.slice(0,8);
+    recordTiming('batch-dispatch',undefined,{reason,firstSeq:pendingBatch[0].seq,lastSeq:pendingBatch.at(-1).seq,count:pendingBatch.length});
+    return pendingBatch;
+  }
+  function wake() {if(waiter && events.length&&!pendingBatch) {const w=waiter;waiter=null;clearTimeout(w.timer);w.res.end(JSON.stringify(batch('waiting-pull')));}}
   function enqueue(e) {events.push({...e,seq:++nextSeq});queued+=e.bytes||0;peak=Math.max(peak,queued);if(queued>512*1024){for(const p of peers.values())p.pause();metrics.paused++;}wake();}
   const tcp=net.createServer({allowHalfOpen:true},p=>{
     if(senderNoDelay)p.setNoDelay(true);
@@ -45,21 +56,26 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
     if(req.method==='GET' && req.url==='/pull') {
       record("poll-open");if(waiter){record("poll-conflict");res.writeHead(409);res.end();return;}
       if(pendingBatch){fault('poll-before-ack',{pendingSeq:pendingBatch.at(-1).seq});res.writeHead(409);res.end('{}');return;}
-      if(events.length){res.end(JSON.stringify(batch()));return;}
+      if(events.length){res.end(JSON.stringify(batch('ready-pull')));return;}
       const w={res,timer:setTimeout(()=>{record('poll-renewal');if(waiter===w)waiter=null;res.end('[]');},15000)};
       waiter=w;res.on('close',()=>{record("poll-close");if(waiter===w){clearTimeout(w.timer);waiter=null;}});return;
     }
     if(req.method==='GET' && req.url==='/status'){res.end(JSON.stringify(status()));return;}
     if(req.method==='POST' && req.url==='/ack'){
+      const receivedElapsedMs=elapsedMs(),receivedUtc=new Date().toISOString();
+      recordTiming('ack-http-receipt',undefined,{receivedElapsedMs,receivedUtc});
       let raw='';req.on('data',data=>{raw+=data;if(raw.length>4096)req.destroy();});
       req.on('end',()=>{
         try{
           const ack=JSON.parse(raw);
+          recordTiming('ack-body-receipt',undefined,{seq:Number.isSafeInteger(ack.seq)?ack.seq:null,receivedElapsedMs,receivedUtc});
           if(!pendingBatch||!Number.isSafeInteger(ack.seq)||ack.seq!==pendingBatch.at(-1).seq){fault('invalid-ack');res.writeHead(409);res.end('{}');return;}
           for(const event of pendingBatch){queued-=event.bytes||0;if(event.kind==='data')peerBytes[event.id].acknowledgedToDevice+=event.bytes;}
           events.splice(0,pendingBatch.length);record('device-batch-ack',undefined,{seq:ack.seq,count:pendingBatch.length});pendingBatch=null;
           if(queued<256*1024)for(const peer of peers.values())peer.resume();
-          res.end('{}');wake();
+          recordTiming('ack-applied',undefined,{seq:ack.seq});
+          res.once('finish',()=>recordTiming('ack-response-finish',undefined,{seq:ack.seq}));
+          res.end('{}');recordTiming('ack-response-submitted',undefined,{seq:ack.seq});wake();
         }catch{fault('invalid-ack');res.writeHead(400);res.end('{}');}
       });return;
     }
@@ -77,13 +93,18 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
       });return;
     }
     if(req.method==='POST' && req.url==='/push') {
+      const receivedElapsedMs=elapsedMs(),receivedUtc=new Date().toISOString();
+      recordTiming('push-http-receipt',undefined,{receivedElapsedMs,receivedUtc});
       let raw=''; req.on('data',d=>{raw+=d;if(raw.length>256*1024)req.destroy();});
       req.on('end',()=>{
         try {
           const e=JSON.parse(raw);const p=peers.get(e.id);
+          const timingEventID=timingID(e.timingEventID);
+          recordTiming('push-body-receipt',e.id,{timingEventID,kind:e.kind,receivedElapsedMs,receivedUtc});
+          res.once('finish',()=>recordTiming('push-response-finish',e.id,{timingEventID,status:res.statusCode}));
           if(!p){fault('push-missing-peer',{id:e.id});res.writeHead(410);res.end('{}');return;}
           if(e.kind==='data'){const data=Buffer.from(e.data,'base64');
-            const attempt={attemptedUtc:new Date().toISOString(),attemptedBytes:data.length,
+            const attempt={timingEventID,attemptedUtc:new Date().toISOString(),attemptedBytes:data.length,
               peerIdentity:{id:e.id,localAddress:p.localAddress,localPort:p.localPort,remoteAddress:p.remoteAddress,remotePort:p.remotePort},attemptState:socketState(p)};
             record('device-data-write-attempt',e.id,attempt);
             p.write(data,error=>{

@@ -34,6 +34,7 @@ const pause = ms => new Promise(ok => setTimeout(ok, ms));
 const appId = 'org.localsend.localsendApp', proxyId = 'org.shlomocode.diagnostics.issue1591.byteproxy';
 let session, local, r, failure, stage = 'configuration', previousFinished = false;
 let monitoredWindow, healthMonitor;
+let helperStartAttempted = false;
 let windowsUI, windowsReady, windowsSeq = 0;
 const windowsRequests = new Map();
 const healthMaxAgeMs = 5000;
@@ -413,6 +414,7 @@ async function configureProxy(label) {
     await wd('POST', prefix() + '/element/' + eid(element) + '/clear', {});
     await wd('POST', prefix() + '/element/' + eid(element) + '/value', {text:value});
   }
+  helperStartAttempted = true;
   await click('startProxy');
   const started = Date.now(), deadline = started + 20000;
   let consentedLocalNetwork = false;
@@ -756,6 +758,31 @@ $receipt.stopped=$true;$receipt|ConvertTo-Json -Compress
   save('scenario-results.json', {results, backgroundWindows, failure, lastStage:stage, transport:r?.status()});
   if (session) {
     stage = 'owned-session-cleanup';
+    if (!nodelayComparison && failure && helperStartAttempted) {
+      // Freeze the failed interval first, then request the existing stop/dump.
+      // Each command shares one deadline; an ambiguous reply gets no retry.
+      const receipt = {operation:'helper owned failure stop for timing retention',startedUtc:new Date().toISOString(),ok:false};
+      const deadline = Date.now() + 15000;
+      const remaining = () => {
+        const ms = deadline - Date.now();
+        if (ms <= 0) throw new Error('Helper failure stop exceeded 15 seconds');
+        return ms;
+      };
+      try {
+        await wd('POST',prefix()+'/appium/device/activate_app',{appId:proxyId},remaining());
+        const stops = await wd('POST',prefix()+'/elements',{using:'accessibility id',value:'stopProxy'},remaining());
+        if (stops.length !== 1) throw new Error('Owned helper stop control absent or ambiguous');
+        receipt.clickAttemptedUtc = new Date().toISOString();
+        await wd('POST',prefix()+'/element/'+eid(stops[0])+'/click',{},remaining());
+        receipt.ok = true;
+        receipt.authority = 'Stop click completed; native timing summary is required to establish dump retention';
+      } catch (error) {
+        receipt.error = redact(error);
+        failure ||= 'Helper failure timing retention cleanup failed';
+      }
+      receipt.finishedUtc = new Date().toISOString();
+      cleanup.push(receipt);save('helper-failure-stop.json',receipt);
+    }
     try { await wd('DELETE', '/session/' + session, undefined, 30000); cleanup.push({operation:'DELETE owned session without trailing slash',ok:true}); }
     catch (error) { cleanup.push({operation:'DELETE owned session',ok:false,error:redact(error)}); failure ||= 'Owned session cleanup failed'; }
     await collectMetadata();

@@ -13,6 +13,7 @@ private struct RelayPush: Encodable {
     let kind: String
     var data: String? = nil
     var origin: String? = nil
+    var timingEventID: String? = nil
 }
 
 private struct RelayAcknowledgment: Encodable {
@@ -41,6 +42,13 @@ private struct ProxyHealth: Encodable {
 
 @MainActor
 final class ByteProxy {
+    private struct TimingRecord {
+        let uptime: Double
+        let boundary: String
+        let eventID: String
+        let peerID: String
+        let bytes: Int
+    }
     @MainActor
     private final class Peer {
         let connection = NWConnection(host: "127.0.0.1", port: 53317, using: .tcp)
@@ -62,8 +70,33 @@ final class ByteProxy {
     private var token = ""
     private var generation = UUID()
     private var lastAcknowledgedSequence = 0
+    private var nextTimingID = 0
+    private var timingRecords: [TimingRecord] = []
+    private var timingDropped = 0
+    private let timingLimit = 512
     private(set) var running = false
     var logLine: ((String) -> Void)?
+
+    private func timingID() -> String {
+        nextTimingID += 1
+        return generation.uuidString + ":" + String(nextTimingID)
+    }
+
+    private func recordTiming(_ boundary: String, eventID: String, peerID: String = "-", bytes: Int = 0,
+                              uptime: Double, run: UUID) {
+        guard running, generation == run else { return }
+        guard timingRecords.count < timingLimit else { timingDropped += 1; return }
+        timingRecords.append(TimingRecord(uptime: uptime, boundary: boundary, eventID: eventID, peerID: peerID, bytes: bytes))
+    }
+
+    private func emitTiming() {
+        // Captured uptime is the event time; log elapsed/budget describe emission at stop.
+        log("timing-summary generation=\(generation.uuidString) originUptime=\(String(format: "%.6f", started)) records=\(timingRecords.count) limit=\(timingLimit) dropped=\(timingDropped)")
+        for record in timingRecords {
+            log("timing-record generation=\(generation.uuidString) uptime=\(String(format: "%.6f", record.uptime)) boundary=\(record.boundary) eventID=\(record.eventID) peer=\(record.peerID) bytes=\(record.bytes)")
+        }
+        timingRecords.removeAll(keepingCapacity: true)
+    }
 
     func log(_ event: String) {
         let elapsed = ProcessInfo.processInfo.systemUptime - started
@@ -85,6 +118,10 @@ final class ByteProxy {
         started = ProcessInfo.processInfo.systemUptime
         generation = UUID()
         lastAcknowledgedSequence = 0
+        nextTimingID = 0
+        timingRecords.removeAll(keepingCapacity: true)
+        timingRecords.reserveCapacity(timingLimit)
+        timingDropped = 0
         self.baseURL = url
         self.token = token
         running = true
@@ -131,6 +168,7 @@ final class ByteProxy {
         session?.invalidateAndCancel()
         session = nil
         token = ""
+        emitTiming()
         if backgroundTask != .invalid {
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
@@ -138,7 +176,8 @@ final class ByteProxy {
         log("stopped")
     }
 
-    private func request(path: String, event: RelayPush? = nil, body: Data? = nil) async throws -> Data {
+    private func request(path: String, event: RelayPush? = nil, body: Data? = nil,
+                         timingEventID: String? = nil, timingByteCount: Int = 0) async throws -> Data {
         guard running, let session, let baseURL else { throw CancellationError() }
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -148,7 +187,27 @@ final class ByteProxy {
             if let event { request.httpBody = try JSONEncoder().encode(event) }
             else { request.httpBody = body }
         }
-        let (data, response) = try await session.data(for: request)
+        let run = generation
+        let observedID = event?.timingEventID ?? timingEventID
+        let invoked = ProcessInfo.processInfo.systemUptime
+        if let observedID {
+            recordTiming(path + "-invoke", eventID: observedID, peerID: event?.id ?? "-", bytes: timingByteCount, uptime: invoked, run: run)
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            let completed = ProcessInfo.processInfo.systemUptime
+            if let observedID {
+                recordTiming(path + "-completion-error", eventID: observedID, peerID: event?.id ?? "-", bytes: timingByteCount, uptime: completed, run: run)
+            }
+            throw error
+        }
+        let completed = ProcessInfo.processInfo.systemUptime
+        if let observedID {
+            recordTiming(path + "-completion", eventID: observedID, peerID: event?.id ?? "-", bytes: timingByteCount, uptime: completed, run: run)
+        }
         guard running, session === self.session else { throw CancellationError() }
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
             throw ProxyFailure.relayStatus((response as? HTTPURLResponse)?.statusCode ?? 0)
@@ -201,7 +260,8 @@ final class ByteProxy {
         let run = generation
         do {
             while running && !Task.isCancelled {
-                let data = try await request(path: "pull")
+                let pullID = timingID()
+                let data = try await request(path: "pull", timingEventID: pullID)
                 let events = try JSONDecoder().decode([RelayEvent].self, from: data)
                 log("poll events=\(events.count)")
                 var previousSequence = lastAcknowledgedSequence
@@ -211,11 +271,13 @@ final class ByteProxy {
                 }
                 for event in events {
                     guard running && generation == run else { return }
+                    recordTiming("consume-entry", eventID: "seq:" + String(event.seq), peerID: event.id, uptime: ProcessInfo.processInfo.systemUptime, run: run)
                     try await consume(event)
+                    recordTiming("consume-completion", eventID: "seq:" + String(event.seq), peerID: event.id, uptime: ProcessInfo.processInfo.systemUptime, run: run)
                 }
                 if let last = events.last {
                     guard running && generation == run else { return }
-                    _ = try await request(path: "ack", body: JSONEncoder().encode(RelayAcknowledgment(seq: last.seq)))
+                    _ = try await request(path: "ack", body: JSONEncoder().encode(RelayAcknowledgment(seq: last.seq)), timingEventID: "seq:" + String(last.seq))
                     lastAcknowledgedSequence = last.seq
                     log("batch-acknowledged seq=\(last.seq) events=\(events.count)")
                 }
@@ -285,18 +347,24 @@ final class ByteProxy {
 
     private func receive(id: String, peer: Peer) {
         let run = generation
+        let readID = timingID()
+        recordTiming("receive-register", eventID: readID, peerID: id, uptime: ProcessInfo.processInfo.systemUptime, run: run)
         peer.connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self, weak peer] data, _, complete, error in
+            let callbackUptime = ProcessInfo.processInfo.systemUptime
             Task { @MainActor in
+                let entryUptime = ProcessInfo.processInfo.systemUptime
+                self?.recordTiming("receive-callback", eventID: readID, peerID: id, bytes: data?.count ?? 0, uptime: callbackUptime, run: run)
+                self?.recordTiming("receive-mainactor", eventID: readID, peerID: id, bytes: data?.count ?? 0, uptime: entryUptime, run: run)
                 guard let self, let peer, self.running, self.peers[id] === peer else { return }
                 do {
                     if let data, !data.isEmpty {
-                        _ = try await self.request(path: "push", event: RelayPush(id: id, kind: "data", data: data.base64EncodedString()))
+                        _ = try await self.request(path: "push", event: RelayPush(id: id, kind: "data", data: data.base64EncodedString(), timingEventID: readID + ":data"), timingByteCount: data.count)
                         peer.received += data.count
                         self.log("fromLocalSend id=\(id) bytes=\(data.count) total=\(peer.received)")
                     }
                     if let error { await self.failPeer(id: id, peer: peer, error: error); return }
                     if complete {
-                        _ = try await self.request(path: "push", event: RelayPush(id: id, kind: "eof"))
+                        _ = try await self.request(path: "push", event: RelayPush(id: id, kind: "eof", timingEventID: readID + ":eof"))
                         peer.outputEOF = true
                         self.log("local-eof id=\(id)")
                         self.finishIfComplete(id: id, peer: peer)
