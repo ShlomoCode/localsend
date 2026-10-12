@@ -1,4 +1,4 @@
-import subprocess, time, pathlib, json, csv, io, os
+import subprocess, time, pathlib, json, csv, io, os, re
 out=pathlib.Path("/home/probe/evidence"); out.mkdir(exist_ok=True)
 events=[]
 def run(*args,**kw):
@@ -53,6 +53,154 @@ def saved_frame_crop(name,suffix,left,top,width,height,scale,psm,execute=run):
     crop.with_suffix(".tesseract.stderr").write_text(result.stderr)
     if result.returncode!=0: raise RuntimeError("Saved-frame OCR failed: "+name+suffix)
     return list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+def native_geometry_calibration():
+    phase=out/"native-geometry-calibration"; phase.mkdir(exist_ok=True)
+    deadline=time.monotonic()+60
+    status=dict(status="started",controls_admitted=False,policy_admitted=False,pixel_mapping_review_required=True,
+                app_pid=app.pid,window_id=w[-1],horizontal_requests=0,phase_bound_seconds=60)
+    process_start=pathlib.Path(f"/proc/{app.pid}/stat").read_text().rsplit(") ",1)[1].split()[19]
+    process_exe=os.readlink(f"/proc/{app.pid}/exe")
+    def execute(name,*args,limit=deadline):
+        remaining=limit-time.monotonic()
+        if remaining<=0: raise RuntimeError("Native geometry calibration deadline reached")
+        result=run(*args,timeout=min(15,remaining),env=dict(os.environ,LC_ALL="C"))
+        (phase/(name+".stdout")).write_text(result.stdout)
+        (phase/(name+".stderr")).write_text(result.stderr)
+        (phase/(name+".command.json")).write_text(json.dumps(dict(command=list(args),returncode=result.returncode)))
+        if result.returncode!=0: raise RuntimeError("Native calibration command failed: "+name)
+        return result.stdout
+    def identity():
+        if (app.poll() is not None or os.readlink(f"/proc/{app.pid}/exe")!=process_exe or
+                pathlib.Path(f"/proc/{app.pid}/stat").read_text().rsplit(") ",1)[1].split()[19]!=process_start):
+            raise RuntimeError("Original calibration app identity changed")
+    def window(name,identifier,limit):
+        raw=execute(name,"xwininfo","-id",str(identifier),"-stats","-tree",limit=limit)
+        def number(label):
+            hit=re.search(r"^\s*"+re.escape(label)+r":\s*(-?\d+)\s*$",raw,re.M)
+            if hit is None: raise RuntimeError("Native window field absent: "+label)
+            return int(hit[1])
+        def xid(label):
+            hit=re.search(re.escape(label)+r":\s*(0x[0-9a-fA-F]+)",raw)
+            if hit is None: raise RuntimeError("Native window identity absent: "+label)
+            return int(hit[1],16)
+        state=re.search(r"^\s*Map State:\s*(\S+)\s*$",raw,re.M)
+        if state is None: raise RuntimeError("Native map state absent")
+        return dict(id=xid("Window id"),root=xid("Root window id"),parent=xid("Parent window id"),
+                    x=number("Absolute upper-left X"),y=number("Absolute upper-left Y"),
+                    relative_x=number("Relative upper-left X"),relative_y=number("Relative upper-left Y"),
+                    width=number("Width"),height=number("Height"),border=number("Border width"),map_state=state[1])
+    def snapshot(name,limit):
+        identity()
+        if execute(name+"-display","xdotool","getdisplaygeometry",limit=limit).strip()!="1280 800":
+            raise RuntimeError("Calibration display changed")
+        owner=execute(name+"-owner","xprop","-id",w[-1],"_NET_WM_PID",limit=limit)
+        owner_hit=re.search(r"_NET_WM_PID\(CARDINAL\)\s*=\s*(\d+)",owner)
+        if owner_hit is None or int(owner_hit[1])!=app.pid: raise RuntimeError("Native client PID differs from original app")
+        # Retain the getter's inconsistent point for comparison only; native
+        # xwininfo absolute coordinates remain the calibration authority.
+        execute(name+"-xdotool-diagnostic","xdotool","getwindowgeometry","--shell",w[-1],limit=limit)
+        properties=execute(name+"-client-properties","xprop","-id",w[-1],"_NET_FRAME_EXTENTS","_GTK_FRAME_EXTENTS",
+                           "WM_STATE","_NET_WM_STATE","WM_NAME","_NET_WM_NAME",limit=limit)
+        extents={}
+        for label in ("_NET_FRAME_EXTENTS","_GTK_FRAME_EXTENTS"):
+            lines=[line.strip() for line in properties.splitlines()
+                   if re.match(r"^"+re.escape(label)+r"(?:\(|:|\s|$)",line.strip())]
+            if len(lines)!=1: raise RuntimeError("Native frame property line missing or duplicated: "+label)
+            line=lines[0]
+            if re.fullmatch(re.escape(label)+r":\s*(?:not found|no such atom on any window)\.?",line):
+                extents[label]=dict(status="absent",values=None)
+                continue
+            match=re.fullmatch(re.escape(label)+r"\(CARDINAL\)\s*=\s*([0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+)",line)
+            if match is None: raise RuntimeError("Native frame extents type or values malformed: "+label)
+            extents[label]=dict(status="present",values=[int(value.strip()) for value in match[1].split(",")])
+        chain=[]; identifier=int(w[-1]); seen=set()
+        for depth in range(8):
+            if identifier in seen: raise RuntimeError("Native parent chain repeats")
+            seen.add(identifier)
+            node=window(name+"-window-"+str(depth),identifier,limit); chain.append(node)
+            if node["id"]!=identifier: raise RuntimeError("Native queried window identity mismatch")
+            if node["id"]==node["root"]: break
+            identifier=node["parent"]
+        else: raise RuntimeError("Native parent chain did not reach root")
+        if any(node["root"]!=chain[0]["root"] or node["map_state"]!="IsViewable" for node in chain):
+            raise RuntimeError("Native chain root/map state is inconsistent")
+        client=chain[0]; frame=chain[-2] if len(chain)>1 else client
+        keyboard_state=execute(name+"-keyboard","gsettings","get","org.cinnamon.desktop.a11y.applications",
+                               "screen-keyboard-enabled",limit=limit).strip()
+        if keyboard_state not in ("true","false"): raise RuntimeError("Supported keyboard state unavailable")
+        result=dict(client=client,frame=frame,parent_chain=chain,extents=extents,client_properties=properties,
+                    process_start=process_start,process_exe=process_exe,keyboard_state=keyboard_state,
+                    keyboard_top=287 if keyboard_state=="true" else 0)
+        (phase/(name+".json")).write_text(json.dumps(result,indent=2))
+        return result
+    def settled(label,limit):
+        previous=None; stable=0; attempt=0
+        while time.monotonic()<limit:
+            name=label+"-"+str(attempt)
+            before=snapshot(name+"-A",limit)
+            execute(name+"-screenshot","scrot",str(phase/(name+"-original.png")),limit=limit)
+            header=(phase/(name+"-original.png")).read_bytes()[:24]
+            if (len(header)!=24 or header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR"
+                    or int.from_bytes(header[16:20],"big")!=1280 or int.from_bytes(header[20:24],"big")!=800):
+                raise RuntimeError("Calibration original screenshot dimensions differ from native display")
+            after=snapshot(name+"-B",limit)
+            matching=(before==after and after["client"]["width"]==1100 and after["client"]["height"]==700)
+            stable=stable+1 if matching and previous==after else 1 if matching else 0
+            with (phase/"triplets.jsonl").open("a") as records:
+                records.write(json.dumps(dict(name=name,wall=time.time(),native_brackets_equal=before==after,
+                    stable_native_triplets=stable,original_png=name+"-original.png",pixels_review_required=True))+"\n")
+            if stable>=2: return after
+            previous=after if matching else None; attempt+=1
+            if limit-time.monotonic()>0.25: time.sleep(0.25)
+        raise RuntimeError("No two consecutive stable native capture triplets: "+label)
+    try:
+        if (out.resolve()!=pathlib.Path("/home/mint/evidence") or not (out/"bootstrap-complete").is_file()
+                or "ID=linuxmint" not in pathlib.Path("/etc/os-release").read_text().splitlines()
+                or any(os.environ.get(flag,"0")!="0" for flag in ("PROBE_CAPTURE_GEOMETRY","PROBE_CAPTURE_INTERACTIONS",
+                     "PROBE_CAPTURE_ROOT_NAME_EVIDENCE","PROBE_OBSERVER_POLICY_DISCRIMINATOR"))):
+            raise RuntimeError("Calibration requires exclusive staged Mint geometry-only scope")
+        execute("tool-versions","dpkg-query","-W","x11-utils","wmctrl","xdotool")
+        supported=execute("root-supported","xprop","-root","_NET_SUPPORTED")
+        supported_lines=[line.strip() for line in supported.splitlines()
+                         if re.match(r"^_NET_SUPPORTED(?:\(|:|\s|$)",line.strip())]
+        if len(supported_lines)!=1: raise RuntimeError("Root supported property line missing or duplicated")
+        supported_match=re.fullmatch(r"_NET_SUPPORTED\(ATOM\)\s*=\s*(\S.*)",supported_lines[0])
+        if supported_match is None: raise RuntimeError("Root supported property is not an explicit ATOM list")
+        supported_atoms=[atom.strip() for atom in supported_match[1].split(",")]
+        if any(re.fullmatch(r"[^\s,]+",atom) is None for atom in supported_atoms):
+            raise RuntimeError("Root supported ATOM list is malformed")
+        if "_NET_MOVERESIZE_WINDOW" not in supported_atoms:
+            raise RuntimeError("Window manager does not advertise X-only EWMH movement")
+        execute("initial-size","xdotool","windowsize",w[-1],"1100","700")
+        before=settled("before-move",deadline-15)
+        command=["wmctrl","-i","-r",w[-1],"-e","0,60,-1,-1,-1"]
+        log("native-geometry-horizontal-input",case="native-geometry-horizontal",command=command,
+            stable_native_before=before,controls_admitted=False,policy_admitted=False,pixels_review_required=True)
+        move_wall=time.time(); status["horizontal_requests"]=1
+        execute("horizontal-request",*command,limit=deadline-12)
+        after=settled("after-move",deadline-2)
+        # Preserve true native Y and size, including the outer frame. No
+        # xdotool getter-derived point, fixed X result or border formula gate.
+        if any(before[target][key]!=after[target][key] for target in ("client","frame")
+               for key in ("id","root","y","width","height","border")):
+            raise RuntimeError("Actual client/frame Y, size or identity changed after X-only request")
+        if before["extents"]!=after["extents"] or before["keyboard_top"]!=after["keyboard_top"]:
+            raise RuntimeError("Frame extents or keyboard condition changed during calibration")
+        status.update(status="stable-native-pixels-review-required",before=before,after=after,
+                      horizontal_native_change=before["client"]["x"]!=after["client"]["x"])
+    except Exception as error:
+        status.update(status="calibration-failed",error=type(error).__name__+": "+str(error))
+    finally:
+        # Reserve the real post-request tail for the existing ten-second clip.
+        if status["horizontal_requests"]:
+            remaining_tail=move_wall+9.25-time.time()
+            if remaining_tail>0:
+                if time.monotonic()+remaining_tail>deadline:
+                    status.update(status="calibration-failed",error="Post-request recording tail exceeds fixed phase bound")
+                else: time.sleep(remaining_tail)
+        (phase/"result.json").write_text(json.dumps(status,indent=2))
+        log("native-geometry-calibration-ended",**status)
+    return status["status"]=="stable-native-pixels-review-required"
 def keyboard_top(execute=run):
     state=execute("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboard-enabled").stdout.strip()
     if state not in ("true","false"): raise RuntimeError("Supported keyboard setting unavailable")
@@ -719,6 +867,8 @@ def capture_interaction_phase():
         log("interactions-phase-ended",**status)
     return status["status"]=="capture-finished" and status.get("returncode")==0
 log("start")
+calibration_flag=os.environ.get("PROBE_NATIVE_GEOMETRY_CALIBRATION","0")
+if calibration_flag not in ("0","1"): raise RuntimeError("Invalid native calibration opt-in")
 executable=os.environ.get("APP_EXECUTABLE","localsend_app")
 app=subprocess.Popen([executable],stdin=subprocess.DEVNULL,stdout=open(out/"app.log","w"),stderr=subprocess.STDOUT)
 time.sleep(15)
@@ -732,6 +882,16 @@ owned=[window for window in w if run("xdotool","getwindowpid",window).stdout.str
 if len(owned)!=1: raise RuntimeError("Original LocalSend native window is ambiguous")
 w=owned
 run("xdotool","windowactivate","--sync",w[-1])
+if calibration_flag=="1":
+    try:
+        calibration_completed=native_geometry_calibration()
+    finally:
+        log("native-geometry-app-cleanup",app_pid=app.pid)
+        app.terminate()
+        try: app.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            app.kill(); app.wait(timeout=5)
+    raise SystemExit(0 if calibration_completed else 1)
 initial_resize=run("xdotool","windowsize",w[-1],"1100","700")
 log("initial-wm-size-input",command=["xdotool","windowsize",w[-1],"1100","700"],returncode=initial_resize.returncode)
 if initial_resize.returncode!=0: raise RuntimeError("Original launch 1100x700 sizing failed")

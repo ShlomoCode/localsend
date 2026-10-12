@@ -21,7 +21,10 @@ def main():
     dest = evidence / "recording-clips"
     dest.mkdir(exist_ok=True)
     source = evidence / "scenario.mp4"
-    expected_cases = ("keyboard-off", "keyboard-on", "keyboard-on-repeat", "keyboard-off-again", "keyboard-on-stack")
+    calibration = os.environ.get("PROBE_NATIVE_GEOMETRY_CALIBRATION", "0") == "1"
+    expected_cases = (("native-geometry-horizontal",) if calibration else
+                      ("keyboard-off", "keyboard-on", "keyboard-on-repeat", "keyboard-off-again", "keyboard-on-stack"))
+    case_event = "native-geometry-horizontal-input" if calibration else "text-open"
     manifest = {
         "source": str(source), "created_wall": time.time(),
         "bridge_variant": os.environ.get("PROBE_BRIDGE_VARIANT"),
@@ -31,6 +34,7 @@ def main():
         "overlays": "none; no cursor, click, ripple, or keyboard input is fabricated from event logs",
         "timing": "source retains wall-clock PTS; excerpts subtract one constant PTS offset only",
         "expected_cases": list(expected_cases), "clips": [], "status": "incomplete",
+        "native_geometry_calibration": calibration,
     }
 
     def save():
@@ -63,7 +67,7 @@ def main():
     save()
     try:
         events = json.loads((evidence / "events.json").read_text())
-        observed_cases = [item.get("case") for item in events if item.get("name") == "text-open"]
+        observed_cases = [item.get("case") for item in events if item.get("name") == case_event]
         manifest["observed_cases"] = observed_cases
         manifest["missing_case_events"] = [case for case in expected_cases if case not in observed_cases]
         save()
@@ -87,12 +91,12 @@ def main():
             if path.is_file():
                 manifest["provenance_files"][name] = sha256(path)
         for index, event in enumerate(events):
-            if event.get("name") != "text-open" or event.get("case") == "geometry-post-timing":
+            if event.get("name") != case_event or event.get("case") == "geometry-post-timing":
                 continue
             case = event["case"]
             if case not in expected_cases or observed_cases.count(case) != 1:
                 raise RuntimeError("Unexpected or duplicate original case: " + str(case))
-            click = next((item for item in reversed(events[:index])
+            click = event if calibration else next((item for item in reversed(events[:index])
                           if item.get("name") == "click" and item.get("label") == "Text"), None)
             if click is None or not 0 <= event["wall"] - click["wall"] < 2:
                 raise RuntimeError("Text case lacks a matching original click: " + case)
@@ -100,10 +104,10 @@ def main():
             # retains 35s to include the observed ~25s delay without a cut.
             # A candidate name does not establish a fast result; retain the
             # same 35s on-window until a reviewer can inspect actual behavior.
-            seconds = 10 if "keyboard-off" in case else 35
+            seconds = 10 if calibration or "keyboard-off" in case else 35
             start = click["wall"] - 0.75
             end = start + seconds
-            item = {"case": case, "trigger": click, "text_open": event,
+            item = {"case": case, "trigger": click, ("geometry_input" if calibration else "text_open"): event,
                     "requested_source_wall_interval": [start, end], "duration_seconds": seconds,
                     "status": "incomplete"}
             manifest["clips"].append(item)
@@ -131,6 +135,12 @@ def main():
                         frame_count=len(clip_pts), first_output_pts=clip_pts[0], last_output_pts=clip_pts[-1],
                         continuous_source_timing_verified=True)
             save()
+        if calibration and not observed_cases:
+            # Calibration may fail before any permitted WM request. Preserve
+            # verified full-source PTS/hash and report failure without a clip.
+            manifest["status"] = "no-input-failure-source-retained"
+            save()
+            return
         if manifest["missing_verified_clips"] or manifest["missing_case_events"]:
             raise RuntimeError("Incomplete original timed Text recordings: " + ", ".join(manifest["missing_verified_clips"]))
         manifest["status"] = "retained"

@@ -6,7 +6,7 @@ on:
         description: 'Run native source gates before any new VM experiment'
         type: choice
         default: vm
-        options: [vm, native, engine, engine-app, packaged-comparison, observer-policy]
+        options: [vm, native, engine, engine-app, packaged-comparison, observer-policy, geometry-calibration]
       environment:
         type: choice
         default: mint
@@ -54,7 +54,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   packaged-comparison:
-    if: inputs.stage == 'packaged-comparison' || inputs.stage == 'observer-policy'
+    if: inputs.stage == 'packaged-comparison' || inputs.stage == 'observer-policy' || inputs.stage == 'geometry-calibration'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
@@ -97,12 +97,13 @@ jobs:
             2>&1 | tee evidence/package/apt-install.log
       - name: Build A through the normal Debian source package rules
         run: bash support/diagnostics/2754-atspi-package/build-package.sh evidence/package/build
-      - name: Run control system then B system then A plus B package in Mint
+      - name: Run the selected Mint comparison or geometry-only calibration
         env:
           APP_RUN_ID: ${{ inputs.bundle_run_id }}
           PROBE_CAPTURE_INTERACTIONS: ${{ inputs.capture_interactions && '1' || '0' }}
           PROBE_CAPTURE_ROOT_NAME_EVIDENCE: ${{ (inputs.capture_root_name_evidence || inputs.stage == 'observer-policy') && '1' || '0' }}
           PROBE_OBSERVER_POLICY_DISCRIMINATOR: ${{ inputs.stage == 'observer-policy' && '1' || '0' }}
+          PROBE_NATIVE_GEOMETRY_CALIBRATION: ${{ inputs.stage == 'geometry-calibration' && '1' || '0' }}
         run: |
           bash support/diagnostics/2754-engine-build/run-packaged-comparison.sh \
             "$RUNNER_TEMP/issue2754-control-app" "$RUNNER_TEMP/issue2754-B-app" \

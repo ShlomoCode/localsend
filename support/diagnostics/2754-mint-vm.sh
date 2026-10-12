@@ -30,6 +30,12 @@ probe_capture_geometry=${PROBE_CAPTURE_GEOMETRY:-0}
 probe_capture_interactions=${PROBE_CAPTURE_INTERACTIONS:-0}
 probe_capture_root_name_evidence=${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0}
 probe_observer_policy_discriminator=${PROBE_OBSERVER_POLICY_DISCRIMINATOR:-0}
+probe_native_geometry_calibration=${PROBE_NATIVE_GEOMETRY_CALIBRATION:-0}
+case "$probe_native_geometry_calibration" in 0|1) ;; *) exit 2 ;; esac
+if [[ $probe_native_geometry_calibration == 1 ]]; then
+ [[ ${PROBE_ENVIRONMENT:-mint} == mint && ${PROBE_APP_SOURCE:-official-deb} == c1ce && $probe_engine_variant == B && $probe_bridge_variant == A && $probe_bridge_delivery == package ]]
+ [[ $probe_capture_geometry == 0 && $probe_capture_interactions == 0 && $probe_capture_root_name_evidence == 0 && $probe_observer_policy_discriminator == 0 ]]
+fi
 case "$probe_observer_policy_discriminator" in 0|1) ;; *) exit 2 ;; esac
 if [[ $probe_observer_policy_discriminator == 1 ]]; then
  [[ $probe_capture_root_name_evidence == 1 && $probe_capture_interactions == 0 ]] || exit 2
@@ -280,7 +286,7 @@ if [[ $probe_capture_root_name_evidence == 1 ]]; then
  [[ $symbol_transfer_status == 0 ]] || exit "$symbol_transfer_status"
 fi
 set +e
-timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
+timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence PROBE_NATIVE_GEOMETRY_CALIBRATION=$probe_native_geometry_calibration bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 cp /tmp/issue2754-bootstrap.log evidence/bootstrap.log
@@ -314,6 +320,11 @@ diff -u evidence/provision-packages-before.tsv evidence/provision-packages-after
 printf 'capture_interactions=%s\n' "$PROBE_CAPTURE_INTERACTIONS" > evidence/interaction-capture-setting.txt
 printf 'capture_geometry=%s\n' "$PROBE_CAPTURE_GEOMETRY" > evidence/geometry-capture-setting.txt
 printf 'capture_root_name_evidence=%s\n' "$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" > evidence/root-name-evidence-setting.txt
+printf 'native_geometry_calibration=%s\n' "$PROBE_NATIVE_GEOMETRY_CALIBRATION" > evidence/native-geometry-calibration-setting.txt
+if [[ $PROBE_NATIVE_GEOMETRY_CALIBRATION == 1 ]]; then
+ command -v xwininfo xprop wmctrl
+ dpkg-query -W x11-utils wmctrl > evidence/native-geometry-tool-packages.txt
+fi
 if [ "$PROBE_APP_SOURCE" = c1ce ]; then
  cd /home/mint/source-artifact
  sha256sum -c source-bundle.tar.gz.sha256 > /home/mint/evidence/source-bundle-verified.txt
@@ -542,7 +553,7 @@ status=$?
 if [ "$status" = 0 ]; then
 scenario_deadline=1500
 if [[ $probe_capture_interactions == 1 ]]; then scenario_deadline=3000; fi
-timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence PROBE_OBSERVER_POLICY_DISCRIMINATOR=$probe_observer_policy_discriminator bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence PROBE_OBSERVER_POLICY_DISCRIMINATOR=$probe_observer_policy_discriminator PROBE_NATIVE_GEOMETRY_CALIBRATION=$probe_native_geometry_calibration bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -562,7 +573,7 @@ set +e
 # A quick query or capture exit cannot establish valid geometry or correction success.
 # This bash reads its commands from SSH stdin. UI subprocesses must not consume
 # that command stream; in particular FFmpeg otherwise reads interactive keys.
-PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" PROBE_OBSERVER_POLICY_DISCRIMINATOR="$PROBE_OBSERVER_POLICY_DISCRIMINATOR" python3 support/diagnostics/2754-ui.py < /dev/null
+PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" PROBE_OBSERVER_POLICY_DISCRIMINATOR="$PROBE_OBSERVER_POLICY_DISCRIMINATOR" PROBE_NATIVE_GEOMETRY_CALIBRATION="$PROBE_NATIVE_GEOMETRY_CALIBRATION" python3 support/diagnostics/2754-ui.py < /dev/null
 status=$?
 if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ] || [ "$PROBE_ENGINE_VARIANT" != official ]; then
  grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1
@@ -580,7 +591,7 @@ printf 'recorder_exit_status=%s\n' "$recording_status" > evidence/recording-exit
 case "$recording_status" in 0|255) ;; *) status=1 ;; esac
 # Extract short continuous source intervals only after all timed UI work finishes.
 # Failures retain source/status and cannot turn a causal or geometry result into a pass.
-PROBE_CLOUD_RECORDING=1 PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_ENGINE_VARIANT="$PROBE_ENGINE_VARIANT" python3 support/diagnostics/2754-recording-clips.py > evidence/recording-clips.log 2>&1
+PROBE_CLOUD_RECORDING=1 PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_ENGINE_VARIANT="$PROBE_ENGINE_VARIANT" PROBE_NATIVE_GEOMETRY_CALIBRATION="$PROBE_NATIVE_GEOMETRY_CALIBRATION" python3 support/diagnostics/2754-recording-clips.py > evidence/recording-clips.log 2>&1
 clip_status=$?
 printf 'clip_exit_status=%s\n' "$clip_status" >> evidence/recording-exit-status.txt
 [ "$clip_status" = 0 ] || status=1

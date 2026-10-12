@@ -22,6 +22,8 @@ jq -e '.variant == "control"' "$control/provenance/manifest.json"
 jq -e '.variant == "B"' "$candidate/provenance/manifest.json"
 (cd "$package" && sha256sum -c SHA256SUMS)
 suite_status=0
+geometry_calibration=${PROBE_NATIVE_GEOMETRY_CALIBRATION:-0}
+case "$geometry_calibration" in 0|1) ;; *) exit 2 ;; esac
 root_name_evidence=${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0}
 case "$root_name_evidence" in 0|1) ;; *) exit 2 ;; esac
 policy_discriminator=${PROBE_OBSERVER_POLICY_DISCRIMINATOR:-0}
@@ -29,14 +31,20 @@ case "$policy_discriminator" in 0|1) ;; *) exit 2 ;; esac
 if [[ $policy_discriminator == 1 ]]; then
   [[ $root_name_evidence == 1 && ${PROBE_CAPTURE_INTERACTIONS:-0} == 0 ]] || exit 2
 fi
+if [[ $geometry_calibration == 1 ]]; then
+  [[ $root_name_evidence == 0 && $policy_discriminator == 0 && ${PROBE_CAPTURE_INTERACTIONS:-0} == 0 ]] || exit 2
+fi
 labels=(control-system B-system AB-package)
-if [[ $root_name_evidence == 1 ]]; then
+if [[ $root_name_evidence == 1 || $geometry_calibration == 1 ]]; then
   # Evidence-only follow-up to the retained AB public-call timeout. This is one
   # fresh session, not a replacement for the unobserved comparison matrix.
   labels=(AB-package)
 fi
 printf 'capture_root_name_evidence=%s\nselected_cohorts=%s\n' "$root_name_evidence" "${labels[*]}" > evidence/comparison/capture-scope.txt
 printf 'observer_policy_discriminator=%s\n' "$policy_discriminator" >> evidence/comparison/capture-scope.txt
+printf 'native_geometry_calibration=%s\ncontrols_and_policy_admitted=false_when_calibrating\n' "$geometry_calibration" >> evidence/comparison/capture-scope.txt
+capture_geometry=1
+if [[ $geometry_calibration == 1 ]]; then capture_geometry=0; fi
 for label in "${labels[@]}"; do
   # Each variant receives a fresh Mint 22.2 live login with the same ISO and
   # UI actions. Keyboard off/on/off and File/Folder/Paste share its app PID.
@@ -52,17 +60,21 @@ for label in "${labels[@]}"; do
   jq -n --arg label "$label" --arg app_run "$app_run" --arg variant "$variant" \
     --arg bridge "$bridge" --arg delivery "$delivery" \
     --arg root_name_evidence "$root_name_evidence" \
+    --arg geometry_calibration "$geometry_calibration" \
     '{case:$label,app_run_id:$app_run,engine_variant:$variant,bridge_variant:$bridge,bridge_delivery:$delivery,
-      session:"fresh Mint 22.2 Cinnamon login per variant; real controls share each app process",
+      session:(if $geometry_calibration == "1" then "fresh Mint 22.2 AB session; native geometry only; controls and policy not admitted"
+        else "fresh Mint 22.2 Cinnamon login per variant; real controls share each app process" end),
+      native_geometry_calibration:($geometry_calibration == "1"),
       root_name_evidence:($root_name_evidence == "1"),
       root_name_observer_scope:(if $root_name_evidence == "1" then "post-timing; no latency claims during observation" else "not requested" end)}' \
     > evidence/cloud/comparison-selection.json
   if PROBE_ENVIRONMENT=mint PROBE_APP_SOURCE=c1ce PROBE_BUNDLE_TAR="$bundle/source-bundle.tar.gz" \
      PROBE_ENGINE_VARIANT="$variant" PROBE_BUNDLE_RUN_ID="$app_run" PROBE_BRIDGE_VARIANT="$bridge" \
-     PROBE_BRIDGE_DELIVERY="$delivery" PROBE_BRIDGE_PACKAGE_DIR="$package" PROBE_CAPTURE_GEOMETRY=1 \
+     PROBE_BRIDGE_DELIVERY="$delivery" PROBE_BRIDGE_PACKAGE_DIR="$package" PROBE_CAPTURE_GEOMETRY="$capture_geometry" \
      PROBE_CAPTURE_INTERACTIONS="${PROBE_CAPTURE_INTERACTIONS:-0}" \
      PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$root_name_evidence" \
      PROBE_OBSERVER_POLICY_DISCRIMINATOR="$policy_discriminator" \
+     PROBE_NATIVE_GEOMETRY_CALIBRATION="$geometry_calibration" \
      bash support/diagnostics/2754-mint-vm.sh; then
     status=0
   else
