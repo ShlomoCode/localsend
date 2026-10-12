@@ -16,9 +16,9 @@ on:
         type: string
         required: true
       comparison:
-        description: Run only after the MKV gallery off control passes
+        description: Additional cases after MKV OFF, or bounded fresh-process TCP_NODELAY comparison
         type: choice
-        options: [none, mp4-off, gallery-on]
+        options: [none, mp4-off, gallery-on, nodelay-first-mkv-off]
         default: none
       fixture_run_id:
         description: Optional previous fork run ID to reuse the exact fixture bytes
@@ -95,5 +95,7 @@ jobs:
             evidence/
             !evidence/release/**
             !evidence/*.zip
+            !evidence/nodelay-*/evidence/release/**
+            !evidence/nodelay-*/evidence/*.zip
           if-no-files-found: error
           retention-days: 30

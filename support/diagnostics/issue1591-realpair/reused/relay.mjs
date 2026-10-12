@@ -3,7 +3,7 @@ import net from 'node:net';
 import {randomBytes} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
 
-export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toString('hex')}={}) {
+export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toString('hex'),senderNoDelay=false}={}) {
   const peers=new Map(); const events=[]; let waiter=null; let queued=0; let peak=0; let next=0;let nextSeq=0;let pendingBatch=null;
   const faults=[],peerBytes={};
   const metrics={opened:0,fromSender:0,fromDevice:0,paused:0};
@@ -29,9 +29,10 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
   function wake() {if(waiter && events.length&&!pendingBatch) {const w=waiter;waiter=null;clearTimeout(w.timer);w.res.end(JSON.stringify(batch()));}}
   function enqueue(e) {events.push({...e,seq:++nextSeq});queued+=e.bytes||0;peak=Math.max(peak,queued);if(queued>512*1024){for(const p of peers.values())p.pause();metrics.paused++;}wake();}
   const tcp=net.createServer({allowHalfOpen:true},p=>{
+    if(senderNoDelay)p.setNoDelay(true);
     const id=String(++next); peers.set(id,p);metrics.opened++;
     peerBytes[id]={fromSender:0,toSender:0,acknowledgedToDevice:0};
-    record('sender-open',id);
+    record('sender-open',id,{senderNoDelay,policy:senderNoDelay?'setNoDelay(true)':'Node accepted socket default'});
     enqueue({id,kind:'open'});
     p.on('data',data=>{metrics.fromSender+=data.length;peerBytes[id].fromSender+=data.length;record('sender-data',id,{bytes:data.length,total:peerBytes[id].fromSender});enqueue({id,kind:'data',bytes:data.length,data:data.toString('base64')});});
     p.on('end',()=>{record('sender-eof',id,{utc:new Date().toISOString(),socketState:socketState(p)});enqueue({id,kind:'eof'});});

@@ -1,13 +1,29 @@
 import {spawn, execFile} from 'node:child_process';
-import {promisify} from 'node:util';
+import {promisify, isDeepStrictEqual} from 'node:util';
 import {readFileSync, writeFileSync, appendFileSync, mkdirSync, copyFileSync, existsSync} from 'node:fs';
 import {randomBytes, createHash} from 'node:crypto';
-import {resolve} from 'node:path';
+import {resolve, dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {relay} from './reused/relay.mjs';
 
-const exec = promisify(execFile), root = 'support/diagnostics/issue1591-realpair';
+const exec = promisify(execFile), root = dirname(fileURLToPath(import.meta.url));
 mkdirSync('evidence', {recursive:true});
+const comparisonRoot = process.cwd(), nodelayComparison = process.env.COMPARISON === 'nodelay-first-mkv-off';
+let arm = 'default', senderNoDelay = false, firstHelper, senderReport, senderSettings;
+const armReceipts = [];
+function enterArm(name) {
+  arm = name;
+  const directory = resolve(comparisonRoot, 'evidence/nodelay-' + name);
+  mkdirSync(directory + '/evidence', {recursive:true});
+  const source = resolve(comparisonRoot, 'evidence');
+  const fixtures = JSON.parse(readFileSync(source + '/fixture-index.json', 'utf8').replace(/^\uFEFF/, ''));
+  for (const file of ['fixture-index.json', ...Object.values(fixtures).flatMap(file => [file, file + '.identity.json'])]) copyFileSync(source + '/' + file, directory + '/evidence/' + file);
+  process.chdir(directory);
+  const hashes = Object.fromEntries(Object.values(fixtures).map(file => [file, createHash('sha256').update(readFileSync('evidence/' + file)).digest('hex')]));
+  writeFileSync('evidence/arm-fixture-hashes.json', JSON.stringify(hashes,null,2));
+}
+if (nodelayComparison) enterArm('default');
 const token = randomBytes(24).toString('hex');
 console.log('::add-mask::' + token);
 const auth = 'Basic ' + Buffer.from(process.env.BROWSERSTACK_USERNAME + ':' + process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
@@ -384,6 +400,12 @@ async function receiverNetworkSettings(label) {
 }
 async function configureProxy(label) {
   stage = label + '-proxy-start';
+  if (nodelayComparison) {
+    await wd('POST', prefix() + '/appium/device/terminate_app', {bundleId:proxyId});
+    const stopped = await wd('POST', prefix() + '/execute/sync', {script:'mobile: queryAppState', args:[{bundleId:proxyId}]});
+    save('helper-before-start.json', {arm, state:stopped, policy:'Fresh helper process only; receiver process/server retained'});
+    if (stopped !== 1) throw new Error('Fresh helper admission requires observed not-running state 1');
+  }
   await activate(proxyId);
   // Supply secrets through element values rather than retained session capabilities.
   for (const [name, value] of [['relayURL','http://bs-local.com:8080'], ['relayToken',token]]) {
@@ -408,6 +430,11 @@ async function configureProxy(label) {
   const window = {case:label, proxyStartedUtc:new Date(started).toISOString(), switchUtc:new Date().toISOString(),
     expiryAuthority:'Authenticated live health plus Swift lifecycle/expiry device logs', consentedLocalNetwork,
     generation:r.health().lastHealth.payload.generation, pid:r.health().lastHealth.payload.pid, checkpoints:[], statusBeforeSwitch:r.status()};
+  if (nodelayComparison) {
+    if (firstHelper && (window.pid === firstHelper.pid || window.generation === firstHelper.generation)) throw new Error('Second arm did not establish a distinct helper PID and generation');
+    firstHelper ||= {pid:window.pid,generation:window.generation};
+    save('helper-identity.json', {arm,pid:window.pid,generation:window.generation,firstHelper});
+  }
   backgroundWindows.push(window);
   await activate(appId);
   await checkpoint(window, 'after-app-switch', {awaitBackground:true}); monitorHealth(window);
@@ -496,10 +523,31 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   save(label + '-proxy-after-stop.xml', await wd('GET', prefix() + '/source'));
   // The helper's normal stop cancels its NWConnections without assuming that a
   // final HTTP push can run. Close owned sender keep-alive sockets server-side.
-  await r.stop(); save(label + '-relay-trace.json', r.trace);
+  if (!nodelayComparison) await r.stop();
+  save(label + '-relay-trace.json', r.trace);
   captureWindowsStreams(label + '-completed');
-  r = relay({token}); await r.start();
+  if (!nodelayComparison) {r = relay({token}); await r.start();}
   await activate(appId);
+}
+async function retainFailure(error) {
+  const failedWindow = nodelayComparison && backgroundWindows.findLast(window => window.case === arm+'-mkv-gallery-off-control');
+  const unadmittedFirstRequest = failedWindow && !failedWindow.acceptInvokedUtc &&
+    (stage.endsWith('-windows-send') || stage.endsWith('-receiver-approval'));
+  const captureSenderError = unadmittedFirstRequest || (stage.endsWith('-windows-send') && r?.status().faults.length);
+  failure ||= redact(error); save('failure.json', {stage, error:redact(error), overallFailure:failure, classification:'Classify using actual UI, device lifecycle and transport logs. Infrastructure errors are not a reproduction.'});
+  if (r && (r.status().faults.length || unadmittedFirstRequest)) {
+    save('failed-interval-transport.json', {utc:new Date().toISOString(),stage,failure,transport:r.status(),trace:r.trace,backgroundWindows});
+    monitoredWindow = null;
+  }
+  if (session) await capture('failure').catch(error => save('failure-capture-error.txt', error));
+  if (captureSenderError) {
+    await captureTransportErrorSnapshot(stage).catch(error => save('sender-transport-fault-dialog-capture-error.txt', error));
+  }
+  if (!captureSenderError && (stage.includes('receiver') || stage.includes('saved-file'))) {
+    await powershell('windows3393-ui.ps1', ['-Action','snapshot','-Label','sender-failure']).catch(error => save('sender-failure-capture-error.txt', error));
+    save('sender-error-detail-unavailable.json', {stage,attempted:false,status:'evidence-unavailable',
+      reason:'Original sender snapshot retained; no semantically qualified Error information control is exposed by this backend, so no coordinate input is sent'});
+  }
 }
 async function collectMetadata() {
   try {
@@ -546,7 +594,15 @@ try {
   for (const name of ['PROXY_APP','RECEIVER_APP']) if (!/^bs:\/\/[a-f0-9]{40}$/i.test(process.env[name])) throw new Error('Expected immutable BrowserStack app hash for ' + name);
   save('identity.json', {receiver:process.env.RECEIVER_APP, receiverIdentity:process.env.RECEIVER_IDENTITY, proxy:process.env.PROXY_APP,
     proxyId, appId, run:process.env.GITHUB_RUN_ID, revision:process.env.GITHUB_SHA, device:'iPad 9th', os:'18', sender:'unchanged Windows 1.17.0 x64 release', comparison:process.env.COMPARISON});
+  if (nodelayComparison) writeFileSync(resolve(comparisonRoot,'evidence/nodelay-source-identity.json'),redact(JSON.stringify({
+    revision:process.env.GITHUB_SHA,node:process.version,armOrder:['default','nodelay'],receiver:process.env.RECEIVER_APP,
+    receiverIdentity:process.env.RECEIVER_IDENTITY,helper:process.env.PROXY_APP,
+    sourceHashes:Object.fromEntries(['run.mjs','reused/relay.mjs','.github/workflows/issue1591-realpair.yml'].map(file => {
+      const path = file.startsWith('.github/') ? resolve(comparisonRoot,file) : resolve(root,file);
+      return [file,createHash('sha256').update(readFileSync(path)).digest('hex')];
+    }))},null,2)));
   stage = 'windows-startup';
+
   await powershell('windows2311-desktop.ps1');
   await powershell('windows_release_ui_probe.ps1', ['-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-2022','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName','startup-control.txt','-DiagnosticPeerPort','53318','-InitializeOnly']);
   captureWindowsStreams('launch');
@@ -559,7 +615,7 @@ try {
   const localDeadline = Date.now() + 120000;
   while (!/You can now access your local|Local Testing successfully connected/i.test(output) && Date.now() < localDeadline && !localError && local.exitCode === null) await pause(200);
   if (localError || local.exitCode !== null || !/You can now access your local|Local Testing successfully connected/i.test(output)) throw new Error('Owned BrowserStack Local did not become ready');
-  r = relay({token}); await r.start();
+  r = relay({token,senderNoDelay}); await r.start();
   stage = 'capacity-admission';
   const response = await fetch('https://api-cloud.browserstack.com/app-automate/plan.json', {headers:{authorization:auth}, signal:AbortSignal.timeout(30000)});
   if (!response.ok) throw new Error('Fresh global capacity check HTTP ' + response.status);
@@ -584,27 +640,111 @@ try {
   const source = await wd('GET', prefix() + '/source');
   if (/local network/i.test(source) && (await elements('accessibility id','Allow')).length === 1) await click('Allow');
   await click('Receive');
-  await transfer({label:'mkv-gallery-off-control',extension:'mkv',desired:false,verifyDocuments:true});
+  if (nodelayComparison) {
+    for (const name of ['default','nodelay']) {
+      let armFailure;
+      try {
+        if (name === 'nodelay') {
+          enterArm(name); senderNoDelay = true; previousFinished = false;
+          await powershell('windows_release_ui_probe.ps1', ['-OutputDirectory','evidence','-ExecutablePath',senderReport.executable.path,
+            '-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-2022','-InitializeOnly']);
+          await prepareWindowsUI();
+          r = relay({token,senderNoDelay}); await r.start();
+        }
+        senderReport = JSON.parse(readFileSync('evidence/release-ui-report.json','utf8').replace(/^\uFEFF/,''));
+        const ownedSender = JSON.parse(readFileSync('evidence/windows-ui-prewarmed-action.json','utf8').replace(/^\uFEFF/,''));
+        if (armReceipts.length && ownedSender.appPid === armReceipts[0].senderPid) throw new Error('Second arm sender PID is not fresh');
+        const settings = readFileSync(resolve(dirname(senderReport.executable.path),'settings.json'));
+        const config = JSON.parse(settings.toString('utf8').replace(/^\uFEFF/,''));
+        const settingsHash = createHash('sha256').update(settings).digest('hex');
+        copyFileSync(resolve(dirname(senderReport.executable.path),'settings.json'),'evidence/sender-settings-before.json');
+        save('arm-identity.json',{arm,senderNoDelay,node:process.version,nodeVersions:process.versions,
+          sourceHashes:Object.fromEntries(['run.mjs','reused/relay.mjs','reused/windows_release_ui_probe.ps1'].map(file => [file,createHash('sha256').update(readFileSync(resolve(root,file))).digest('hex')])),
+          sender:senderReport,settingsSha256:settingsHash,settingsText:settings.toString('utf8'),discoveryTimeoutMs:500,
+          timeoutAuthority:'No persisted timeout override; Windows v1.17 tag 7f21d1f9082a43803e05c37f021912e012145aa5 common/lib/constants.dart defaults to 500 ms. Not a runtime measured internal deadline.',
+          armOrder:['default','nodelay'],poolContext:'Fresh Windows sender process, relay and helper for each first MKV Gallery OFF request; unlike earlier same-process multi-case history',
+          receiverPolicy:'Same owned session and receiver/server; no restart or settings reset between arms',
+          selectedFilename:`issue1591-${process.env.GITHUB_RUN_ID}-${arm}-mkv-gallery-off-control.mkv`,
+          filenamePolicy:'Arm-specific basename prevents destination collision on retained receiver; source fixture bytes are identical'});
+        if (Object.keys(config).some(key => /timeout/i.test(key))) throw new Error('Sender timeout override is outside the preserved 500 ms default comparator');
+        if (senderSettings && !isDeepStrictEqual(senderSettings,config)) throw new Error('Sender full persisted configuration changed between arms');
+        senderSettings ||= config;
+        await transfer({label:arm+'-mkv-gallery-off-control',extension:'mkv',desired:false,verifyDocuments:true});
+      } catch (error) {
+        armFailure = redact(error); await retainFailure(error);
+      } finally {
+        monitoredWindow = null;
+        const receipt = {arm, failure:armFailure,cleanup:[]};
+        const clean = async (operation, action) => {
+          try {await action();receipt.cleanup.push({operation,ok:true});}
+          catch (error) {receipt.cleanup.push({operation,ok:false,error:redact(error)});failure ||= 'Arm cleanup failed: ' + operation;}
+        };
+        await clean('helper owned stop and terminate', async () => {
+          await activate(proxyId);
+          const stops = await elements('accessibility id','stopProxy');
+          if (stops.length === 1) await click('stopProxy');
+          await wd('POST',prefix()+'/appium/device/terminate_app',{bundleId:proxyId});
+          const state = await wd('POST',prefix()+'/execute/sync',{script:'mobile: queryAppState',args:[{bundleId:proxyId}]});
+          receipt.helperStoppedState=state;
+          if (state !== 1) throw new Error('Helper not observed stopped');
+        });
+        if (r) {
+          save('arm-relay-trace.json',r.trace);save('arm-helper-health.json',r.healthSamples);
+          await clean('relay stop',async()=>{
+            let timer;
+            try {await Promise.race([r.stop(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Relay stop exceeded 10 seconds')),10000);})]);}
+            finally {clearTimeout(timer);}
+          });
+          save('arm-relay-trace.json',r.trace);
+          r=null;
+        }
+        await clean('Windows final stream capture',async()=>captureWindowsStreams('arm-final'));
+        if (windowsUI) await clean('owned Windows UI stop',async()=>{if(windowsUI.exitCode===null)await exec('taskkill',['/PID',String(windowsUI.pid),'/T','/F'],{timeout:30000});});
+        windowsUI=null;windowsReady=false;
+        await clean('owned sender stop',async()=>{
+          const owned = JSON.parse(readFileSync('evidence/windows-ui-prewarmed-action.json','utf8').replace(/^\uFEFF/,''));
+          if (!Number.isInteger(owned.appPid) || owned.appPid <= 0) throw new Error('Owned sender PID unavailable');
+          receipt.senderPid=owned.appPid;receipt.senderWindow=owned.window;
+          const report = JSON.parse(readFileSync('evidence/release-ui-report.json','utf8').replace(/^\uFEFF/,''));
+          const executablePath = report.executable?.path;
+          if (!executablePath || !report.processes.some(process => process.pid === owned.appPid &&
+              process.executablePath?.toLowerCase() === executablePath.toLowerCase())) throw new Error('Sender native PID is not linked to the exact release executable report');
+          if (!Number.isInteger(owned.window) || owned.window <= 0) throw new Error('Sender native window unavailable');
+          const expected = Buffer.from(JSON.stringify({pid:owned.appPid,window:owned.window,path:executablePath})).toString('base64');
+          const stopped = await exec('pwsh',['-NoProfile','-Command',`
+$ErrorActionPreference='Stop'
+$expected=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${expected}'))|ConvertFrom-Json
+$live=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$expected.pid)
+if(-not $live -or $live.ExecutablePath -ine $expected.path){throw 'Live sender PID/executable identity changed; no termination'}
+$window=(Get-Process -Id $expected.pid -ErrorAction Stop).MainWindowHandle.ToInt64()
+if($window -ne $expected.window){throw 'Live sender main HWND ownership changed; no termination'}
+$receipt=@{pid=$expected.pid;window=$window;executablePath=$live.ExecutablePath;creationDate=$live.CreationDate;qualifiedUtc=[DateTime]::UtcNow.ToString('o')}
+& taskkill /PID $expected.pid /T /F | Out-Null
+if($LASTEXITCODE -ne 0){throw 'Qualified sender taskkill failed'}
+if(Get-CimInstance Win32_Process -Filter ('ProcessId = '+$expected.pid)){throw 'Sender PID still present after taskkill'}
+$receipt.stopped=$true;$receipt|ConvertTo-Json -Compress
+`],{timeout:30000});
+          receipt.senderStopQualification=JSON.parse(stopped.stdout.trim());
+          save('sender-owned-stop.json',receipt.senderStopQualification);
+        });
+        receipt.cleanupSucceeded = receipt.cleanup.every(entry=>entry.ok);
+        armReceipts.push(receipt);save('arm-receipt.json',receipt);
+        writeFileSync(resolve(comparisonRoot,'evidence/nodelay-comparison.json'),redact(JSON.stringify({armOrder:['default','nodelay'],armReceipts,failure},null,2)));
+        if (!receipt.cleanupSucceeded) throw new Error('Bounded owned cleanup failed; second arm is not admitted');
+        await activate(appId);
+      }
+    }
+  } else {
+    await transfer({label:'mkv-gallery-off-control',extension:'mkv',desired:false,verifyDocuments:true});
+  }
   if (process.env.COMPARISON === 'mp4-off') await transfer({label:'mp4-gallery-off',extension:'mp4',desired:false,verifyDocuments:true});
   if (process.env.COMPARISON === 'gallery-on') {
     await transfer({label:'mp4-gallery-on-control',extension:'mp4',desired:true,verifyDocuments:false});
     await transfer({label:'mkv-gallery-on',extension:'mkv',desired:true,verifyDocuments:true});
   }
 } catch (error) {
-  failure = redact(error); save('failure.json', {stage, error:failure, classification:'Classify using actual UI, device lifecycle and transport logs. Infrastructure errors are not a reproduction.'});
-  if (r?.status().faults.length) {
-    save('failed-interval-transport.json', {utc:new Date().toISOString(),stage,failure,transport:r.status(),trace:r.trace,backgroundWindows});
-    monitoredWindow = null;
-  }
-  if (session) await capture('failure').catch(error => save('failure-capture-error.txt', error));
-  if (stage.endsWith('-windows-send') && r?.status().faults.length) {
-    await captureTransportErrorSnapshot(stage).catch(error => save('sender-transport-fault-dialog-capture-error.txt', error));
-  }
-  if (stage.includes('receiver') || stage.includes('saved-file')) {
-    await powershell('windows3393-ui.ps1', ['-Action','snapshot','-Label','sender-failure']).catch(error => save('sender-failure-capture-error.txt', error));
-    save('sender-error-detail-unavailable.json', {stage,attempted:false,status:'evidence-unavailable',
-      reason:'Original sender snapshot retained; no semantically qualified Error information control is exposed by this backend, so no coordinate input is sent'});
-  }
+  if (nodelayComparison && existsSync('evidence/failure.json')) {failure ||= redact(error);save('comparison-abort.json',{stage,error:redact(error),failure});}
+  else await retainFailure(error);
 } finally {
   monitoredWindow = null; if (healthMonitor) clearInterval(healthMonitor);
   try {captureWindowsStreams('final');} catch (error) {save('windows-app-final-stream-capture-error.txt', error);}
