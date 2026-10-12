@@ -16,19 +16,20 @@ jobs:
   baseline:
     if: github.repository == 'ShlomoCode/localsend' && github.ref == 'refs/heads/codex/diagnostic-2955' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 15
     env:
       EVIDENCE: ${{ github.workspace }}/evidence-2955
       DISPLAY: ':99'
       GTK_MODULES: gail:atk-bridge
       ACCESSIBILITY_ENABLED: '1'
       NO_AT_BRIDGE: '0'
+      OBSERVE_2955: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Install native diagnostic tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool at-spi2-core python3-pyatspi libgtk-3-0 libayatana-appindicator3-1 libegl1 libegl-mesa0 libgl1 libglx-mesa0 libgl1-mesa-dri libgles2 ffmpeg scrot
+          sudo apt-get install -y xvfb openbox xdotool x11-utils at-spi2-core python3-pyatspi libgtk-3-0 libayatana-appindicator3-1 libegl1 libegl-mesa0 libgl1 libglx-mesa0 libgl1-mesa-dri libgles2 ffmpeg scrot
           sudo chmod a+rw /dev/kvm
           mkdir -p "$EVIDENCE"
           uname -a > "$EVIDENCE/runner-os.txt"
@@ -41,12 +42,12 @@ jobs:
           echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n receiver2955 -k 'system-images;android-36;google_apis;x86_64'
-      - name: Run finite real-app cases
-        timeout-minutes: 35
+      - name: Observe sender native window and accessibility without app input
+        timeout-minutes: 8
         run: |
           Xvfb :99 -screen 0 1600x1000x24 > "$EVIDENCE/xvfb.log" 2>&1 &
           "$ANDROID_HOME/emulator/emulator" -avd receiver2955 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$EVIDENCE/emulator.log" 2>&1 &
-          timeout 1900s dbus-run-session -- /usr/bin/python3 support/diagnostics/2955/run.py
+          timeout 420s dbus-run-session -- /usr/bin/python3 support/diagnostics/2955/run.py
       - name: Retain raw evidence even on infrastructure failure
         if: always()
         uses: actions/upload-artifact@v4

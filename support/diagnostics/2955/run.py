@@ -211,6 +211,41 @@ def desktop_snapshot():
     return rows
 
 
+def observe_sender_environment():
+    """Retain unfiltered native evidence without sending any app input."""
+    samples = []
+    for attempt, delay in enumerate((0, 15, 45)):
+        if delay:
+            time.sleep(delay)
+        prefix = f'sender-observation-{attempt}'
+        sample = {'time': time.time(), 'sender_pid': sender_process.pid, 'sender_exit': sender_process.poll()}
+        samples.append(sample)
+        write('sender-environment-observation.json', samples)
+        # Capture pixels first: bridge errors must not erase rendered evidence.
+        cmd('scrot', str(OUT / (prefix + '.png')), timeout=10)
+        for label, args in {
+            'windows': ['xwininfo', '-root', '-tree'],
+            'foreground': ['xdotool', 'getactivewindow', 'getwindowname'],
+            'a11y-status': ['gdbus', 'call', '--session', '--dest', 'org.a11y.Bus', '--object-path', '/org/a11y/status', '--method', 'org.freedesktop.DBus.Properties.GetAll', 'org.a11y.Status'],
+            'toolkit-accessibility': ['gsettings', 'get', 'org.gnome.desktop.interface', 'toolkit-accessibility'],
+        }.items():
+            try:
+                result = subprocess.run(args, capture_output=True, timeout=10)
+                sample[label] = {'returncode': result.returncode, 'stdout': native_output(result.stdout), 'stderr': native_output(result.stderr)}
+            except subprocess.TimeoutExpired as error:
+                sample[label] = {'error': 'TimeoutExpired', 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr)}
+            write('sender-environment-observation.json', samples)
+        # A fresh native observer process has its own bus connection and a
+        # separate deadline, so blocked bridge calls cannot prevent later pixels
+        # or the main controller's normal cleanup.
+        try:
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('observe_tree.py')), str(OUT / (prefix + '-tree.json'))], capture_output=True, timeout=20)
+            sample['tree_observer'] = {'returncode': result.returncode, 'stdout': native_output(result.stdout), 'stderr': native_output(result.stderr)}
+        except subprocess.TimeoutExpired as error:
+            sample['tree_observer'] = {'error': 'TimeoutExpired', 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr)}
+        write('sender-environment-observation.json', samples)
+
+
 def desktop_find(label, seconds=30, role=None):
     attempts = 0
     def find():
@@ -534,51 +569,56 @@ try:
     write('sender-executable.json', {'path': str(executables[0]), **digest(executables[0])})
     cmd('gsettings', 'set', 'org.gnome.desktop.interface', 'toolkit-accessibility', 'true')
     sender_process = spawn([str(executables[0])], 'sender-app.txt')
-    desktop_find('Settings', seconds=60)
-    stage = 'stop-sender-server-ui'
-    desktop_tap('Settings')
-    # Accessible server controls may be below the viewport. Never guess a scroll.
-    desktop_tap('Stop')
-    desktop_find('Start')
-    desktop_snapshot()
-    listeners = cmd('ss', '-ltnp')
-    (OUT / 'before-forward-listeners.txt').write_text(listeners)
-    if re.search(r':53317\s', listeners):
-        raise RuntimeError('Sender UI Stop did not free host port 53317')
-    adb('forward', 'tcp:53317', 'tcp:53317')
-    write('network.json', {'forward': cmd('adb', 'forward', '--list'), 'host_routes': cmd('ip', 'route'), 'receiver_routes': adb('shell', 'ip', 'route'), 'host_listeners': cmd('ss', '-ltnp'), 'sender_identity_deviation': {'alias': '-', 'port': -1, 'https': True}})
-    stage = 'receiver-default-settings'
-    until(lambda: receiver_ready('Settings'), 40)
-    android_tap('Settings')
-    # Confirm default Downloads through visible UI; no private settings writes.
-    android_find('(Downloads)', scroll=True)
-    quick = android_setting('Quick Save', checkable=True)
-    if quick.get('checked') != 'false':
-        raise RuntimeError('Cannot prove default Quick Save off from current semantics')
-    android_tap('Receive')
-    stage = 'select-english-baseline-ui'
-    locale('English', 'Settings', 'Language')
-    android_tap('Receive')
-    case('01-english-approval', False, False, apk)
-    stage = 'enable-quick-save-ui'
-    android_tap('Settings')
-    android_setting_tap('Quick Save', checkable=True)
-    android_tap('Close')
-    android_tap('Settings')
-    if android_setting('Quick Save', checkable=True).get('checked') != 'true':
-        raise RuntimeError('Quick Save did not become enabled through UI')
-    android_tap('Receive')
-    case('02-english-quick', True, False, apk)
-    stage = 'select-arabic-ui'
-    locale('العربية', 'Settings', 'Language')
-    android_tap('استلام')
-    case('03-arabic-quick', True, True, apk)
-    case('04-arabic-quick-repeat', True, True, apk)
-    stage = 'return-english-ui'
-    locale('English', 'الإعدادات', 'لغة')
-    android_tap('Receive')
-    case('05-english-return', True, False, apk)
-    write('result.json', {'delivery': 'all five verified', 'alignment': 'requires root review of original rendered media', 'stage': stage})
+    if os.environ.get('OBSERVE_2955') == '1':
+        stage = 'observe-linux-sender-environment'
+        observe_sender_environment()
+        write('result.json', {'stage': stage, 'delivery': 'not attempted', 'observation': 'requires original rendered/native evidence review'})
+    else:
+        desktop_find('Settings', seconds=60)
+        stage = 'stop-sender-server-ui'
+        desktop_tap('Settings')
+        # Accessible server controls may be below the viewport. Never guess a scroll.
+        desktop_tap('Stop')
+        desktop_find('Start')
+        desktop_snapshot()
+        listeners = cmd('ss', '-ltnp')
+        (OUT / 'before-forward-listeners.txt').write_text(listeners)
+        if re.search(r':53317\s', listeners):
+            raise RuntimeError('Sender UI Stop did not free host port 53317')
+        adb('forward', 'tcp:53317', 'tcp:53317')
+        write('network.json', {'forward': cmd('adb', 'forward', '--list'), 'host_routes': cmd('ip', 'route'), 'receiver_routes': adb('shell', 'ip', 'route'), 'host_listeners': cmd('ss', '-ltnp'), 'sender_identity_deviation': {'alias': '-', 'port': -1, 'https': True}})
+        stage = 'receiver-default-settings'
+        until(lambda: receiver_ready('Settings'), 40)
+        android_tap('Settings')
+        # Confirm default Downloads through visible UI; no private settings writes.
+        android_find('(Downloads)', scroll=True)
+        quick = android_setting('Quick Save', checkable=True)
+        if quick.get('checked') != 'false':
+            raise RuntimeError('Cannot prove default Quick Save off from current semantics')
+        android_tap('Receive')
+        stage = 'select-english-baseline-ui'
+        locale('English', 'Settings', 'Language')
+        android_tap('Receive')
+        case('01-english-approval', False, False, apk)
+        stage = 'enable-quick-save-ui'
+        android_tap('Settings')
+        android_setting_tap('Quick Save', checkable=True)
+        android_tap('Close')
+        android_tap('Settings')
+        if android_setting('Quick Save', checkable=True).get('checked') != 'true':
+            raise RuntimeError('Quick Save did not become enabled through UI')
+        android_tap('Receive')
+        case('02-english-quick', True, False, apk)
+        stage = 'select-arabic-ui'
+        locale('العربية', 'Settings', 'Language')
+        android_tap('استلام')
+        case('03-arabic-quick', True, True, apk)
+        case('04-arabic-quick-repeat', True, True, apk)
+        stage = 'return-english-ui'
+        locale('English', 'الإعدادات', 'لغة')
+        android_tap('Receive')
+        case('05-english-return', True, False, apk)
+        write('result.json', {'delivery': 'all five verified', 'alignment': 'requires root review of original rendered media', 'stage': stage})
 except BaseException as error:
     failure = {'stage': stage, 'error_type': type(error).__name__, 'message': str(error), 'time': time.time()}
     if isinstance(error, subprocess.CalledProcessError):
