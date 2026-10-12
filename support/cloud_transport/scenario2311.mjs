@@ -12,6 +12,9 @@ export default async function({session,wd,senderPort,transportStatus}){
  const precisionSourceControl=process.env.VALIDATION_SUITE==='precision-source-control';
  if(precisionSourceControl&&(process.env.SOURCE_APP_FAMILY!=='current'||process.env.SOURCE_APK_KIND!=='tagged'))throw new Error('Precision source control requires the current tagged observer APK');
  if(remainingMedia&&(process.env.SOURCE_APP_FAMILY!=='candidate'||process.env.SOURCE_APK_KIND!=='candidate'))throw new Error('Remaining-media validation requires the immutable candidate APK');
+ const deliveryObservation=process.env.ISSUE2311_API29_DELIVERY_OBSERVATION==='true';
+ if(deliveryObservation&&(!remainingMedia||process.env.BS_DEVICE!=='Samsung Galaxy S20'||process.env.BS_OS!=='10.0'||process.env.DIAGNOSTIC_RUNNER_LABEL!=='windows-2022'
+  ||process.env.SOURCE_RUN_ID!=='38184232921'||process.env.MEDIA_FIXTURE_RUN_ID!=='38183553686'))throw new Error('API29 delivery observation requires the exact candidate remaining-media comparison');
  const fixtureDirectory=process.env.MEDIA_FIXTURE_DIRECTORY;
  const fixtureManifest=extended?JSON.parse(readFileSync(join(fixtureDirectory||'__missing_media_fixture_artifact__','manifest.json'))):null;
  const cases=precisionSourceControl
@@ -33,6 +36,16 @@ export default async function({session,wd,senderPort,transportStatus}){
  const target=label=>({using:'accessibility id',value:label});
  async function click(label){const e=await waitForNativeControl({wd,prefix,label:'2311-'+label,...target(label)});await wd('POST',prefix+'/element/'+e['element-6066-11e4-a52e-4f735466cecf']+'/click',{});}
  async function capture(label){writeFileSync(`evidence/${label}.xml`,await wd('GET',prefix+'/source'));writeFileSync(`evidence/${label}.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));}
+ async function deliveryBoundary(label,receiver=false){
+  const observations=[];
+  if(receiver)try{await capture(label+'-receiver');observations.push({surface:'receiver',captured:true});}catch(error){observations.push({surface:'receiver',errorClass:error?.name||'Error',errorCode:error?.code||null});}
+  try{
+   const control=JSON.parse(readFileSync('evidence/windows-control-send-action.json'));
+   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action','snapshot','-ExpectedPid',String(control.appPid),'-ExpectedHwnd',String(control.window),'-Label',label+'-sender-original']);
+   observations.push({surface:'original-sender',captured:true,pid:control.appPid,hwnd:control.window});
+  }catch(error){observations.push({surface:'original-sender',errorClass:error?.name||'Error',errorCode:error?.code||null});}
+  writeFileSync(`evidence/${label}-delivery-boundary.json`,JSON.stringify(observations,null,2));
+ }
  async function globalGallery(desired,label){
   const settings=await waitForNativeControl({wd,prefix,label:label+'-settings',using:'xpath',value:'//*[@package="org.localsend.localsend_app" and contains(@content-desc,"Settings") and @clickable="true"]'});
   await wd('POST',prefix+'/element/'+settings['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
@@ -177,7 +190,10 @@ export default async function({session,wd,senderPort,transportStatus}){
    if(selected!==(desired?'On':'Off'))throw new Error('Receive Options did not inherit the global gallery setting');
    writeFileSync(`evidence/${gallery}-options-gallery.json`,JSON.stringify({desired,selected,description,merged,matches:matches.length,selectionTiming:'Inherited global setting before acceptance'},null,2));
    await capture(gallery+'-options-selected');await wd('POST',prefix+'/back',{});
-   await click('Accept');await waitForNativeControl({wd,prefix,label:gallery+'-complete',...target('Done')});
+   await click('Accept');
+   if(deliveryObservation)await deliveryBoundary(gallery+'-after-accept');
+   try{await waitForNativeControl({wd,prefix,label:gallery+'-complete',...target('Done')});}
+   catch(error){if(deliveryObservation)await deliveryBoundary(gallery+'-completion-failure',true);throw error;}
    await capture(gallery+'-completed');
    const filename=`issue2311-${process.env.GITHUB_RUN_ID}-${gallery}.${testCase.extension}`;
    const savedPath=`/sdcard/${desired?(testCase.extension==='mp4'?'Movies':'Pictures'):'Download'}/${filename}`;

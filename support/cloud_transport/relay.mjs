@@ -38,16 +38,28 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
     }
     if(req.method==='GET' && req.url==='/status'){res.end(JSON.stringify({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter}));return;}
     if(req.method==='POST' && req.url==='/push') {
+      const requestStarted=process.hrtime.bigint();let observation={};
+      const deliveryRecord=(origin,detail={})=>record(origin,observation.id,{relayRequestId:observation.relayRequestId,sequence:observation.sequence,
+        kind:observation.kind,bytes:observation.bytes,durationMs:Number(process.hrtime.bigint()-requestStarted)/1e6,...detail});
+      deliveryRecord('push-http-open');
+      req.on('aborted',()=>deliveryRecord('push-http-aborted'));
+      req.on('error',error=>deliveryRecord('push-http-error',{code:error.code||'HTTP_REQUEST_ERROR'}));
+      res.on('finish',()=>deliveryRecord('push-http-response-finish',{status:res.statusCode}));
+      res.on('close',()=>deliveryRecord('push-http-response-close',{status:res.statusCode,writableFinished:res.writableFinished}));
       let raw=''; req.on('data',d=>{raw+=d;if(raw.length>256*1024)req.destroy();});
       req.on('end',()=>{
         try {
           const e=JSON.parse(raw);const p=peers.get(e.id);
-          if(!p){res.writeHead(410);res.end('{}');return;}
-          if(e.kind==='data'){const data=Buffer.from(e.data,'base64');metrics.fromDevice+=data.length;p.write(data,()=>res.end('{}'));}
+          observation={id:e.id,relayRequestId:e.relayRequestId,sequence:e.sequence,kind:e.kind,bytes:e.bytes};deliveryRecord('push-http-parsed');
+          if(!p){deliveryRecord('push-peer-missing');res.writeHead(410);res.end('{}');return;}
+          if(e.kind==='data'){const data=Buffer.from(e.data,'base64');metrics.fromDevice+=data.length;
+            deliveryRecord('push-tcp-write-start',{decodedBytes:data.length});
+            p.write(data,error=>{deliveryRecord('push-tcp-write-callback',{decodedBytes:data.length,errorCode:error?(error.code||'TCP_WRITE_ERROR'):null});res.end('{}');});
+          }
           else if(e.kind==='eof'){record('device-eof',e.id);p.end();res.end('{}');}
-          else if(e.kind==='error'){record('device-error',e.id,{source:e.origin||'unspecified'});p.destroy(new Error('Device socket failed'));res.end('{}');}
+          else if(e.kind==='error'){record('device-error',e.id,{source:e.origin||'unspecified',failedRelayRequestId:e.failedRelayRequestId,failedSequence:e.failedSequence,failedBytes:e.failedBytes});p.destroy(new Error('Device socket failed'));res.end('{}');}
           else {res.writeHead(400);res.end('{}');}
-        }catch{res.writeHead(400);res.end('{}');}
+        }catch(error){deliveryRecord('push-handler-error',{errorClass:error?.name||'Error'});res.writeHead(400);res.end('{}');}
       });return;
     }
     res.writeHead(404);res.end('{}');
