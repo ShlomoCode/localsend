@@ -277,16 +277,21 @@ def rendered_sender_label(label):
     prefix = f'{sequence:04d}-{stage}-rendered'
     screenshot = OUT / (prefix + '.png')
     control_cmd('scrot', str(screenshot), timeout=10)
-    raw = control_cmd('tesseract', str(screenshot), 'stdout', '--psm', '11', 'tsv', timeout=15)
+    # Preserve the original pixels. Scale only the OCR observation so small
+    # visible labels are readable; inverse-map every returned bound explicitly.
+    ocr_scale = 3
+    ocr_image = OUT / (prefix + '-ocr3x.png')
+    control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', 'scale=iw*3:ih*3', '-frames:v', '1', str(ocr_image), timeout=10)
+    raw = control_cmd('tesseract', str(ocr_image), 'stdout', '--psm', '11', 'tsv', timeout=15)
     (OUT / (prefix + '.tsv')).write_text(raw)
     matches = []
     for row in csv.DictReader(io.StringIO(raw), delimiter='\t'):
         if row['text'].strip() != label or float(row['conf']) < 80:
             continue
-        left, top, w, h = (int(row[key]) for key in ('left', 'top', 'width', 'height'))
+        left, top, w, h = (int(row[key])/ocr_scale for key in ('left', 'top', 'width', 'height'))
         if w > 0 and h > 0 and x <= left and y <= top and left+w <= x+width and top+h <= y+height:
             matches.append({'label': label, 'bounds': [left, top, w, h], 'confidence': float(row['conf'])})
-    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': [x, y, width, height], 'label': label, 'matches': matches, 'screenshot': screenshot.name}
+    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': [x, y, width, height], 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale}
     write(prefix + '.json', observation)
     if len(matches) > 1:
         raise RuntimeError('Ambiguous rendered sender label')
@@ -304,7 +309,7 @@ def rendered_sender_tap(label, scroll=False):
         if target is not None:
             left, top, width, height = target['bounds']
             log('rendered-sender-click', {**observation, 'target': target})
-            control_cmd('xdotool', 'mousemove', '--sync', str(left+width//2), str(top+height//2), 'click', '1', timeout=5)
+            control_cmd('xdotool', 'mousemove', '--sync', str(round(left+width/2)), str(round(top+height/2)), 'click', '1', timeout=5)
             time.sleep(.5)
             return
         if scroll and attempt < 24:
