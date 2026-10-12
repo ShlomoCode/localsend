@@ -1,48 +1,48 @@
-name: Diagnose Explorer restart 3166
+name: Diagnose Minimize setting 3317
 on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Type RUN-3166-EXPLORER-RESTART for the selected ordinary Windows UI diagnostic
+        description: Type RUN-3317-MINIMIZE-TOGGLE for the selected ordinary Windows UI diagnostic
         required: true
         type: string
 permissions:
   contents: read
 concurrency:
-  group: diagnostic-3166-explorer-restart
+  group: diagnostic-3317-minimize-toggle
   cancel-in-progress: false
 jobs:
   official-tray:
-    if: github.repository == 'ShlomoCode/localsend' && github.ref == 'refs/heads/codex/diag-3166-explorer-restart' && inputs.confirmation == 'RUN-3166-EXPLORER-RESTART'
+    if: github.repository == 'ShlomoCode/localsend' && github.ref == 'refs/heads/codex/diagnose-3317-short-round' && inputs.confirmation == 'RUN-3317-MINIMIZE-TOGGLE'
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Start absolute clock
         timeout-minutes: 1
         shell: powershell
         run: |
           "DIAG_STARTED_UTC=$([DateTime]::UtcNow.ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "DIAG_EVIDENCE=$env:RUNNER_TEMP\issue3166-evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DIAG_EVIDENCE=$env:RUNNER_TEMP\issue3317-evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: actions/checkout@v4
         timeout-minutes: 2
-      - name: Observe actual Explorer Restart and same app tray activation
-        timeout-minutes: 15
+      - name: Observe General setting toggle and app-written preference
+        timeout-minutes: 10
         shell: powershell
         run: |
-          & support/diagnostics/3166/supervise.ps1 -Evidence $env:DIAG_EVIDENCE -StartedUtc ([DateTime]$env:DIAG_STARTED_UTC)
+          & support/diagnostics/3317/supervise.ps1 -Evidence $env:DIAG_EVIDENCE -StartedUtc ([DateTime]$env:DIAG_STARTED_UTC)
           exit $LASTEXITCODE
       - name: Retain originals and check media
         timeout-minutes: 2
         if: always()
         shell: powershell
         run: |
-          & support/diagnostics/3166/retain.ps1 -Evidence $env:DIAG_EVIDENCE
+          & support/diagnostics/3317/retain.ps1 -Evidence $env:DIAG_EVIDENCE
       - name: Upload original evidence
         timeout-minutes: 3
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: issue3166-explorer-restart-${{ github.run_id }}
+          name: issue3317-minimize-toggle-${{ github.run_id }}
           path: ${{ env.DIAG_EVIDENCE }}
           if-no-files-found: error
           retention-days: 14
