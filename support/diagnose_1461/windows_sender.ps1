@@ -93,7 +93,47 @@ public class SenderTextObservation {
  public bool Success,TimedOut,Truncated; public string Text,Error;
  public SenderControl Control;
 }
+public class SenderShortcutObservation {
+ public int Pid,VirtualKey,InputSize,Win32Error,CleanupWin32Error;
+ public uint Inserted,CleanupInserted;
+ public bool ForegroundOwned,KeysInitiallyUp,Accepted;
+ public string Error;
+}
 public static class SenderInput {
+ [StructLayout(LayoutKind.Sequential)] private struct KEYBDINPUT { public ushort Vk,Scan; public uint Flags,Time; public UIntPtr Extra; }
+ [StructLayout(LayoutKind.Sequential)] private struct MOUSEINPUT { public int X,Y; public uint Data,Flags,Time; public UIntPtr Extra; }
+ [StructLayout(LayoutKind.Sequential)] private struct HARDWAREINPUT { public uint Message; public ushort Low,High; }
+ [StructLayout(LayoutKind.Explicit)] private struct INPUTUNION {
+  [FieldOffset(0)] public KEYBDINPUT Keyboard;
+  [FieldOffset(0)] public MOUSEINPUT Mouse;
+  [FieldOffset(0)] public HARDWAREINPUT Hardware;
+ }
+ [StructLayout(LayoutKind.Sequential)] private struct INPUT { public uint Type; public INPUTUNION Data; }
+ [DllImport("user32.dll",SetLastError=true)] private static extern uint SendInput(uint count,[In] INPUT[] inputs,int size);
+ [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+ [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+ private static INPUT Key(ushort key,bool up) { return new INPUT { Type=1,Data=new INPUTUNION { Keyboard=new KEYBDINPUT { Vk=key,Flags=up?2u:0u } } }; }
+ public static SenderShortcutObservation ControlShortcut(IntPtr hwnd,int expectedPid,ushort key) {
+  var result=new SenderShortcutObservation { Pid=expectedPid,VirtualKey=key,InputSize=Marshal.SizeOf(typeof(INPUT)) };
+  if(key!=0x41&&key!=0x43){result.Error="Only explicit VK_A and VK_C shortcuts are supported.";return result;}
+  if(result.InputSize!=(IntPtr.Size==8?40:28)){result.Error="Unexpected native INPUT ABI size; no input sent.";return result;}
+  uint owner;GetWindowThreadProcessId(hwnd,out owner);
+  result.ForegroundOwned=GetForegroundWindow()==hwnd&&owner==(uint)expectedPid&&IsWindowVisible(hwnd);
+  if(!result.ForegroundOwned){result.Error="Original app does not own the foreground window; no input sent.";return result;}
+  result.KeysInitiallyUp=true;
+  foreach(int check in new int[] {0x10,0x11,0x12,0x5B,0x5C,key})if((GetAsyncKeyState(check)&0x8000)!=0)result.KeysInitiallyUp=false;
+  if(!result.KeysInitiallyUp){result.Error="Shortcut or modifier key already down; no input sent.";return result;}
+  SetLastError(0);
+  result.Inserted=SendInput(4,new INPUT[] {Key(0x11,false),Key(key,false),Key(key,true),Key(0x11,true)},result.InputSize);
+  result.Win32Error=Marshal.GetLastWin32Error();
+  if(result.Inserted!=4){
+   // Never retry the shortcut. Release only the keys that this attempt could
+   // have pressed; retain any uncertain cleanup as infrastructure failure.
+   if(result.Inserted>0){SetLastError(0);result.CleanupInserted=SendInput(2,new INPUT[] {Key(key,true),Key(0x11,true)},result.InputSize);result.CleanupWin32Error=Marshal.GetLastWin32Error();}
+   result.Error="SendInput did not insert all four shortcut events; action and modifier cleanup are not credited.";return result;
+  }
+  result.Accepted=true;return result;
+ }
  [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left,Top,Right,Bottom; }
  private delegate bool EnumProc(IntPtr hwnd,IntPtr data);
  [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent,EnumProc callback,IntPtr data);
@@ -298,17 +338,27 @@ function Favorites {
   [SenderInput]::Click($x,$y);$report.actions+=@{name='Favorites tooltip hover target';x=$x;y=$y;tooltip=$tooltip;evidence=$observed.screenshot};Start-Sleep -Milliseconds 500;return
  };throw 'No observed Favorites tooltip within bounded toolbar hover search.'
 }
+function ControlShortcut([string]$key){
+ if($key -notin @('A','C')){throw 'Only Select All and Copy shortcuts are supported.'}
+ $before=Window;if([ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw 'Original sender is not foreground; shortcut withheld.'}
+ $virtualKey=if($key -eq 'A'){0x41}else{0x43}
+ $native=[SenderInput]::ControlShortcut($appHwnd,$app.Id,[ushort]$virtualKey)
+ $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='ordinary native Control shortcut';key=$key;window=$before;native=$native};Persist
+ if(-not $native.Accepted){throw "Native Control shortcut infrastructure failure: $($native.Error)"}
+}
 function FavoriteFieldReadback([string]$expected,[string]$field){
  if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'Favorite clipboard readback requires an explicitly STA sender controller; infrastructure admission failed.'}
  Focus;$before=Window;$marker='localsend1461-readback-'+[Guid]::NewGuid().ToString('N')
  [Windows.Forms.Clipboard]::SetText($marker)
  if([Windows.Forms.Clipboard]::GetText() -cne $marker){throw 'Fresh clipboard marker was not established; favorite readback withheld.'}
- [Windows.Forms.SendKeys]::SendWait('^a^c')
+ ControlShortcut 'A'
+ if((Window).Hwnd -ne $before.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw 'Original favorite window lost foreground between Select All and Copy; copy withheld.'}
+ ControlShortcut 'C'
  $copyDeadline=[DateTime]::UtcNow.AddMilliseconds((Remaining 2000));$actual=$marker
  do{$actual=[Windows.Forms.Clipboard]::GetText();if($actual -cne $marker){break};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $copyDeadline)
  $copyObservedUtc=[DateTime]::UtcNow;$withinDeadline=$copyObservedUtc -lt $copyDeadline
  $after=Window
- $observation=@{utc=$copyObservedUtc.ToString('o');field=$field;expected=$expected;actual=$actual;marker=$marker;markerReplaced=$actual -cne $marker;withinCopyDeadline=$withinDeadline;processId=$app.Id;before=$before;after=$after;foreground=[ReceiverNative]::GetForegroundWindow().ToInt64();method='One ordinary Ctrl+A/Ctrl+C on the source-defined focused field; fresh clipboard marker prevents stale acceptance'}
+ $observation=@{utc=$copyObservedUtc.ToString('o');field=$field;expected=$expected;actual=$actual;marker=$marker;markerReplaced=$actual -cne $marker;withinCopyDeadline=$withinDeadline;processId=$app.Id;before=$before;after=$after;foreground=[ReceiverNative]::GetForegroundWindow().ToInt64();method='Explicit native VK_CONTROL+VK_A Select All then VK_CONTROL+VK_C Copy on the source-defined focused field; fresh clipboard marker prevents stale acceptance'}
  $report.actions+=@{name='favorite focused-field readback';observation=$observation};Persist
  if(-not $withinDeadline -or $actual -ceq $marker -or $actual -cne $expected -or $before.Hwnd -ne $after.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw "Actual focused favorite field readback failed: $field"}
  return $observation
@@ -419,7 +469,8 @@ function NativePicker([IntPtr]$hwnd,[string]$path,[string]$id){
  $buttons=@($children|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Button' -and $_.Id -eq 1 -and $_.Text -match '^(&)?Open$'})
  if($edits.Count -ne 1 -or $buttons.Count -ne 1){throw 'Native File name Edit (under ID 1148) and Open Button (ID 1) must be unique; inspect retained HWND evidence.'}
  Focus $hwnd;$edit=$edits[0];[SenderInput]::Click([int]($edit.Left+$edit.Width/2),[int]($edit.Top+$edit.Height/2))
- [System.Windows.Forms.SendKeys]::SendWait('^a')
+ $selectionShortcut=[SenderInput]::ControlShortcut($hwnd,$app.Id,[ushort]0x41);$evidence['selectAllShortcut']=$selectionShortcut;Json $record $evidence
+ if(-not $selectionShortcut.Accepted){throw "Native picker Select All infrastructure failure: $($selectionShortcut.Error)"}
  $escaped=[regex]::Replace($path,'([+^%~(){}\[\]])','{$1}')
  [System.Windows.Forms.SendKeys]::SendWait($escaped);Start-Sleep -Milliseconds 200
  $after=@([SenderInput]::Children($hwnd));$actual=@($after|Where-Object{$_.Hwnd -eq $edit.Hwnd -and $_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Edit' -and $_.FileNameAncestor})
@@ -499,9 +550,9 @@ function Execute($c){
    foreach($label in @('Add to favorites','IP Address','Port','Confirm')){$bounds=LabelBounds $s $label;if(-not(FreshPixels $s $bounds)){throw "Favorite dialog label changed before typing: $label"}}
    # 1.14.0 FavoriteEditDialog autofocuses IP. Tab order is IP -> Port.
    # Retain the dialog and typed input; no profile injection or protocol registration replaces the UI.
-   [System.Windows.Forms.SendKeys]::SendWait('^a'+$receiverHost)
+   ControlShortcut 'A';[System.Windows.Forms.SendKeys]::SendWait($receiverHost)
    $ipReadback=FavoriteFieldReadback $receiverHost 'IP Address'
-   [System.Windows.Forms.SendKeys]::SendWait('{TAB}^a'+$receiverPort)
+   [System.Windows.Forms.SendKeys]::SendWait('{TAB}');ControlShortcut 'A';[System.Windows.Forms.SendKeys]::SendWait([string]$receiverPort)
    $portReadback=FavoriteFieldReadback ([string]$receiverPort) 'Port'
    [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
    $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='favorite IP autofocus and source-defined Tab to Port';ip=$receiverHost;port=$receiverPort;evidence=$s.screenshot}
