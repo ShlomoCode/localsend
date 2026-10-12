@@ -22,7 +22,7 @@ def capture(role, stage):
     COUNTERS[role] += 1
     stem = OUT / ('%s-%04d-%s' % (role, COUNTERS[role], stage))
     command(role, 'scrot', str(stem) + '.png')
-    command(role, 'convert', str(stem) + '.png', '-resize', '200%', str(stem) + '-ocr.png')
+    command(role, 'convert', str(stem) + '.png', '-colorspace', 'Gray', '-resize', '200%', '-threshold', '70%', '-negate', str(stem) + '-ocr.png')
     ocr = subprocess.run(['tesseract', str(stem) + '-ocr.png', 'stdout', '--psm', '11', 'tsv'],
                          env={**os.environ, 'DISPLAY': DISPLAYS[role]}, text=True, capture_output=True, check=True)
     raw = ocr.stdout
@@ -61,24 +61,32 @@ def key(role, *keys):
 
 def app_ready(role):
     end = time.monotonic() + 60
+    window=None
     while time.monotonic() < end:
+        if window is None:
+            try:
+                ids = command(role, 'xdotool', 'search', '--onlyvisible', '--name', '^LocalSend$').split()
+            except subprocess.CalledProcessError:
+                ids=[]
+            if len(ids)>1: raise RuntimeError('Expected one LocalSend window: '+repr(ids))
+            if len(ids)==1:
+                window=ids[0]
+                pid=command(role,'xdotool','getwindowpid',window).strip()
+                owner=subprocess.check_output(['ps','-o','uid=','-p',pid],text=True).strip()
+                expected_owner=subprocess.check_output(['id','-u',role+'1425'],text=True).strip()
+                if owner!=expected_owner: raise RuntimeError('Window belongs to unexpected uid: '+owner)
+                command(role, 'xdotool', 'windowactivate', '--sync', window)
+                command(role, 'xdotool', 'windowmove', window, '0', '0')
+                command(role, 'xdotool', 'windowsize', window, '1000', '700')
+                event('app_window', role=role, id=window, owner=owner,
+                      geometry=command(role, 'xdotool', 'getwindowgeometry', '--shell', window),pid=pid)
+                time.sleep(1)
         words = capture(role, 'startup')
         confirm = next((w for w in words if w['text'] == 'Confirm'), None)
         if confirm:
             click(role, (confirm['x']+confirm['w']/2, confirm['y']+confirm['h']/2), 'first launch Confirm')
         else:
-            if any(w['text'] == 'Settings' for w in words) and any(w['text'] == 'Receive' for w in words):
-                ids = command(role, 'xdotool', 'search', '--onlyvisible', '--name', '^LocalSend$').split()
-                if len(ids) != 1:
-                    raise RuntimeError('Expected one LocalSend window: ' + repr(ids))
-                window = ids[0]
-                command(role, 'xdotool', 'windowactivate', '--sync', window)
-                command(role, 'xdotool', 'windowmove', window, '0', '0')
-                command(role, 'xdotool', 'windowsize', window, '1000', '700')
-                event('app_window', role=role, id=window,
-                      geometry=command(role, 'xdotool', 'getwindowgeometry', '--shell', window),
-                      pid=command(role, 'xdotool', 'getwindowpid', window))
-                time.sleep(1)
+            if window and any(w['text'] == 'Settings' for w in words) and any(w['text'] == 'Send' for w in words):
                 return window
         time.sleep(1)
     raise RuntimeError('Application startup did not reach normal home: ' + role)

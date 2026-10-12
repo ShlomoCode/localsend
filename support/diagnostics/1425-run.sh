@@ -20,6 +20,8 @@ apt-get install -y xvfb openbox xdotool scrot tesseract-ocr imagemagick ffmpeg l
 systemctl start NetworkManager
 for role in sender1425 receiver1425; do
   useradd --create-home --shell /bin/bash "$role"
+  runtime="/run/user/$(id -u "$role")"
+  install -d -m 700 -o "$role" -g "$role" "$runtime"
   mkdir -p "/home/$role/Downloads"
   chown "$role:$role" "/home/$role/Downloads"
   ip netns add "$role"
@@ -65,7 +67,8 @@ for display in 81 82; do
 done
 for role in sender1425 receiver1425; do
   if [ "$role" = sender1425 ]; then display=:81; else display=:82; fi
-  ip netns exec "$role" runuser -u "$role" -- env DISPLAY="$display" LANG=C.UTF-8 LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- bash -c 'openbox > /tmp/'"$role"'-openbox.log 2>&1 & exec /tmp/issue1425/LocalSend-1.14.0-linux-x86-64.AppImage' > "$evidence/$role-app.log" 2>&1 &
+  runtime="/run/user/$(id -u "$role")"
+  ip netns exec "$role" runuser -u "$role" -- env DISPLAY="$display" XDG_RUNTIME_DIR="$runtime" LANG=C.UTF-8 LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- bash -c 'openbox > /tmp/'"$role"'-openbox.log 2>&1 & exec /tmp/issue1425/LocalSend-1.14.0-linux-x86-64.AppImage' > "$evidence/$role-app.log" 2>&1 &
 done
 python3 support/diagnostics/1425-ui.py "$evidence"
 ip netns exec sender1425 ss -tinp > "$evidence/sender-final-sockets.txt"
