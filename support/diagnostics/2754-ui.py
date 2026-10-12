@@ -32,88 +32,225 @@ def keyboard_switch(name):
     x=left+574
     log("keyboard-toggle-ui",x=x,y=y,crop_left=left,crop_top=top)
     run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(4)
-def folder_saved_crop(name,suffix,left,top,width,height,scale,psm):
+def saved_frame_crop(name,suffix,left,top,width,height,scale,psm,execute=run):
     source=out/(name+".png")
     with source.open("rb") as saved_frame:
         header=saved_frame.read(24)
     if len(header)!=24 or header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR":
-        raise RuntimeError("Saved Folder frame has no valid PNG dimensions: "+name)
+        raise RuntimeError("Saved frame has no valid PNG dimensions: "+name)
     image_width=int.from_bytes(header[16:20],"big"); image_height=int.from_bytes(header[20:24],"big")
     if not (left>=0 and top>=0 and width>0 and height>0
             and left+width<=image_width and top+height<=image_height):
-        raise RuntimeError("Folder crop outside saved frame: "+name+suffix)
+        raise RuntimeError("Crop outside saved frame: "+name+suffix)
     crop=out/(name+suffix+".png")
-    cropped=run("ffmpeg","-nostdin","-v","error","-y","-i",str(source),
+    cropped=execute("ffmpeg","-nostdin","-v","error","-y","-i",str(source),
                 "-vf",f"crop={width}:{height}:{left}:{top},scale={width*scale}:{height*scale}:flags=lanczos",
                 "-frames:v","1",str(crop))
     crop.with_suffix(".ffmpeg.stderr").write_text(cropped.stderr)
-    if cropped.returncode!=0: raise RuntimeError("Folder saved-frame crop failed: "+name+suffix)
-    result=run("tesseract",str(crop),"stdout","--psm",str(psm),"tsv")
+    if cropped.returncode!=0: raise RuntimeError("Saved-frame crop failed: "+name+suffix)
+    result=execute("tesseract",str(crop),"stdout","--psm",str(psm),"tsv")
     crop.with_suffix(".tsv").write_text(result.stdout)
     crop.with_suffix(".tesseract.stderr").write_text(result.stderr)
-    if result.returncode!=0: raise RuntimeError("Folder saved-frame OCR failed: "+name+suffix)
+    if result.returncode!=0: raise RuntimeError("Saved-frame OCR failed: "+name+suffix)
     return list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+def keyboard_top(execute=run):
+    state=execute("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboard-enabled").stdout.strip()
+    if state not in ("true","false"): raise RuntimeError("Supported keyboard setting unavailable")
+    # Retained native keyboard occupies y=0..287 when enabled; panel starts759.
+    return 287 if state=="true" else 0
+def window_geometry(name,execute=run):
+    display=execute("xdotool","getdisplaygeometry").stdout.strip()
+    owner=execute("xdotool","getwindowpid",w[-1]).stdout.strip()
+    title=execute("xdotool","getwindowname",w[-1]).stdout.strip()
+    raw=execute("xdotool","getwindowgeometry","--shell",w[-1]).stdout
+    (out/(name+"-window.txt")).write_text(raw+"\nDISPLAY="+display+"\nPID="+owner+"\nTITLE="+title+"\n")
+    values=dict(line.split("=",1) for line in raw.splitlines() if "=" in line)
+    geometry={key:int(values[key]) for key in ("X","Y","WIDTH","HEIGHT","SCREEN")}
+    geometry["KEYBOARD_TOP"]=keyboard_top(execute)
+    if display!="1280 800" or owner!=str(app.pid) or title!="LocalSend":
+        raise RuntimeError("Viewport gate requires original LocalSend and unchanged 1280x800 display")
+    log("window-geometry",case=name,window_id=w[-1],owner_pid=owner,display=display,geometry=geometry)
+    return geometry
+def normalize_window(name):
+    before=window_geometry(name+"-before")
+    snap(name+"-original-screen")
+    # Correct horizontal clipping only. Relative WM movement preserves actual
+    # client Y without assuming a decoration/frame offset or changing size.
+    if before["X"]!=60:
+        command=("xdotool","windowmove","--sync","--relative",w[-1],str(60-before["X"]),"0")
+        result=run(*command)
+        log("viewport-wm-input",case=name,command=list(command),returncode=result.returncode)
+        if result.returncode!=0: raise RuntimeError("Supported WM normalization failed")
+    time.sleep(1)
+    after=window_geometry(name+"-after")
+    snap(name+"-normalized-screen")
+    if not (after["X"]==60 and after["WIDTH"]==1100 and after["HEIGHT"]==700
+            and all(after[key]==before[key] for key in ("Y","WIDTH","HEIGHT","SCREEN","KEYBOARD_TOP"))):
+        raise RuntimeError("Horizontal WM normalization changed actual Y/size/screen/keyboard condition")
+def saved_client_crop(name,suffix,geometry):
+    # A 700px client can extend below the screenshot after keyboard activation.
+    # Clip only this broad sampling region; required targets still need full bounds.
+    header=(out/(name+".png")).read_bytes()[:24]
+    if len(header)!=24 or header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR":
+        raise RuntimeError("Saved client frame has no valid PNG dimensions")
+    image_width=int.from_bytes(header[16:20],"big"); image_height=int.from_bytes(header[20:24],"big")
+    left=max(0,geometry["X"]); top=max(0,geometry["Y"])
+    right=min(image_width,geometry["X"]+geometry["WIDTH"])
+    bottom=min(image_height,geometry["Y"]+geometry["HEIGHT"])
+    log("saved-client-sampling-bounds",case=name,crop=dict(left=left,top=top,right=right,bottom=bottom),geometry=geometry)
+    return saved_frame_crop(name,suffix,left,top,right-left,bottom-top,2,11)
+def original_focus(name,execute=run):
+    focused=execute("xdotool","getwindowfocus").stdout.strip()
+    owner=execute("xdotool","getwindowpid",focused).stdout.strip()
+    title=execute("xdotool","getwindowname",focused).stdout.strip()
+    log("original-focus",case=name,window_id=focused,owner_pid=owner,title=title)
+    if focused!=w[-1] or owner!=str(app.pid) or title!="LocalSend" or app.poll() is not None:
+        raise RuntimeError("Actual input requires focused original LocalSend window")
+def target_visible(name,label,row,geometry):
+    left=int(row["left"]); top=int(row["top"])
+    right=left+int(row["width"]); bottom=top+int(row["height"])
+    visible=(geometry["X"]<=left<right<=geometry["X"]+geometry["WIDTH"] and
+             geometry["Y"]<=top<bottom<=geometry["Y"]+geometry["HEIGHT"] and
+             0<=left<right<=1280 and geometry["KEYBOARD_TOP"]<=top<bottom<=759)
+    log("rendered-target-bounds",case=name,label=label,bounds=dict(left=left,top=top,right=right,bottom=bottom),
+        geometry=geometry,visible=visible)
+    if not visible: raise RuntimeError("Required rendered target is occluded/outside original client: "+label)
+def exact_visible_label(name,label,rows,geometry):
+    hits=[r for r in rows if r["text"].lower().strip()==label.lower() and float(r["conf"])>=90]
+    unique=[]
+    for hit in hits:
+        center=(int(hit["left"])+int(hit["width"])/2,int(hit["top"])+int(hit["height"])/2)
+        if not any(abs(center[0]-(int(r["left"])+int(r["width"])/2))<=4 and
+                   abs(center[1]-(int(r["top"])+int(r["height"])/2))<=4 for r in unique): unique.append(hit)
+    if len(unique)!=1: raise RuntimeError("Required exact confident rendered label is absent/ambiguous: "+label)
+    target_visible(name,label,unique[0],geometry)
+    return unique[0]
+def baseline_modal(name,rows):
+    geometry=window_geometry(name+"-modal")
+    title=exact_visible_label(name,"Type",rows,geometry)
+    exact_visible_label(name,"message",rows,geometry)
+    # Retained keyboard-on-stack-65 expands the dialog to ~338px for its
+    # typed control; a 280px sample cuts the actual Confirm label in half.
+    header=(out/(name+".png")).read_bytes()[:24]
+    if len(header)!=24 or header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR":
+        raise RuntimeError("Saved baseline modal frame has no valid PNG dimensions")
+    image_width=int.from_bytes(header[16:20],"big"); image_height=int.from_bytes(header[20:24],"big")
+    requested_left=int(title["left"])-24; requested_top=int(title["top"])-32
+    left=max(0,requested_left); top=max(0,requested_top)
+    right=min(image_width,requested_left+360); bottom=min(image_height,requested_top+190)
+    log("baseline-modal-sampling-bounds",case=name,requested=dict(left=requested_left,top=requested_top,width=360,height=190),
+        crop=dict(left=left,top=top,right=right,bottom=bottom))
+    cropped=saved_frame_crop(name,"-modal-controls",left,top,right-left,bottom-top,2,6)
+    converted=[]
+    for row in cropped:
+        hit=dict(row)
+        for key,origin in (("left",left),("top",top),("width",0),("height",0)):
+            hit[key]=str(round(origin+int(hit[key])/2))
+        converted.append(hit)
+    for label in ("Type","message","typed","Cancel","Confirm"):
+        exact_visible_label(name,label,rows+converted,geometry)
+    original_focus(name+"-modal")
+def picker_text(name,rows):
+    selections=[r for r in rows if r["text"].lower().strip()=="selection"]
+    if len(selections)!=1 or float(selections[0]["conf"])<90:
+        raise RuntimeError("Picker requires unique confident Selection heading: "+name)
+    hits=[r for r in rows if r["text"].lower().strip()=="text"]
+    if len(hits)==1 and float(hits[0]["conf"])>=90: return hits[0]
+    if hits: raise RuntimeError("Picker Text label is ambiguous or unconfident: "+name)
+    left=int(selections[0]["left"])-8; top=int(selections[0]["top"])+24
+    cropped=saved_frame_crop(name,"-exact-text-picker",left,top,460,80,3,11)
+    hits=[r for r in cropped if r["text"].lower().strip()=="text"]
+    if len(hits)!=1 or float(hits[0]["conf"])<90:
+        raise RuntimeError("Saved picker requires unique exact confident Text label: "+name)
+    hit=dict(hits[0])
+    for key,origin in (("left",left),("top",top),("width",0),("height",0)):
+        hit[key]=str(round(origin+int(hit[key])/3))
+    log("exact-text-picker",file=name+".png",crop=name+"-exact-text-picker.png",hit=hit)
+    return hit
+def clear_paste(name):
+    normalize_window(name+"-viewport")
+    rows=snap(name+"-before")
+    geometry=window_geometry(name+"-clear")
+    original_focus(name+"-clear")
+    selections=[r for r in rows if r["text"].lower().strip()=="selection"]
+    if len(selections)!=1 or float(selections[0]["conf"])<90:
+        raise RuntimeError("Clear requires unique confident Selection heading")
+    selection=selections[0]
+    # Original paste-clear-before.png renders a 14x16 close glyph near the
+    # right end of this header. Search pixels; never click an anchor offset.
+    left=int(selection["left"])+400; top=int(selection["top"])-12
+    glyphs=saved_frame_crop(name+"-before","-close-search",left,top,140,40,4,6)
+    hits=[r for r in glyphs if r["text"].lower().strip() in ("x","×")]
+    if (len(hits)!=1 or float(hits[0]["conf"])<90 or not
+            (8<=int(hits[0]["width"])/4<=24 and 8<=int(hits[0]["height"])/4<=24)):
+        raise RuntimeError("Rendered close glyph is absent, ambiguous, or unconfident; no click")
+    hit=hits[0]
+    glyph_left=left+int(hit["left"])/4; glyph_top=top+int(hit["top"])/4
+    glyph_right=glyph_left+int(hit["width"])/4; glyph_bottom=glyph_top+int(hit["height"])/4
+    x=round(left+(int(hit["left"])+int(hit["width"])/2)/4)
+    y=round(top+(int(hit["top"])+int(hit["height"])/2)/4)
+    if not (geometry["X"]<=glyph_left<glyph_right<=geometry["X"]+geometry["WIDTH"] and
+            geometry["Y"]<=glyph_top<glyph_bottom<=geometry["Y"]+geometry["HEIGHT"]
+            and 0<=glyph_left<glyph_right<=1280 and geometry["KEYBOARD_TOP"]<=glyph_top<glyph_bottom<=759):
+        raise RuntimeError("Rendered close glyph outside original visible client")
+    original_focus(name+"-clear-input")
+    if window_geometry(name+"-clear-input")!=geometry:
+        raise RuntimeError("Original window moved after saved close-glyph evidence; no click")
+    log("clear-paste-ui",case=name,x=x,y=y,glyph=hit,source=name+"-before.png",crop=name+"-before-close-search.png")
+    run("xdotool","mousemove",str(x),str(y),"click","1"); time.sleep(2)
+    cleared=snap(name+"-cleared")
+    geometry=window_geometry(name+"-cleared")
+    target_visible(name+"-cleared","Text",picker_text(name+"-cleared",cleared),geometry)
 def click_word(word,name):
+    if word.lower() in ("text","file","folder","paste"): normalize_window(name+"-viewport")
     rows=snap(name)
     hits=[r for r in rows if r["text"].lower().strip()==word.lower()]
-    if word.lower()=="folder":
+    if word.lower() in ("folder","paste"):
+        control=word.lower()
         focused=run("xdotool","getwindowfocus").stdout.strip()
         title=run("xdotool","getwindowname",focused).stdout.strip()
         owner=run("xdotool","getwindowpid",focused).stdout.strip()
         if title!="LocalSend" or owner!=str(app.pid):
-            raise RuntimeError("Folder opener requires focused original LocalSend: "+name)
+            raise RuntimeError(word+" opener requires focused original LocalSend: "+name)
         selections=[r for r in rows if r["text"].lower().strip()=="selection"]
-        if len(selections)!=1: raise RuntimeError("Folder opener requires unique Selection heading: "+name)
+        if len(selections)!=1 or float(selections[0]["conf"])<90:
+            raise RuntimeError(word+" opener requires unique confident Selection heading: "+name)
         selection=selections[0]
-        # A dimmed Folder remains readable behind MessageInputDialog. Check the
-        # audited modal region in the SAME frame before accepting either OCR path.
-        modal_rows=folder_saved_crop(name,"-folder-modal-gate",int(selection["left"])+1,
-                                    int(selection["top"])+184,310,220,1,6)
-        modal_labels={r["text"].lower().strip() for r in modal_rows}
+        # A dimmed picker remains readable behind MessageInputDialog. Read the
+        # saved visible client and retain every original positive modal label.
+        geometry=window_geometry(name+"-modal-gate")
+        modal_rows=saved_client_crop(name,"-"+control+"-modal-gate",geometry)
+        modal_labels={r["text"].lower().strip() for r in rows+modal_rows}
         previous_modal={"type","message"}.issubset(modal_labels)
-        log("folder-modal-gate",previous_modal=previous_modal,window_id=focused,owner_pid=owner)
-        if previous_modal: raise RuntimeError("Previous Text dialog visible before Folder trigger: "+name)
+        log(control+"-modal-gate",previous_modal=previous_modal,window_id=focused,owner_pid=owner)
+        if previous_modal: raise RuntimeError("Previous Text dialog visible before "+word+" trigger: "+name)
         if not hits:
             left=int(selection["left"])-8; top=int(selection["top"])+24
-            picker_rows=folder_saved_crop(name,"-folder-picker",left,top,460,80,3,11)
-            hits=[r for r in picker_rows if r["text"].lower().strip()=="folder"]
+            picker_rows=saved_frame_crop(name,"-"+control+"-picker",left,top,460,80,3,11)
+            hits=[r for r in picker_rows if r["text"].lower().strip()==control]
             if len(hits)!=1 or float(hits[0]["conf"])<90:
-                raise RuntimeError("Folder fallback requires unique exact confident label: "+name)
+                raise RuntimeError(word+" fallback requires unique exact confident label: "+name)
             hit=hits[0]
             x=round(left+(int(hit["left"])+int(hit["width"])/2)/3)
             y=round(top+(int(hit["top"])+int(hit["height"])/2)/3)
-            log("folder-picker-ocr-fallback",x=x,y=y,confidence=hit["conf"],crop_x=left,crop_y=top,scale=3)
-            hits=[dict(left=str(x),top=str(y),width="0",height="0",text="Folder")]
+            log(control+"-picker-ocr-fallback",x=x,y=y,confidence=hit["conf"],crop_x=left,crop_y=top,scale=3)
+            hits=[dict(left=str(round(left+int(hit["left"])/3)),top=str(round(top+int(hit["top"])/3)),
+                       width=str(round(int(hit["width"])/3)),height=str(round(int(hit["height"])/3)),text=word,conf=hit["conf"])]
         elif len(hits)!=1 or float(hits[0]["conf"])<90:
-            raise RuntimeError("Folder opener requires unique exact confident label: "+name)
-    if not hits and word.lower()=="text":
-        selections=[r for r in rows if r["text"].lower().strip()=="selection"]
-        if not selections: raise RuntimeError("Missing original Selection heading in "+name)
-        selection=selections[0]
-        left=int(selection["left"])-8; top=int(selection["top"])+24
-        crop=out/(name+"-picker.png")
-        run("scrot","--autoselect",f"{left},{top},460,80",str(crop))
-        result=run("tesseract",str(crop),"stdout","--psm","11","tsv")
-        (out/(name+"-picker.tsv")).write_text(result.stdout)
-        picker_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
-        hits=[r for r in picker_rows if r["text"].lower().strip()==word.lower()]
-        for hit in hits:
-            hit["left"]=str(left+int(hit["left"])); hit["top"]=str(top+int(hit["top"]))
-        log("picker-ocr-fallback",file=crop.name,x=left,y=top,text_found=bool(hits))
+            raise RuntimeError(word+" opener requires unique exact confident label: "+name)
+    if word.lower()=="text": hits=[picker_text(name,rows)]
     if not hits: raise RuntimeError("Missing UI label "+word+" in "+name)
     r=hits[0]; x=int(r["left"])+int(r["width"])//2; y=int(r["top"])+int(r["height"])//2
     if word.lower()=="text":
-        # The rendered picker shifts with the app when the top keyboard appears.
-        crop_x=x-273; crop_y=y+109
-        crop=out/(name+"-modal-gate.png")
-        run("scrot","--autoselect",f"{crop_x},{crop_y},310,220",str(crop))
-        result=run("tesseract",str(crop),"stdout","--psm","6","tsv")
-        (out/(name+"-modal-gate.tsv")).write_text(result.stdout)
-        modal_rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
-        labels={r["text"].lower().strip() for r in modal_rows}
-        log("fresh-text-gate",file=crop.name,x=crop_x,y=crop_y,previous_modal={"type","message"}.issubset(labels))
+        geometry=window_geometry(name+"-modal-gate")
+        modal_rows=saved_client_crop(name,"-modal-gate",geometry)
+        labels={r["text"].lower().strip() for r in rows+modal_rows}
+        log("fresh-text-gate",file=name+"-modal-gate.png",previous_modal={"type","message"}.issubset(labels))
         if {"type","message"}.issubset(labels):
             raise RuntimeError("Previous Text dialog still visible before fresh trigger: "+name)
+    if word.lower() in ("send","text","file","folder","paste"):
+        original_focus(name)
+        target_visible(name,word,r,window_geometry(name+"-target"))
     log("click",label=word,x=x,y=y); run("xdotool","mousemove",str(x),str(y),"click","1")
 def text_case(label):
     trace=None
@@ -122,9 +259,10 @@ def text_case(label):
         time.sleep(1)
     click_word("Text",label+"-before")
     start=time.monotonic(); log("text-open",case=label)
+    log("text-input",case=label,text=label+" typed control",delay_ms=60)
     run("xdotool","type","--clearmodifiers","--delay","60",label+" typed control")
     for second in [0,1,3,10,20,35,50,65]:
-        time.sleep(max(0,start+second-time.monotonic())); snap(label+"-"+str(second))
+        time.sleep(max(0,start+second-time.monotonic())); rows=snap(label+"-"+str(second))
         proc=run("ps","-eLo","pid,tid,stat,pcpu,wchan:32,comm").stdout
         focus=run("xdotool","getwindowfocus","getwindowname").stdout
         (out/(label+"-"+str(second)+"-state.txt")).write_text(proc+"\nFOCUS\n"+focus)
@@ -133,6 +271,10 @@ def text_case(label):
             (out/(label+"-gdb.txt")).write_text(stack.stdout+stack.stderr)
     if trace:
         run("sudo","kill","-INT",str(trace.pid))
+    # Validate saved final native controls after the original timing samples,
+    # before dismissal and before permitting the policy experiment to start.
+    baseline_modal(label+"-65",rows)
+    log("text-dismiss-input",case=label,key="Escape")
     run("xdotool","key","Escape"); time.sleep(2)
 def picker_control(word,label):
     # Open and cancel the actual chooser in the same process/keyboard setting.
@@ -198,6 +340,11 @@ def picker_control(word,label):
                     if (result.returncode==0 and len(cancels)==1 and len(actions)==1
                             and float(cancels[0]["conf"])>=90 and float(actions[0]["conf"])>=90):
                         cancel=cancels[0]
+                        for button_label,button in (("Cancel",cancel),("Open",actions[0])):
+                            rendered=dict(button)
+                            for key,origin in (("left",left),("top",top),("width",0),("height",0)):
+                                rendered[key]=str(round(origin+int(button[key])/3))
+                            target_visible(frame,button_label,rendered,dict(X=wx,Y=wy,WIDTH=ww,HEIGHT=wh,KEYBOARD_TOP=keyboard_top()))
                         cancel_point=(round(left+(int(cancel["left"])+int(cancel["width"])/2)/3),
                                       round(top+(int(cancel["top"])+int(cancel["height"])/2)/3))
                         observed=True; break
@@ -206,6 +353,9 @@ def picker_control(word,label):
         attempt+=1; time.sleep(1)
     log("picker-control",case=label,app_pid=app.pid,observed=observed,elapsed=time.monotonic()-start)
     if not observed: raise RuntimeError("Rendered chooser controls absent: "+label)
+    if (run("xdotool","getwindowfocus").stdout.strip()!=focused or
+            run("xdotool","getwindowpid",focused).stdout.strip()!=str(app.pid)):
+        raise RuntimeError("Actual chooser Cancel requires original app-owned focused chooser")
     x,y=cancel_point
     log("click",label="Cancel",case=label,x=x,y=y)
     run("xdotool","mousemove",str(x),str(y),"click","1")
@@ -224,6 +374,14 @@ def capture_observer_policy_phase():
     phase=out/"observer-policy"; phase.mkdir(exist_ok=True)
     status=dict(status="started",app_pid=app.pid,window_id=w[-1],native_baseline_during_wait=False)
     capture=None
+    # All WM setup and baseline controls are complete. Never move or resize
+    # either arm, including while the baseline observer is unresolved.
+    frozen_geometry=window_geometry("policy-geometry-freeze")
+    snap("policy-geometry-freeze")
+    if not (frozen_geometry["WIDTH"]==1100 and frozen_geometry["HEIGHT"]==700 and
+            frozen_geometry["X"]==60 and frozen_geometry["KEYBOARD_TOP"]==287):
+        raise RuntimeError("Policy freeze requires original 1100x700 with horizontal correction and enabled keyboard")
+    log("policy-geometry-frozen",geometry=frozen_geometry,window_id=w[-1],app_pid=app.pid)
     original_start=pathlib.Path(f"/proc/{app.pid}/stat").read_text().rsplit(") ",1)[1].split()[19]
     original_exe=os.readlink(f"/proc/{app.pid}/exe")
     def app_detached():
@@ -245,11 +403,29 @@ def capture_observer_policy_phase():
         return result
     def frame(name,deadline):
         app_detached()
+        before=window_geometry(name+"-before-frame",execute=lambda *args: bounded_run(deadline,*args))
+        if before!=frozen_geometry: raise RuntimeError("Policy client geometry changed after freeze")
         path=out/(name+".png")
         bounded_run(deadline,"scrot",str(path))
         result=bounded_run(deadline,"tesseract",str(path),"stdout","--psm","11","tsv")
         path.with_suffix(".tsv").write_text(result.stdout)
         rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+        selections=[r for r in rows if r["text"].lower().strip()=="selection" and float(r["conf"])>=90]
+        text_hits=[r for r in rows if r["text"].lower().strip()=="text" and float(r["conf"])>=90]
+        modal_present=any(r["text"].lower().strip() in ("type","message","cancel","confirm","precheck","probecheck") for r in rows)
+        if len(selections)==1 and not text_hits and not modal_present:
+            # Full-frame OCR can truncate visible Text/Paste after the native
+            # chooser shifts the window. Read the same saved picker region.
+            left=int(selections[0]["left"])-8; top=int(selections[0]["top"])+24; scale=3
+            picker_rows=saved_frame_crop(name,"-policy-picker",left,top,460,80,scale,11,
+                                        execute=lambda *args: bounded_run(deadline,*args))
+            hits=[r for r in picker_rows if r["text"].lower().strip()=="text" and float(r["conf"])>=90]
+            if len(hits)!=1: raise RuntimeError("Policy picker requires unique exact confident Text label")
+            hit=hits[0]
+            hit["left"]=str(round(left+int(hit["left"])/scale)); hit["top"]=str(round(top+int(hit["top"])/scale))
+            hit["width"]=str(round(int(hit["width"])/scale)); hit["height"]=str(round(int(hit["height"])/scale))
+            rows=[r for r in rows if r["text"].lower().strip()!="text"]+[hit]
+            log("policy-native-saved-picker-crop",file=path.name,x=left,y=top,width=460,height=80,scale=scale)
         titles=[r for r in rows if r["text"].lower().strip()=="type" and float(r["conf"])>=90]
         messages=[r for r in rows if r["text"].lower().strip()=="message" and float(r["conf"])>=90]
         if len(titles)==1 and len(messages)==1:
@@ -274,8 +450,8 @@ def capture_observer_policy_phase():
                 # Keep original positive title evidence so cropped OCR cannot
                 # turn a still-visible modal into a dismissal. Use crop rows
                 # for buttons/marker and root coordinates for real Cancel.
-                rows=[r for r in rows if r in (title,message) or not
-                      (left<=int(r["left"])<left+width and top<=int(r["top"])<top+height)]
+                # Preserve every positive original label; exact label gates
+                # merge duplicate boxes from the two OCR views of one frame.
                 for row in crop_rows:
                     row["left"]=str(round(left+int(row["left"])/scale))
                     row["top"]=str(round(top+int(row["top"])/scale))
@@ -287,6 +463,8 @@ def capture_observer_policy_phase():
         owner=bounded_run(deadline,"xdotool","getwindowpid",focus).stdout.strip()
         if owner!=str(app.pid) or focus!=w[-1]:
             raise RuntimeError("Native policy frame lost original LocalSend focus")
+        after=window_geometry(name+"-after-frame",execute=lambda *args: bounded_run(deadline,*args))
+        if after!=frozen_geometry: raise RuntimeError("Policy client geometry changed during saved frame")
         log("policy-native-frame",file=path.name,window_id=focus,owner_pid=owner)
         return rows
     def modal(rows,marker=None):
@@ -294,9 +472,9 @@ def capture_observer_policy_phase():
         if not {"type","message","cancel","confirm"}.issubset(labels):
             raise RuntimeError("Full native Text dialog and Cancel/Confirm must be visible")
         if marker and marker not in labels: raise RuntimeError("Native marker absent from saved pixels: "+marker)
-        cancels=[r for r in rows if r["text"].lower().strip()=="cancel"]
-        if len(cancels)!=1: raise RuntimeError("Native Cancel label is ambiguous")
-        return cancels[0]
+        required=["type","message","cancel","confirm"]+([marker] if marker else [])
+        controls={label:exact_visible_label("policy-modal",label,rows,frozen_geometry) for label in required}
+        return controls["cancel"]
     def wait_modal(name,deadline,marker=None):
         attempt=0
         while True:
@@ -327,11 +505,15 @@ def capture_observer_policy_phase():
         labels={r["text"].lower().strip() for r in rows}
         if {"type","message"}.issubset(labels): raise RuntimeError("Old modal remains before policy arm")
         hits=[r for r in rows if r["text"].lower().strip()=="text"]
-        if len(hits)!=1 or "selection" not in labels: raise RuntimeError("Policy arm requires rendered Send/Text control")
+        if len(hits)!=1 or float(hits[0]["conf"])<90 or "selection" not in labels:
+            raise RuntimeError("Policy arm requires rendered confident Send/Text control")
         hit=hits[0]; x=int(hit["left"])+int(hit["width"])//2; y=int(hit["top"])+int(hit["height"])//2
+        target_visible("policy-"+arm+"-before-open","Text",hit,frozen_geometry)
+        exact_visible_label("policy-"+arm+"-before-open","Selection",rows,frozen_geometry)
         log("policy-native-text-click",arm=arm,x=x,y=y)
         bounded_run(deadline,"xdotool","mousemove",str(x),str(y),"click","1")
         wait_modal("policy-"+arm+"-opened",deadline)
+        log("policy-native-marker-input",arm=arm,marker="precheck",delay_ms=30)
         bounded_run(deadline,"xdotool","type","--clearmodifiers","--delay","30","precheck")
         wait_modal("policy-"+arm+"-preobserver-marker",deadline,"precheck")
         log("policy-native-preobserver-pass",arm=arm,marker="precheck")
@@ -340,6 +522,7 @@ def capture_observer_policy_phase():
         rows=frame("policy-"+arm+"-during-wait-before",deadline); modal(rows,"precheck")
         baseline_unresolved(call)
         log("policy-native-marker-input",arm=arm,marker="probecheck")
+        log("policy-native-select-input",arm=arm,key="ctrl+a")
         bounded_run(deadline,"xdotool","key","--clearmodifiers","ctrl+a")
         bounded_run(deadline,"xdotool","type","--clearmodifiers","--delay","30","probecheck")
         rows=wait_modal("policy-"+arm+"-during-wait-marker",deadline,"probecheck"); cancel=modal(rows,"probecheck")
@@ -354,7 +537,10 @@ def capture_observer_policy_phase():
             send_labels=[r for r in rows if r["text"].lower().strip() in ("selection","text")]
             unique_send=(len(send_labels)==2 and {r["text"].lower().strip() for r in send_labels}=={"selection","text"}
                          and all(float(r["conf"])>=90 for r in send_labels))
-            if not {"type","message","cancel","confirm","probecheck"}.intersection(labels) and unique_send: break
+            if not {"type","message","cancel","confirm","probecheck"}.intersection(labels) and unique_send:
+                for label in ("Selection","Text"):
+                    exact_visible_label("policy-"+arm+"-dismissed",label,rows,frozen_geometry)
+                break
             if deadline-time.monotonic()<=0.1:
                 raise RuntimeError("Native Cancel did not visibly dismiss Text and return to Send")
             time.sleep(0.1); attempt+=1
@@ -372,8 +558,19 @@ def capture_observer_policy_phase():
             capture=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,text=True,stdin=subprocess.DEVNULL)
             deadline=time.monotonic()+460
             ready=set(); root_enter_time=None
+            geometry_sample=0
             while capture.poll() is None:
                 if time.monotonic()>=deadline: raise RuntimeError("Observer policy capture exceeded original bound")
+                # Detect WM movement between arms and during the unresolved
+                # observer, as well as around each saved native frame.
+                raw=bounded_run(deadline,"xdotool","getwindowgeometry","--shell",w[-1]).stdout
+                values=dict(line.split("=",1) for line in raw.splitlines() if "=" in line)
+                current={key:int(values[key]) for key in ("X","Y","WIDTH","HEIGHT","SCREEN")}
+                current["KEYBOARD_TOP"]=keyboard_top(execute=lambda *args: bounded_run(deadline,*args))
+                with (phase/"native-geometry-samples.jsonl").open("a") as samples:
+                    samples.write(json.dumps(dict(t=time.monotonic(),wall=time.time(),sample=geometry_sample,geometry=current))+"\n")
+                geometry_sample+=1
+                if current!=frozen_geometry: raise RuntimeError("WM changed policy geometry after freeze")
                 for arm in ("none","states"):
                     request=phase/("arm-request-"+arm)
                     if request.is_file() and arm not in ready:
@@ -527,26 +724,28 @@ app=subprocess.Popen([executable],stdin=subprocess.DEVNULL,stdout=open(out/"app.
 time.sleep(15)
 log("app",pid=app.pid,executable=executable,proc_exe=os.readlink(f"/proc/{app.pid}/exe"))
 (out/"initial-keyboard-settings.txt").write_text(run("gsettings","list-recursively","org.cinnamon.desktop.a11y.applications").stdout)
-# Maximize the actual app window through the window manager.
+# Locate the original process's actual app window before supported WM setup.
 w=run("xdotool","search","--onlyvisible","--name","LocalSend").stdout.splitlines()
 if not w: raise RuntimeError("LocalSend visible window absent")
-run("xdotool","windowactivate","--sync",w[-1]); run("xdotool","windowsize",w[-1],"1100","700")
+owned=[window for window in w if run("xdotool","getwindowpid",window).stdout.strip()==str(app.pid)
+       and run("xdotool","getwindowname",window).stdout.strip()=="LocalSend"]
+if len(owned)!=1: raise RuntimeError("Original LocalSend native window is ambiguous")
+w=owned
+run("xdotool","windowactivate","--sync",w[-1])
+initial_resize=run("xdotool","windowsize",w[-1],"1100","700")
+log("initial-wm-size-input",command=["xdotool","windowsize",w[-1],"1100","700"],returncode=initial_resize.returncode)
+if initial_resize.returncode!=0: raise RuntimeError("Original launch 1100x700 sizing failed")
+normalize_window("initial-viewport")
 time.sleep(3); snap("app-ready")
 click_word("Send","send"); time.sleep(2)
 text_case("keyboard-off")
 # Paste is a real application action, with clipboard content set by xclip.
 # The clipboard owner can outlive the driver; do not let it retain SSH output streams.
 subprocess.run(["xclip","-selection","clipboard"],input=b"Paste control issue2754",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+log("clipboard-input",case="keyboard-off",text="Paste control issue2754")
 click_word("Paste","paste-before"); time.sleep(3); snap("paste-result")
 # Clear the selection through its rendered close control before the next original Text trigger.
-rows=snap("paste-clear-before")
-selection=next(r for r in rows if r["text"].lower()=="selection")
-clear_x=int(selection["left"])+510
-clear_y=int(selection["top"])+int(selection["height"])//2
-log("clear-paste-ui",x=clear_x,y=clear_y)
-run("xdotool","mousemove",str(clear_x),str(clear_y),"click","1"); time.sleep(2)
-cleared=snap("paste-cleared")
-if not any(r["text"].lower()=="text" for r in cleared): raise RuntimeError("Paste selection was not cleared through UI")
+clear_paste("paste-clear")
 # Keep the same application process and graphical login while changing a supported UI setting.
 settings=subprocess.Popen(["cinnamon-settings","accessibility"],stdin=subprocess.DEVNULL,stdout=open(out/"accessibility.log","w"),stderr=subprocess.STDOUT)
 time.sleep(6); snap("accessibility-start")
@@ -565,15 +764,9 @@ picker_control("File","keyboard-on-file-control")
 picker_control("Folder","keyboard-on-folder-control")
 # Repeat Paste under the enabled keyboard, then remove its real selection.
 subprocess.run(["xclip","-selection","clipboard"],input=b"Paste enabled keyboard control",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+log("clipboard-input",case="keyboard-on",text="Paste enabled keyboard control")
 click_word("Paste","keyboard-on-paste-before"); time.sleep(3); snap("keyboard-on-paste-result")
-rows=snap("keyboard-on-paste-clear-before")
-selection=next(r for r in rows if r["text"].lower()=="selection")
-clear_x=int(selection["left"])+510
-clear_y=int(selection["top"])+int(selection["height"])//2
-log("clear-paste-ui",case="keyboard-on",x=clear_x,y=clear_y)
-run("xdotool","mousemove",str(clear_x),str(clear_y),"click","1"); time.sleep(2)
-cleared=snap("keyboard-on-paste-cleared")
-if not any(r["text"].lower()=="text" for r in cleared): raise RuntimeError("Keyboard-on Paste selection was not cleared")
+clear_paste("keyboard-on-paste-clear")
 text_case("keyboard-on-repeat")
 # Return the supported setting through the same UI, then repeat the original trigger.
 run("xdotool","windowactivate","--sync",wid); time.sleep(2)
