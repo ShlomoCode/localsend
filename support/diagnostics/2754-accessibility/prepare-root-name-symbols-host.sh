@@ -68,7 +68,7 @@ stage_package() {
 }
 
 stage_package atspi libatspi2.0-0t64-dbgsym 2.52.0-1build1 \
- https://ddebs.ubuntu.com/pool/main/a/at-spi2-core/libatspi2.0-0t64-dbgsym_2.52.0-1build1_amd64.ddeb \
+ https://launchpad.net/ubuntu/+source/at-spi2-core/2.52.0-1build1/+build/28034835/+files/libatspi2.0-0t64-dbgsym_2.52.0-1build1_amd64.ddeb \
  6be64cf137f649471785d44e373e4fba5f6e79598ebca9289f8c13f9e7d4c16b d53e3f4bf82655a42a0cb86c25416fd443ee76c6 \
  dc8d6f0039246a3dd5d5602d8bf2b5b2f2c0dd89c7f86d916ae2c040dcd1afd9 \
  /usr/lib/x86_64-linux-gnu/libatspi.so.0.0.1 4af877d2d235b7eaab015abe6d81b82c82fe506a5d71403b9bbdfcbce99e8141
@@ -88,23 +88,34 @@ if [[ -n $bridge_package ]]; then
  # The selected package directory is build/candidate; retained debug products
  # live in its sibling build/work, not in the installable candidate directory.
  bridge_archive=$bridge_package/../work/libatk-bridge2.0-0t64-dbgsym_2.52.0-1build1+localsend2754.1_amd64.ddeb
- if [[ -f $bridge_archive ]]; then
+ printf 'optional_bridge_status=archive-absent-or-symlink\n' > "$out/records/bridge-status.txt"
+ if [[ -f $bridge_archive && ! -L $bridge_archive ]]; then
+  printf 'optional_bridge_status=archive-qualification-incomplete\n' > "$out/records/bridge-status.txt"
+  bridge_bytes=$(stat -c %s "$bridge_archive")
+  printf '%s\n' "$bridge_bytes" > "$out/records/bridge-package-bytes.txt"
+  [[ $bridge_bytes =~ ^[0-9]+$ && $bridge_bytes -gt 0 && $bridge_bytes -le 33554432 ]]
   sha256sum "$bridge_archive" > "$out/records/bridge-package.sha256"
   dpkg-deb --info "$bridge_archive" > "$out/records/bridge-control.txt"
-  if [[ $(sha256sum "$bridge_archive" | awk '{print $1}') == 6649246a861cb349487376e7b672fa37d15902d3abef4632792a406f0765ec49 &&
-        $(dpkg-deb -f "$bridge_archive" Package) == libatk-bridge2.0-0t64-dbgsym &&
+  # Rebuilt archive metadata varies; retain its hash as provenance. Exact
+  # debug bytes/Build ID and the selected runtime bytes remain identity gates.
+  printf 'optional_bridge_status=control-mismatch-or-extraction-failed\n' > "$out/records/bridge-status.txt"
+  if [[ $(dpkg-deb -f "$bridge_archive" Package) == libatk-bridge2.0-0t64-dbgsym &&
         $(dpkg-deb -f "$bridge_archive" Version) == 2.52.0-1build1+localsend2754.1 &&
         $(dpkg-deb -f "$bridge_archive" Architecture) == amd64 ]] &&
      timeout --kill-after=2s 30s dpkg-deb -x "$bridge_archive" "$out/records/bridge-extracted"; then
    bridge_debug=$out/records/bridge-extracted/usr/lib/debug/.build-id/c8/8dc5ceb3f29cb6dfbeee30473e90e846e2e4d2.debug
+   printf 'optional_bridge_status=debug-file-absent\n' > "$out/records/bridge-status.txt"
    if [[ -f $bridge_debug ]]; then
+    printf 'optional_bridge_status=debug-identity-mismatch-or-inspection-failed\n' > "$out/records/bridge-status.txt"
     readelf -n "$bridge_debug" > "$out/records/bridge-debug-notes.txt"
     sha256sum "$bridge_debug" > "$out/records/bridge-debug.sha256"
     if [[ $(sha256sum "$bridge_debug" | awk '{print $1}') == c8f341752ed668ed6f022b728bbbb41f745b785f8acaed0c24f198c06dd9b91b &&
           $(awk '/Build ID:/ {print $3; exit}' "$out/records/bridge-debug-notes.txt") == c88dc5ceb3f29cb6dfbeee30473e90e846e2e4d2 ]]; then
      bridge_path=$(jq -er .bridge_path "$bridge_package/manifest.json")
      bridge_sha=$(jq -er .bridge_sha256 "$bridge_package/manifest.json")
-     [[ $bridge_path == /usr/lib/x86_64-linux-gnu/libatk-bridge-2.0.so.0.0.0 && $bridge_sha =~ ^[0-9a-f]{64}$ ]]
+     printf 'optional_bridge_status=selected-runtime-identity-incomplete\n' > "$out/records/bridge-status.txt"
+     [[ $bridge_path == /usr/lib/x86_64-linux-gnu/libatk-bridge-2.0.so.0.0.0 &&
+        $bridge_sha == a57454051a1c3ec2e43148cba6bb4ed550b18e9e106d7f83f81a466596e14297 ]]
      mkdir -p "$out/transfer/.build-id/c8"
      cp "$bridge_debug" "$out/transfer/.build-id/c8/8dc5ceb3f29cb6dfbeee30473e90e846e2e4d2.debug"
      printf 'libatk-bridge2.0-0t64-dbgsym\t2.52.0-1build1+localsend2754.1\t%s\t%s\tc88dc5ceb3f29cb6dfbeee30473e90e846e2e4d2\tc8f341752ed668ed6f022b728bbbb41f745b785f8acaed0c24f198c06dd9b91b\t.build-id/c8/8dc5ceb3f29cb6dfbeee30473e90e846e2e4d2.debug\t0\n' "$bridge_path" "$bridge_sha" >> "$manifest"
