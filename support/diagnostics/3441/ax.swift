@@ -118,7 +118,8 @@ if args.count > 2 && args[2] == "--enhance" {
     var settable = DarwinBoolean(false)
     let query = AXUIElementIsAttributeSettable(root, key, &settable)
     let result = query == .success && settable.boolValue ? AXUIElementSetAttributeValue(root, key, kCFBooleanTrue) : query
-    try emit(["pid": app.processIdentifier, "attribute": "AXEnhancedUserInterface", "before": before, "queryResult": query.rawValue, "settable": settable.boolValue, "attempted": query == .success && settable.boolValue, "setResult": result.rawValue, "after": attribute(root, "AXEnhancedUserInterface").map { String(describing: $0) } ?? "unavailable"])
+    let after = attribute(root, "AXEnhancedUserInterface").map { String(describing: $0) } ?? "unavailable"
+    try emit(["pid": app.processIdentifier, "attribute": "AXEnhancedUserInterface", "before": before, "queryResult": query.rawValue, "settable": settable.boolValue, "attempted": query == .success && settable.boolValue, "setResult": result.rawValue, "setSucceeded": query == .success && settable.boolValue && result == .success, "after": after, "observedAfterEnabled": after == "1", "scope": "Attribute observation and setter return are separate; an enabled observation does not turn a negative setter return into success"])
     exit(0)
 }
 if args.count == 2 {

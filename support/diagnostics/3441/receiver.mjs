@@ -7,6 +7,7 @@ import {relay} from "./transport/relay.mjs";
 const root=path.resolve("evidence/issue3441"),bundle=process.env.APP_BUNDLE;
 const destination=process.env.RECEIVER_DESTINATION;
 const ax=path.join(process.env.RUNNER_TEMP,"issue3441/ax");
+const tabs=Object.freeze({receive:"Receive\nTab 1 of 3",send:"Send\nTab 2 of 3",settings:"Settings\nTab 3 of 3"});
 let screenIndex, bridge, active;
 const events=[];
 const owned=[];
@@ -27,7 +28,8 @@ export function snapshot(label){
 export function press(label){const result=execFileSync(ax,[bundle,label],{encoding:"utf8",timeout:10000});log("AXPress",{label,result:result.trim()});}
 function hasLabel(tree,label){return tree.elements.some(e=>[e.AXTitle,e.AXDescription,e.AXValue].includes(label));}
 function assertMainReceive(tree){
- if(!tree.pid||!tree.elements.some(e=>e.AXRole==="AXWindow")||!hasLabel(tree,"Receive")||!hasLabel(tree,"Send")||!hasLabel(tree,"Receive via link"))throw Error("Actual app Receive page/window not exposed by semantic backend");
+ const exactTabs=Object.values(tabs).every(label=>tree.elements.filter(e=>e.AXRole==="AXButton"&&e.AXEnabled==="1"&&[e.AXTitle,e.AXDescription,e.AXValue].includes(label)).length===1);
+ if(!tree.pid||!tree.elements.some(e=>e.AXRole==="AXWindow")||!exactTabs||!hasLabel(tree,"Receive via link"))throw Error("Actual app Receive page/window with exact observed qualified navigation buttons not exposed by semantic backend");
 }
 function recording(name){
  const stderr=[];
@@ -67,8 +69,8 @@ export async function ready(){
  if(permission.pressed){await delay(1500);snapshot("first-launch-after-permission");}
  const initial=snapshot("before-semantic-enablement");
  if(!hasLabel(initial,"Receive via link")){
-   writeFileSync(root+"/enhanced-accessibility.json",execFileSync(ax,[bundle,"--enhance"],{timeout:10000}));
-   log("query-and-enable-settable-AXEnhancedUserInterface");await delay(1500);snapshot("after-semantic-enablement");
+   const probe=JSON.parse(execFileSync(ax,[bundle,"--enhance"],{timeout:10000}));writeFileSync(root+"/enhanced-accessibility.json",JSON.stringify(probe,null,2));
+   log("AXEnhancedUserInterface-probe",probe);await delay(1500);snapshot("after-semantic-enablement");
  }
  let tree, lastError;
  let mainReady=false;
@@ -84,14 +86,14 @@ export async function ready(){
  writeFileSync(root+"/capture-devices.txt",listing);const match=listing.match(/\[(\d+)\] Capture screen 0/);if(!match)throw Error("No AVFoundation screen capture device");screenIndex=match[1];
  const control=recording("readiness-continuous");
  try{
-   await delay(1500);snapshot("readiness-before-send");press("Send");await delay(1500);
+   await delay(1500);snapshot("readiness-before-send");press(tabs.send);await delay(1500);
    const send=snapshot("readiness-send");if(send.pid!==tree.pid||!hasLabel(send,"Selection")||!hasLabel(send,"File"))throw Error("Send AXPress did not reach actual Send selection page");
-   press("Receive");await delay(1500);const receive=snapshot("readiness-after-receive");assertMainReceive(receive);if(receive.pid!==tree.pid)throw Error("App process changed during navigation");
+   press(tabs.receive);await delay(1500);const receive=snapshot("readiness-after-receive");assertMainReceive(receive);if(receive.pid!==tree.pid)throw Error("App process changed during navigation");
    await delay(1500);
  }finally{await control.stop();}
  execFileSync("ffmpeg",["-v","error","-i",root+"/readiness-continuous.mp4","-f","null","-"],{stdio:"inherit"});
  execFileSync("codesign",["--verify","--deep","--strict","/Applications/LocalSend.app"],{stdio:"inherit"});
- writeFileSync(root+"/readiness.json",JSON.stringify({status:"ready",bundle,pid:tree.pid,destination,app:"unmodified official 1.18.2 DMG",portableProfile:false,screenIndex,mainReceive:true,sendSelection:true,actualAXPress:["Send","Receive"],proof:"Native app navigation, semantic assertions and continuous capture; raw pixels still require inspection and no app transfer yet"},null,2));
+ writeFileSync(root+"/readiness.json",JSON.stringify({status:"ready",bundle,pid:tree.pid,destination,app:"unmodified official 1.18.2 DMG",portableProfile:false,screenIndex,mainReceive:true,sendSelection:true,actualAXPress:[tabs.send,tabs.receive],proof:"Native app navigation, semantic assertions and continuous capture; raw pixels still require inspection and no app transfer yet"},null,2));
 }
 export async function startRelay(){if(!process.env.RELAY_TOKEN)throw Error("Missing private relay token");bridge=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:"stream"});await bridge.start();log("relay-start",{httpPort:8080,reverseTargetPort:53317,androidPort:53318,transport:"stream"});}
 export async function startCase(name){
