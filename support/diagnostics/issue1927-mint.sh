@@ -102,6 +102,10 @@ start_xres_control initial
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user --noninteractive -y flathub org.freedesktop.Platform/x86_64/26.08
 flatpak install --user --noninteractive -y ./baseline.flatpak
+EXPECTED_APP_COMMIT=$(flatpak info --user --show-commit org.localsend.localsend_app)
+[[ "$EXPECTED_APP_COMMIT" =~ ^[0-9a-f]{64}$ ]]
+printf '%s\n' "$EXPECTED_APP_COMMIT" > evidence/baseline-installed-app-commit.txt
+export EXPECTED_APP_COMMIT
 { dpkg-query -W '*xdg-desktop-portal*'; flatpak remote-info --user --log flathub org.localsend.localsend_app; } > evidence/portal-and-package-history.txt 2>&1
 gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop > evidence/portal-host-introspection.txt 2>&1 || true
 flatpak run --user --command=sh org.localsend.localsend_app -c 'command -v gdbus; gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop' > evidence/portal-sandbox-introspection.txt 2>&1 || true
@@ -150,6 +154,10 @@ flatpak override --user --reset org.localsend.localsend_app
 flatpak uninstall --user --delete-data --noninteractive -y org.localsend.localsend_app
 rm -f "$HOME/.config/autostart/localsend_app.desktop" "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 flatpak install --user --noninteractive -y ./candidate.flatpak
+EXPECTED_APP_COMMIT=$(flatpak info --user --show-commit org.localsend.localsend_app)
+[[ "$EXPECTED_APP_COMMIT" =~ ^[0-9a-f]{64}$ ]]
+printf '%s\n' "$EXPECTED_APP_COMMIT" > evidence/candidate-installed-app-commit.txt
+export EXPECTED_APP_COMMIT
 flatpak override --user --show org.localsend.localsend_app > evidence/candidate-overrides.txt
 source /home/mint/portal-gui.sh
 GUEST

@@ -228,53 +228,112 @@ identity_command() {
   printf 'stage=%s exit=%s\n' "$stage" "$result" >> "$OUT/$identity_label-identity-observer.txt"
   return "$result"
 }
+candidate_identity_unchanged() {
+  # Caller locals bind this bounded check to one row/PID observation.
+  local after_inode after_pid_namespace after_mount_namespace
+  identity_command "start-$instance-$anchor-$pid" sudo -n cat "/proc/$pid/stat" > "$OUT/$evidence_prefix-stat.txt" || return 1
+  ticks=$(identity_command "start-field-$instance-$anchor-$pid" awk '{sub(/^.*\) /,""); print $20}' "$OUT/$evidence_prefix-stat.txt") || return 1
+  [[ "$ticks" =~ ^[0-9]+$ ]] && [ "$ticks" = "$before_ticks" ] || return 1
+  after_inode=$(identity_command "exe-inode-after-$instance-$anchor-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/exe") || return 1
+  after_pid_namespace=$(identity_command "pid-namespace-after-$instance-$anchor-$pid" sudo -n readlink "/proc/$pid/ns/pid") || return 1
+  after_mount_namespace=$(identity_command "mount-namespace-after-$instance-$anchor-$pid" sudo -n readlink "/proc/$pid/ns/mnt") || return 1
+  printf 'start=%s executable_inode=%s pid_namespace=%s mount_namespace=%s\n' "$ticks" "$after_inode" "$after_pid_namespace" "$after_mount_namespace" > "$OUT/$evidence_prefix-identity-after.txt"
+  [ "$after_inode" = "$actual" ] && [ "$after_pid_namespace" = "$pid_namespace" ] && [ "$after_mount_namespace" = "$mount_namespace" ]
+}
 qualified_app_pid() {
   # Flatpak ps reports the supervisor, not the executable leaf. Resolve the
-  # unique descendant by UID, executable inode and exact sandbox identity.
+  # unique actual app leaf across ALL app-ID rows, including nested sandboxes.
   local identity_label=$1 transition_deadline=$((SECONDS+12)) uid rows instance anchor descendants pid actual expected status info ticks before_ticks gtk_path found=''
+  local qualified_count=0 qualified_tokens='' token row_count=0 row_qualified result evidence_prefix pid_namespace mount_namespace
+  [[ "${EXPECTED_APP_COMMIT:-}" =~ ^[0-9a-f]{64}$ ]] || return 1
   uid=$(id -u) || return 1
   identity_command instances flatpak ps --columns=instance,application,pid > "$OUT/$identity_label-instances.txt" || return 1
   identity_command topology ps -u "$uid" -o pid=,ppid=,uid=,comm= > "$OUT/$identity_label-topology.txt" || return 1
   rows=$(identity_command instance-filter awk '$2=="org.localsend.localsend_app" {print $1,$3}' "$OUT/$identity_label-instances.txt") || return 1
-  [[ "$rows" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
-  read -r instance anchor <<< "$rows"
-  descendants=$(identity_command descendants awk -v anchor="$anchor" '
-    {parent[$1]=$2} END {for(pid in parent){p=pid; for(n=0;n<1024 && p in parent;n++){if(p==anchor){print pid;break}p=parent[p]}}}
-  ' "$OUT/$identity_label-topology.txt") || return 1
-  for pid in $descendants; do
-    identity_command "start-before-$pid" sudo -n cat "/proc/$pid/stat" > "$OUT/$identity_label-$pid-stat-before.txt" || continue
-    before_ticks=$(identity_command "start-before-field-$pid" awk '{sub(/^.*\) /,""); print $20}' "$OUT/$identity_label-$pid-stat-before.txt") || continue
-    [[ "$before_ticks" =~ ^[0-9]+$ ]] || return 1
-    status="$OUT/$identity_label-$pid-status.txt"
-    identity_command "status-$pid" sudo -n cat "/proc/$pid/status" > "$status" || continue
-    identity_command "cgroup-$pid" sudo -n cat "/proc/$pid/cgroup" > "$OUT/$identity_label-$pid-cgroup.txt" || continue
-    identity_command "exe-$pid" sudo -n readlink "/proc/$pid/exe" > "$OUT/$identity_label-$pid-exe.txt" || continue
-    actual=$(identity_command "exe-inode-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/exe") || continue
-    expected=$(identity_command "app-inode-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/root/app/localsend_app") || continue
-    printf 'pid=%s executable_inode=%s expected_inode=%s\n' "$pid" "$actual" "$expected" >> "$OUT/$identity_label-identity-observer.txt"
-    [ "$actual" = "$expected" ] || continue
-    identity_command "maps-$pid" sudo -n cat "/proc/$pid/maps" > "$OUT/$identity_label-$pid-maps.txt" || return 1
-    gtk_path=$(identity_command "gtk-path-$pid" awk '$NF~/\/libgtk-3\.so\./ {paths[$NF]=1} END {for(path in paths) print path}' "$OUT/$identity_label-$pid-maps.txt") || return 1
-    [[ "$gtk_path" = /* && "$gtk_path" != *$'\n'* ]] || return 1
-    identity_command "gtk-hash-$pid" sudo -n sha256sum "/proc/$pid/root$gtk_path" > "$OUT/$identity_label-$pid-gtk-sha256.txt" || return 1
-    identity_command "gtk-build-id-$pid" sudo -n readelf -n "/proc/$pid/root$gtk_path" > "$OUT/$identity_label-$pid-gtk-build-id.txt" || return 1
-    info="$OUT/$identity_label-$pid-flatpak-info.txt"
-    identity_command "sandbox-$pid" sudo -n cat "/proc/$pid/root/.flatpak-info" > "$info" || return 1
-    identity_command "uid-$pid" awk -v uid="$uid" '/^Uid:/ {matched=($2==uid && $3==uid && $4==uid && $5==uid)} END {exit !matched}' "$status" || return 1
-    identity_command "sandbox-match-$pid" awk -v instance="$instance" '
-      /^\[/ {section=$0} section=="[Application]" && $0=="name=org.localsend.localsend_app" {app=1}
-      section=="[Instance]" && $0=="instance-id=" instance {matched=1} END {exit !(app && matched)}
-    ' "$info" || return 1
-    identity_command "start-$pid" sudo -n cat "/proc/$pid/stat" > "$OUT/$identity_label-$pid-stat.txt" || return 1
-    ticks=$(identity_command "start-field-$pid" awk '{sub(/^.*\) /,""); print $20}' "$OUT/$identity_label-$pid-stat.txt") || return 1
-    [[ "$ticks" =~ ^[0-9]+$ ]] || return 1
-    [ "$ticks" = "$before_ticks" ] || return 1
-    [ -z "$found" ] || return 1
-    found=$pid
-    printf '%s\n' "$actual" > "$OUT/$identity_label-executable-identity.txt"
-    printf '%s %s %s %s\n' "$instance" "$anchor" "$pid" "$ticks" > "$OUT/$identity_label-process-identity.txt"
-  done
-  [ -n "$found" ] && [ "$SECONDS" -lt "$transition_deadline" ] || return 1
+  [ -n "$rows" ] || return 1
+  while read -r instance anchor; do
+    [[ "$instance" =~ ^[0-9]+$ && "$anchor" =~ ^[0-9]+$ ]] || return 1
+    row_count=$((row_count+1))
+    row_qualified=0
+    printf 'instance=%s anchor=%s examining-all-descendants\n' "$instance" "$anchor" >> "$OUT/$identity_label-instance-selection.txt"
+    descendants=$(identity_command "descendants-$instance" awk -v anchor="$anchor" '
+      {parent[$1]=$2} END {for(pid in parent){p=pid; for(n=0;n<1024 && p in parent;n++){if(p==anchor){print pid;break}p=parent[p]}}}
+    ' "$OUT/$identity_label-topology.txt") || return 1
+    if [ -z "$descendants" ]; then
+      printf 'instance=%s anchor=%s inconclusive=no-observed-descendants\n' "$instance" "$anchor" >> "$OUT/$identity_label-instance-selection.txt"
+      return 1
+    fi
+    for pid in $descendants; do
+      evidence_prefix="$identity_label-instance-$instance-anchor-$anchor-$pid"
+      # Observer failures are UNKNOWN and stop; they cannot hide another app leaf.
+      identity_command "start-before-$instance-$anchor-$pid" sudo -n cat "/proc/$pid/stat" > "$OUT/$evidence_prefix-stat-before.txt" || return 1
+      before_ticks=$(identity_command "start-before-field-$instance-$anchor-$pid" awk '{sub(/^.*\) /,""); print $20}' "$OUT/$evidence_prefix-stat-before.txt") || return 1
+      [[ "$before_ticks" =~ ^[0-9]+$ ]] || return 1
+      status="$OUT/$evidence_prefix-status.txt"
+      identity_command "status-$instance-$anchor-$pid" sudo -n cat "/proc/$pid/status" > "$status" || return 1
+      identity_command "cgroup-$instance-$anchor-$pid" sudo -n cat "/proc/$pid/cgroup" > "$OUT/$evidence_prefix-cgroup.txt" || return 1
+      identity_command "exe-$instance-$anchor-$pid" sudo -n readlink "/proc/$pid/exe" > "$OUT/$evidence_prefix-exe.txt" || return 1
+      actual=$(identity_command "exe-inode-$instance-$anchor-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/exe") || return 1
+      pid_namespace=$(identity_command "pid-namespace-$instance-$anchor-$pid" sudo -n readlink "/proc/$pid/ns/pid") || return 1
+      mount_namespace=$(identity_command "mount-namespace-$instance-$anchor-$pid" sudo -n readlink "/proc/$pid/ns/mnt") || return 1
+      printf 'pid=%s pid_namespace=%s mount_namespace=%s\n' "$pid" "$pid_namespace" "$mount_namespace" > "$OUT/$evidence_prefix-namespaces.txt"
+      result=0
+      expected=$(identity_command "app-inode-$instance-$anchor-$pid" sudo -n stat -Lc '%d:%i' "/proc/$pid/root/app/localsend_app") || result=$?
+      if [ "$result" != 0 ]; then
+        # Host supervisor roots have no /app. Prove absence; any other error stops.
+        [ "$result" = 1 ] || return 1
+        identity_command "sandbox-root-present-$instance-$anchor-$pid" sudo -n test -d "/proc/$pid/root" || return 1
+        identity_command "app-path-absent-$instance-$anchor-$pid" sudo -n test ! -e "/proc/$pid/root/app/localsend_app" || return 1
+        candidate_identity_unchanged || return 1
+        printf 'instance=%s anchor=%s pid=%s rejected=sandbox-app-path-absent actual_inode=%s\n' "$instance" "$anchor" "$pid" "$actual" >> "$OUT/$identity_label-instance-selection.txt"
+        continue
+      fi
+      printf 'pid=%s executable_inode=%s expected_inode=%s\n' "$pid" "$actual" "$expected" >> "$OUT/$identity_label-identity-observer.txt"
+      if [ "$actual" != "$expected" ]; then
+        candidate_identity_unchanged || return 1
+        printf 'instance=%s anchor=%s pid=%s rejected=executable-inode-mismatch actual=%s expected=%s\n' "$instance" "$anchor" "$pid" "$actual" "$expected" >> "$OUT/$identity_label-instance-selection.txt"
+        continue
+      fi
+      identity_command "maps-$instance-$anchor-$pid" sudo -n cat "/proc/$pid/maps" > "$OUT/$evidence_prefix-maps.txt" || return 1
+      gtk_path=$(identity_command "gtk-path-$instance-$anchor-$pid" awk '$NF~/\/libgtk-3\.so\./ {paths[$NF]=1} END {for(path in paths) print path}' "$OUT/$evidence_prefix-maps.txt") || return 1
+      [[ "$gtk_path" = /* && "$gtk_path" != *$'\n'* ]] || return 1
+      identity_command "gtk-hash-$instance-$anchor-$pid" sudo -n sha256sum "/proc/$pid/root$gtk_path" > "$OUT/$evidence_prefix-gtk-sha256.txt" || return 1
+      identity_command "gtk-build-id-$instance-$anchor-$pid" sudo -n readelf -n "/proc/$pid/root$gtk_path" > "$OUT/$evidence_prefix-gtk-build-id.txt" || return 1
+      info="$OUT/$evidence_prefix-flatpak-info.txt"
+      identity_command "sandbox-$instance-$anchor-$pid" sudo -n cat "/proc/$pid/root/.flatpak-info" > "$info" || return 1
+      identity_command "uid-$instance-$anchor-$pid" awk -v uid="$uid" '/^Uid:/ {matched=($2==uid && $3==uid && $4==uid && $5==uid)} END {exit !matched}' "$status" || return 1
+      result=0
+      identity_command "sandbox-match-$instance-$anchor-$pid" awk -v instance="$instance" -v commit="$EXPECTED_APP_COMMIT" '
+        /^\[/ {section=$0} section=="[Application]" && $0=="name=org.localsend.localsend_app" {app=1}
+        section=="[Instance]" && $0=="instance-id=" instance {matched=1}
+        section=="[Instance]" && $0=="app-commit=" commit {immutable=1} END {exit !(app && matched && immutable)}
+      ' "$info" || result=$?
+      if [ "$result" != 0 ]; then
+        [ "$result" = 1 ] || return 1
+        candidate_identity_unchanged || return 1
+        printf 'instance=%s anchor=%s pid=%s rejected=own-sandbox-instance-or-commit-mismatch expected_commit=%s\n' "$instance" "$anchor" "$pid" "$EXPECTED_APP_COMMIT" >> "$OUT/$identity_label-instance-selection.txt"
+        continue
+      fi
+      candidate_identity_unchanged || return 1
+      row_qualified=1
+      token="$pid:$ticks"
+      case " $qualified_tokens " in
+        *" $token "*) printf 'instance=%s pid=%s qualified=same-leaf-already-counted start=%s\n' "$instance" "$pid" "$ticks" >> "$OUT/$identity_label-instance-selection.txt";;
+        *)
+          qualified_tokens="$qualified_tokens $token"
+          qualified_count=$((qualified_count+1))
+          printf 'instance=%s anchor=%s pid=%s qualified=immutable-app-leaf start=%s commit=%s\n' "$instance" "$anchor" "$pid" "$ticks" "$EXPECTED_APP_COMMIT" >> "$OUT/$identity_label-instance-selection.txt"
+          if [ "$qualified_count" = 1 ]; then
+            found=$pid
+            printf '%s\n' "$actual" > "$OUT/$identity_label-executable-identity.txt"
+            printf '%s %s %s %s\n' "$instance" "$anchor" "$pid" "$ticks" > "$OUT/$identity_label-process-identity.txt"
+          fi;;
+      esac
+    done
+    printf 'instance=%s qualified_leaf=%s\n' "$instance" "$row_qualified" >> "$OUT/$identity_label-instance-selection.txt"
+  done <<< "$rows"
+  printf 'examined_rows=%s unique_qualified_leaves=%s\n' "$row_count" "$qualified_count" >> "$OUT/$identity_label-instance-selection.txt"
+  [ "$qualified_count" = 1 ] && [ -n "$found" ] && [ "$SECONDS" -lt "$transition_deadline" ] || return 1
   printf '%s\n' "$found"
 }
 xres_host_namespace() {
