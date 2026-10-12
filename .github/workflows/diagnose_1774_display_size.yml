@@ -1,0 +1,57 @@
+name: Issue 1774 ordinary display size
+on:
+  push:
+    branches:
+      - codex/diagnose-1774-display-size
+permissions:
+  contents: read
+concurrency:
+  group: issue1774-owned-diagnostic
+  cancel-in-progress: false
+jobs:
+  original-display-size:
+    if: github.repository == 'ShlomoCode/localsend' && contains(github.event.head_commit.message, '[issue1774-admitted]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ISSUE1774_ADMITTED: '1'
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      EVIDENCE_DIR: evidence/issue1774
+      BASELINE_RECEIPT: support/diagnostics/1774/original-apk-binding.json
+      FIXTURE_PATH: support/diagnostics/1774/fixture.png
+      COORDINATOR_ADMISSION_FILE: evidence/issue1774/coordinator-admission-input.json
+      COORDINATOR_ADMISSION_JSON: ${{ vars.ISSUE1774_ADMISSION }}
+    steps:
+      - name: Set hard deadline before preparation
+        run: |
+          printf 'ISSUE1774_JOB_DEADLINE_UTC=%s\n' "$(date -u -d '+20 minutes' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require existing recording tools and resolve exact unchanged upload
+        timeout-minutes: 1
+        run: |
+          command -v ffmpeg
+          command -v ffprobe
+          node support/diagnostics/1774/prepare.mjs
+      - name: One ordinary native file and default to maximum screen zoom scenario
+        timeout-minutes: 13
+        run: node support/diagnostics/1774/controller.mjs
+      - name: Independently restore and delete only exact owned session
+        if: always()
+        timeout-minutes: 2
+        run: node support/diagnostics/1774/cleanup.mjs
+      - name: Retain exact owned provider original video and logs
+        if: always()
+        timeout-minutes: 3
+        run: node support/diagnostics/1774/retain.mjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        timeout-minutes: 4
+        with:
+          name: issue1774-display-size-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/issue1774/
+          compression-level: 0
+          if-no-files-found: warn
