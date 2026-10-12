@@ -13,7 +13,7 @@ $allProcesses | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, 
 # Freeze only this scenario's tracked descendant tree before media validation.
 $ownedIds = [System.Collections.Generic.HashSet[int]]::new()
 $oldestOwnedStart = [DateTime]::UtcNow
-foreach ($recordFile in @("owned-worker.json", "owned-installer.json", "owned-tools.json")) {
+foreach ($recordFile in @("owned-worker.json", "owned-installer.json", "owned-tools.json", "owned-ffmpeg-version.json", "owned-ffprobe-version.json")) {
     $recordPath = Join-Path $Evidence $recordFile
     if (-not (Test-Path $recordPath)) { continue }
     $record = Get-Content $recordPath -Raw | ConvertFrom-Json
@@ -47,9 +47,46 @@ function Invoke-RetainedMediaTool($Tool, $Arguments, $Prefix, $Timeout = 5) {
         "NOT_RUN: retention deadline" | Set-Content "$Prefix-status.txt"
         return
     }
-    $p = Start-Process $Tool -ArgumentList $Arguments -PassThru -NoNewWindow -RedirectStandardError "$Prefix-stderr-original.txt" -RedirectStandardOutput "$Prefix-stdout-original.txt"
-    if (-not $p.WaitForExit($Timeout * 1000)) { $p.Kill(); "TIMEOUT" | Set-Content "$Prefix-status.txt" }
-    else { "ExitCode=$($p.ExitCode)" | Set-Content "$Prefix-status.txt" }
+    $receipt = [ordered]@{ ExpectedPath = $null; ActualPath = $null; Pid = $null; StartUtc = $null;
+        HandleAcquired = $false; HandleValue = $null; WaitBoolean = $null; HasExited = $null;
+        ExitCodeIsNull = $true; ExitCodeType = $null; ExitCodeValue = $null; Status = "UNKNOWN"; Errors = @() }
+    $p = $null
+    try {
+        $receipt.ExpectedPath = (Get-Command $Tool -ErrorAction Stop).Source
+        $p = Start-Process $receipt.ExpectedPath -ArgumentList $Arguments -PassThru -NoNewWindow -RedirectStandardError "$Prefix-stderr-original.txt" -RedirectStandardOutput "$Prefix-stdout-original.txt" -ErrorAction Stop
+        # Cache the original Process handle immediately, before identity queries or waiting.
+        $cachedHandle = $p.Handle
+        $receipt.HandleValue = $cachedHandle.ToInt64()
+        $receipt.HandleAcquired = $cachedHandle -ne [IntPtr]::Zero
+        $receipt.Pid = $p.Id; $receipt.StartUtc = $p.StartTime.ToUniversalTime().ToString("o"); $receipt.ActualPath = $p.Path
+        $receipt | ConvertTo-Json -Depth 5 | Set-Content "$Prefix-process-exit.json"
+        if ($receipt.HandleAcquired) { $receipt.WaitBoolean = $p.WaitForExit($Timeout * 1000) }
+        else { $receipt.Errors += "Process handle unavailable; exit status unknown" }
+    } catch { $receipt.Errors += "Launch/handle/identity/wait: $_" }
+    if ($p) {
+        try { $receipt.HasExited = $p.HasExited } catch { $receipt.Errors += "HasExited: $_" }
+        try {
+            $code = $p.ExitCode
+            $receipt.ExitCodeIsNull = $null -eq $code
+            if ($null -ne $code) { $receipt.ExitCodeType = $code.GetType().FullName; $receipt.ExitCodeValue = $code }
+        } catch { $receipt.Errors += "ExitCode: $_" }
+    }
+    if ($receipt.HandleAcquired -and $receipt.WaitBoolean -eq $true -and $receipt.HasExited -eq $true -and
+        -not $receipt.ExitCodeIsNull -and $receipt.ExitCodeType -eq "System.Int32") {
+        $receipt.Status = if ($receipt.ExitCodeValue -eq 0) { "EXIT_ZERO" } else { "EXIT_NONZERO" }
+    } elseif ($receipt.WaitBoolean -eq $false -and $receipt.HasExited -eq $false) { $receipt.Status = "TIMED_OUT" }
+    $receipt | ConvertTo-Json -Depth 5 | Set-Content "$Prefix-process-exit.json"
+    switch ($receipt.Status) {
+        "EXIT_ZERO" { "ExitCode=0" | Set-Content "$Prefix-status.txt" }
+        "EXIT_NONZERO" { "ExitCode=$($receipt.ExitCodeValue)" | Set-Content "$Prefix-status.txt" }
+        "TIMED_OUT" { "TIMEOUT" | Set-Content "$Prefix-status.txt"; $p.Kill() }
+        default {
+            "ENV_BLOCK: process exit status unknown" | Set-Content "$Prefix-status.txt"
+            if ($p -and $receipt.HasExited -eq $false) {
+                try { $p.Kill() } catch { "Unknown observer cleanup: $_" | Add-Content "$Prefix-status.txt" }
+            }
+        }
+    }
 }
 # Capture decode errors verbatim and one original frame. No edited/accelerated videos.
 if ((Get-Command ffmpeg.exe -ErrorAction SilentlyContinue) -and (Get-Command ffprobe.exe -ErrorAction SilentlyContinue)) {
