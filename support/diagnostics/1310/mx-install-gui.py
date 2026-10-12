@@ -190,7 +190,7 @@ def button(rows, name):
 
 
 def toggle(rows, name, wanted):
-    node = unique(named(rows, name), name)
+    node = unique(named(rows, name, ['check box', 'radio button']), name)
     if state(node, at.STATE_CHECKED) != wanted:
         click(node, 'set ' + name + ' ' + str(wanted))
     if state(node, at.STATE_CHECKED) != wanted:
