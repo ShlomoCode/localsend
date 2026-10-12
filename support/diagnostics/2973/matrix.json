@@ -1,0 +1,13 @@
+{
+  "purpose": "Fill only from actual native screenshot/source observations after preflight; keep six-condition experiment plan",
+  "originalSettingsIdentity": "REPLACE_WITH_CAPTURED_DEVICE_SETTINGS_AND_RANGES",
+  "steps": [
+    { "mode": "tap", "args": ["REPLACE_WITH_OBSERVED_SEND_X", "REPLACE_WITH_OBSERVED_SEND_Y"] },
+    { "mode": "tap", "args": ["REPLACE_WITH_OBSERVED_APPS_X", "REPLACE_WITH_OBSERVED_APPS_Y"] }
+  ],
+  "restore": [
+    { "mode": "tap", "args": ["REPLACE_WITH_OBSERVED_ORIGINAL_SETTINGS_UI_X", "REPLACE_WITH_OBSERVED_ORIGINAL_SETTINGS_UI_Y"] },
+    { "mode": "snapshot", "args": ["restore-original-font"], "expectedSourceIncludes": ["REPLACE_WITH_ORIGINAL_NATIVE_FONT_SETTING_VALUE"] },
+    { "mode": "snapshot", "args": ["restore-original-display"], "expectedSourceIncludes": ["REPLACE_WITH_ORIGINAL_NATIVE_DISPLAY_SETTING_VALUE"] }
+  ]
+}

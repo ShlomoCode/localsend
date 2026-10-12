@@ -1,0 +1,7 @@
+{
+  "purpose": "Infrastructure and untouched original-app observation only; no product reproduction verdict",
+  "steps": [
+    { "mode": "snapshot", "args": ["preflight-original"] }
+  ],
+  "restore": []
+}

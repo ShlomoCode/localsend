@@ -1,0 +1,18 @@
+{
+  "capabilities": {
+    "alwaysMatch": {
+      "platformName": "Android",
+      "appium:automationName": "UiAutomator2",
+      "appium:app": "REPLACE_WITH_UNMODIFIED_OFFICIAL_RELEASE_APP_UPLOAD_ID",
+      "bstack:options": {
+        "deviceName": "Samsung Galaxy S24",
+        "osVersion": "16.0",
+        "projectName": "LocalSend bug sprint",
+        "buildName": "2973-original-picker",
+        "sessionName": "2973-S24-substitute-original-control",
+        "video": true,
+        "debug": true
+      }
+    }
+  }
+}
