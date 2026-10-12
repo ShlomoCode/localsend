@@ -190,9 +190,25 @@ if (process.argv.includes('--cleanup')) {
     await save('session.private.json', { id: sid, name: ownName, capabilities: safeCaps, deadline: new Date(deadline).toISOString() });
     let source = await capture('startup');
     if (/XCUIElementTypeAlert\b/.test(source)) {
-      if (!source.includes('LocalSend') || !source.includes('devices on your local network')) throw new Error('Unexpected startup alert');
-      await click(await button('Allow'));
-      source = await capture('startup-local-network-allowed');
+      const title = 'Allow “LocalSend” to find devices on local networks?';
+      const alerts = [...source.matchAll(/<XCUIElementTypeAlert\b[^>]*>[\s\S]*?<\/XCUIElementTypeAlert>/g)];
+      const application = source.match(/<XCUIElementTypeApplication\b[^>]*>/)?.[0] || '';
+      if (!/bundleId="com\.apple\.springboard"/.test(application) || alerts.length !== 1 ||
+        !alerts[0][0].includes(`label="${title}"`) || !alerts[0][0].includes('The app uses the local network to find and connect to nearby devices.')) throw new Error('Unexpected startup alert');
+      const alert = await single(`type == 'XCUIElementTypeAlert' AND label == '${title}' AND visible == 1`);
+      const allow = await wd(`/element/${alert}/elements`, 'POST', {
+        using: '-ios predicate string', value: `type == 'XCUIElementTypeButton' AND label == 'Allow' AND enabled == 1 AND visible == 1`,
+      });
+      if (allow.length !== 1) throw new Error('Expected exactly one Allow button inside the owned local-network alert');
+      await click(eid(allow[0])); // One mutation only; subsequent readiness observations never replay it.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        source = await capture(`startup-local-network-allowed-${attempt}`);
+        const root = source.match(/<XCUIElementTypeApplication\b[^>]*>/)?.[0] || '';
+        if (!/XCUIElementTypeAlert\b/.test(source) && /bundleId="org\.localsend\.localsendApp"/.test(root) && /(?:name|label)="LocalSend"/.test(root)) break;
+        if (/XCUIElementTypeAlert\b/.test(source) && !source.includes(`label="${title}"`)) throw new Error('Unexpected alert after local-network permission');
+        if (attempt === 3) throw new Error('Local-network alert disappearance and owned app readiness not confirmed');
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
     const application = source.match(/<XCUIElementTypeApplication\b[^>]*>/)?.[0];
     if (!application || !/bundleId="org\.localsend\.localsendApp"/.test(application) || !/(?:name|label)="LocalSend"/.test(application)) throw new Error('Owned LocalSend application not confirmed');
