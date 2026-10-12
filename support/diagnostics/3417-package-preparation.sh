@@ -157,10 +157,13 @@ apt-get -o APT::Update::Error-Mode=any -o Acquire::AllowInsecureRepositories=fal
 apt-get -o APT::Get::IndexTargets::Format= indextargets > "$out/index-targets.txt"
 cp /var/lib/apt/lists/*InRelease "$out/raw/"
 for suite in noble noble-updates noble-security; do
-  mapfile -t signed < <(find "$out/raw" -maxdepth 1 -type f -name "*_dists_${suite}_InRelease")
-  test "${#signed[@]}" = 1
+  # APT retains ordinary SHADOWED metadata alongside the selected snapshot.
+  # Keep all raw records, but authenticate this exact selected snapshot file.
+  signed="$out/raw/snapshot.ubuntu.com_ubuntu_20260726T000000Z_dists_${suite}_InRelease"
+  test -f "$signed" && test ! -L "$signed"
+  printf 'SELECTED_INRELEASE=%s\n' "$signed"
   gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
-    --output "$out/verified/$suite.Release" "${signed[0]}" > "$out/verified/$suite.gpgv.txt" 2>&1
+    --output "$out/verified/$suite.Release" "$signed" > "$out/verified/$suite.gpgv.txt" 2>&1
 done
 python3 - <<'PY'
 import hashlib, json, pathlib, re, subprocess
@@ -177,23 +180,52 @@ for suite in ('noble','noble-updates','noble-security'):
             checksums[name] = (sha, int(size))
     if not checksums: raise ValueError('No authenticated Release SHA256 records')
     releases[suite] = checksums
-receipts = []; combined = bytearray(); seen = set()
+receipts = []; shadows = []; combined = bytearray(); seen = set(); shadow_seen = set()
 for block in (out/'index-targets.txt').read_text().split('\n\n'):
-    fields = {}
+    fields = {}; field = None
     for line in block.splitlines():
+        if not line.strip(): continue
+        if line.startswith((' ', '\t')):
+            if field is None: raise ValueError('Index continuation without field')
+            fields[field] += '\n'+line
+            continue
         key, sep, value = line.partition(':')
-        if sep: fields[key] = value.strip()
+        if not sep or not re.fullmatch(r'[A-Za-z0-9-]+', key) or key in fields:
+            raise ValueError('Malformed or duplicate index field')
+        field = key; fields[key] = value.strip()
     if fields.get('Identifier') != 'Packages': continue
     if fields.get('Trusted') != 'yes': raise ValueError('APT did not admit the signed index as trusted')
+    if fields.get('Architecture') != 'amd64' or fields.get('Target-Of') != 'deb':
+        raise ValueError('Unexpected package index architecture/type')
     uri = fields.get('URI','')
+    key = fields.get('MetaKey','')
+    if fields.get('Shadowed') == 'true':
+        match = re.fullmatch(r'http://(archive|security)\.ubuntu\.com/ubuntu/dists/(noble(?:-updates|-security)?)/(.+)', uri)
+        if not match: raise ValueError('Unexpected shadowed index URI: '+uri)
+        host, suite, uri_key = match.groups()
+        if host != ('security' if suite == 'noble-security' else 'archive') or uri_key != key or not re.fullmatch(r'(main|restricted|universe|multiverse)/binary-amd64/Packages', key):
+            raise ValueError('Unexpected ordinary shadowed Packages target')
+        if fields.get('Sourcesentry') != f'/etc/apt/sources.list.d/ubuntu.sources:{2 if suite == "noble-security" else 1}':
+            raise ValueError('Unexpected ordinary shadow source stanza')
+        identity = (suite,key)
+        if identity in shadow_seen: raise ValueError('Duplicate shadowed Packages target')
+        shadow_seen.add(identity)
+        shadows.append(dict(uri=uri, suite=suite, metaKey=key, shadowed=True, excludedFromCache=True))
+        continue
+    if 'Shadowed' in fields: raise ValueError('Unexpected shadow state')
     match = re.fullmatch(r'https://snapshot\.ubuntu\.com/ubuntu/20260726T000000Z/dists/(noble(?:-updates|-security)?)/(.+)', uri)
     if not match: raise ValueError('Unexpected index URI: '+uri)
-    suite, uri_key = match.groups(); key = fields.get('MetaKey','')
+    suite, uri_key = match.groups()
     if uri_key != key or not re.fullmatch(r'(main|restricted|universe|multiverse)/binary-amd64/Packages', key):
         raise ValueError('Unexpected Packages target')
+    if fields.get('Sourcesentry') != f'/etc/apt/sources.list.d/ubuntu.sources:{2 if suite == "noble-security" else 1}':
+        raise ValueError('Unexpected selected source stanza')
     name = fields.get('Filename',''); path = pathlib.Path(name)
     if path.parent != pathlib.Path('/var/lib/apt/lists') or path.is_symlink() or not path.is_file():
         raise ValueError('Unsafe/missing cached index')
+    expected_name = f'snapshot.ubuntu.com_ubuntu_20260726T000000Z_dists_{suite}_{key.replace("/","_")}'
+    if path.name not in {expected_name+suffix for suffix in ('','.xz','.bz2','.lzma','.gz','.lz4','.zst')}:
+        raise ValueError('Cached filename does not identify the selected snapshot index')
     identity = (suite,key)
     if identity in seen: raise ValueError('Duplicate index target')
     seen.add(identity)
@@ -206,8 +238,10 @@ for block in (out/'index-targets.txt').read_text().split('\n\n'):
     receipts.append(dict(uri=uri, suite=suite, metaKey=key, cachedFilename=name, sha256=observed[0], size=observed[1]))
 expected = {(s,f'{c}/binary-amd64/Packages') for s in releases for c in ('main','restricted','universe','multiverse')}
 if seen != expected: raise ValueError('Missing or extra signed component index')
+if shadow_seen != expected: raise ValueError('Missing or extra ordinary shadowed component index')
 (out/'Packages.concat').write_bytes(combined)
 (out/'verified/index-chain.json').write_text(json.dumps(receipts,indent=2)+'\n')
+(out/'verified/shadowed-indexes.json').write_text(json.dumps(shadows,indent=2)+'\n')
 PY
 apt-cache policy "${packages[@]}" base-files apt > "$out/package-policy.txt"
 # An empty dedicated cache makes both resolver plans independent of cache seeding.
