@@ -39,6 +39,43 @@ function Find-Tray([int]$Seconds=12){
  do{Check-Budget;$icon=Tray-Control 'LocalSend';if($icon){return $icon};if(-not $opened){$chevron=Tray-Control 'Show hidden icons';if(-not $chevron){$chevron=Tray-Control 'Notification Chevron'};if($chevron){Shell-Click $chevron;$opened=$true}};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
  return $null
 }
+function Find-SettingsNavigation($App){
+ $tree=@(Snapshot $App);$controls=@($tree|Where-Object {$_.Name -in @('Settings',"Settings`nTab 3 of 3") -and $_.Type -in @(50000,50019) -and $_.Enabled})
+ if($controls.Count -ne 1){throw 'ENV_BLOCK: unique actual Settings navigation unavailable after normal maximize'}
+ return $controls[0]
+}
+function Bind-GeneralBooleanRows($App,$CompositeName,$LanguageName,$BooleanLabels){
+ $tree=@(Snapshot $App);$groups=@($tree|Where-Object {$_.Name -eq $CompositeName -and $_.Type -eq 50026});$navigation=@(Find-SettingsNavigation $App);$views=@($tree|Where-Object ClassName -eq FLUTTERVIEW)
+ if($groups.Count -ne 1 -or $navigation.Count -ne 1 -or $views.Count -ne 1){throw 'ENV_BLOCK: unique source-contracted General composite/navigation unavailable'}
+ $group=$groups[0];$inside={param($c) $c.Left -ge $group.Left -and $c.Right -le $group.Right -and $c.Top -ge $group.Top -and $c.Bottom -le $group.Bottom}
+ $view=$views[0];$nav=$navigation[0]
+ if($group.Left -lt $view.Left -or $group.Right -gt $view.Right -or $group.Top -lt $view.Top -or $group.Bottom -gt $view.Bottom){throw 'ENV_BLOCK: General rows outside visible native client bounds'}
+ if(-not ($group.Bottom -le $nav.Top -or $group.Left -ge $nav.Right)){throw 'ENV_BLOCK: General rows overlap actual bottom/rail navigation'}
+ $visibleBottom=if($group.Left -ge $nav.Right){$view.Bottom}else{$nav.Top}
+ $language=@($tree|Where-Object {$_.Name -eq $LanguageName -and $_.Type -eq 50000 -and (& $inside $_)})
+ $checks=@($tree|Where-Object {$_.Type -eq 50002 -and (& $inside $_)}|Sort-Object Top)
+ if($language.Count -ne 1 -or $checks.Count -ne $BooleanLabels.Count){throw 'ENV_BLOCK: complete source-contracted General row controls unavailable'}
+ $rows=@();$previous=$language[0]
+ for($i=0;$i -lt $checks.Count;$i++){
+  $c=$checks[$i]
+  if(-not $c.Enabled -or $c.Pid -ne $App.Id -or $c.Toggle -notin @(0,1) -or $c.Top -le $previous.Bottom){throw 'ENV_BLOCK: General row order/toggle/ownership ambiguous'}
+  if($i -gt 0 -and ($c.Left -ne $checks[0].Left -or $c.Right -ne $checks[0].Right)){throw 'ENV_BLOCK: source Boolean column alignment differs'}
+  $top=[int][Math]::Floor(($previous.Bottom+$c.Top)/2)
+  $bottom=if($i+1 -lt $checks.Count){[int][Math]::Floor(($c.Bottom+$checks[$i+1].Top)/2)}else{$group.Bottom}
+  if($top -lt $group.Top -or $bottom -gt $group.Bottom -or $bottom -gt $visibleBottom -or $c.Top -lt $top -or $c.Bottom -gt $bottom){throw 'ENV_BLOCK: full rendered Boolean row not inside visible General bounds'}
+  $rows+=[pscustomobject]@{Label=$BooleanLabels[$i];SourceOrdinal=$i;Control=$c;Row=[pscustomobject]@{Left=$group.Left;Top=$top;Right=$group.Right;Bottom=$bottom};LabelArea=[pscustomobject]@{Left=$group.Left;Top=$top;Right=$c.Left;Bottom=$bottom}}
+  $previous=$c
+ }
+ Json @{SourceContract='v1.18.2 SettingsTab General: Theme, Color, Language, then minimizeToTray, launchAtStartup, animations; advanced and autostart-hidden rows absent';Composite=$group;Language=$language[0];Rows=$rows;Tree=$tree} "$script:Stage-general-row-binding"
+ return $rows
+}
+function Save-RowPixels($Row,$Name){
+ Check-Budget;$screen=[System.Windows.Forms.SystemInformation]::VirtualScreen
+ if($Row.Left -lt $screen.Left -or $Row.Top -lt $screen.Top -or $Row.Right -gt $screen.Right -or $Row.Bottom -gt $screen.Bottom){throw 'ENV_BLOCK: row pixels outside actual desktop'}
+ $size=[System.Drawing.Size]::new($Row.Right-$Row.Left,$Row.Bottom-$Row.Top);$b=[System.Drawing.Bitmap]::new($size.Width,$size.Height);$g=[System.Drawing.Graphics]::FromImage($b)
+ try{$g.CopyFromScreen([System.Drawing.Point]::new($Row.Left,$Row.Top),[System.Drawing.Point]::Empty,$size);$b.Save((Join-Path $Evidence "$Name.png"),[System.Drawing.Imaging.ImageFormat]::Png)}finally{$g.Dispose();$b.Dispose()}
+ Json $Row "$Name-bounds"
+}
 function TaskManager {
  $script:Stage='task-manager';Check-Budget;Write-Event keys @{Method='Ctrl+Shift+Esc';Foreground=[Issue3456Native]::GetForegroundWindow().ToInt64()};[System.Windows.Forms.SendKeys]::SendWait('^+{ESC}')
  $end=[DateTime]::UtcNow.AddSeconds(15)
@@ -78,16 +115,25 @@ try {
  Click-Name $script:App Minimize 50000
  if([Tray3166Native]::Visible([IntPtr]$script:App.Hwnd) -and -not [Tray3166Native]::Iconic([IntPtr]$script:App.Hwnd)){throw 'ENV_BLOCK: actual minimize control did not minimize app'}
  $icon=Find-Tray;if(-not $icon){throw 'ENV_BLOCK: actual tray control unavailable after ordinary minimize'};Shell-Click $icon;Wait-Visible $script:App;Desktop-Snapshot tray-working-control-after|Out-Null
- $script:Stage='close-to-tray';Click-Name $script:App "Settings`nTab 3 of 3" 50000
- $label=Find-Control $script:App 'Minimize to the System Tray/Menu Bar when closing';$tree=@(Snapshot $script:App)
- $switches=@($tree|Where-Object {$_.Type -eq 50002 -and $_.Enabled -and $_.Left -ge $label.Right -and $_.Top -le $label.Bottom -and $_.Bottom -ge $label.Top})
- Json @{Label=$label;Switches=$switches;Tree=$tree} close-to-tray-control;Save-Desktop close-to-tray-setting-before
- if($switches.Count -ne 1){throw 'ENV_BLOCK: unique label-bound close-to-tray checkbox unavailable'}
+ $script:Stage='close-to-tray';Click-Name $script:App Maximize 50000
+ $end=[DateTime]::UtcNow.AddSeconds(5);do{Check-Budget;$null=Alive $script:App;if([Tray3166Native]::Zoomed([IntPtr]$script:App.Hwnd)){break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $end)
+ if(-not [Tray3166Native]::Zoomed([IntPtr]$script:App.Hwnd)){throw 'ENV_BLOCK: normal caption Maximize did not maximize same app'}
+ Save-Desktop close-to-tray-maximized;Click-Control $script:App (Find-SettingsNavigation $script:App)
+ # Bind the complete release-specific named section and all source Boolean rows before selecting the requested label.
+ $booleanLabels=@('Minimize to the System Tray/Menu Bar when closing','Autostart after login','Animations')
+ $generalComposite=(@('General','Theme','Color','Language')+$booleanLabels) -join "`n"
+ $rows=@(Bind-GeneralBooleanRows $script:App $generalComposite 'English' $booleanLabels)
+ $target=@($rows|Where-Object Label -eq $booleanLabels[0]);if($target.Count -ne 1){throw 'ENV_BLOCK: requested close-to-tray source row ambiguous'}
+ Save-Desktop close-to-tray-setting-before;Save-RowPixels $target[0].Row close-to-tray-row-before
  $profile=Get-Content $script:App.Profile -Raw -Encoding UTF8|ConvertFrom-Json
- if($profile.'flutter.ls_minimize_to_tray' -ne $true){Click-Control $script:App $switches[0]}
- $end=[DateTime]::UtcNow.AddSeconds(5);do{Check-Budget;$profile=Get-Content $script:App.Profile -Raw -Encoding UTF8|ConvertFrom-Json;if($profile.'flutter.ls_minimize_to_tray' -eq $true){break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $end)
- Json @{Path=$script:App.Profile;MinimizeToTray=$profile.'flutter.ls_minimize_to_tray';ObservedOnly=$true} close-to-tray-setting-readback;Save-Desktop close-to-tray-setting-after
- if($profile.'flutter.ls_minimize_to_tray' -ne $true){throw 'ENV_BLOCK: actual ordinary setting did not persist true'}
+ $persisted=$profile.'flutter.ls_minimize_to_tray' -eq $true
+ if(($target[0].Control.Toggle -eq 1) -ne $persisted){throw 'ENV_BLOCK: native toggle and ordinary persisted setting disagree before input'}
+ if(-not $persisted){Click-Control $script:App $target[0].Control}
+ $end=[DateTime]::UtcNow.AddSeconds(5)
+ do{Check-Budget;$rows=@(Bind-GeneralBooleanRows $script:App $generalComposite 'English' $booleanLabels);$target=@($rows|Where-Object Label -eq $booleanLabels[0]);$profile=Get-Content $script:App.Profile -Raw -Encoding UTF8|ConvertFrom-Json;if($target.Count -eq 1 -and $target[0].Control.Toggle -eq 1 -and $profile.'flutter.ls_minimize_to_tray' -eq $true){break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $end)
+ Save-Desktop close-to-tray-setting-after;Save-RowPixels $target[0].Row close-to-tray-row-after
+ Json @{Path=$script:App.Profile;MinimizeToTray=$profile.'flutter.ls_minimize_to_tray';NativeToggle=$target[0].Control.Toggle;ActualRow=$target[0];ObservedOnly=$true} close-to-tray-setting-readback
+ if($target.Count -ne 1 -or $target[0].Control.Toggle -ne 1 -or $profile.'flutter.ls_minimize_to_tray' -ne $true){throw 'ENV_BLOCK: actual ordinary close-to-tray toggle and persisted true-state readback not qualified'}
  Click-Name $script:App Close 50000;$null=Alive $script:App
  if([Tray3166Native]::Visible([IntPtr]$script:App.Hwnd)){throw 'ENV_BLOCK: normal Close did not hide same app'}
  $manager=TaskManager;$null=Focus-App $manager

@@ -60,6 +60,7 @@ public static class Volume3536 {
 }
 
 public static class Tray3166Native {
+ [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint="IsZoomed")] public static extern bool Zoomed(System.IntPtr h);
  [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint="IsWindowVisible")] public static extern bool Visible(System.IntPtr h);
  [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint="IsIconic")] public static extern bool Iconic(System.IntPtr h);
 }
