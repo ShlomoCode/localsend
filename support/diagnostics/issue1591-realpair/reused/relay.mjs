@@ -24,6 +24,7 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
         Number.isSafeInteger(peer.fromLocalSendBytes)&&peer.fromLocalSendBytes>=0&&typeof peer.inputEOF==='boolean'&&typeof peer.outputEOF==='boolean');
   }
   function record(origin,id,detail={}){trace.push({elapsedMs:Number(process.hrtime.bigint()-started)/1e6,origin,id,...detail});}
+  const socketState=p=>({writableEnded:p.writableEnded,destroyed:p.destroyed,readableEnded:p.readableEnded});
   function batch() {pendingBatch=events.slice(0,8);return pendingBatch;}
   function wake() {if(waiter && events.length&&!pendingBatch) {const w=waiter;waiter=null;clearTimeout(w.timer);w.res.end(JSON.stringify(batch()));}}
   function enqueue(e) {events.push({...e,seq:++nextSeq});queued+=e.bytes||0;peak=Math.max(peak,queued);if(queued>512*1024){for(const p of peers.values())p.pause();metrics.paused++;}wake();}
@@ -33,9 +34,9 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
     record('sender-open',id);
     enqueue({id,kind:'open'});
     p.on('data',data=>{metrics.fromSender+=data.length;peerBytes[id].fromSender+=data.length;record('sender-data',id,{bytes:data.length,total:peerBytes[id].fromSender});enqueue({id,kind:'data',bytes:data.length,data:data.toString('base64')});});
-    p.on('end',()=>{record('sender-eof',id);enqueue({id,kind:'eof'});});
+    p.on('end',()=>{record('sender-eof',id,{utc:new Date().toISOString(),socketState:socketState(p)});enqueue({id,kind:'eof'});});
     p.on('error',e=>{fault('sender-socket-error',{id,code:e.code||'SOCKET_ERROR'});record('sender-error',id,{code:e.code||'SOCKET_ERROR'});enqueue({id,kind:'error',error:e.code||'SOCKET_ERROR'});});
-    p.on('close',()=>{record('sender-close',id);peers.delete(id);enqueue({id,kind:'close'});});
+    p.on('close',()=>{record('sender-close',id,{utc:new Date().toISOString(),socketState:socketState(p)});peers.delete(id);enqueue({id,kind:'close'});});
   });
   const server=http.createServer((req,res)=>{
     if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(401);res.end();return;}
@@ -80,8 +81,14 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
         try {
           const e=JSON.parse(raw);const p=peers.get(e.id);
           if(!p){fault('push-missing-peer',{id:e.id});res.writeHead(410);res.end('{}');return;}
-          if(e.kind==='data'){const data=Buffer.from(e.data,'base64');p.write(data,error=>{
-            if(error){fault('sender-write-error',{id:e.id,code:error.code||'SOCKET_WRITE_ERROR'});res.writeHead(502);res.end('{}');return;}
+          if(e.kind==='data'){const data=Buffer.from(e.data,'base64');
+            const attempt={attemptedUtc:new Date().toISOString(),attemptedBytes:data.length,
+              peerIdentity:{id:e.id,localAddress:p.localAddress,localPort:p.localPort,remoteAddress:p.remoteAddress,remotePort:p.remotePort},attemptState:socketState(p)};
+            record('device-data-write-attempt',e.id,attempt);
+            p.write(data,error=>{
+            const result={...attempt,callbackUtc:new Date().toISOString(),callbackState:socketState(p),code:error?.code||null};
+            record('device-data-write-result',e.id,result);
+            if(error){fault('sender-write-error',{id:e.id,...result,code:error.code||'SOCKET_WRITE_ERROR'});res.writeHead(502);res.end('{}');return;}
             metrics.fromDevice+=data.length;peerBytes[e.id].toSender+=data.length;record('device-data-written',e.id,{bytes:data.length,total:peerBytes[e.id].toSender});res.end('{}');
           });}
           else if(e.kind==='eof'){record('device-eof',e.id);p.end();res.end('{}');}

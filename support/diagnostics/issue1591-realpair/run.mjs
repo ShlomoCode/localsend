@@ -1,6 +1,6 @@
 import {spawn, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {readFileSync, writeFileSync, appendFileSync, mkdirSync, copyFileSync} from 'node:fs';
+import {readFileSync, writeFileSync, appendFileSync, mkdirSync, copyFileSync, existsSync} from 'node:fs';
 import {randomBytes, createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import {createInterface} from 'node:readline';
@@ -121,6 +121,44 @@ async function capture(label) {
   save(label + '-app-state.json', {utc:new Date().toISOString(), appId,
     state:await wd('POST', prefix() + '/execute/sync', {script:'mobile: queryAppState', args:[{bundleId:appId}]}),
     pidAuthority:'Process identity and lifecycle require the original BrowserStack device logs; app-state is not a PID.'});
+}
+function captureWindowsStreams(label) {
+  const reportPath = 'evidence/release-ui-report.json';
+  if (!existsSync(reportPath)) return;
+  const report = JSON.parse(readFileSync(reportPath, 'utf8').replace(/^\uFEFF/, ''));
+  const streams = ['stdout','stderr'].map(stream => {
+    const path = 'evidence/windows-app.' + stream + '.txt';
+    if (!existsSync(path)) return {stream,sourcePath:path,status:'capture-unavailable',reason:'redirected file absent'};
+    const bytes = readFileSync(path);
+    const snapshotName = 'windows-app-' + label + '.' + stream + '.txt';
+    save(snapshotName, bytes.toString('utf8'));
+    const retainedSnapshotPath = 'evidence/' + snapshotName, retained = readFileSync(retainedSnapshotPath);
+    return {stream,sourcePath:path,sourceBytes:bytes.length,sourceSha256:createHash('sha256').update(bytes).digest('hex'),
+      retainedSnapshotPath,retainedSnapshotBytes:retained.length,retainedSnapshotSha256:createHash('sha256').update(retained).digest('hex'),
+      snapshotTransform:'UTF-8 decode plus configured text redaction; redirected source file remains retained separately',
+      status:bytes.length ? 'bytes-retained' : 'capture-unavailable',limitation:'Empty streams do not establish absence of application errors; snapshots may precede later writes'};
+  });
+  save('windows-app-' + label + '-streams.json', {utc:new Date().toISOString(),launch:report.appStreamCapture,
+    executable:report.executable,observedLaunchProcesses:report.processes,streams});
+}
+async function captureTransportErrorSnapshot(failedStage) {
+  // Supplemental observation only. Geometry cannot prove Favorites/Error
+  // semantics, so no coordinate input is admitted by this snapshot.
+  const label = 'sender-transport-fault-before';
+  await powershell('windows3393-ui.ps1', ['-Action','snapshot','-Label',label]);
+  const readJson = name => JSON.parse(readFileSync('evidence/' + name, 'utf8').replace(/^\uFEFF/, ''));
+  const baseline = readJson('windows-ui-prewarmed-action.json'), current = readJson(label + '-action.json');
+  const png = readFileSync('evidence/' + label + '.png');
+  const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
+  const tree = readJson(label + '-hwnd-tree.json'), views = (Array.isArray(tree) ? tree : [tree]).filter(row => row.cls === 'FLUTTERVIEW');
+  if (current.appPid !== baseline.appPid || current.window !== baseline.window || width !== 400 || height !== 500 || views.length !== 1 ||
+      views[0].pid !== current.appPid || views[0].rect.R - views[0].rect.L !== 384 || views[0].rect.B - views[0].rect.T !== 461) {
+    throw new Error('Supplementary sender snapshot layout/PID/HWND does not match retained evidence; ErrorDialog unavailable');
+  }
+  save('sender-transport-fault-dialog-receipt.json', {utc:new Date().toISOString(),failedStage,appPid:current.appPid,window:current.window,width,height,attempted:false,status:'evidence-unavailable',
+    prospectiveInput:{x:127,y:258},authority:'38186635961 original 400x500 window PNG: info center135,289 minus measured window-to-client offset8,31; original native FLUTTERVIEW384x461',
+    semanticLimit:'Same PID/HWND/dimensions do not prove the orange Error information control is present. Source favorite_dialog.dart opens ErrorDialog SelectableText only from that control',
+    outcome:'not attempted; ErrorDialog evidence unavailable without semantic UI qualification; original transport failure remains fatal'});
 }
 async function elements(using, value) { return wd('POST', prefix() + '/elements', {using, value}); }
 async function unique(using, value, timeout = 10000) {
@@ -370,6 +408,7 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   // No transfer is triggered until configureProxy has begun its background budget.
   stage = label + '-windows-file-selection';
   await powershell('windows2311-context.ps1', ['-Case',label, '-FixturePath',resolve('evidence/' + filename), '-SelectOnly', ...(previousFinished ? ['-CompletePrevious'] : [])]);
+  captureWindowsStreams(label + '-selected');
   const window = await configureProxy(label);
   stage = label + '-windows-send';
   // These admission margins exceed the one-second media duration. They are
@@ -440,6 +479,7 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   // The helper's normal stop cancels its NWConnections without assuming that a
   // final HTTP push can run. Close owned sender keep-alive sockets server-side.
   await r.stop(); save(label + '-relay-trace.json', r.trace);
+  captureWindowsStreams(label + '-completed');
   r = relay({token}); await r.start();
   await activate(appId);
 }
@@ -491,6 +531,7 @@ try {
   stage = 'windows-startup';
   await powershell('windows2311-desktop.ps1');
   await powershell('windows_release_ui_probe.ps1', ['-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-2022','-FixtureTimestampUtc','2025-02-13T14:11:00Z','-FixtureFileName','startup-control.txt','-DiagnosticPeerPort','53318','-InitializeOnly']);
+  captureWindowsStreams('launch');
   await prepareWindowsUI();
   stage = 'browserstack-local';
   local = spawn('C:/tmp/bs-local-bin/BrowserStackLocal.exe', ['--key',process.env.BROWSERSTACK_ACCESS_KEY,'--local-identifier',process.env.BS_LOCAL_ID,'--force-local','--only-automate'], {windowsHide:true});
@@ -533,16 +574,22 @@ try {
   }
 } catch (error) {
   failure = redact(error); save('failure.json', {stage, error:failure, classification:'Classify using actual UI, device lifecycle and transport logs. Infrastructure errors are not a reproduction.'});
+  if (r?.status().faults.length) {
+    save('failed-interval-transport.json', {utc:new Date().toISOString(),stage,failure,transport:r.status(),trace:r.trace,backgroundWindows});
+    monitoredWindow = null;
+  }
   if (session) await capture('failure').catch(error => save('failure-capture-error.txt', error));
+  if (stage.endsWith('-windows-send') && r?.status().faults.length) {
+    await captureTransportErrorSnapshot(stage).catch(error => save('sender-transport-fault-dialog-capture-error.txt', error));
+  }
   if (stage.includes('receiver') || stage.includes('saved-file')) {
     await powershell('windows3393-ui.ps1', ['-Action','snapshot','-Label','sender-failure']).catch(error => save('sender-failure-capture-error.txt', error));
-    // This is the same Windows 1.17 error-details control used in the reliable
-    // release harness. Retain the preceding image so its actual presence can
-    // be reviewed; the clicked image alone is not proof of an HTTP error.
-    await powershell('windows3393-ui.ps1', ['-Action','click','-X','127','-Y','258','-Label','sender-failure-error-detail','-RequireForeground','-UseControlSequence']).catch(error => save('sender-error-detail-capture-error.txt', error));
+    save('sender-error-detail-unavailable.json', {stage,attempted:false,status:'evidence-unavailable',
+      reason:'Original sender snapshot retained; no semantically qualified Error information control is exposed by this backend, so no coordinate input is sent'});
   }
 } finally {
   monitoredWindow = null; if (healthMonitor) clearInterval(healthMonitor);
+  try {captureWindowsStreams('final');} catch (error) {save('windows-app-final-stream-capture-error.txt', error);}
   if (r) save('final-helper-health-samples.json', r.healthSamples);
   save('scenario-results.json', {results, backgroundWindows, failure, lastStage:stage, transport:r?.status()});
   if (session) {

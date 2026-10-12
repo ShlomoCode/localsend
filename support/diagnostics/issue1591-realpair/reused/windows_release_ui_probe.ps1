@@ -318,12 +318,24 @@ namespace LocalSendReleaseUiProbe {
     $favorite = @{id='issue1591-relay';fingerprint='issue1591-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='iPad receiver';customAlias=$true} | ConvertTo-Json -Compress
     @{'flutter.ls_alias'='Windows1591';'flutter.ls_favorites'=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
   }
+  $appStdout = [IO.Path]::GetFullPath((Join-Path $OutputDirectory 'windows-app.stdout.txt'))
+  $appStderr = [IO.Path]::GetFullPath((Join-Path $OutputDirectory 'windows-app.stderr.txt'))
+  $launchArguments = @()
+  if ($EntryMethod -eq 'SendTo') { $launchArguments = @('"' + $selectionPath + '"') }
+  $launchUtc = [DateTime]::UtcNow.ToString('o')
   if ($EntryMethod -eq 'SendTo') {
-    $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList @('"' + $selectionPath + '"') -PassThru
+    $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList $launchArguments -PassThru -RedirectStandardOutput $appStdout -RedirectStandardError $appStderr
   } else {
-    $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru
+    $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru -RedirectStandardOutput $appStdout -RedirectStandardError $appStderr
   }
   $report.launchedPid = $started.Id
+  $report.appStreamCapture = [ordered]@{
+    launchedPid = $started.Id; launchUtc = $launchUtc; executablePath = $exe.FullName
+    powerShellVersion = $PSVersionTable.PSVersion.ToString(); powerShellEdition = $PSVersionTable.PSEdition
+    workingDirectory = $exe.DirectoryName; arguments = $launchArguments; stdoutPath = $appStdout; stderrPath = $appStderr
+    method = 'Normal first official launch stdout/stderr redirection; no verbose flag'
+    limitation = 'GUI AttachConsole and possible forwarding process can leave streams empty/incomplete; empty streams are unavailable evidence'
+  }
   $deadline = [DateTime]::UtcNow.AddSeconds(30)
   $visible = $false
   do {
