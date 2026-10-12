@@ -173,6 +173,13 @@ async function setup(arm) {
     await execute(`${arm}-allow-network`, 'mobile: alert', {action: 'accept', buttonLabel: 'Allow'});
     xml = await source(`${arm}-after-network`);
   }
+  if (/<XCUIElementTypeApplication[^>]*bundleId="com.apple.springboard"/.test(xml) && !xml.includes('<XCUIElementTypeAlert')) {
+    const state = await execute(`${arm}-setup-query-running`, 'mobile: queryAppState', {bundleId: bundle});
+    if (![2, 3, 4].includes(state)) throw new Error('Setup target is not running; no startup recovery or relaunch');
+    await execute(`${arm}-setup-activate`, 'mobile: activateApp', {bundleId: bundle});
+    xml = await source(`${arm}-after-setup-activate`);
+  }
+  if (!/<XCUIElementTypeApplication[^>]*bundleId="org.localsend.localsendApp"/.test(xml)) throw new Error('Setup source does not identify the target application');
   if (!xml.includes('name="Media"')) {
     await click(`${arm}-send`, '-ios predicate string', 'type == "XCUIElementTypeStaticText" AND name BEGINSWITH "Send"');
     xml = await source(`${arm}-send-ready`);
