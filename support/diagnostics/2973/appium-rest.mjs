@@ -106,7 +106,6 @@ if (mode === 'create') {
       await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
         { type: 'pointerMove', duration: 0, x, y }, { type: 'pointerDown', button: 0 }, { type: 'pause', duration: 100 }, { type: 'pointerUp', button: 0 },
       ] }] });
-      await request('DELETE', prefix + '/actions');
     }
     async function byLabel(label, snapshotLabel) {
       const screen = await capture(snapshotLabel);
@@ -180,6 +179,9 @@ if (mode === 'create') {
     if (!restoredPicker.nodes.some(node => node.class === 'android.widget.Switch' && node.checked === 'false')) throw new Error('Original picker switch off not verified');
     await writeFile(resolve(evidence, 'observation-state.json'), JSON.stringify({ originalSendSelection: 'empty-observed', originalMultipleSwitch: false, mutationMayHaveOccurred: false, restorationVerified: true }, null, 2));
     await back();
+    if (args[0] === 'control') {
+      await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ scope: 'default-picker-control-only', originalSelectionAndSwitchRestorationVerified: true, androidSettingsChanged: false, aboutAndNativeSettingsObserved: false, enlargementProductFailureValidated: false }, null, 2));
+    } else {
     await byLabel('Settings', 'send-after-apps');
     let aboutFound = false;
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -198,7 +200,6 @@ if (mode === 'create') {
         { type: 'pointerMove', duration: 0, x: Math.floor(rect.width / 2), y: Math.floor(rect.height * 0.75) }, { type: 'pointerDown', button: 0 },
         { type: 'pointerMove', duration: 600, x: Math.floor(rect.width / 2), y: Math.floor(rect.height * 0.3) }, { type: 'pointerUp', button: 0 },
       ] }] });
-      await request('DELETE', prefix + '/actions');
     }
     if (!aboutFound) throw new Error('About label not exposed after bounded native Settings observation');
     // Real notification shade gestures use the live window dimensions, not stored coordinates.
@@ -209,7 +210,6 @@ if (mode === 'create') {
       await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
         { type: 'pointerMove', duration: 0, x, y: startY }, { type: 'pointerDown', button: 0 }, { type: 'pointerMove', duration: 600, x, y: endY }, { type: 'pointerUp', button: 0 },
       ] }] });
-      await request('DELETE', prefix + '/actions');
       const shade = await capture(`notification-shade-${attempt}`);
       const gears = shade.nodes.filter(node => node.package === 'com.android.systemui' && node.clickable === 'true' && node.enabled === 'true' && node.displayed === 'true' &&
         (node['resource-id']?.endsWith(':id/settings_button') || node['content-desc'] === 'Settings'));
@@ -228,6 +228,7 @@ if (mode === 'create') {
     originalControls.fontSize = { nativeControls: font.nodes.filter(node => /SeekBar|Slider/.test(node.class ?? '')), nativeLabels: font.nodes.filter(node => node.text || node['content-desc']), rangeEstablished: false, screenshotInspectionRequired: true };
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
     await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ settingsChanged: false, productValidated: false, originalNativeScreensCaptured: true }, null, 2));
+    }
   } else if (mode === 'snapshot') {
     const label = args[0];
     if (!label || !/^[a-zA-Z0-9_-]+$/.test(label)) throw new Error('Snapshot label must contain letters, digits, underscores or hyphens');
@@ -247,7 +248,6 @@ if (mode === 'create') {
       { type: 'pointerUp', button: 0 },
     ];
     await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions }] });
-    await request('DELETE', prefix + '/actions');
   } else if (mode === 'quit') {
     await request('DELETE', prefix);
     await writeFile(resolve(evidence, 'ended-session.json'), JSON.stringify({ sessionId, endedAt: new Date().toISOString() }, null, 2));

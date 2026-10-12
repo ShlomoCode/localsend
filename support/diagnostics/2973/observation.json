@@ -1,5 +1,6 @@
 {
-  "purpose": "Exercise original picker switch, two actual app rows and Add, restore original app selection, and observe Samsung original native font/display controls without changing Android settings; raw evidence requires inspection",
+  "purpose": "Exercise original picker switch, two actual app rows and Add, restore original app selection. Stock native source snapshots cost ten seconds each; About and Samsung font/display observation are deferred to a separate bounded stage. No Android settings changes; raw evidence requires inspection",
+  "scope": "default-picker-control-only",
   "steps": [],
   "restore": []
 }

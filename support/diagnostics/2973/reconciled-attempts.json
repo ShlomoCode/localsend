@@ -1,0 +1,10 @@
+[
+  {
+    "runId": "38204481679",
+    "headSha": "91978c19646553ec5dc53d64a136983121e0cc7f",
+    "sessionId": "e418cce17eee48784f3bf65c2b6fcdbbfd9ed22e",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "resolution": "Root reconciled unsupported DELETE actions after complete Send pointerUp. No picker or Android settings inputs occurred. Independent cleanup confirmed terminal done. One focused-reviewed corrected observation authorized."
+  }
+]
