@@ -1,0 +1,31 @@
+# Independent source-only wire/GDB review
+
+Scope: `decode-root-name-transport.py` and `root-name-gdb.py` in `/tmp/localsend-bug-2754`, against `/tmp/2754-next-root-name-discriminator-plan.md` and retained static artifacts in `/tmp/2754-qualified-symbols`. Maximum reportable priority P2. No source edits, app execution, build, tests, syntax execution, inferior execution, reproduction, or cloud workload were performed. Findings below derive from static source, retained DWARF/source inspection, and SHA-256 reads only.
+
+Final reviewed source SHA-256:
+
+- Decoder: `bb45bc492d6f40adea83083ca2fa5d3b03d78ea6d7669a612ff2bb5baec2fb2e`
+- GDB: `6c352771f2f6091d6fe7774772542d87e83fa9b43c80c0f4e12edbe4e3961a16`
+
+Final immutable combined artifact: `/tmp/2754-root-name-birth-discriminator.patch`, SHA-256 `4a82069f2342ef12c0c5bc252dc9f0cc96f7b22c049d38c85864904b6189a1f2`. Independently rehashed the supplied artifact and both reviewed source files after final delivery; all match. Its eight-file diff includes the reviewed decoder and GDB corrections. This review's approval applies only to the two-file wire/GDB scope within that exact artifact.
+
+The existing `/tmp/2754-root-name-proposal.patch`, SHA-256 `37c9621b1649d9a03d4a27592faf47dcf406fc1e363628877a324a0cee1a75f2`, is stale and is explicitly excluded from this final review: it lacks the decoder and current fixes.
+
+## Result
+
+No remaining concrete P2-or-higher finding in the final reviewed source. This is source-only review of collection code; it does not establish runtime qualification, normal behavior, wire observation, deadlock ownership, geometry success, or authorization for a workload.
+
+## Concrete adversarial cases inspected
+
+1. **Unfinished IO across FD reuse:** a shared-table thread starts `read(5<old socket>, ... <unfinished>)`; another closes 5 and creates a new socket at 5; the first resumes with old bytes. Initially completion-time lookup assigned old bytes to the new generation. Final source records entry generation in the pending record and uses that OFD generation on resumed IO. Simultaneous same-direction unfinished/completed IO on an aliased generation now invalidates framing instead of inventing byte order.
+2. **Unshared descriptor tables:** after `unshare(CLONE_FILES)`, `close_range(..., CLOSE_RANGE_UNSHARE)`, or exec, clearing the shared dictionary previously left independent callers aliased for later socket births. Final source replaces the caller's table with an independent dictionary for these transitions. Prior generations become incomplete; post-transition births cannot silently become sibling descriptors.
+3. **dup/fcntl/dup2 replacement:** `dup`, `F_DUPFD`, and `F_DUPFD_CLOEXEC` alias the same connection generation; `dup2`/`dup3` replace the target mapping rather than allocating a fresh stream for the same OFD. Closing one alias removes only that descriptor mapping. Untracked sources and failed closes explicitly invalidate uncertain lifetime. Observed reuse allocates a separate generation. Unsupported socketpair/FD transfers remain explicit gaps.
+4. **Short IO/iovec counts:** reconstruction takes only successful returned bytes, distributes the return count across iovecs, and rejects insufficient/unprinted buffers. Zero/error returns do not supply payload. Unmatched resumed records, capture-end unfinished transport calls, MSG_PEEK, unsupported IO, and byte/message/raw-input bounds produce partial evidence. Ordinary cutoff poll/futex does not erase already collected facts.
+5. **Authentication and D-Bus identity:** split NUL/AUTH and BEGIN lines remain buffered at a known boundary, without scanning for a guessed binary header after a gap. Binary messages require fixed/header lengths and field variant types. Root Name identity requires complete root path, Properties.Get interface/member, `ss` body signature, and exact `org.a11y.atspi.Accessible`/`Name` body. Replies require same connection generation and request/reply serial. Genuine bus-generated ERROR replies are retained after removal of the overrestrictive sender comparison. A missing reply stays unknown.
+6. **Later gaps versus positive facts:** a complete observed request/reply pair remains `delivered-reply-observed` if later unfinished IO or partial trailing data makes capture completeness partial. Stream completeness and causal linkage remain separate. No post-gap heuristic recovery reconstructs additional messages on the poisoned generation.
+7. **Mapped symbols and socket cast:** GDB binds actual map_files runtime hashes, current runtime hashes, debug hashes, exact debug objfile BuildID/path, and offset-zero load bias. Missing/deleted/replaced mappings cannot qualify memory interpretation. The transport socket cast requires the file-qualified `dbus-transport-socket.c::socket_vtable` at qualified bias + `0x4d920`; the similarly named server table cannot pass. The final comparison strips const qualification while requiring exact qualified DBusTransportVTable ownership. No inferior getter/function calls or blind offsets were introduced.
+8. **Actual closure/pending/wait fields:** retained AT-SPI DWARF declares closure as `SpiReentrantCallClosure *`; exact dbind bus location covers retained return PC `0x2172e`. Stock libdbus source declares pending connection/reply/reply_serial/completed and DBusCondVar's pthread condition member. The code captures closure and pending reply candidates separately and keeps target frames/thread/depth distinct. It does not promote suspended ret into a received reply or condition-address equality into ownership/deadlock. Missing/optimized locations remain explicit unavailable evidence.
+
+## Limitations that remain explicit
+
+Descriptor transitions and unsupported/truncated records deliberately sacrifice completeness. Socketpair, FD transfer, and uncertain lifetime do not support causal joins. `pending->connection` is not independently emitted, so a snapshot whose frame connection argument is unavailable may lose linkage; this is consistent with explicit partial reporting, and the qualified retained dbind bus location provides the intended finite discriminator when recoverable. Read delivery establishes kernel-to-client bytes, not wrapper consumption. Actual GDB attach/type recovery and runtime strace formatting were not executed locally.

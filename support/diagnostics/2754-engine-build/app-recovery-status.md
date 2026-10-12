@@ -106,3 +106,13 @@ Official AT-SPI and D-Bus runtime/debug pairs are now qualified against the reta
 The next source-only plan, symbol qualification, birth-trace topology and independent review are saved beside this status. Fresh independent review has no open P2 findings after requiring exact strace binary hash/Build ID before UI. The existing blind transport socket cast remains an explicit implementation repair gate. No implementation or workload has run; root approval of exact source scope/diff and separate workload authorization are still required.
 
 Durable raw packages, runtime/debug ELFs, maps/stacks, PC disassembly/PLT/addr2line, private-type inventory and hash manifests are preserved under `.a5c/localsend-sprint/2754-next-root-name-source/2754-qualified-symbols/` in the main sprint worktree. Source planning docs are changelog-exempt.
+
+## Source-only discriminator implementation ready (October 12)
+
+Root admitted the exact eight-file implementation scope. Source commit `47b58a9b44ae8e28ccd27bc6b8b18ccb687e967f` implements host-pinned symbol preparation/transfer, guest pre-UI identity/type/tool gates, client birth tracing, verified detached snapshots and bounded offline wire decoding. Original client/validator/UI source, accepted bundles, cohort selection and 180-second deadlines remain unchanged.
+
+Immutable proposal patch SHA-256: `4a82069f2342ef12c0c5bc252dc9f0cc96f7b22c049d38c85864904b6189a1f2`. The patch and final raw review reports are preserved in the main sprint worktree at `.a5c/localsend-sprint/2754-next-root-name-source/`. Three final independent reports beside this status bind that patch and have no open P2 findings. Fresh adversarial review closed concrete FD reuse/shared-table/partial-IO, const-vtable, pre-exec TERM/intermediate, launch-assignment, PID-reuse and second-phase ownership defects.
+
+Direct source/diff inspection and Git whitespace checks completed. No scripts, syntax checks, applications, builds, tests, inferiors or cloud workloads ran. Runtime formatting, debugger recovery, scheduling, detach latency and gate operation remain unqualified. On ownership-unproven exceptional startup cleanup, evidence stays partial and GDB is skipped; tracing can remain until the original client deadline. A successful path must prove actual tracer exit and repeated all-thread zero TracerPid/non-stopped state before GDB. No causal or geometry success is claimed.
+
+Exact final diff/reviews must be read by root before separately authorizing one cloud job. No automatic retry, PR or publication is admitted by this source-ready status.
