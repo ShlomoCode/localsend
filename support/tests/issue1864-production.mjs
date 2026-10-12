@@ -15,7 +15,7 @@ const adbUntil=(until,...args)=>{const result=execFileSync('adb',args,{encoding:
 const adb=(...args)=>adbUntil(deadline,...args);
 const nodes=xml=>[...xml.matchAll(/<[\w.$-]+\s+([^>]+)>?/g)].map(m=>Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a=>[a[1],a[2].replaceAll('&#10;','\n').replaceAll('&amp;','&')])));
 const labels=xml=>nodes(xml).map(n=>n['content-desc'] || n.text || '').join('\n');
-const bounds=n=>[...n.bounds.matchAll(/\d+/g)].map(m=>Number(m[0]));
+const bounds=n=>[...n.bounds.matchAll(/-?\d+/g)].map(m=>Number(m[0]));
 const assets=xml=>nodes(xml).filter(n=>/^(Image|Video)\d+,/.test(n['content-desc'] ?? '') && n.displayed!=='false');
 const count=xml=>{const text=labels(xml);const m=text.match(/Confirm\s*\((\d+)\/999\)/);return m ? Number(m[1]) : /(^|\n)Confirm(\n|$)/.test(text) ? 0 : null;};
 const requireCount=(xml,n)=>{if(count(xml)!==n) throw new Error(`Expected Confirm count ${n}, observed ${count(xml)}`);if(n>0 && !labels(xml).includes(`Preview (${n})`)) throw new Error(`Missing selected Preview (${n}) semantic`);};
@@ -76,7 +76,7 @@ function nativeSettingsState(name,xml,{appDetails=false}={}) {
     const b=bounds(n);return b.length===4 && b[0]>=0 && b[1]>=0 && b[2]>b[0] && b[3]>b[1] && b[2]<=width && b[3]<=height;
   });
   const named=visible.filter(n=>n.text || n['content-desc']);
-  // Android TV often focuses a row container whose title is a child node.
+  // A focused row container can expose its title on a child node.
   const rows=visible.filter(n=>(n.focused==='true' || n.selected==='true') && n.focusable==='true').map(n=>{
     const b=bounds(n),children=named.filter(child=>{const c=bounds(child);return c[0]>=b[0] && c[1]>=b[1] && c[2]<=b[2] && c[3]<=b[3];});
     const title=children.find(c=>/(^|:)id\/title$/.test(c['resource-id'] ?? '')) ?? children[0];
