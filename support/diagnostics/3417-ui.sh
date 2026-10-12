@@ -132,7 +132,7 @@ tree 03-documents-selected
 click_row 03-visible-file right
 capture 04-context-menu
 tree 04-context-menu
-if ! action 05-open-with menu "'Open With…'"; then
+if ! action 05-open-with file-menu-command; then
   capture 05-open-with-unavailable
   echo 'HARNESS_OPEN_WITH_ACTION_UNAVAILABLE' > evidence/vm/verdict.txt
   exit 2

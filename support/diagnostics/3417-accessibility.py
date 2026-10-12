@@ -74,6 +74,30 @@ if mode == "desktop":
             sys.exit(2)
     sys.exit(0)
 
+if mode == "file-menu-command":
+    # GTK4 omits the rendered context-menu items from this backend, but the
+    # selected Files view exposes its own named Open With command as an action.
+    command = "view.open-with-other-application"
+    targets = [(node, item) for node, item in visited
+               if ("org.gnome.Nautilus", "application") in item["path"]
+               and item["role"] == "frame" and item["name"] == "Documents"
+               and command in item["actions"]]
+    if len(targets) == 1:
+        node, item = targets[0]
+        action = node.queryAction()
+        # GTK rebuilds the enabled-action list on each request. Refresh names
+        # on this exact node immediately before dispatching the selected index.
+        names = [action.getName(i) for i in range(action.nActions)]
+        print(json.dumps({"target": item, "fresh_actions": names, "action": command}), flush=True)
+        if names.count(command) == 1:
+            index = names.index(command)
+            print(json.dumps({"action_index": index}), flush=True)
+            if action.doAction(index):
+                print("NATIVE_OPEN_WITH_COMMAND_ACCEPTED_REVIEW_CHOOSER", flush=True)
+                sys.exit(0)
+    print("NATIVE_OPEN_WITH_COMMAND_NOT_UNIQUE_OR_ACCEPTED", flush=True)
+    sys.exit(2)
+
 def qualified(item):
     applications = [name.lower() for name, role in item["path"] if role == "application"]
     native = any(name in ("nautilus", "org.gnome.nautilus", "files") for name in applications)
