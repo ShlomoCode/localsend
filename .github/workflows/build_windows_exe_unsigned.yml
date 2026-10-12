@@ -35,7 +35,7 @@ on:
         default: historical
       validation_suite:
         type: choice
-        options: [png, extended, precision-source-control]
+        options: [png, extended, precision-source-control, remaining-media]
         default: png
       media_fixture_run_id:
         type: string
@@ -159,6 +159,11 @@ jobs:
       EXPECTED_GAL_SOURCE: 55dabd7b43927e5b0ad87cf0ab3dab06950ebe2f
     steps:
       - uses: actions/checkout@v4
+      - name: Qualify retained positive and negative Favorites frames before allocating a device
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          ./support/diagnostics/issue2311-favorites-gate.ps1 -Mode Preflight -OutputPath evidence/favorites-gate-preflight.json
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -208,7 +213,7 @@ jobs:
           if(-not $app){throw 'No source app URL returned'}
           "BASELINE_APP=$app" | Add-Content $env:GITHUB_ENV
       - name: Retrieve exact shared media fixtures
-        if: inputs.validation_suite == 'extended'
+        if: inputs.validation_suite == 'extended' || inputs.validation_suite == 'remaining-media'
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}

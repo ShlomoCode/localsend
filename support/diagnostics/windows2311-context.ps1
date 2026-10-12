@@ -183,7 +183,15 @@ SaveSenderBoundary 'after-send-to'
 & $ui -Action snapshot -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -Label "windows-$Case-image-selected"
 SaveSemanticObservation 'before-favorites'
 SaveSenderBoundary 'before-favorites'
-& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseControlSequence
+& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground
 SaveSemanticObservation 'before-send'
 SaveSenderBoundary 'before-send'
+# A queued mouse gesture and an opaque accessibility pane do not establish the
+# Favorites dialog. Require both fresh owned-window captures to match the pinned
+# positive dialog interior before the single recipient input.
+& "$PSScriptRoot/issue2311-favorites-gate.ps1" -Mode Validate `
+ -CapturePaths @("evidence/windows-$Case-favorites.png","evidence/windows-$Case-before-send-original.png") `
+ -ActionPaths @("evidence/windows-$Case-favorites-action.json","evidence/windows-$Case-before-send-original-action.json") `
+ -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -OutputPath "evidence/$Case-favorites-gate.json"
 & $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 145 -Y 225 -Label "windows-$Case-send" -RequireForeground -UseControlSequence
+SaveSenderBoundary 'after-recipient'

@@ -7,21 +7,26 @@ import {waitForNativeControl} from './native-readiness.mjs';
 const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}){
  const prefix=`/session/${session}`,results=[],precisionFailures=[],mtimeFailures=[];
- const extended=process.env.VALIDATION_SUITE==='extended';
+ const remainingMedia=process.env.VALIDATION_SUITE==='remaining-media';
+ const extended=process.env.VALIDATION_SUITE==='extended'||remainingMedia;
  const precisionSourceControl=process.env.VALIDATION_SUITE==='precision-source-control';
  if(precisionSourceControl&&(process.env.SOURCE_APP_FAMILY!=='current'||process.env.SOURCE_APK_KIND!=='tagged'))throw new Error('Precision source control requires the current tagged observer APK');
+ if(remainingMedia&&(process.env.SOURCE_APP_FAMILY!=='candidate'||process.env.SOURCE_APK_KIND!=='candidate'))throw new Error('Remaining-media validation requires the immutable candidate APK');
  const fixtureDirectory=process.env.MEDIA_FIXTURE_DIRECTORY;
  const fixtureManifest=extended?JSON.parse(readFileSync(join(fixtureDirectory||'__missing_media_fixture_artifact__','manifest.json'))):null;
  const cases=precisionSourceControl
   ?[false,true].map(gallery=>({label:'source-precision-'+(gallery?'on':'off'),gallery,extension:'png',fixtureModifiedUtc:'2025-02-13T14:11:00.123Z',sourceBoundaryObservation:true}))
-  :['on','off','on-repeat','off-repeat'].map(label=>({label,gallery:label.startsWith('on'),extension:'png'}));
+  :(remainingMedia?[]:['on','off','on-repeat','off-repeat']).map(label=>({label,gallery:label.startsWith('on'),extension:'png'}));
  if(extended){
-  cases.push({label:'precision-on',gallery:true,extension:'png',fixtureModifiedUtc:'2025-02-13T14:11:00.123Z'});
+  if(!remainingMedia)cases.push({label:'precision-on',gallery:true,extension:'png',fixtureModifiedUtc:'2025-02-13T14:11:00.123Z'});
   for(const [type,extension,artifactName] of [['jpeg','jpg','capture.jpg'],['video','mp4','capture.mp4']]){
    const fixtureSource=join(fixtureDirectory,artifactName),bytes=readFileSync(fixtureSource);
    const sourceMetadata=fixtureManifest.files.find(file=>file.name===artifactName);
    if(!sourceMetadata||createHash('sha256').update(bytes).digest('hex')!==sourceMetadata.sha256||bytes.length!==sourceMetadata.bytes)throw new Error('Immutable media fixture artifact mismatch: '+artifactName);
-   for(const gallery of [true,false])cases.push({label:type+'-'+(gallery?'on':'off'),gallery,extension,fixtureSource,sourceMetadata});
+   for(const gallery of [true,false]){
+    if(remainingMedia&&type==='jpeg'&&gallery)continue;
+    cases.push({label:type+'-'+(gallery?'on':'off'),gallery,extension,fixtureSource,sourceMetadata});
+   }
   }
   writeFileSync('evidence/media-fixture-manifest.json',JSON.stringify(fixtureManifest,null,2));
  }
@@ -311,7 +316,7 @@ export default async function({session,wd,senderPort,transportStatus}){
    finally{await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});}
    await click('Done');
   }
-  if(!precisionSourceControl)await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
+  if(!precisionSourceControl&&!remainingMedia)await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
   if(precisionFailures.length)throw new Error('Candidate gallery received-metadata preservation failed; separate end-to-end fractional verdict and gallery/fallback artifacts retained');
   if(mtimeFailures.length)throw new Error('Required media modification-time verdicts failed: '+mtimeFailures.map(result=>result.case).join(', ')+'; raw per-case results retained');
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
