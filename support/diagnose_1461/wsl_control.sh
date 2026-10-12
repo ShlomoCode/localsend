@@ -9,6 +9,12 @@ set -Eeuo pipefail
 evidence=${1:?evidence}; action=${2:?action}; shift 2
 scripts=$(cd "$(dirname "$0")" && pwd)
 if [[ "$action" == prepare || "$action" == start ]]; then exec bash "$scripts/wsl_prepare.sh" "$evidence" "${1:?pinned DEB sha256}"; fi
+if [[ "$action" == receiver-liveness ]]; then
+  # The whole observation, including receipt collection, is guest-bounded.
+  # GNU timeout owns only the observer group and attempts TERM at 8s, KILL
+  # after 1s grace. Uninterruptible tasks/I/O can exceed the intended bound.
+  exec timeout --kill-after=1s 8s bash "$0" "$evidence" receiver-liveness-bounded "${1:?label}"
+fi
 evidence=$(realpath "$evidence")
 source "$evidence/receiver/session.env"
 stamp() { date -u --iso-8601=ns; }
@@ -73,6 +79,50 @@ restore() {
   rm -f "$out/guardian.active"
 }
 case "$action" in
+  receiver-liveness-bounded)
+    root; label=${1:?label}; [[ "$label" =~ ^post-return-[12]$ ]]
+    live="$evidence/receiver/lifetime/$label"; mkdir "$live"
+    failure=0
+    probe_capture() {
+      local name=$1 result=0; shift
+      "$@" > "$live/$name.txt" 2> "$live/$name.stderr" || result=$?
+      printf '%s\n' "$result" > "$live/$name.exit" || true
+      if (( result != 0 )); then printf '%s\texit=%s\n' "$name" "$result" >> "$live/failures.tsv"; failure=1; fi
+      return 0
+    }
+    probe_capture snapshot-before bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot "$label-before"
+    original_live() {
+      local name=$1 pid tick executable raw fields; local -a parts
+      read -r pid tick executable < "$evidence/receiver/lifetime/$name.ref" || return 1
+      raw=$(cat "/proc/$pid/stat") || return 1; fields=${raw##*) }; read -r -a parts <<< "$fields"
+      [[ ${parts[19]} == "$tick" && ${parts[0]} != Z && ${parts[0]} != X && ${parts[0]} != x && $(readlink -f "/proc/$pid/exe") == "$executable" ]] || return 1
+    }
+    for name in app xvfb; do
+      if original_live "$name"; then printf 'original-live\n' > "$live/$name.gate"; else printf '%s\toriginal-identity-or-state-failed\n' "$name" >> "$live/failures.tsv"; failure=1; fi
+    done
+    probe_capture listeners ss -ltnp
+    if ! grep -E ':41631[[:space:]].*pid='"$APP_PID"',' "$live/listeners.txt" >/dev/null; then printf 'original-app-listener-missing\n' >> "$live/failures.tsv"; failure=1; fi
+    # Xvfb was launched without an authorization file; query its original
+    # display directly, avoiding another PAM/session launcher in the observer.
+    probe_capture window-pid env DISPLAY="$DISPLAY" xdotool getwindowpid "$WINDOW"
+    probe_capture visible-windows env DISPLAY="$DISPLAY" xdotool search --onlyvisible --pid "$APP_PID"
+    if [[ $(cat "$live/window-pid.txt") != "$APP_PID" ]] || ! grep -Fxq "$WINDOW" "$live/visible-windows.txt"; then printf 'original-visible-owned-window-missing\n' >> "$live/failures.tsv"; failure=1; fi
+    # Recheck identities after socket/window observations to reject PID reuse.
+    for name in app xvfb; do
+      if ! original_live "$name"; then printf '%s\tfinal-original-identity-or-state-failed\n' "$name" >> "$live/failures.tsv"; failure=1; fi
+    done
+    # Primary result survives a failed secondary snapshot/write.
+    printf 'observed\t%s\tfailed=%s\n' "$(stamp)" "$failure" > "$live/validation-result.tsv" || true
+    probe_capture snapshot-after bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot "$label-after"
+    if (( failure )); then exit 1; fi
+    before="$evidence/receiver/lifetime/prepare-before-normal-return"; after="$evidence/receiver/lifetime/$label-after"
+    if [[ ! -s "$before/boot-id.txt" || ! -s "$after/boot-id.txt" || ! -s "$before/pid1.stat" || ! -s "$after/pid1.stat" ]] ||
+       [[ $(cat "$before/boot-id.txt") != $(cat "$after/boot-id.txt") ]]; then printf 'guest-boot-continuity-failed\n' >> "$live/failures.tsv"; exit 1; fi
+    raw=$(cat "$before/pid1.stat"); fields=${raw##*) }; read -r -a before_parts <<< "$fields"
+    raw=$(cat "$after/pid1.stat"); fields=${raw##*) }; read -r -a after_parts <<< "$fields"
+    [[ ${before_parts[19]} == "${after_parts[19]}" ]] || { printf 'pid1-continuity-failed\n' >> "$live/failures.tsv"; exit 1; }
+    printf 'passed\t%s\t%s\n' "$(stamp)" "$APP_PID" > "$live/passed.tsv"
+    ;;
   arm)
     root; case_id=${1:?case}; case_dir "$case_id"; expected_bytes=${2:?bytes}; expected_sha=${3:?sha256}; filename=${4:?basename}
     [[ "$expected_bytes" =~ ^[1-9][0-9]*$ && "$expected_sha" =~ ^[a-fA-F0-9]{64}$ && "$filename" =~ ^[A-Za-z0-9_.-]+$ && "$filename" != .* ]]

@@ -1,4 +1,5 @@
 # Source-only draft. Dispatch requires parent review of the independent audit.
+param([switch]$ReceiverLifetimeOnly)
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $root=$PWD.Path
@@ -15,10 +16,26 @@ function Wsl([string[]]$Arguments,[int]$Seconds=30,[string]$ReceiptPath=''){
  if($ReceiptPath){Json $ReceiptPath $receipt}
  $p=[Diagnostics.Process]::new();$p.StartInfo=$info;[void]$p.Start()
  $stdout=$p.StandardOutput.ReadToEndAsync();$stderr=$p.StandardError.ReadToEndAsync()
- if(-not $p.WaitForExit($Seconds*1000)){ $p.Kill();if($ReceiptPath){$receipt.status='deadline-exceeded';$receipt['finishedUtc']=[DateTime]::UtcNow.ToString('o');Json $ReceiptPath $receipt};throw 'Out-of-band WSL command deadline; infrastructure failure.' }
+ if($ReceiptPath){
+  $receipt['processId']=$p.Id;$receipt['controllerId']=$PID
+  try{$receipt['processStartUtc']=$p.StartTime.ToUniversalTime().ToString('o')}catch{$receipt['processStartObservationError']=$_.Exception.Message}
+  try{$receipt['controllerStartUtc']=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')}catch{$receipt['controllerStartObservationError']=$_.Exception.Message}
+  Json $ReceiptPath $receipt
+ }
+ if(-not $p.WaitForExit($Seconds*1000)){
+  $deadlineFailure=[TimeoutException]::new('Out-of-band WSL command deadline; infrastructure failure.')
+  try{$p.Kill()}catch{$receipt['terminationObservationError']=$_.Exception.Message}
+  if($ReceiptPath){$receipt.status='deadline-exceeded';$receipt['finishedUtc']=[DateTime]::UtcNow.ToString('o');try{Json $ReceiptPath $receipt}catch{}}
+  throw $deadlineFailure
+ }
  $text=$stdout.GetAwaiter().GetResult();$errorText=$stderr.GetAwaiter().GetResult()
- if($ReceiptPath){$receipt.status='exited';$receipt.stdout=$text;$receipt.stderr=$errorText;$receipt.exitCode=$p.ExitCode;$receipt['finishedUtc']=[DateTime]::UtcNow.ToString('o');Json $ReceiptPath $receipt}
- if($p.ExitCode -ne 0){throw "WSL command failed: $($Arguments -join ' '); $text $errorText"}
+ if($ReceiptPath){$receipt.status='exited';$receipt.stdout=$text;$receipt.stderr=$errorText;$receipt.exitCode=$p.ExitCode;$receipt['finishedUtc']=[DateTime]::UtcNow.ToString('o')}
+ if($p.ExitCode -ne 0){
+  $commandFailure=[InvalidOperationException]::new("WSL command failed (exit $($p.ExitCode)): $($Arguments -join ' '); $text $errorText")
+  if($ReceiptPath){try{Json $ReceiptPath $receipt}catch{}}
+  throw $commandFailure
+ }
+ if($ReceiptPath){Json $ReceiptPath $receipt}
  return $text.Trim()
 }
 $linuxRoot=Wsl @('wslpath','-a',$root.Replace('\','/'))
@@ -65,15 +82,40 @@ function WorkingProbe([string]$Fixture,[string]$Phase,[int]$Seconds=240){
  return $probe
 }
 $sender=$null;$down=$false;$native=$null
+$lifetimeResult=@{mode=$(if($ReceiverLifetimeOnly){'receiver-only'}else{'full-sequence'});status='not-started';productCredit=$false;nativeTerminalObserved=$false;observations=@()}
+$lifetimePath=Join-Path $evidence 'receiver-lifetime-result.json'
 try{
- Guest @('prepare','9a823f990eab24d33c0d3c27698a15812f08a266f342462ed4755afa52d703ca') 900|Set-Content (Join-Path $evidence 'guest-prepare-output.txt')
+ $lifetimeResult.status='preparing';Json $lifetimePath $lifetimeResult
+ Wsl @('bash',$linuxScript,$linuxEvidence,'prepare','9a823f990eab24d33c0d3c27698a15812f08a266f342462ed4755afa52d703ca') 900 (Join-Path $evidence 'guest-prepare-command.json')|Set-Content (Join-Path $evidence 'guest-prepare-output.txt')
+ $lifetimeResult['preparationReceipt']='guest-prepare-command.json';$lifetimeResult['normalReturnObservedUtc']=[DateTime]::UtcNow.ToString('o');$lifetimeResult.status='post-return-observing';Json $lifetimePath $lifetimeResult
+ foreach($probe in @(@{label='post-return-1';idleSeconds=2},@{label='post-return-2';idleSeconds=3})){
+  # No guest invocation occurs in this host-only interval. Probe 2 is reached
+  # only after probe 1 returned successfully with the original identities.
+  $clock=[Diagnostics.Stopwatch]::StartNew();$idleStart=[DateTime]::UtcNow.ToString('o')
+  Start-Sleep -Seconds $probe.idleSeconds;$clock.Stop()
+  $observation=@{label=$probe.label;idleStartedUtc=$idleStart;idleFinishedUtc=[DateTime]::UtcNow.ToString('o');idleElapsedMilliseconds=$clock.Elapsed.TotalMilliseconds;requestedIdleSeconds=$probe.idleSeconds;guestWholeBoundSeconds=8;guestKillGraceSeconds=1;hostBoundSeconds=12;receipt=($probe.label+'-command.json');status='starting'}
+  $lifetimeResult.observations+=@($observation);Json $lifetimePath $lifetimeResult
+  Wsl @('bash',$linuxScript,$linuxEvidence,'receiver-liveness',$probe.label) 12 (Join-Path $evidence $observation.receipt)|Set-Content (Join-Path $evidence ($probe.label+'-output.txt'))
+  $observation.status='passed';Json $lifetimePath $lifetimeResult
+ }
+ $lifetimeResult.status='bounded-original-receiver-survival-passed';Json $lifetimePath $lifetimeResult
+ if($ReceiverLifetimeOnly){
+  Json (Join-Path $evidence 'controller-result.json') @{status='receiver-only-discriminator-completed';productCredit=$false;nativeTerminalObserved=$false;lifetimeReceipt='receiver-lifetime-result.json'}
+  return
+ }
  $ipOutput=Wsl @('ip','-j','-4','address','show','dev','eth0','scope','global') 30 (Join-Path $evidence 'guest-ip-command.json')
  $ipInterfaces=@($ipOutput|ConvertFrom-Json)
  if($ipInterfaces.Count -ne 1 -or $ipInterfaces[0].ifname -cne 'eth0'){throw 'Actual IP JSON must identify exactly one eth0 interface.'}
  $globalAddresses=@($ipInterfaces[0].addr_info|Where-Object {$_.family -ceq 'inet' -and $_.scope -ceq 'global'})
  if($globalAddresses.Count -ne 1){throw 'Actual eth0 must have exactly one global IPv4 address.'}
  $guestIp=[string]$globalAddresses[0].local;$parsedGuestIp=$null
- if(-not [Net.IPAddress]::TryParse($guestIp,[ref]$parsedGuestIp) -or $parsedGuestIp.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsedGuestIp.ToString() -cne $guestIp -or $parsedGuestIp.GetAddressBytes()[0] -ne 172 -or $parsedGuestIp.GetAddressBytes()[1] -lt 16 -or $parsedGuestIp.GetAddressBytes()[1] -gt 31){throw 'Expected one canonical actual WSL NAT guest IPv4 in 172.16.0.0/12.'}
+ if(-not [Net.IPAddress]::TryParse($guestIp,[ref]$parsedGuestIp) -or $parsedGuestIp.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsedGuestIp.ToString() -cne $guestIp){throw 'Expected one canonical actual eth0 IPv4 address.'}
+ # WSL documents querying the actual guest address; its 172.x example does
+ # not guarantee a fixed NAT range. Preserve the observed IP and admit RFC1918.
+ $guestOctets=$parsedGuestIp.GetAddressBytes()
+ $privateGuestIp=$guestOctets[0] -eq 10 -or ($guestOctets[0] -eq 172 -and $guestOctets[1] -ge 16 -and $guestOctets[1] -le 31) -or ($guestOctets[0] -eq 192 -and $guestOctets[1] -eq 168)
+ if(-not $privateGuestIp){throw 'Expected one canonical actual WSL guest IPv4 in an RFC1918 private range.'}
+ Json (Join-Path $evidence 'guest-address-admission.json') @{guestIp=$guestIp;interface=$ipInterfaces[0];address=$globalAddresses[0];rawReceipt='guest-ip-command.json';policy='Canonical single eth0 global IPv4 in 10/8, 172.16/12 or 192.168/16';scope='Address admission only; actual live peer socket and eth0 route remain required before interruption'}
  $env:RECEIVER_HOST=$guestIp;$env:RECEIVER_PORT='41631';$env:FAILED_FIXTURE_BYTES='4294967296'
  $fixtureBytes=[long]$env:FAILED_FIXTURE_BYTES
  $sourceDrive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($windows))
@@ -156,8 +198,13 @@ try{
  }
  Json (Join-Path $evidence 'controller-result.json') @{status='native-error-sequence-completed';productVerdict='Requires raw/video independent review; no claim of Android equivalence or causal fix'}
 }catch{
- Json (Join-Path $evidence 'controller-result.json') @{status='infrastructure-or-admission-failure';error=$_.Exception.ToString();nativeTerminalObserved=(Test-Path (Join-Path $evidence 'native-terminal.json'))}
- throw
+ $primaryFailure=$_
+ if($lifetimeResult.status -ne 'bounded-original-receiver-survival-passed'){
+  $lifetimeResult.status='infrastructure-lifetime-failure';$lifetimeResult['error']=$primaryFailure.Exception.ToString()
+  try{Json $lifetimePath $lifetimeResult}catch{}
+ }
+ try{Json (Join-Path $evidence 'controller-result.json') @{status='infrastructure-or-admission-failure';error=$primaryFailure.Exception.ToString();nativeTerminalObserved=(Test-Path (Join-Path $evidence 'native-terminal.json'))}}catch{}
+ throw $primaryFailure
 }finally{
  if($down){try{Guest @('up','failed')|Out-Null}catch{$_|Out-String|Set-Content (Join-Path $evidence 'restoration-error.txt')}}
  if($sender -and -not $sender.HasExited){try{Command @{action='record-stop'} 30|Out-Null}catch{$_|Out-String|Set-Content (Join-Path $evidence 'recorder-stop-error.txt')}}

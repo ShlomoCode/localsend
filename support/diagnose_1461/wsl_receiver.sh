@@ -4,6 +4,8 @@ set -Eeuo pipefail
 evidence=$(realpath "${1:?evidence}"); exe=$(readlink -f "${2:?official installed executable}")
 [[ $(id -un) == tester && $(id -u) != 0 ]]
 out="$evidence/receiver"; mkdir -p "$out"
+scripts=$(cd "$(dirname "$0")" && pwd); lifetime="$scripts/wsl_lifetime_snapshot.sh"
+bash "$lifetime" "$evidence" register receiver "$$"
 exec > >(tee -a "$out/startup.log") 2>&1
 [[ -f "$exe" && -x "$exe" && ! -e "$out/session.env" ]]
 dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' localsend > "$out/package.tsv"
@@ -85,6 +87,8 @@ xvfb_owned
 xdotool getdisplaygeometry
 eval "$(dbus-launch --sh-syntax)"
 openbox > "$out/openbox.log" 2>&1 & wm_pid=$!
+bash "$lifetime" "$evidence" register wm "$wm_pid"
+bash "$lifetime" "$evidence" register dbus "${DBUS_SESSION_BUS_PID:?original dbus pid}"
 "$exe" > "$out/app.log" 2>&1 & app_pid=$!
 printf 'DISPLAY=%q\nAPP_PID=%q\nDEST=%q\nSETTINGS=%q\nEXE=%q\n' "$DISPLAY" "$app_pid" "$dest" "$settings" "$exe" > "$out/session.env"
 printf 'XVFB_PID=%q\nXVFB_START_TICK=%q\nXVFB_EXE=%q\nDISPLAY_NUMBER=%q\nDISPLAY_RECEIPT=%q\n' \
@@ -141,6 +145,10 @@ for ((attempt=0; attempt<60; attempt++)); do
     if (( receive_observed )) && grep -q WSL1461 "$out/readiness.txt" && kill -0 "$app_pid" &&
        [[ $(readlink -f "/proc/$app_pid/exe") == "$exe" && $(awk '{print $22}' "/proc/$app_pid/stat") == "$(cat "$out/app.start-tick")" && $(timeout 3 xdotool getwindowpid "$window") == "$app_pid" ]] &&
        grep -E ':41631[[:space:]].*pid='"$app_pid"',' "$out/listeners.txt" >/dev/null; then
+      # Bind liveness references only after the existing strict executable/
+      # start-tick readiness gate, never to the pre-exec child shell image.
+      bash "$lifetime" "$evidence" register app "$app_pid" "$exe" "$(cat "$out/app.start-tick")"
+      bash "$lifetime" "$evidence" register xvfb "$xvfb_pid" "$xvfb_exe" "$xvfb_start_tick"
       printf 'receive_source\texact_word\tminimum_confidence\twindow\tpid\n%s\tReceive\t50\t%s\t%s\n' \
         "$receive_source" "$window" "$app_pid" > "$out/readiness-observation.tsv"
       printf 'WINDOW=%q\n' "$window" >> "$out/session.env"
@@ -153,7 +161,17 @@ done
 [[ -s "$out/ready.tsv" ]] || { echo 'Readiness failed; live app is preserved'; exit 1; }
 # Cleanup the display only after the actual app exits. A control timeout does
 # not kill LocalSend, delete partial files, or create an artificial error.
+snapshot_status=0
+timeout --kill-after=1s 2s bash "$lifetime" "$evidence" snapshot receiver-ready-before-wait || snapshot_status=$?
+printf '%s\n' "$snapshot_status" > "$out/lifetime/receiver-ready-before-wait.exit"
+printf 'wait-start-observed\t%s\t%s\n' "$(date -u --iso-8601=ns)" "$(cat /proc/uptime)" > "$out/lifetime/wait-start.tsv"
 status=0; wait "$app_pid" || status=$?
+# This is observation after wait, not the true app-exit instant. Retain status
+# before any secondary receipt/settings operation or display cleanup can fail.
+printf 'wait-return-observed\t%s\tstatus=%s\t%s\n' "$(date -u --iso-8601=ns)" "$status" "$(cat /proc/uptime)" > "$out/lifetime/wait-return.tsv" || true
+snapshot_status=0
+timeout --kill-after=1s 2s bash "$lifetime" "$evidence" snapshot receiver-after-wait-before-cleanup || snapshot_status=$?
+printf '%s\n' "$snapshot_status" > "$out/lifetime/receiver-after-wait-before-cleanup.exit" || true
 cp "$settings" "$out/settings-after.json"
 printf 'exited\t%s\t%s\n' "$(date -u --iso-8601=ns)" "$status" > "$out/app-exited.tsv"
 kill "$wm_pid" "${DBUS_SESSION_BUS_PID:-}" 2>/dev/null || true

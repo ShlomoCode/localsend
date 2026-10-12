@@ -102,11 +102,21 @@ done < <(dpkg -L localsend | grep '/localsend_app$')
 printf '%s\n' "$exe" > "$evidence/linux-executable.txt"
 chown -R tester:tester "$evidence"
 scripts=$(cd "$(dirname "$0")" && pwd)
+lifetime="$scripts/wsl_lifetime_snapshot.sh"
+mkdir -p "$evidence/receiver/lifetime"; chown tester:tester "$evidence/receiver" "$evidence/receiver/lifetime"
+bash "$lifetime" "$evidence" register prepare "$$"
 printf -v launch 'bash %q %q %q' "$scripts/wsl_receiver.sh" "$evidence" "$exe"
 nohup runuser -u tester -- bash -c "$launch" > "$evidence/receiver-supervisor.log" 2>&1 < /dev/null &
 supervisor=$!
+bash "$lifetime" "$evidence" register supervisor "$supervisor"
 for ((attempt=0; attempt<120; attempt++)); do
-  [[ ! -s "$evidence/receiver/ready.tsv" ]] || exit 0
+  if [[ -s "$evidence/receiver/ready.tsv" ]]; then
+    snapshot_status=0
+    timeout --kill-after=1s 2s bash "$lifetime" "$evidence" snapshot prepare-before-normal-return || snapshot_status=$?
+    printf '%s\n' "$snapshot_status" > "$evidence/receiver/lifetime/prepare-before-normal-return.exit"
+    date -u --iso-8601=ns > "$evidence/receiver/lifetime/prepare-normal-return-observed.utc"
+    exit 0
+  fi
   kill -0 "$supervisor" || { cat "$evidence/receiver-supervisor.log"; exit 1; }
   sleep 1
 done
