@@ -55,6 +55,21 @@ function recording(name){
 }
 export async function ready(){
  mkdirSync(root,{recursive:true});
+ let launched=false,lastLaunchError;
+ for(let i=0;i<10;i++){
+   try{const launch=snapshot("first-launch-before-permission");if(launch.pid&&launch.elements.some(e=>e.AXRole==="AXWindow")){launched=true;break;}lastLaunchError=Error("App process has no native window yet");}catch(error){lastLaunchError=error;}
+   await delay(500);
+ }
+ if(!launched)throw lastLaunchError;
+ writeFileSync(root+"/first-launch-system-ax.json",execFileSync(ax,["--system"],{timeout:20000,maxBuffer:32*1024*1024}));
+ const permission=JSON.parse(execFileSync(ax,["--allow-local-network"],{timeout:20000,maxBuffer:4*1024*1024}));
+ writeFileSync(root+"/first-launch-permission.json",JSON.stringify(permission,null,2));log("native-local-network-permission",permission);
+ if(permission.pressed){await delay(1500);snapshot("first-launch-after-permission");}
+ const initial=snapshot("before-semantic-enablement");
+ if(!hasLabel(initial,"Receive via link")){
+   writeFileSync(root+"/enhanced-accessibility.json",execFileSync(ax,[bundle,"--enhance"],{timeout:10000}));
+   log("query-and-enable-settable-AXEnhancedUserInterface");await delay(1500);snapshot("after-semantic-enablement");
+ }
  let tree, lastError;
  let mainReady=false;
  for(let i=0;i<20;i++){try{tree=snapshot("readiness");assertMainReceive(tree);mainReady=true;break;}catch(e){lastError=e;}await delay(1500);}
