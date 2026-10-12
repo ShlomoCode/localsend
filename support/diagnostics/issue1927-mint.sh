@@ -90,6 +90,8 @@ for n in $(seq 1 60); do
 done
 test "$ready" = 1
 timeout 1200 ssh "${opts[@]}" mint@127.0.0.1 'bash -s' > evidence/cloud/scenario.log 2>&1 <<'GUEST'
+exec 9>&2
+BASH_XTRACEFD=9
 set -Eeuxo pipefail
 cd /home/mint
 OUT=$(realpath evidence)
