@@ -410,8 +410,10 @@ private enum ProxyFailure: Error { case relayStatus(Int), protocolViolation }
 @MainActor
 final class ProxyViewController: UIViewController {
     let proxy = ByteProxy()
+    let qualification = WebSocketQualification()
     private let urlField = UITextField()
     private let tokenField = UITextField()
+    private let qualificationField = UITextField()
     private let logView = UITextView()
 
     override func viewDidLoad() {
@@ -426,7 +428,10 @@ final class ProxyViewController: UIViewController {
         tokenField.accessibilityIdentifier = "relayToken"
         tokenField.accessibilityLabel = "Relay token"
         tokenField.isSecureTextEntry = true
-        for field in [urlField, tokenField] {
+        qualificationField.placeholder = "Armed WebSocket qualification ID"
+        qualificationField.accessibilityIdentifier = "qualificationID"
+        qualificationField.accessibilityLabel = "WebSocket qualification ID"
+        for field in [urlField, tokenField, qualificationField] {
             field.borderStyle = .roundedRect
             field.autocorrectionType = .no
             field.autocapitalizationType = .none
@@ -439,13 +444,17 @@ final class ProxyViewController: UIViewController {
         stop.setTitle("Stop proxy", for: .normal)
         stop.accessibilityIdentifier = "stopProxy"
         stop.addTarget(self, action: #selector(stopProxy), for: .touchUpInside)
+        let qualify = UIButton(type: .system)
+        qualify.setTitle("Qualify WebSocket", for: .normal)
+        qualify.accessibilityIdentifier = "qualifyWebSocket"
+        qualify.addTarget(self, action: #selector(qualifyWebSocket), for: .touchUpInside)
         let note = UILabel()
         note.text = "Start before switching to LocalSend. iOS can expire the background budget."
         note.numberOfLines = 0
         logView.isEditable = false
         logView.accessibilityIdentifier = "proxyLog"
         logView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        let stack = UIStackView(arrangedSubviews: [note, urlField, tokenField, start, stop, logView])
+        let stack = UIStackView(arrangedSubviews: [note, urlField, tokenField, start, qualificationField, qualify, stop, logView])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -462,6 +471,12 @@ final class ProxyViewController: UIViewController {
             // Keep the UI bounded; the device log retains the complete record.
             if self.logView.text.count > 24000 { self.logView.text = String(self.logView.text.suffix(16000)) }
         }
+        qualification.logLine = { [weak self] line in
+            guard let self else { return }
+            self.logView.text += line + "\n"
+            if self.logView.text.count > 24000 { self.logView.text = String(self.logView.text.suffix(16000)) }
+            if line.hasPrefix("ws-summary ") { self.tokenField.text = "" }
+        }
         let args = ProcessInfo.processInfo.arguments
         func value(_ key: String) -> String? {
             guard let index = args.firstIndex(of: key), index + 1 < args.count else { return nil }
@@ -474,9 +489,19 @@ final class ProxyViewController: UIViewController {
 
     @objc private func startProxy() {
         view.endEditing(true)
+        guard !qualification.running else { return }
         proxy.start(urlText: urlField.text ?? "", token: tokenField.text ?? "")
     }
-    @objc private func stopProxy() { proxy.stop(reason: "user-stop") }
+    @objc private func qualifyWebSocket() {
+        view.endEditing(true)
+        guard !proxy.running, !qualification.running else { return }
+        logView.text = ""
+        qualification.start(urlText: urlField.text ?? "", token: tokenField.text ?? "", id: qualificationField.text ?? "")
+    }
+    @objc private func stopProxy() {
+        proxy.stop(reason: "user-stop")
+        qualification.stop(reason: "user-stop")
+    }
 }
 
 @main
@@ -490,7 +515,16 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         window?.makeKeyAndVisible()
         return true
     }
-    func applicationDidEnterBackground(_ application: UIApplication) { controller.proxy.log("did-enter-background") }
-    func applicationWillEnterForeground(_ application: UIApplication) { controller.proxy.log("will-enter-foreground") }
-    func applicationWillTerminate(_ application: UIApplication) { controller.proxy.stop(reason: "termination") }
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        controller.proxy.log("did-enter-background")
+        controller.qualification.enteredBackground()
+    }
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        controller.proxy.log("will-enter-foreground")
+        controller.qualification.enteringForeground()
+    }
+    func applicationWillTerminate(_ application: UIApplication) {
+        controller.proxy.stop(reason: "termination")
+        controller.qualification.stop(reason: "termination")
+    }
 }

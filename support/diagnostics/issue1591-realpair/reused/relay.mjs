@@ -2,8 +2,9 @@ import http from 'node:http';
 import net from 'node:net';
 import {randomBytes} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
+import {qualification} from './ws-qualification.mjs';
 
-export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toString('hex'),senderNoDelay=false}={}) {
+export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toString('hex'),senderNoDelay=false,qualificationOnly=false}={}) {
   const peers=new Map(); const events=[]; let waiter=null; let queued=0; let peak=0; let next=0;let nextSeq=0;let pendingBatch=null;
   const faults=[],peerBytes={};
   const metrics={opened:0,fromSender:0,fromDevice:0,paused:0};
@@ -12,7 +13,7 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
   const elapsedMs=()=>Number(process.hrtime.bigint()-started)/1e6;
   const health=()=>({lastHealth:healthSamples.at(-1)||null,healthAgeMs:healthSamples.length?elapsedMs()-healthSamples.at(-1).receivedElapsedMs:null,
     healthGeneration:healthSamples.at(-1)?.payload.generation||null,healthSamples:healthSamples.length,healthDropped});
-  const status=()=>({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter,pendingAckSeq:pendingBatch?.at(-1)?.seq||null,peerBytes,faults,timingLimit,timingRecords,timingDropped,...health()});
+  const status=()=>({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter,pendingAckSeq:pendingBatch?.at(-1)?.seq||null,peerBytes,faults,timingLimit,timingRecords,timingDropped,...health(),...(qualificationOnly?{qualification:probe.qualificationStatus()}: {})});
   function fault(kind,detail={}){const entry={utc:new Date().toISOString(),elapsedMs:elapsedMs(),kind,...detail};faults.push(entry);record('transport-fault',undefined,entry);}
   function validHealth(value){
     return value&&Number.isInteger(value.pid)&&value.pid>0&&Number.isFinite(value.elapsedSeconds)&&value.elapsedSeconds>=0&&
@@ -39,7 +40,7 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
   }
   function wake() {if(waiter && events.length&&!pendingBatch) {const w=waiter;waiter=null;clearTimeout(w.timer);w.res.end(JSON.stringify(batch('waiting-pull')));}}
   function enqueue(e) {events.push({...e,seq:++nextSeq});queued+=e.bytes||0;peak=Math.max(peak,queued);if(queued>512*1024){for(const p of peers.values())p.pause();metrics.paused++;}wake();}
-  const tcp=net.createServer({allowHalfOpen:true},p=>{
+  const tcp=qualificationOnly?null:net.createServer({allowHalfOpen:true},p=>{
     if(senderNoDelay)p.setNoDelay(true);
     const id=String(++next); peers.set(id,p);metrics.opened++;
     peerBytes[id]={fromSender:0,toSender:0,acknowledgedToDevice:0};
@@ -53,6 +54,10 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
   const server=http.createServer((req,res)=>{
     if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(401);res.end();return;}
     res.setHeader('content-type','application/json');
+    if(qualificationOnly) {
+      if(req.method==='GET' && req.url==='/status') {res.end(JSON.stringify(status()));return;}
+      res.writeHead(404);res.end('{}');return;
+    }
     if(req.method==='GET' && req.url==='/pull') {
       record("poll-open");if(waiter){record("poll-conflict");res.writeHead(409);res.end();return;}
       if(pendingBatch){fault('poll-before-ack',{pendingSeq:pendingBatch.at(-1).seq});res.writeHead(409);res.end('{}');return;}
@@ -121,9 +126,11 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
     }
     res.writeHead(404);res.end('{}');
   });
+  const probe=qualification(server,token,qualificationOnly);
   return {token,metrics,trace,record,status,health,healthSamples,
-    start:async()=>{await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
-    stop:async()=>{record('relay-stop');if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}for(const [id,p] of peers){record('relay-stop-close',id);p.destroy();}server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),new Promise(r=>tcp.close(r))]);}};
+    armQualification:probe.armQualification,qualificationStatus:probe.qualificationStatus,revokeQualification:probe.revokeQualification,
+    start:async()=>{if(tcp)await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
+    stop:async()=>{record('relay-stop');await probe.stop();if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}for(const [id,p] of peers){record('relay-stop-close',id);p.destroy();}server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),...(tcp?[new Promise(r=>tcp.close(r))]:[])]);}};
 }
 
 if(process.argv[1]?.endsWith('/relay.mjs')) {

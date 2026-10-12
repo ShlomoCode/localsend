@@ -16,9 +16,9 @@ on:
         type: string
         required: true
       comparison:
-        description: Additional cases after MKV OFF, or bounded fresh-process TCP_NODELAY comparison
+        description: Real transfer comparison, or dedicated native WebSocket qualification without app traffic
         type: choice
-        options: [none, mp4-off, gallery-on, mkv-gallery-pair, nodelay-first-mkv-off]
+        options: [none, mp4-off, gallery-on, mkv-gallery-pair, nodelay-first-mkv-off, ws-qualification]
         default: none
       fixture_run_id:
         description: Optional previous fork run ID to reuse the exact fixture bytes
@@ -52,8 +52,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install locked diagnostic relay dependency from its owned source
+        shell: pwsh
+        run: |
+          npm ci --prefix support/diagnostics/issue1591-realpair --ignore-scripts --omit=optional
+          if($LASTEXITCODE -ne 0){throw 'Locked relay dependency installation failed'}
       - name: Retrieve exact retained fixtures for controlled comparison
-        if: inputs.fixture_run_id != ''
+        if: inputs.comparison != 'ws-qualification' && inputs.fixture_run_id != ''
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
@@ -67,7 +72,9 @@ jobs:
           FIXTURE_ARTIFACT: ${{ inputs.fixture_artifact }}
         run: |
           New-Item -ItemType Directory -Force evidence,C:/tmp/bs-local-bin | Out-Null
-          if($env:FIXTURE_RUN_ID){
+          if($env:COMPARISON -eq 'ws-qualification'){
+            if($env:FIXTURE_RUN_ID -or $env:FIXTURE_ARTIFACT){throw 'WebSocket qualification does not accept media fixture inputs'}
+          }elseif($env:FIXTURE_RUN_ID){
             if(-not $env:FIXTURE_ARTIFACT){throw 'Exact fixture artifact name is required'}
             ./support/diagnostics/issue1591-realpair/fixtures.ps1 -ReuseDirectory fixture-source
             @{run=$env:FIXTURE_RUN_ID;artifact=$env:FIXTURE_ARTIFACT}|ConvertTo-Json|Set-Content evidence/fixture-lineage.json

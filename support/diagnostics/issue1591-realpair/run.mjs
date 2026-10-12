@@ -6,6 +6,7 @@ import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {relay} from './reused/relay.mjs';
+import {runWebSocketQualification} from './ws-qualification.mjs';
 
 const exec = promisify(execFile), root = dirname(fileURLToPath(import.meta.url));
 mkdirSync('evidence', {recursive:true});
@@ -659,6 +660,10 @@ async function collectMetadata() {
     }
   } catch (error) { save('metadata-error.txt', error); failure ||= 'Required original BrowserStack evidence retrieval failed'; }
 }
+if (process.env.COMPARISON === 'ws-qualification') {
+  await runWebSocketQualification({wd,save,redact,auth,token,appId,proxyId,root,
+    setSession:value=>{session=value;},setStage:value=>{stage=value;}});
+} else {
 try {
   for (const name of ['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','PROXY_APP','RECEIVER_APP','RECEIVER_IDENTITY','BS_LOCAL_ID']) if (!process.env[name]) throw new Error('Missing required input ' + name);
   for (const name of ['PROXY_APP','RECEIVER_APP']) if (!/^bs:\/\/[a-f0-9]{40}$/i.test(process.env[name])) throw new Error('Expected immutable BrowserStack app hash for ' + name);
@@ -870,3 +875,4 @@ $receipt.stopped=$true;$receipt|ConvertTo-Json -Compress
   save('evidence-admission.json', {failure, senderVerified:false, admission:'Requires parent inspection of both endpoint results, exact saved bytes, native health/lifecycle and original video/logs. A successful controller exit alone does not establish app-to-app success.'});
 }
 if (failure) { console.error(failure); process.exitCode = 1; }
+}
