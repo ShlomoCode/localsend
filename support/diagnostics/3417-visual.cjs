@@ -102,6 +102,28 @@ if (mode === 'crop') {
       point: [x + Math.floor((left + right) / 2), y + Math.floor((top + bottom) / 2)] });
   }
   if (mode === 'file') {
+    // The native GNOME grid wraps this exact fixture label over two centered
+    // lines. Keep both observed fragments and click the lower rendered text.
+    const words = [...lines.values()].flat();
+    const first = words.filter(word => word.text === '3417-' && word.confidence >= 70);
+    const second = words.filter(word => word.text === 'control.txt' && word.confidence >= 70);
+    for (const upper of first) {
+      for (const lower of second) {
+        const gap = lower.top - upper.top - upper.height;
+        const centers = Math.abs(upper.left + upper.width / 2 - lower.left - lower.width / 2);
+        const left = Math.min(upper.left, lower.left), top = upper.top;
+        const right = Math.max(upper.left + upper.width, lower.left + lower.width);
+        const bottom = lower.top + lower.height;
+        if (gap < 0 || gap > Math.max(upper.height, lower.height) || centers > 4
+            || left < 8 || top < 55 || right > width - 8 || bottom > height - 55) continue;
+        const overlapping = words.filter(word => word.left < right && word.left + word.width > left
+          && word.top < bottom && word.top + word.height > top);
+        if (overlapping.length !== 2) continue;
+        matches.push({ text: '3417-control.txt', rendering: 'two-centered-lines', words: [upper, lower],
+          bounds: [left, top, right - left, bottom - top],
+          point: [x + Math.floor(lower.left + lower.width / 2), y + Math.floor(lower.top + lower.height / 2)] });
+      }
+    }
     const visibleWords = [...lines.values()].flat().filter(word => word.confidence >= 70).map(word => word.text);
     if (!visibleWords.includes('Files') || !visibleWords.includes('Documents')) {
       throw new Error('Files/Documents is not rendered in the file-selection screenshot');
