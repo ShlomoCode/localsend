@@ -68,7 +68,7 @@ export async function runColdShareScenario(api){
  const staged=await until(s=>{const text=labels(s).join('\n');assert(!/FAILED|INSUFFICIENT_STORAGE/.test(text),'Fixture staging failed');return /READY name=.*\.mp4/.test(text);},sessionStart+8*minute);
  const details=labels(staged).find(s=>s.includes('READY name='));
  const name=details?.match(/READY name=([^\n]+)/)?.[1],bytes=Number(details?.match(/\nbytes=(\d+)/)?.[1]);
- assert(name?.endsWith('.mp4')&&bytes===16000000000&&/mediaDurationMs=1000(?:\n|$)/.test(details)&&/decodedFrame=320x240(?:\n|$)/.test(details),'Exact valid pinned-seed 16GB fixture evidence missing');
+ assert(name?.endsWith('.mp4')&&bytes===16000000000&&/mediaDurationMs=1000(?:\s|$)/.test(details)&&/decodedFrame=320x240(?:\n|$)/.test(details),'Exact valid pinned-seed 16GB fixture evidence missing');
  report.fixture={name,bytes,recipeIdentityOnly:true,uri:details.match(/\nuri=([^\n]+)/)?.[1],details,sha256:null};save('fixture.json',report.fixture);await snap('cold-fixture-ready',staged);
  // Stage before the original receives this URI, then prepare installed/not-running startup entry.
  assert(/^content:\/\/media\/external\/video\/media\/\d+$/.test(report.fixture.uri||''),'Pinned MediaStore video route missing');
@@ -254,29 +254,39 @@ export async function retainColdShareRecording({session,auth,save,output,report,
  const checkedUrl=value=>{const u=new URL(value);assert(u.protocol==='https:'&&!u.username&&!u.password&&(!u.port||u.port==='443')&&
   (apiHosts.has(u.hostname)||u.hostname==='app-automate.browserstack.com'),'Unexpected artifact HTTPS origin');return u;};
  const bound=end=>{const ms=Math.floor(Math.min(end,deadline)-Date.now());assert(ms>0,'Share artifact phase expired');return ms;};
+ const completed=(entry,phaseEnd,requestEnd)=>{const now=Date.now();entry.finishedUtc=new Date(now).toISOString();
+  entry.phaseDeadlineUtc=new Date(phaseEnd).toISOString();entry.requestDeadlineUtc=new Date(requestEnd).toISOString();
+  entry.finishedAfterPhaseDeadline=now>=phaseEnd;entry.finishedAfterRequestDeadline=now>=requestEnd;entry.finishedAfterAggregateDeadline=now>=deadline;
+  return !entry.finishedAfterPhaseDeadline&&!entry.finishedAfterRequestDeadline&&!entry.finishedAfterAggregateDeadline;};
  let metadata=preflightReferences?.hashed_id===session?{...preflightReferences}:{};
  receipt.preflightFallback=preflightReferences?.hashed_id===session?'validated-same-session-private-references':'unavailable';receipt.metadataRefreshes=[];
  const refreshMetadata=async(end)=>{
   const attempt={startedUtc:new Date().toISOString(),status:'incomplete'};receipt.metadataRefreshes.push(attempt);
+  const requestEnd=Math.min(end,deadline,Date.now()+10000),previousMetadata=metadata;
   try{
   const response=await fetch('https://api-cloud.browserstack.com/app-automate/sessions/'+encodeURIComponent(session)+'.json',{
-   headers:{authorization:auth},signal:AbortSignal.timeout(Math.min(10000,bound(end)))});
+   headers:{authorization:auth},signal:AbortSignal.timeout(bound(requestEnd))});
   const chunks=[];let bytes=0;for await(const chunk of response.body){bytes+=chunk.length;assert(bytes<=1024*1024,'Session metadata byte cap exceeded');chunks.push(Buffer.from(chunk));}
   assert(response.ok,'Owned session metadata failed '+response.status);const value=JSON.parse(Buffer.concat(chunks).toString()).automation_session;
   assert(value?.hashed_id===session,'Metadata does not identify the exact owned session');
-  for(const field of ['video_url','device_logs_url','appium_logs_url'])if(value[field])metadata[field]=checkedUrl(value[field]).href;
-  metadata.hashed_id=session;attempt.status='validated';
+  const candidate={...metadata,hashed_id:session};
+  for(const field of ['video_url','device_logs_url','appium_logs_url'])if(value[field])candidate[field]=checkedUrl(value[field]).href;
+  assert(completed(attempt,end,requestEnd),'Metadata completed after its request, phase, or aggregate deadline');
+  metadata=candidate;attempt.status='validated';
   }catch(error){attempt.error=scrub(error);throw error;}
-  finally{attempt.finishedUtc=new Date().toISOString();save('cold-share-recording-retention.json',receipt);}
+  finally{const onTime=completed(attempt,end,requestEnd);if(!onTime){metadata=previousMetadata;attempt.status='late-unusable';}
+   save('cold-share-recording-retention.json',receipt);
+   if(!completed(attempt,end,requestEnd)){metadata=previousMetadata;attempt.status='late-unusable';save('cold-share-recording-retention.json',receipt);throw Error('Metadata completion exceeded its immutable deadline');}}
  };
  try{await refreshMetadata(deadline-minute);}catch(error){receipt.initialMetadataRefreshError=scrub(error);save('cold-share-recording-retention.json',receipt);}
  const download=async(field,file,end)=>{
   let totalBytes=0;const cap=field==='video_url'?1024*1024*1024:100*1024*1024;
   for(let attempt=1;attempt<=3&&Date.now()<end;attempt++){
    const entry={field,attempt,startedUtc:new Date().toISOString(),status:'incomplete',file:file+'.attempt-'+attempt+'.response'};receipt.attempts.push(entry);
+   const responseFile=entry.file;
+   const attemptEnd=Math.min(end,Date.now()+(field==='video_url'?35000:10000));
    try{
     let url=checkedUrl(metadata[field]);entry.reference=safeUrl(url);let response;
-    const attemptEnd=Math.min(end,Date.now()+(field==='video_url'?35000:10000));
     for(let redirects=0;redirects<=5;redirects++){
      response=await fetch(url,{redirect:'manual',headers:field!=='video_url'&&apiHosts.has(url.hostname)?{authorization:auth}:{},
       signal:AbortSignal.timeout(bound(attemptEnd))});
@@ -290,12 +300,22 @@ export async function retainColdShareRecording({session,auth,save,output,report,
     const destination=openSync(path.join(output,entry.file),'w'),hash=createHash('sha256');let bytes=0,header=Buffer.alloc(0);
     try{for await(const chunk of response.body){bound(attemptEnd);bytes+=chunk.length;totalBytes+=chunk.length;assert(totalBytes<=cap,'Artifact cumulative byte cap exceeded');
      if(header.length<32)header=Buffer.concat([header,Buffer.from(chunk).subarray(0,32-header.length)]);hash.update(chunk);writeSync(destination,chunk);}}
-    finally{closeSync(destination);entry.bytes=bytes;entry.sha256=hash.digest('hex');entry.totalArtifactBytes=totalBytes;entry.finishedUtc=new Date().toISOString();}
+    finally{closeSync(destination);entry.bytes=bytes;entry.sha256=hash.digest('hex');entry.totalArtifactBytes=totalBytes;
+     completed(entry,end,attemptEnd);entry.bodyFinishedUtc=entry.finishedUtc;}
+    assert(completed(entry,end,attemptEnd),'Artifact body completed after its request, phase, or aggregate deadline; raw response retained');
     assert(response.ok&&bytes>0,'Artifact not ready/usable: HTTP '+response.status);
     if(field==='video_url')assert(/video\/mp4/i.test(entry.contentType||'')&&header.length>=12&&header.subarray(4,8).toString()==='ftyp','Video response is not a usable MP4; raw response retained');
     else assert(!/xml|html/i.test(entry.contentType||'')&&!/^\s*<(?:\?xml|html|Error)/i.test(header.toString()),'Log endpoint returned error document; raw response retained');
-    renameSync(path.join(output,entry.file),path.join(output,file));entry.file=file;entry.status='retained';save('cold-share-recording-retention.json',receipt);return true;
-   }catch(error){entry.error=scrub(error);entry.finishedUtc??=new Date().toISOString();save('cold-share-recording-retention.json',receipt);}
+    assert(completed(entry,end,attemptEnd),'Artifact validation completed late; raw response retained');
+    renameSync(path.join(output,entry.file),path.join(output,file));entry.file=file;entry.renamedUtc=new Date().toISOString();
+    assert(completed(entry,end,attemptEnd),'Artifact rename completed late; unmodified response retained');
+    entry.status='retained';save('cold-share-recording-retention.json',receipt);
+    assert(completed(entry,end,attemptEnd),'Artifact receipt completed late; unmodified response retained');return true;
+   }catch(error){entry.error=scrub(error);if(!completed(entry,end,attemptEnd)){
+     entry.status='late-unusable';
+     if(entry.file===file)try{renameSync(path.join(output,file),path.join(output,responseFile));entry.file=responseFile;}
+     catch(preservationError){entry.latePreservationError=scrub(preservationError);save('cold-share-recording-retention.json',receipt);return false;}
+    }save('cold-share-recording-retention.json',receipt);}
    if(attempt<3&&Date.now()+1000<end){await new Promise(ok=>setTimeout(ok,Math.min(3000,Math.max(0,end-Date.now()))));
     try{await refreshMetadata(end);}catch(error){entry.metadataRefreshError=scrub(error);save('cold-share-recording-retention.json',receipt);}}
   }
