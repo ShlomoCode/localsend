@@ -28,7 +28,7 @@ fs.copyFileSync(env.ISSUE1864_APP_SOURCE_MANIFEST,`${out}/source-manifest.txt`);
 let session;
 async function request(path,body,until=deadline) {
   check();if(Date.now()>=until) throw new Error('Observation readiness budget exhausted');const response=await fetch(`http://127.0.0.1:4723/session${path}`,{method:body ? 'POST' : 'GET',headers:{'content-type':'application/json'},body:body ? JSON.stringify(body) : undefined,signal:AbortSignal.timeout(Math.min(30000,deadline-Date.now(),until-Date.now()))});
-  const result=await response.json();if(!response.ok || result.value?.error) throw new Error(`Appium failed ${path}: ${JSON.stringify(result)}`);return result;
+  const result=await response.json();if(!response.ok || result.value?.error) {const error=new Error(`Appium failed ${path}: ${JSON.stringify(result)}`);error.status=response.status;error.response=result;throw error;}return result;
 }
 async function snapshot(name,until=deadline) {
   const remaining=()=>{check();const ms=Math.min(deadline,until)-Date.now();if(ms<=0) throw new Error('Observation readiness budget exhausted');return Math.min(30000,ms);};
@@ -187,7 +187,8 @@ let result={apk:env.ISSUE1864_APK,phase,max999:'source-only; saturation not exer
 try {
   const created=await request('',{capabilities:{alwaysMatch:{platformName:'Android','appium:automationName':'UiAutomator2','appium:deviceName':'emulator-5554','appium:appPackage':pkg,'appium:appActivity':'.MainActivity','appium:noReset':true,'appium:autoGrantPermissions':false,'appium:settings[waitForIdleTimeout]':0}}});
   fs.writeFileSync(`${out}/appium-session.json`,JSON.stringify(created,null,2));session=created.value?.sessionId;if(!session) throw new Error('No observation session');
-  fs.writeFileSync(`${out}/appium-settings.json`,JSON.stringify(await request(`/${session}/settings`),null,2));
+  try {fs.writeFileSync(`${out}/appium-settings.json`,JSON.stringify(await request(`/${session}/appium/settings`),null,2));}
+  catch(error) {fs.writeFileSync(`${out}/appium-settings-error.json`,JSON.stringify({status:error.status ?? null,response:error.response ?? null,message:error.message,stack:error.stack,boundary:'Optional read-only settings receipt unavailable; effective driver settings remain unknown. Real UI/input/permission assertions are still mandatory.'},null,2));check();}
   adb('shell','setprop','log.tag.appium','INFO');await ready();fixtureHashes('before');
   if(phase==='permission-denial-grant') {
     const permissionBefore=adb('shell','dumpsys','package',pkg);fs.writeFileSync(`${out}/permissions-before.txt`,permissionBefore);if(/READ_MEDIA_(IMAGES|VIDEO): granted=true/.test(permissionBefore)) throw new Error('Initial permission control was pregranted');
