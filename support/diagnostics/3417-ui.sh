@@ -111,6 +111,11 @@ capture 02-running-empty
 identity 02-running-empty
 guest "nohup nautilus /home/probe/Documents >/home/probe/3417-nautilus.log 2>&1 </dev/null &"
 sleep 8
+# V7 first-login update prompts stole the foreground before file selection.
+# Retain their qualified native dismissal, then request Files' normal activation.
+action 03-desktop-prompts desktop
+guest "nohup nautilus /home/probe/Documents >>/home/probe/3417-nautilus.log 2>&1 </dev/null &"
+sleep 3
 key ctrl-a
 capture 03-documents-selected
 tree 03-documents-selected

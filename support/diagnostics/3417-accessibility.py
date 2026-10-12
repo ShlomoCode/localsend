@@ -46,6 +46,34 @@ if mode == "dump":
     print(json.dumps([item for _, item in visited], indent=2))
     sys.exit(0)
 
+if mode == "desktop":
+    # Ordinary first-login prompts observed in the original V7 evidence.
+    # Defer updates using their own controls; never activate an upgrade/reboot.
+    prompts = (("update-manager", "Software Updater", "Restart Later"),
+               ("check-new-release-gtk", "Ubuntu 26.04.1 LTS Upgrade Available", "Ask Me Later"))
+    for app, frame, button in prompts:
+        def in_prompt(item):
+            return ((app, "application") in item["path"] and
+                    (frame, "frame") in item["path"])
+        frames = [item for _, item in visited if in_prompt(item) and item["role"] == "frame"]
+        windows = [item for item in frames if item["ready"]]
+        print(json.dumps({"prompt": frame, "matching_frames": len(frames),
+                          "ready_frames": len(windows)}), flush=True)
+        if not windows:
+            continue
+        targets = [(node, item) for node, item in visited if in_prompt(item)
+                   and item["name"] == button and item["role"] == "push button"
+                   and item["ready"] and "click" in item["actions"]]
+        if len(windows) != 1 or len(targets) != 1:
+            print("DESKTOP_PROMPT_TARGET_NOT_UNIQUE_OR_READY", flush=True)
+            sys.exit(2)
+        node, item = targets[0]
+        print(json.dumps({"target": item, "action": "click"}), flush=True)
+        if not node.queryAction().doAction(item["actions"].index("click")):
+            print("DESKTOP_PROMPT_DISMISS_FAILED", flush=True)
+            sys.exit(2)
+    sys.exit(0)
+
 def qualified(item):
     applications = [name.lower() for name, role in item["path"] if role == "application"]
     native = any(name in ("nautilus", "org.gnome.nautilus", "files") for name in applications)
