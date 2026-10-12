@@ -15,7 +15,7 @@ $references=@(
  @{role='negative-control';name='favorites-negative-control.png';sha256='ec9f371b355c2506b91d1c2b46edc418bb983544b733f69321b127b58e462662'}
 )
 $report=[ordered]@{schema=1;mode=$Mode;utc=[DateTime]::UtcNow.ToString('o');expectedPid=$ExpectedPid;expectedHwnd=$ExpectedHwnd;
- expectedGeometry=@{width=400;height=493};rectangle=$rectangle;comparison='Exact ARGB equality at every interior pixel; no threshold';
+ expectedGeometry=@{width=400;height=500};rectangle=$rectangle;comparison='Exact ARGB equality at every interior pixel; no threshold';
  references=@();templateGeometry=$null;releasePin=$null;liveIdentity=$null;observations=@();passed=$false;error=$null}
 $template=$null
 function CompareFavorites([string]$Path){
@@ -24,7 +24,7 @@ function CompareFavorites([string]$Path){
  $bitmap=[System.Drawing.Bitmap]::new($resolved)
  try{
   $geometry=@{width=$bitmap.Width;height=$bitmap.Height}
-  $geometryMatches=$bitmap.Width -eq 400 -and $bitmap.Height -eq 493
+  $geometryMatches=$bitmap.Width -eq 400 -and $bitmap.Height -eq 500
   $mismatches=0;$samples=@()
   if($geometryMatches){
    for($y=$rectangle.y;$y -lt ($rectangle.y+$rectangle.height);$y++){
@@ -50,7 +50,7 @@ try{
  }
  $template=[System.Drawing.Bitmap]::new((Join-Path $PSScriptRoot $references[0].name))
  $report.templateGeometry=@{width=$template.Width;height=$template.Height}
- if($template.Width -ne 400 -or $template.Height -ne 493){throw 'Favorites template geometry differs from the reviewed 400x493 source'}
+ if($template.Width -ne 400 -or $template.Height -ne 500){throw 'Favorites template geometry differs from the reviewed 400x500 source'}
  if($Mode -eq 'Preflight'){
   $positive=CompareFavorites (Join-Path $PSScriptRoot $references[1].name);$positive.role='independent-positive-control';$positive.expectedMatch=$true
   $report.observations+=@($positive)
