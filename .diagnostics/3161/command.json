@@ -1,82 +1,9 @@
 {
-  "round": 9,
+  "round": 10,
   "actions": [
     {
       "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; cat /proc/uptime; if command -v gnome-screenshot; then dpkg-query -W gnome-screenshot; command -v gnome-screenshot; else printf \"GNOME_SCREENSHOT_NOT_INSTALLED\\n\"; fi; printf \"ROUND9_PREFLIGHT_COMPLETE\\n\""
-    },
-    {
-      "kind": "click",
-      "x": 400,
-      "y": 750
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; cat /proc/uptime; test ! -e /home/probe/evidence/mousekeys-round9-before-inventory.txt; pictures=$(xdg-user-dir PICTURES); test -d \"$pictures\"; find \"$pictures\" -type f -printf \"%T@ %s %p\\n\" > /home/probe/evidence/mousekeys-round9-before-inventory.txt; printf \"ROUND9_BEFORE_PRE_PRINT_COMPLETE\\n\""
-    },
-    {
-      "kind": "key",
-      "value": "Print"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; cat /proc/uptime; printf \"ROUND9_BEFORE_POST_PRINT_COMPLETE\\n\""
-    },
-    {
-      "kind": "key",
-      "value": "c"
-    },
-    {
-      "kind": "key",
-      "value": "p"
-    },
-    {
-      "kind": "key",
-      "value": "Return"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/mousekeys-round9-before; mkdir -p \"$out\"; pictures=$(xdg-user-dir PICTURES); test -d \"$pictures\"; export CAPTURE_PICTURES=\"$pictures\"; /usr/bin/ruby <<'RUBY'\nrequire 'json'\nrequire 'digest'\nrequire 'base64'\nbaseline = '/home/probe/evidence/mousekeys-round9-before-inventory.txt'\npictures = File.realpath(ENV.fetch('CAPTURE_PICTURES'))\nout = '/home/probe/evidence/mousekeys-round9-before'\nseen = File.readlines(baseline, chomp: true).map do |line|\n  match = /\\A\\S+ \\d+ (.+)\\z/.match(line)\n  raise 'Invalid baseline inventory row' unless match\n  path = match[1]\n  File.exist?(path) ? File.realpath(path) : File.expand_path(path)\nend\ncandidates = Dir.glob(File.join(pictures, '**', '*'), File::FNM_DOTMATCH).select do |path|\n  File.file?(path) && !File.symlink?(path) && File.extname(path).downcase == '.png'\nend.reject { |path| seen.include?(File.realpath(path)) }\nraise \"Expected exactly one distinct new Pictures PNG, found #{candidates.length}\" unless candidates.length == 1\npath = File.realpath(candidates.fetch(0))\nraise 'PNG predates phase inventory' if File.mtime(path) < File.mtime(baseline)\nsnapshot = lambda do |file|\n  s = File.stat(file)\n  {'dev'=>s.dev, 'inode'=>s.ino, 'size'=>s.size,\n   'mtimeSeconds'=>s.mtime.to_i, 'mtimeNs'=>s.mtime.nsec,\n   'ctimeSeconds'=>s.ctime.to_i, 'ctimeNs'=>s.ctime.nsec}\nend\nbefore = snapshot.call(path)\nbytes = File.binread(path)\nraise 'Invalid PNG signature or IHDR' unless bytes.bytesize >= 24 && bytes.byteslice(0, 8) == \"\\x89PNG\\r\\n\\x1a\\n\".b && bytes.byteslice(12, 4) == 'IHDR'\nwidth, height = bytes.byteslice(16, 8).unpack('N2')\nraise 'Invalid PNG dimensions' unless width > 0 && height > 0\nraise 'PNG changed while reading' unless snapshot.call(path) == before && bytes.bytesize == before['size']\ncopy = File.join(out, 'native-screen.png')\nFile.open(copy, File::WRONLY | File::CREAT | File::EXCL, 0600) { |io| io.write(bytes) }\ndigest = Digest::SHA256.hexdigest(bytes)\nraise 'Forensic copy hash differs' unless Digest::SHA256.file(copy).hexdigest == digest\nmetadata = {'originalPath'=>path, 'picturesPath'=>pictures,\n 'forensicCopyPath'=>copy, 'before'=>before,\n 'sha256'=>digest, 'headerHex'=>bytes.byteslice(0, 24).unpack1('H*'),\n 'width'=>width, 'height'=>height,\n 'baselineInventory'=>baseline, 'baselineInventoryMtime'=>File.mtime(baseline).to_r.to_s,\n 'sceneTime'=>'Frozen when ScreenshotUI opened in round9 before phase; pre/post Print timestamps bound dispatch; actual UI-open completion must be established from retained Print-action image'}\nFile.write(File.join(out, 'native-screen-metadata.json'), JSON.pretty_generate(metadata))\nputs JSON.generate(metadata)\nputs 'ROUND9_BEFORE_NATIVE_PNG_BASE64_START'\nputs Base64.strict_encode64(bytes)\nputs 'ROUND9_BEFORE_NATIVE_PNG_BASE64_END'\nafter = snapshot.call(path)\nraise 'Original PNG changed during transfer' unless after == before\nraise 'Original PNG hash changed during transfer' unless Digest::SHA256.file(path).hexdigest == digest\nputs JSON.generate({'event'=>'after-transfer-stat', 'originalPath'=>path, 'after'=>after})\nputs 'ROUND9_BEFORE_NATIVE_PNG_TRANSFER_COMPLETE'\nRUBY\n"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env\nset -eu\nout=/home/probe/evidence/mousekeys-round9-calibration\ntest ! -e \"$out\"\nmkdir \"$out\"\ndate -u +%FT%T.%N\ncat /proc/uptime\nfor key in mousekeys-enable mousekeys-max-speed mousekeys-accel-time mousekeys-init-delay; do\n  expected=$(cat \"/home/probe/evidence/mousekeys-state-before/$key.effective\")\n  test \"$(gsettings get org.gnome.desktop.a11y.keyboard \"$key\")\" = \"$expected\"\n  test -z \"$(dconf read \"/org/gnome/desktop/a11y/keyboard/$key\")\"\ndone\ntest \"$(gsettings get org.gnome.desktop.a11y.keyboard mousekeys-enable)\" = false\ntest \"$(gsettings get org.gnome.desktop.a11y.keyboard enable)\" = false\nexport MK_CALIBRATION_OUT=\"$out\"\ncat > \"$out/restore-guard.sh\" <<'GUARD'\n#!/bin/sh\n. /home/probe/session-env\nset -eu\nsleep 30\ndate -u +%FT%T.%N\ncat /proc/uptime\n/usr/bin/timeout --kill-after=2 45 /usr/bin/ruby <<'RESTORE'\nout = ENV.fetch('MK_CALIBRATION_OUT')\nFile.open(File.join(out, 'state.lock'), 'a') do |lock|\n  abort \"State lock failed\" unless lock.flock(File::LOCK_EX)\n  File.write(File.join(out, 'enable-lease-closed'), Time.now.utc.to_s)\n  abort 'Guard reset failed' unless system('timeout', '--kill-after=2', '5', 'gsettings', 'reset', 'org.gnome.desktop.a11y.keyboard', 'mousekeys-enable')\nend\nRESTORE\ntest \"$(timeout --kill-after=2 5 gsettings get org.gnome.desktop.a11y.keyboard mousekeys-enable)\" = false\ntest -z \"$(timeout --kill-after=2 5 dconf read /org/gnome/desktop/a11y/keyboard/mousekeys-enable)\"\ntest \"$(timeout --kill-after=2 5 gsettings get org.gnome.desktop.a11y.keyboard enable)\" = false\nprintf 'ROUND9_MOUSEKEYS_GUARD_COMPLETE\\n'\nGUARD\nnohup /bin/sh \"$out/restore-guard.sh\" > \"$out/restore-guard.log\" 2>&1 < /dev/null &\nguard=$!\nprintf '%s\\n' \"$guard\" > \"$out/restore-guard.pid\"\nkill -0 \"$guard\"\nps -p \"$guard\" -o pid,lstart,args\ncat \"/proc/$guard/stat\"\nkill -0 \"$guard\"\n/usr/bin/timeout --kill-after=2 20 /usr/bin/ruby <<'ENABLE'\nout = ENV.fetch('MK_CALIBRATION_OUT')\nFile.open(File.join(out, 'state.lock'), 'a') do |lock|\n  abort \"State lock failed\" unless lock.flock(File::LOCK_EX)\n  abort 'Enable lease already closed' if File.exist?(File.join(out, 'enable-lease-closed'))\n  completed = false\n  begin\n    abort 'Mouse Keys enable failed' unless system('timeout', '--kill-after=2', '5', 'gsettings', 'set', 'org.gnome.desktop.a11y.keyboard', 'mousekeys-enable', 'true')\n    value = IO.popen(['timeout', '--kill-after=2', '5', 'gsettings', 'get', 'org.gnome.desktop.a11y.keyboard', 'mousekeys-enable'], &:read)\n    abort 'Mouse Keys readback failed' unless $?.success? && value.strip == 'true'\n    File.write(File.join(out, 'activation-receipt'), Time.now.utc.to_s)\n    completed = true\n  ensure\n    unless completed\n      system('timeout', '--kill-after=2', '5', 'gsettings', 'reset', 'org.gnome.desktop.a11y.keyboard', 'mousekeys-enable')\n    end\n  end\nend\nENABLE\nprintf 'ROUND9_MOUSEKEYS_ENABLE_COMPLETE\\n'\n"
-    },
-    {
-      "kind": "key",
-      "value": "KP_Right"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env\nset -eu\nout=/home/probe/evidence/mousekeys-round9-calibration\ndate -u +%FT%T.%N\ncat /proc/uptime\ngsettings reset org.gnome.desktop.a11y.keyboard mousekeys-enable\ntest \"$(gsettings get org.gnome.desktop.a11y.keyboard mousekeys-enable)\" = false\ntest -z \"$(dconf read /org/gnome/desktop/a11y/keyboard/mousekeys-enable)\"\ntest \"$(gsettings get org.gnome.desktop.a11y.keyboard enable)\" = false\ncompleted=0\nfor attempt in $(seq 1 25); do\n  if grep -q '^ROUND9_MOUSEKEYS_GUARD_COMPLETE$' \"$out/restore-guard.log\"; then\n    completed=1\n    break\n  fi\n  sleep 2\ndone\ncat \"$out/restore-guard.log\"\ntest \"$completed\" = 1\nfor key in mousekeys-enable mousekeys-max-speed mousekeys-accel-time mousekeys-init-delay; do\n  expected=$(cat \"/home/probe/evidence/mousekeys-state-before/$key.effective\")\n  actual=$(gsettings get org.gnome.desktop.a11y.keyboard \"$key\")\n  printf 'RESTORED_KEY=%s EXPECTED=%s ACTUAL=%s\\n' \"$key\" \"$expected\" \"$actual\"\n  test \"$actual\" = \"$expected\"\n  test -z \"$(dconf read \"/org/gnome/desktop/a11y/keyboard/$key\")\"\ndone\nprintf 'ROUND9_MOUSEKEYS_RESTORE_COMPLETE\\n'\n"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; cat /proc/uptime; test ! -e /home/probe/evidence/mousekeys-round9-after-inventory.txt; pictures=$(xdg-user-dir PICTURES); test -d \"$pictures\"; find \"$pictures\" -type f -printf \"%T@ %s %p\\n\" > /home/probe/evidence/mousekeys-round9-after-inventory.txt; printf \"ROUND9_AFTER_PRE_PRINT_COMPLETE\\n\""
-    },
-    {
-      "kind": "key",
-      "value": "Print"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; cat /proc/uptime; printf \"ROUND9_AFTER_POST_PRINT_COMPLETE\\n\""
-    },
-    {
-      "kind": "key",
-      "value": "c"
-    },
-    {
-      "kind": "key",
-      "value": "Return"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; out=/home/probe/evidence/mousekeys-round9-after; mkdir -p \"$out\"; pictures=$(xdg-user-dir PICTURES); test -d \"$pictures\"; export CAPTURE_PICTURES=\"$pictures\"; /usr/bin/ruby <<'RUBY'\nrequire 'json'\nrequire 'digest'\nrequire 'base64'\nbaseline = '/home/probe/evidence/mousekeys-round9-after-inventory.txt'\npictures = File.realpath(ENV.fetch('CAPTURE_PICTURES'))\nout = '/home/probe/evidence/mousekeys-round9-after'\nseen = File.readlines(baseline, chomp: true).map do |line|\n  match = /\\A\\S+ \\d+ (.+)\\z/.match(line)\n  raise 'Invalid baseline inventory row' unless match\n  path = match[1]\n  File.exist?(path) ? File.realpath(path) : File.expand_path(path)\nend\ncandidates = Dir.glob(File.join(pictures, '**', '*'), File::FNM_DOTMATCH).select do |path|\n  File.file?(path) && !File.symlink?(path) && File.extname(path).downcase == '.png'\nend.reject { |path| seen.include?(File.realpath(path)) }\nraise \"Expected exactly one distinct new Pictures PNG, found #{candidates.length}\" unless candidates.length == 1\npath = File.realpath(candidates.fetch(0))\nraise 'PNG predates phase inventory' if File.mtime(path) < File.mtime(baseline)\nsnapshot = lambda do |file|\n  s = File.stat(file)\n  {'dev'=>s.dev, 'inode'=>s.ino, 'size'=>s.size,\n   'mtimeSeconds'=>s.mtime.to_i, 'mtimeNs'=>s.mtime.nsec,\n   'ctimeSeconds'=>s.ctime.to_i, 'ctimeNs'=>s.ctime.nsec}\nend\nbefore = snapshot.call(path)\nbytes = File.binread(path)\nraise 'Invalid PNG signature or IHDR' unless bytes.bytesize >= 24 && bytes.byteslice(0, 8) == \"\\x89PNG\\r\\n\\x1a\\n\".b && bytes.byteslice(12, 4) == 'IHDR'\nwidth, height = bytes.byteslice(16, 8).unpack('N2')\nraise 'Invalid PNG dimensions' unless width > 0 && height > 0\nraise 'PNG changed while reading' unless snapshot.call(path) == before && bytes.bytesize == before['size']\ncopy = File.join(out, 'native-screen.png')\nFile.open(copy, File::WRONLY | File::CREAT | File::EXCL, 0600) { |io| io.write(bytes) }\ndigest = Digest::SHA256.hexdigest(bytes)\nraise 'Forensic copy hash differs' unless Digest::SHA256.file(copy).hexdigest == digest\nmetadata = {'originalPath'=>path, 'picturesPath'=>pictures,\n 'forensicCopyPath'=>copy, 'before'=>before,\n 'sha256'=>digest, 'headerHex'=>bytes.byteslice(0, 24).unpack1('H*'),\n 'width'=>width, 'height'=>height,\n 'baselineInventory'=>baseline, 'baselineInventoryMtime'=>File.mtime(baseline).to_r.to_s,\n 'sceneTime'=>'Frozen when ScreenshotUI opened in round9 after phase; pre/post Print timestamps bound dispatch; actual UI-open completion must be established from retained Print-action image'}\nFile.write(File.join(out, 'native-screen-metadata.json'), JSON.pretty_generate(metadata))\nputs JSON.generate(metadata)\nputs 'ROUND9_AFTER_NATIVE_PNG_BASE64_START'\nputs Base64.strict_encode64(bytes)\nputs 'ROUND9_AFTER_NATIVE_PNG_BASE64_END'\nafter = snapshot.call(path)\nraise 'Original PNG changed during transfer' unless after == before\nraise 'Original PNG hash changed during transfer' unless Digest::SHA256.file(path).hexdigest == digest\nputs JSON.generate({'event'=>'after-transfer-stat', 'originalPath'=>path, 'after'=>after})\nputs 'ROUND9_AFTER_NATIVE_PNG_TRANSFER_COMPLETE'\nRUBY\n"
-    },
-    {
-      "kind": "probe",
-      "value": ". /home/probe/session-env; set -eu; date -u +%FT%T.%N; cat /proc/uptime; timeout 15 /usr/bin/python3 /home/probe/source-input/geometry-oracle/snapshot-guest.py; gsettings get org.gnome.desktop.a11y.keyboard mousekeys-enable; dconf read /org/gnome/desktop/a11y/keyboard/mousekeys-enable; printf \"ROUND9_CALIBRATION_CONTEXT_COMPLETE\\n\""
+      "value": ". /home/probe/session-env; set -eu; export LC_ALL=C; out=/home/probe/evidence/official-screenshot-package-round10; test ! -e \"$out\"; mkdir \"$out\"; date -u +%FT%T.%N; cat /proc/uptime; apt-cache --version; apt-cache policy gnome-screenshot > \"$out/policy.txt\"; cat \"$out/policy.txt\"; candidate=$(awk '$1==\"Candidate:\" {n++; value=$2} END {if(n!=1) exit 1; print value}' \"$out/policy.txt\"); printf 'GNOME_SCREENSHOT_CANDIDATE=%s\\n' \"$candidate\"; if test \"$candidate\" = '(none)'; then printf 'GNOME_SCREENSHOT_NO_CANDIDATE\\n'; else apt-cache show \"gnome-screenshot=$candidate\" > \"$out/package.txt\"; cat \"$out/package.txt\"; printf 'SOURCE_METADATA_START\\n'; if apt-cache showsrc gnome-screenshot > \"$out/source.txt\" 2> \"$out/source.stderr\"; then cat \"$out/source.txt\"; printf 'SOURCE_METADATA_RC=0\\n'; else rc=$?; cat \"$out/source.txt\"; cat \"$out/source.stderr\"; printf 'SOURCE_METADATA_RC=%s\\n' \"$rc\"; fi; printf 'SOURCE_METADATA_END\\n'; fi; if command -v gnome-screenshot; then dpkg-query -W -f='${Package} ${Version} ${Architecture} ${Status}\\n' gnome-screenshot; else printf 'GNOME_SCREENSHOT_STILL_NOT_INSTALLED\\n'; fi; sha256sum \"$out\"/*; printf 'ROUND10_OFFICIAL_SCREENSHOT_PACKAGE_METADATA_COMPLETE\\n'"
     },
     {
       "kind": "capture"
