@@ -50,7 +50,7 @@ zoom_state() {
 locate() {
   local label=$1 name=$2
   capture "$name-acquire"
-  step 7 "$name-ocr" tesseract "$target/$name-acquire.png" "$target/$name-acquire" tsv > "$target/$name-ocr.log" 2>&1
+  step 7 "$name-ocr" tesseract "$target/$name-acquire.png" "$target/$name-acquire" --psm 11 tsv > "$target/$name-ocr.log" 2>&1
   # Unique exact visible label; TSV/image remain the acquisition evidence.
   awk -F '\t' -v label="$label" 'NR>1 && $12==label && $11>=50 {n++; x=$7+$9/2; y=$8+$10/2} END {if(n!=1) exit 2; printf "%d %d\n",x,y}' "$target/$name-acquire.tsv" > "$target/$name-coordinate.txt"
 }
