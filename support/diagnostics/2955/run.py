@@ -331,11 +331,11 @@ def observe_sender_environment():
         write('sender-environment-observation.json', samples)
 
 
-def control_cmd(*args, timeout=30):
+def control_cmd(*args, timeout=30, binary=False):
     remaining = control_deadline - time.monotonic()
     if remaining <= 0:
         raise RuntimeError('Rendered control exceeded its120s deadline')
-    return cmd(*args, timeout=min(timeout, remaining))
+    return cmd(*args, timeout=min(timeout, remaining), binary=binary)
 
 
 def native_window_geometry(window):
@@ -445,6 +445,101 @@ def qualify_native_pointer(observation, x, y):
         raise RuntimeError('Native pointer/foreground does not match observed control target; no input admitted')
 
 
+def rendered_server_glyphs(observation, row):
+    """Observe actual foreground glyphs; hover tooltips determine their meaning."""
+    width, height = observation['screenshot_dimensions']
+    raw = control_cmd('ffmpeg', '-v', 'error', '-i', str(OUT / observation['screenshot']), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1', timeout=5, binary=True)
+    if len(raw) != width*height*3:
+        raise RuntimeError('Original glyph observation has unexpected pixel dimensions')
+    wx, wy, ww, wh = observation['geometry']
+    left, top, row_width, row_height = row['bounds']
+    x0, x1 = wx+ww//2, wx+ww
+    y0, y1 = max(wy, int(top-2*row_height)), min(wy+wh, int(top+3*row_height))
+    dark = {(x, y) for y in range(y0, y1) for x in range(x0, x1) if max(raw[(y*width+x)*3:(y*width+x)*3+3]) < 100}
+    glyphs = []
+    while dark:
+        seed = dark.pop()
+        component = [seed]
+        pending = [seed]
+        while pending:
+            x, y = pending.pop()
+            for neighbor in ((x-1,y), (x+1,y), (x,y-1), (x,y+1)):
+                if neighbor in dark:
+                    dark.remove(neighbor)
+                    component.append(neighbor)
+                    pending.append(neighbor)
+        xs, ys = zip(*component)
+        gx, gy = min(xs), min(ys)
+        gw, gh = max(xs)-gx+1, max(ys)-gy+1
+        if 8 <= gw <= 30 and 8 <= gh <= 30 and len(component) >= 16:
+            glyphs.append({'bounds': [gx, gy, gw, gh], 'pixels': len(component)})
+    glyphs.sort(key=lambda item: item['bounds'][0])
+    log('rendered-server-glyph-observation', {'screenshot': observation['screenshot'], 'server_row': row, 'region': [x0,y0,x1-x0,y1-y0], 'foreground_rule': 'all RGB channels <100; connected native pixels', 'glyphs': glyphs})
+    if not 1 <= len(glyphs) <= 4:
+        raise RuntimeError('Rendered Server glyph candidates are absent or ambiguous')
+    return glyphs
+
+
+def rendered_server_tooltip(label, expected, tap=True):
+    observation, row = rendered_sender_label('Server')
+    if observation['window'] != expected['window'] or observation['geometry'] != expected['geometry']:
+        raise RuntimeError('Original Server window/geometry changed across Stop Start control')
+    if row is None:
+        raise RuntimeError('Visible Server row required before native icon hover')
+    for glyph in rendered_server_glyphs(observation, row):
+        x, y, width, height = glyph['bounds']
+        center = [x+width//2, y+height//2]
+        qualify_native_pointer(observation, *center)
+        log('rendered-server-hover', {'requested_tooltip': label, 'glyph': glyph, 'original_screen': observation['screenshot']})
+        time.sleep(.8)
+        tooltip_observation, tooltip = rendered_sender_label(label)
+        if tooltip is None:
+            continue
+        if tooltip_observation['window'] != observation['window'] or tooltip_observation['geometry'] != observation['geometry']:
+            raise RuntimeError('Server window changed during native tooltip qualification')
+        fresh_glyphs = rendered_server_glyphs(tooltip_observation, row)
+        if glyph not in fresh_glyphs:
+            raise RuntimeError('Hovered Server glyph changed before input')
+        qualify_native_pointer(tooltip_observation, *center)
+        log('rendered-server-tooltip-qualified', {'label': label, 'tooltip': tooltip, 'glyph': glyph, 'original_screen': tooltip_observation['screenshot'], 'tap': tap})
+        if tap:
+            control_cmd('xdotool', 'click', '1', timeout=5)
+            time.sleep(.5)
+        return
+    raise RuntimeError(f'No actual Server icon exposed native tooltip {label!r}')
+
+
+def qualify_rendered_server_controls(expected):
+    global stage
+    stage = 'rendered-server-stop-tooltip'
+    rendered_server_tooltip('Stop', expected)
+    stage = 'rendered-server-listener-absence'
+    def absent():
+        raw = control_cmd('ss', '-ltnp', timeout=5)
+        log('native-stopped-listeners', raw)
+        if re.search(r':53317\s', raw):
+            return False
+        (OUT / 'rendered-control-stopped-listeners.txt').write_text(raw)
+        return True
+    until(absent, seconds=10)
+    stage = 'rendered-server-start-tooltip'
+    rendered_server_tooltip('Start', expected)
+    stage = 'rendered-server-listener-restored'
+    def restored():
+        if sender_process.poll() is not None:
+            raise RuntimeError('Actual sender exited during Start control')
+        raw = control_cmd('ss', '-ltnp', timeout=5)
+        log('native-restored-listeners', raw)
+        if not any(re.search(r':53317\s', line) and f'pid={sender_process.pid},' in line for line in raw.splitlines()):
+            return False
+        (OUT / 'rendered-control-restored-listeners.txt').write_text(raw)
+        return True
+    until(restored, seconds=10)
+    stage = 'rendered-server-restored-stop-tooltip'
+    rendered_server_tooltip('Stop', expected, tap=False)
+    write('sender-rendered-control.json', {'control': 'actual native hover Tooltip Stop Start', 'sender_pid': sender_process.pid, 'window': expected['window'], 'geometry': expected['geometry'], 'port_release': 'observed', 'port_restore': 'observed owned by same live senderPID', 'delivery': 'not attempted'})
+
+
 def qualify_sender_input_actions():
     global stage
     stage = 'rendered-control-listener-baseline'
@@ -464,6 +559,9 @@ def qualify_sender_input_actions():
             observations.append(observation)
             write('sender-settings-observation.json', {'server_row_observed': server is not None, 'observations': observations, 'control': 'Settings clicked; Start/Stop not attempted', 'delivery': 'not attempted'})
             if server is not None:
+                if os.environ.get('NATIVE_SERVER_CONTROL_2955') == '1':
+                    qualify_rendered_server_controls(observation)
+                    write('sender-settings-observation.json', {'server_row_observed': True, 'observations': observations, 'control': 'Settings plus actual Stop Start completed; see sender-rendered-control.json', 'delivery': 'not attempted'})
                 return
             if attempt < 8:
                 if control_cmd('xdotool', 'getactivewindow', timeout=5).strip() != observation['window'] or sender_process.poll() is not None:
