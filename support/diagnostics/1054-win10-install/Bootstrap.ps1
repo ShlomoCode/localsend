@@ -3,6 +3,7 @@ $serial = $null
 $handshake = [Diagnostics.Stopwatch]::StartNew()
 $handshakeLimitMs = 120000
 $preparationStage = 'serial-open'
+$identityQueryTelemetry = $null
 function RemainingHandshakeMs {
   $remaining = $handshakeLimitMs - $handshake.ElapsedMilliseconds
   if ($remaining -le 0) { throw 'First-logon network handshake deadline exceeded' }
@@ -18,40 +19,106 @@ function Report([string]$stage, $data) {
 }
 # CIM's provider timeout alone is not a total wall-clock bound. Each small query
 # runs in an owned child process, whose entire lifetime uses the same stopwatch.
-function BoundedSnapshot([string]$query, [long]$stageDeadlineMs = 120000) {
+function BoundedSnapshot([string]$query, [long]$stageDeadlineMs = 120000, [switch]$TraceIdentity) {
   $childCode = '$ErrorActionPreference="Stop"; try { & { ' + $query + ' } | ConvertTo-Json -Compress -Depth 8 } catch { [Console]::Out.WriteLine("query-failed"); exit 1 }'
+  $phasePath = $null
+  if ($TraceIdentity) {
+    # The guest user's private temp directory holds only fixed phase tokens.
+    $phasePath = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'issue1054-' + [Guid]::NewGuid().ToString('N') + '.status')
+    $script:identityQueryTelemetry = @{ label='windows-identity'; startAttemptElapsedMs=$null; startReturnedElapsedMs=$null; endElapsedMs=$null; deadlineMs=$null; started=$false; timedOut=$false; nonzeroExit=$false; killAttempted=$false; killed=$false; reaped=$false; phase='unavailable'; phaseFileRemoved=$false }
+    $childCode = '$ErrorActionPreference="Stop"; $phasePath=' + "'" + $phasePath.Replace("'", "''") + "'" + '; $markerFailed=$false; function Mark([string]$phase) { if ($script:markerFailed) { return }; try { [IO.File]::WriteAllText($phasePath, $phase, [Text.Encoding]::ASCII) } catch { $script:markerFailed=$true; try { [Console]::Error.WriteLine("marker-unavailable") } catch { }; try { [IO.File]::Delete($phasePath) } catch { } } }; try { Mark "child-entered"; Mark "query-started"; $snapshot = & { ' + $query + ' }; Mark "query-returned"; $json = $snapshot | ConvertTo-Json -Compress -Depth 8; Mark "serialization-completed"; $json } catch { exit 1 }'
+  }
   $start = New-Object Diagnostics.ProcessStartInfo
   $start.FileName = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"
   $start.Arguments = '-NoProfile -NonInteractive -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCode))
   $start.UseShellExecute = $false
   $start.CreateNoWindow = $true
   $start.RedirectStandardOutput = $true
+  $start.RedirectStandardError = [bool]$TraceIdentity
   $child = New-Object Diagnostics.Process
   $child.StartInfo = $start
   $started = $false
   try {
     $allowance = [Math]::Min(10000, [Math]::Min((RemainingHandshakeMs), $stageDeadlineMs - $handshake.ElapsedMilliseconds))
-    if ($allowance -le 0) { throw 'Bounded preparation query timed out' }
+    if ($allowance -le 0) {
+      if ($TraceIdentity) { $identityQueryTelemetry.timedOut = $true }
+      throw 'Bounded preparation query timed out'
+    }
     $queryDeadlineMs = $handshake.ElapsedMilliseconds + $allowance
-    if (-not $child.Start()) { throw 'Could not start bounded preparation query' }
-    $started = $true
+    if ($TraceIdentity) {
+      $identityQueryTelemetry.deadlineMs = $queryDeadlineMs
+      $identityQueryTelemetry.startAttemptElapsedMs = $handshake.ElapsedMilliseconds
+    }
+    try {
+      if (-not $child.Start()) { throw 'Could not start bounded preparation query' }
+      $started = $true
+    } finally {
+      if ($TraceIdentity) {
+        $identityQueryTelemetry.started = $started
+        $identityQueryTelemetry.startReturnedElapsedMs = $handshake.ElapsedMilliseconds
+      }
+    }
     # Include process startup time instead of renewing the allowance after Start.
     $allowance = [Math]::Min($queryDeadlineMs - $handshake.ElapsedMilliseconds, (RemainingHandshakeMs))
-    if ($allowance -le 0) { throw 'Bounded preparation query timed out' }
-    if (-not $child.WaitForExit([int]$allowance)) { throw 'Bounded preparation query timed out' }
+    if ($allowance -le 0 -or -not $child.WaitForExit([int]$allowance)) {
+      if ($TraceIdentity) { $identityQueryTelemetry.timedOut = $true }
+      throw 'Bounded preparation query timed out'
+    }
+    if ($TraceIdentity) {
+      $identityQueryTelemetry.reaped = $true
+      $identityQueryTelemetry.nonzeroExit = ($child.ExitCode -ne 0)
+    }
     $null = RemainingHandshakeMs
     if ($child.ExitCode -ne 0) { throw 'Bounded preparation query failed' }
     $result = $child.StandardOutput.ReadToEnd() | ConvertFrom-Json
     $null = RemainingHandshakeMs
     return $result
   } finally {
-    if ($started -and -not $child.HasExited) {
-      $child.Kill()
-      # Reap only within the original budget; never grant cleanup a new wait.
-      $cleanupMs = [Math]::Max(0, [Math]::Min(1000, $handshakeLimitMs - $handshake.ElapsedMilliseconds))
-      $null = $child.WaitForExit([int]$cleanupMs)
+    try {
+      if ($started -and -not $child.HasExited) {
+        if ($TraceIdentity) { $identityQueryTelemetry.killAttempted = $true }
+        $child.Kill()
+        if ($TraceIdentity) { $identityQueryTelemetry.killed = $true }
+        # Reap only within the original budget; never grant cleanup a new wait.
+        $cleanupMs = [Math]::Max(0, [Math]::Min(1000, $handshakeLimitMs - $handshake.ElapsedMilliseconds))
+        $reaped = $child.WaitForExit([int]$cleanupMs)
+        if ($TraceIdentity) { $identityQueryTelemetry.reaped = $reaped }
+      } elseif ($TraceIdentity -and $started) {
+        $identityQueryTelemetry.reaped = $child.WaitForExit(0)
+      }
+    } finally {
+      if ($TraceIdentity) {
+        # Read only after reap: at most 32 stderr chars and 32 file bytes.
+        # Tokens show last successful progress, not proof of a blocking cause.
+        $phaseFile = $null
+        try {
+          if ($started -and $identityQueryTelemetry.reaped -and $handshake.ElapsedMilliseconds -lt [Math]::Min($handshakeLimitMs, $stageDeadlineMs)) {
+            $markerStatus = New-Object char[] 32
+            $statusCount = $child.StandardError.Read($markerStatus, 0, $markerStatus.Length)
+            # Any stderr, including the fixed marker-unavailable flag, invalidates
+            # stale tokens. Never copy stderr text into a serial record.
+            if ($statusCount -eq 0 -and $handshake.ElapsedMilliseconds -lt [Math]::Min($handshakeLimitMs, $stageDeadlineMs)) {
+              $phaseFile = [IO.File]::Open($phasePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+              $bytes = New-Object byte[] 32
+              $count = $phaseFile.Read($bytes, 0, $bytes.Length)
+              $phase = [Text.Encoding]::ASCII.GetString($bytes, 0, $count)
+              if ($phaseFile.Length -le 32 -and $phase -cin @('child-entered','query-started','query-returned','serialization-completed')) {
+                $identityQueryTelemetry.phase = $phase
+              }
+            }
+          }
+        } catch [IO.FileNotFoundException] {
+          $identityQueryTelemetry.phase = 'absent'
+        } catch {
+          $identityQueryTelemetry.phase = 'unavailable'
+        } finally {
+          if ($phaseFile) { $phaseFile.Dispose() }
+          try { [IO.File]::Delete($phasePath); $identityQueryTelemetry.phaseFileRemoved = $true } catch { }
+          $identityQueryTelemetry.endElapsedMs = $handshake.ElapsedMilliseconds
+        }
+      }
+      $child.Dispose()
     }
-    $child.Dispose()
   }
 }
 $networkQuery = @'
@@ -69,8 +136,8 @@ try {
   $serial.Open()
   Report 'bootstrap-entry' @{ handshakeLimitSeconds=120 }
   $preparationStage = 'windows-identity'
-  $os = BoundedSnapshot 'Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 3 | Select-Object Caption, Version, BuildNumber, OSArchitecture, OperatingSystemSKU'
-  Report 'windows-identity' @{ caption=$os.Caption; version=$os.Version; build=$os.BuildNumber; architecture=$os.OSArchitecture; sku=$os.OperatingSystemSKU }
+  $os = BoundedSnapshot 'Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 3 | Select-Object Caption, Version, BuildNumber, OSArchitecture, OperatingSystemSKU' -TraceIdentity
+  Report 'windows-identity' @{ caption=$os.Caption; version=$os.Version; build=$os.BuildNumber; architecture=$os.OSArchitecture; sku=$os.OperatingSystemSKU; identityQuery=$identityQueryTelemetry }
   if ($os.Caption -notmatch 'Enterprise Evaluation' -or $os.Version -notmatch '^10\.0\.19045') { throw 'Unexpected Windows edition or build' }
   $preparationStage = 'probe-session'
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -150,7 +217,9 @@ $setup = Get-ItemProperty 'HKLM:\SYSTEM\Setup'
       $safeReasons = @('First-logon network handshake deadline exceeded','Could not start bounded preparation query','Bounded preparation query timed out','Bounded preparation query failed','Unexpected Windows edition or build','Expected interactive Probe first-logon session was not observed','Expected single e1000 adapter was not observed','Expected e1000 adapter is not media disconnected','Expected adapter identity changed during restore')
       $failureReason = 'Preparation runtime or query failure'
       if ($_.Exception.Message -in $safeReasons) { $failureReason = $_.Exception.Message }
-      Report 'guest-blocked' @{ preparationStage=$preparationStage; failureReason=$failureReason; errorType=$_.Exception.GetType().Name; hresult=$_.Exception.HResult; handshakeElapsedMs=$handshake.ElapsedMilliseconds }
+      $failureData = @{ preparationStage=$preparationStage; failureReason=$failureReason; errorType=$_.Exception.GetType().Name; hresult=$_.Exception.HResult; handshakeElapsedMs=$handshake.ElapsedMilliseconds }
+      if ($preparationStage -eq 'windows-identity' -and $identityQueryTelemetry) { $failureData.identityQuery = $identityQueryTelemetry }
+      Report 'guest-blocked' $failureData
     } else {
       Report 'guest-blocked' @{ message=$_.Exception.Message }
     }
