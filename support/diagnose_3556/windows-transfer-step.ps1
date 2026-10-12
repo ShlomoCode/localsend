@@ -6,12 +6,14 @@ param(
 )
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+$downloadsDataDiagnostic=$env:DOWNLOADS_DATA_DIAGNOSTIC -eq '1'
 $coldFileDiagnostic=$env:COLD_FILE_DIAGNOSTIC -eq '1'
 $coldShareDiagnostic=$env:COLD_SHARE_DIAGNOSTIC -eq '1'
 $coldShareStateObservation=$env:COLD_SHARE_STATE_OBSERVATION -eq '1'
 if($coldShareStateObservation -and -not $coldShareDiagnostic){throw 'State observation requires historical cold Share setup.'}
-$coldDiagnostic=$coldFileDiagnostic -or $coldShareDiagnostic
-$historicalShareReference=$coldShareDiagnostic -and -not [string]::IsNullOrWhiteSpace($env:COLD_SHARE_HISTORICAL_HELPER_APP)
+$coldDiagnostic=$coldFileDiagnostic -or $coldShareDiagnostic -or $downloadsDataDiagnostic
+$historicalHelperDiagnostic=$coldShareDiagnostic -or $downloadsDataDiagnostic
+$historicalShareReference=$historicalHelperDiagnostic -and -not [string]::IsNullOrWhiteSpace($env:COLD_SHARE_HISTORICAL_HELPER_APP)
 if(-not $EvidenceDirectory) { $EvidenceDirectory=Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'evidence/windows-transfer' }
 $EvidenceDirectory=[IO.Path]::GetFullPath($EvidenceDirectory)
 [void][IO.Directory]::CreateDirectory($EvidenceDirectory)
@@ -56,17 +58,17 @@ function Upload-App {
 }
 try {
  if($coldDiagnostic){
-  foreach($module in @('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs')){
+  foreach($module in @('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs','downloads-data-scenario.mjs')){
    & node --check (Join-Path $PSScriptRoot $module)
    if($LASTEXITCODE -ne 0){throw "Syntax failed before provider upload: $module"}
   }
-  if(($coldFileDiagnostic -and $coldShareDiagnostic) -or $env:LARGE_TRANSFER_DIAGNOSTIC -eq '1' -or $env:MODERATE_TRANSFER_CONTROL -eq '1' -or $env:SHARE_AFTER_CONTROL -eq '1'){throw 'Cold File rejects transfer and Share controls before provider upload.'}
+  if((($coldFileDiagnostic -and $coldShareDiagnostic) -or ($downloadsDataDiagnostic -and ($coldFileDiagnostic -or $coldShareDiagnostic))) -or $env:LARGE_TRANSFER_DIAGNOSTIC -eq '1' -or $env:MODERATE_TRANSFER_CONTROL -eq '1' -or $env:SHARE_AFTER_CONTROL -eq '1'){throw 'Cold File rejects transfer and Share controls before provider upload.'}
   [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'cold-workflow-binding.json'),(ConvertTo-Json @{
-   scenario=$(if($coldShareStateObservation){'cold-share-state'}elseif($coldShareDiagnostic){'cold-share-onset'}else{'cold-file-onset'}); fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
-   syntaxChecked=@('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs'); sourceCommit=$env:GITHUB_SHA
-   cleanupAgeMinutes=25; artifactRetentionMinutes=5; workflowMinutes=45; deadlineUtc=$env:COLD_JOB_DEADLINE_UTC; requiredMinutesBeforeSessionPost=30
-   stateObservationOnly=$coldShareStateObservation; processReads=$(if($coldShareStateObservation){1}else{0}); originalActivation=$false
-   outcomeGate='First touch and full ten-minute onset coverage remain unverified until original decoded video frames align with native input/log evidence.'
+   scenario=$(if($downloadsDataDiagnostic){'downloads-data-onset'}elseif($coldShareStateObservation){'cold-share-state'}elseif($coldShareDiagnostic){'cold-share-onset'}else{'cold-file-onset'}); fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
+   syntaxChecked=@('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs','downloads-data-scenario.mjs'); sourceCommit=$env:GITHUB_SHA
+   cleanupAgeMinutes=$(if($downloadsDataDiagnostic){20}else{25}); prepMinutes=10; observationMinutes=$(if($downloadsDataDiagnostic){5}else{10}); artifactRetentionMinutes=5; workflowMinutes=45; deadlineUtc=$env:COLD_JOB_DEADLINE_UTC; requiredMinutesBeforeSessionPost=$(if($downloadsDataDiagnostic){25}else{30})
+   stateObservationOnly=$coldShareStateObservation; processReads=$(if($coldShareStateObservation){1}else{0}); originalActivation=$downloadsDataDiagnostic
+   outcomeGate='Actual File/row input and full admitted onset coverage remain unverified until original decoded provider video aligns with native input/log evidence; pre-Send only.'
   }),[Text.UTF8Encoding]::new($false))
  }else{
   $localLog=Join-Path $private 'local.log'
@@ -105,7 +107,7 @@ try {
    method='Foreground owned native process readiness message; same step lifetime'
   }),[Text.UTF8Encoding]::new($false))
  }
- if($coldShareDiagnostic -and -not $historicalShareReference){
+ if($historicalHelperDiagnostic -and -not $historicalShareReference){
   if((Get-Item -LiteralPath $env:FIXTURE_3556_APK).Length -ne 24984 -or (Get-FileHash -LiteralPath $env:FIXTURE_3556_APK -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af'){throw 'Historical helper APK unavailable or identity differs; no session allocation.'}
   $archive=[IO.Compression.ZipFile]::OpenRead($env:FIXTURE_3556_APK)
   try{
@@ -120,7 +122,7 @@ try {
   $env:HELPER_APP=$env:COLD_SHARE_HISTORICAL_HELPER_APP
   $seedHash='a5b810580805d9ef75e40d4dc9f3088fcaacd67fa48680019778587af1170a33'
  }else{$env:HELPER_APP=Upload-App -ApkPath $env:FIXTURE_3556_APK -Label 'fixture'}
- if($coldShareDiagnostic){
+ if($historicalHelperDiagnostic){
   $referenceBytes=[Text.Encoding]::UTF8.GetBytes($env:HELPER_APP);$sha=[Security.Cryptography.SHA256]::Create()
   try{$referenceHash=[Convert]::ToHexString($sha.ComputeHash($referenceBytes)).ToLowerInvariant()}finally{$sha.Dispose()}
   if($historicalShareReference -and $referenceHash -ne '35b26d081e501726490aba415889ac6eb52f8220c86b053a2a01dc5dc276cfe3'){throw 'Configured historical helper reference differs from admitted provenance binding.'}
@@ -145,7 +147,7 @@ try {
   }),[Text.UTF8Encoding]::new($false))
   $env:BASELINE_APP=Upload-App -ApkPath $baselinePath -Label 'baseline'
  }else{$env:BASELINE_APP=Upload-App -RemoteUrl $BaselineUrl -Label 'baseline'}
- if($coldShareDiagnostic -and -not $historicalShareReference){
+ if($historicalHelperDiagnostic -and -not $historicalShareReference){
   if((Get-Item -LiteralPath $env:FIXTURE_3556_APK).Length -ne 24984 -or (Get-FileHash -LiteralPath $env:FIXTURE_3556_APK -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af'){throw 'Historical local helper bytes changed before controller admission.'}
   $receiptPath=Join-Path $EvidenceDirectory 'cold-share-helper.json';$receipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
   $receipt | Add-Member -NotePropertyName prePostIdentityUtc -NotePropertyValue ([DateTime]::UtcNow.ToString('o'))

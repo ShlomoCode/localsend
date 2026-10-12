@@ -5,7 +5,7 @@ on:
       scenario:
         type: choice
         default: selection
-        options: [selection, windows-transfer-control, moderate-transfer-control, stream-moderate-control, large-transfer-diagnostic, cold-file-onset, cold-share-onset, cold-share-state, syntax-only, direct-tcp-gate]
+        options: [selection, windows-transfer-control, moderate-transfer-control, stream-moderate-control, large-transfer-diagnostic, cold-file-onset, cold-share-onset, cold-share-state, downloads-data-onset, syntax-only, direct-tcp-gate]
 jobs:
   direct-tcp-gate:
     if: inputs.scenario == 'direct-tcp-gate'
@@ -48,7 +48,7 @@ jobs:
           name: issue3556-storage-evidence
           path: evidence/
   windows-transfer-control:
-    if: github.repository == 'ShlomoCode/localsend' && (inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic' || inputs.scenario == 'cold-file-onset' || (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state') || inputs.scenario == 'syntax-only')
+    if: github.repository == 'ShlomoCode/localsend' && (inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic' || inputs.scenario == 'cold-file-onset' || (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state') || inputs.scenario == 'downloads-data-onset' || inputs.scenario == 'syntax-only')
     concurrency:
       group: issue3556-owned-diagnostics
       cancel-in-progress: false
@@ -58,17 +58,18 @@ jobs:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue3556-${{ github.run_id }}-${{ github.run_attempt }}
-      SHARE_AFTER_CONTROL: ${{ (inputs.scenario == 'cold-file-onset' || (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state')) && '0' || '1' }}
+      SHARE_AFTER_CONTROL: ${{ (inputs.scenario == 'downloads-data-onset' || inputs.scenario == 'cold-file-onset' || (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state')) && '0' || '1' }}
+      DOWNLOADS_DATA_DIAGNOSTIC: ${{ inputs.scenario == 'downloads-data-onset' && '1' || '0' }}
       COLD_FILE_DIAGNOSTIC: ${{ inputs.scenario == 'cold-file-onset' && '1' || '0' }}
       COLD_SHARE_STATE_OBSERVATION: ${{ inputs.scenario == 'cold-share-state' && '1' || '0' }}
       COLD_SHARE_DIAGNOSTIC: ${{ (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state') && '1' || '0' }}
-      COLD_SHARE_HISTORICAL_HELPER_APP: ${{ (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state') && secrets.BS_3556_HISTORICAL_HELPER_APP || '' }}
+      COLD_SHARE_HISTORICAL_HELPER_APP: ${{ (inputs.scenario == 'downloads-data-onset' || inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state') && secrets.BS_3556_HISTORICAL_HELPER_APP || '' }}
       MODERATE_TRANSFER_CONTROL: ${{ (inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic') && '1' || '0' }}
       LARGE_TRANSFER_DIAGNOSTIC: ${{ inputs.scenario == 'large-transfer-diagnostic' && '1' || '0' }}
       RELAY_TRANSPORT: ${{ (inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic') && 'stream' || 'legacy' }}
     steps:
       - name: Record cold workflow cleanup deadline
-        if: inputs.scenario == 'cold-file-onset' || (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state')
+        if: inputs.scenario == 'downloads-data-onset' || inputs.scenario == 'cold-file-onset' || (inputs.scenario == 'cold-share-onset' || inputs.scenario == 'cold-share-state')
         shell: pwsh
         run: |
           # Keep a minute inside the 45-minute job timeout for runner overhead.
@@ -94,6 +95,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Controller syntax failed'}
           node --check support/diagnose_3556/cold-file-scenario.mjs
           if($LASTEXITCODE -ne 0){throw 'Cold File scenario syntax failed'}
+          node --check support/diagnose_3556/downloads-data-scenario.mjs
+          if($LASTEXITCODE -ne 0){throw 'Downloads data scenario syntax failed'}
           node --check support/diagnose_3556/cold-share-scenario.mjs
           if($LASTEXITCODE -ne 0){throw 'Cold Share scenario syntax failed'}
           node --check support/diagnose_3556/helper-restart-check.mjs
@@ -129,7 +132,7 @@ jobs:
           $ffmpeg=(Get-ChildItem C:/ProgramData/chocolatey/lib/ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName
           $ffprobe=Join-Path (Split-Path $ffmpeg) 'ffprobe.exe'
           if(-not (Test-Path $ffmpeg) -or -not (Test-Path $ffprobe)){throw 'ffmpeg binaries unavailable'}
-          if($env:COLD_SHARE_DIAGNOSTIC -eq '1'){
+          if($env:COLD_SHARE_DIAGNOSTIC -eq '1' -or $env:DOWNLOADS_DATA_DIAGNOSTIC -eq '1'){
             if(-not $env:COLD_SHARE_HISTORICAL_HELPER_APP -and (-not $env:FIXTURE_3556_APK -or -not (Test-Path -LiteralPath $env:FIXTURE_3556_APK -PathType Leaf))){throw 'Historical helper unavailable: configured admitted private reference or exact retained local APK required; Share does not rebuild or reseed.'}
             [IO.File]::AppendAllText($env:GITHUB_PATH,(Split-Path $ffmpeg)+[Environment]::NewLine)
             return
@@ -151,14 +154,14 @@ jobs:
           node support/diagnose_3556/relay-stream-check.mjs
           exit $LASTEXITCODE
       - name: Receiver hash receipt race negative control and candidate
-        if: inputs.scenario != 'cold-file-onset' && inputs.scenario != 'cold-share-onset' && inputs.scenario != 'cold-share-state'
+        if: inputs.scenario != 'cold-file-onset' && inputs.scenario != 'cold-share-onset' && inputs.scenario != 'cold-share-state' && inputs.scenario != 'downloads-data-onset'
         shell: pwsh
         run: |
           git fetch --no-tags --depth=1 origin 1b14424098058239b003e5b8e1dabf843b687f51
           if($LASTEXITCODE -ne 0){throw 'Race negative control source fetch failed'}
           ./support/diagnose_3556/hash-receipt-check.ps1
       - name: Retired helper poll restart negative control and candidate
-        if: inputs.scenario != 'cold-file-onset' && inputs.scenario != 'cold-share-onset' && inputs.scenario != 'cold-share-state'
+        if: inputs.scenario != 'cold-file-onset' && inputs.scenario != 'cold-share-onset' && inputs.scenario != 'cold-share-state' && inputs.scenario != 'downloads-data-onset'
         shell: pwsh
         run: |
           git fetch --no-tags --depth=1 origin a3c81bb623aaa1e4906b2788863c4298780da5ce
@@ -169,11 +172,11 @@ jobs:
           $env:NEGATIVE_RELAY_SOURCE=$oldSource
           node support/diagnose_3556/helper-restart-check.mjs
           if($LASTEXITCODE -ne 0){throw 'Helper restart component check failed'}
-      - name: ${{ inputs.scenario == 'cold-share-state' && 'One preShare original process observation' || inputs.scenario == 'cold-share-onset' && 'Cold original native Share onset observation' || inputs.scenario == 'cold-file-onset' && 'Cold original File onset observation' || 'Small real Android sender and Windows receiver control' }}
+      - name: ${{ inputs.scenario == 'downloads-data-onset' && 'Original File Downloads data pre-Send observation' || inputs.scenario == 'cold-share-state' && 'One preShare original process observation' || inputs.scenario == 'cold-share-onset' && 'Cold original native Share onset observation' || inputs.scenario == 'cold-file-onset' && 'Cold original File onset observation' || 'Small real Android sender and Windows receiver control' }}
         if: inputs.scenario != 'syntax-only'
         shell: pwsh
         run: |
-          if($env:COLD_FILE_DIAGNOSTIC -ne '1' -and $env:COLD_SHARE_DIAGNOSTIC -ne '1'){
+          if($env:COLD_FILE_DIAGNOSTIC -ne '1' -and $env:COLD_SHARE_DIAGNOSTIC -ne '1' -and $env:DOWNLOADS_DATA_DIAGNOSTIC -ne '1'){
             New-Item -ItemType Directory -Force C:/tmp/bs-local-bin | Out-Null
             Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile (Join-Path $env:RUNNER_TEMP 'bs-local.zip')
             Expand-Archive (Join-Path $env:RUNNER_TEMP 'bs-local.zip') C:/tmp/bs-local-bin -Force

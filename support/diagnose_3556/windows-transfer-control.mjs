@@ -8,21 +8,26 @@ import {createHash} from 'node:crypto';
 import {relay} from '../cloud_transport/relay.mjs';
 import shareScenario from './share-scenario.mjs';
 import {runTransportControls} from './stream-controls.mjs';
+import {runDownloadsDataScenario} from './downloads-data-scenario.mjs';
 import {runColdFileScenario,recordingPreflight,retainColdRecording} from './cold-file-scenario.mjs';
 import {runColdShareScenario,coldShareRecordingPreflight,retainColdShareRecording} from './cold-share-scenario.mjs';
 
 // Drive the unmodified apps. The moderate control measures throughput; neither size proves 16GB behavior.
 const largeDiagnostic=process.env.LARGE_TRANSFER_DIAGNOSTIC==='1';
+const downloadsDataDiagnostic=process.env.DOWNLOADS_DATA_DIAGNOSTIC==='1';
 const coldFileDiagnostic=process.env.COLD_FILE_DIAGNOSTIC==='1';
 const coldShareDiagnostic=process.env.COLD_SHARE_DIAGNOSTIC==='1';
 const coldShareStateObservation=process.env.COLD_SHARE_STATE_OBSERVATION==='1';
 assert(!coldShareStateObservation||coldShareDiagnostic,'State observation requires the historical cold Share setup');
-assert([largeDiagnostic,coldFileDiagnostic,coldShareDiagnostic].filter(Boolean).length<=1,'Diagnostic modes are mutually exclusive');
-const coldDiagnostic=coldFileDiagnostic||coldShareDiagnostic;
+assert([largeDiagnostic,coldFileDiagnostic,coldShareDiagnostic,downloadsDataDiagnostic].filter(Boolean).length<=1,'Diagnostic modes are mutually exclusive');
+const coldDiagnostic=coldFileDiagnostic||coldShareDiagnostic||downloadsDataDiagnostic;
 assert(!coldDiagnostic||(process.env.SHARE_AFTER_CONTROL!=='1'&&process.env.MODERATE_TRANSFER_CONTROL!=='1'),'Cold onset is incompatible with Share/moderate controls');
 const boundedDiagnostic=largeDiagnostic||coldDiagnostic;
 if(coldDiagnostic)assert(/^\d+$/.test(process.env.GITHUB_RUN_ID||'')&&/^\d+$/.test(process.env.GITHUB_RUN_ATTEMPT||''),'Cold onset requires exact workflow run/attempt ownership');
 const ownedBuildName='issue3556-'+process.env.GITHUB_RUN_ID+(coldDiagnostic?'-attempt-'+process.env.GITHUB_RUN_ATTEMPT:'');
+const cleanupAgeMinutes=downloadsDataDiagnostic?20:25;
+const requiredOwnedMinutes=downloadsDataDiagnostic?25:30;
+const historicalHelperDiagnostic=coldShareDiagnostic||downloadsDataDiagnostic;
 const minute=60000,reserveBytes=2*1024*1024*1024;
 let controlBytes=(largeDiagnostic||process.env.MODERATE_TRANSFER_CONTROL==='1')?64*1024*1024:1048576;
 let controlName=controlBytes===1048576?'1 MiB':'64 MiB';
@@ -59,7 +64,7 @@ let sessionCreationAttempted=false,sessionStart=null,phaseDeadline=Infinity,wdBu
 const androidSourceLimit=200,windowsObservationLimit=100;
 let windowsImagesRemaining=60,windowsObservationsRemaining=windowsObservationLimit,windowsLargeReceiverStarted=false;
 const sessionAge=()=>sessionStart===null?0:Date.now()-sessionStart;
-function remaining(){return boundedDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+(coldDiagnostic?25:110)*minute)-Date.now()):Infinity;}
+function remaining(){return boundedDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+(coldDiagnostic?cleanupAgeMinutes:110)*minute)-Date.now()):Infinity;}
 function admit(){assert(!largeDiagnostic||sessionAge()<20*minute,'Large stage/controls/selection/Send admission exceeded session age 20 minutes');}
 function commandLimit(url){if(coldDiagnostic&&url!=='/session')return 10000;if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
@@ -153,7 +158,7 @@ async function recoverOwnedStartupSession(){
  }
 }
 async function snap(name,xml){
- const terminal=/android-finished|failure|transfer-error|hash-ready|cold-terminal|cold-share-terminal/.test(name);
+ const terminal=/android-finished|failure|transfer-error|hash-ready|cold-terminal|cold-share-terminal|downloads-terminal/.test(name);
  const text=xml||await source(Infinity,terminal);save(name+'.xml',text);
  if(boundedDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name:artifactName(name),utc:new Date().toISOString(),sourceOnly:true,reason:'Android image budget reserved or exhausted'});return text;}
  imageCount++;const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
@@ -433,7 +438,7 @@ try{
   assert(provenance.release==='1.18.2'&&provenance.architecture==='arm64v8'&&provenance.sha256==='82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3'&&provenance.bytes>0,'Cold File requires verified unchanged original APK provenance before provider allocation');
   report.originalApk=provenance;
  }
- if(coldShareDiagnostic){
+ if(historicalHelperDiagnostic){
   const helperReceipt=JSON.parse(readFileSync(path.join(output,'cold-share-helper.json'),'utf8'));
   assert(helperReceipt.apkSha256==='1064d8872a88e33def446c895c76f2da1f6df5f0d0f4ee7c00992d17414843af'&&helperReceipt.apkBytes===24984&&helperReceipt.seedSha256==='a5b810580805d9ef75e40d4dc9f3088fcaacd67fa48680019778587af1170a33'&&helperReceipt.seedBytes===7355,'Historical helper bytes/seed pin missing');
   assert(helperReceipt.uploadReferenceSha256===createHash('sha256').update(process.env.HELPER_APP).digest('hex')&&helperReceipt.runId===process.env.GITHUB_RUN_ID&&helperReceipt.runAttempt===process.env.GITHUB_RUN_ATTEMPT,'Historical helper provenance receipt does not match this attempt/reference');
@@ -449,8 +454,8 @@ try{
  if(!coldDiagnostic){await r.start();startedRelay=true;}
  if(coldDiagnostic){
   const deadline=Date.parse(process.env.COLD_JOB_DEADLINE_UTC);
-  assert(Number.isFinite(deadline)&&deadline-Date.now()>=30*minute,'Cold provider allocation requires 30 minutes remaining for owned cleanup and retention');
-  if(coldShareDiagnostic&&report.historicalHelper.route==='historical-private-reference'){
+  assert(Number.isFinite(deadline)&&deadline-Date.now()>=requiredOwnedMinutes*minute,'Provider allocation lacks the required owned cleanup and separate finite retention budget');
+  if(historicalHelperDiagnostic&&report.historicalHelper.route==='historical-private-reference'){
    const check=report.historicalHelper.availability={status:'incomplete',startedUtc:new Date().toISOString(),method:'Authenticated documented recent_apps limit=100 offset=0',
     referenceSha256:report.historicalHelper.uploadReferenceSha256,limit:100,offset:0,
     qualification:'Account-visible exact historical reference/provenance only; no recovered local bytes, raw upload response, server hash, or future installation guarantee'};
@@ -469,9 +474,9 @@ try{
     check.uploadedUtc=new Date(uploaded).toISOString();check.uploadAgeMs=age;check.status='exact-reference-account-visible';
    }catch(error){check.error=redact(error.message);throw error;}
    finally{check.finishedUtc=new Date().toISOString();save('cold-share-helper-availability.json',check);}
-   assert(deadline-Date.now()>=30*minute,'Historical availability read left insufficient owned cleanup/retention budget');
-  }else if(coldShareDiagnostic)assert(report.historicalHelper.localApkVerifiedBeforeController===true&&Date.now()-Date.parse(report.historicalHelper.prePostIdentityUtc)<minute&&Date.now()-Date.parse(report.historicalHelper.uploadUtc)<10*minute,'Historical helper identity/upload availability receipt stale before POST');
-  report.coldWorkflowBudget={deadlineUtc:new Date(deadline).toISOString(),remainingBeforePostMs:deadline-Date.now(),requiredRemainingMs:30*minute,sessionCleanupAgeMs:25*minute,retentionMs:5*minute};
+   assert(deadline-Date.now()>=requiredOwnedMinutes*minute,'Historical availability read left insufficient owned cleanup/retention budget');
+  }else if(historicalHelperDiagnostic)assert(report.historicalHelper.localApkVerifiedBeforeController===true&&Date.now()-Date.parse(report.historicalHelper.prePostIdentityUtc)<minute&&Date.now()-Date.parse(report.historicalHelper.uploadUtc)<10*minute,'Historical helper identity/upload availability receipt stale before POST');
+  report.coldWorkflowBudget={deadlineUtc:new Date(deadline).toISOString(),remainingBeforePostMs:deadline-Date.now(),requiredRemainingMs:requiredOwnedMinutes*minute,sessionCleanupAgeMs:cleanupAgeMinutes*minute,retentionMs:5*minute};
  }
  sessionCreationAttempted=true;sessionStart=Date.now();if(boundedDiagnostic)phaseDeadline=sessionStart+(coldDiagnostic?10:20)*minute;
  report.sessionStartBeforePostUtc=new Date(sessionStart).toISOString();
@@ -481,7 +486,7 @@ try{
   'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,...(coldDiagnostic?[]:[process.env.RELAY_APP])],
   'appium:autoGrantPermissions':true,'appium:newCommandTimeout':1200,
   'bstack:options':{...(coldDiagnostic?{local:false}:{local:true,localIdentifier:process.env.BS_LOCAL_ID}),idleTimeout:300,projectName:'LocalSend bug sprint',
-   buildName:ownedBuildName,sessionName:coldShareDiagnostic?'issue3556-S20-cold-Share':coldFileDiagnostic?'issue3556-S20-cold-File':'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
+   buildName:ownedBuildName,sessionName:downloadsDataDiagnostic?'issue3556-S20-Downloads-data':coldShareDiagnostic?'issue3556-S20-cold-Share':coldFileDiagnostic?'issue3556-S20-cold-File':'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
   firstMatch:[{}]}});
  session=created.sessionId;assert(session,'No BrowserStack session ID');save('session.json',{session,device:report.device,android:report.android});
  await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});
@@ -490,9 +495,10 @@ try{
  await wd('POST',base()+'/timeouts',{implicit:5000});
  await wd('POST',base()+'/appium/settings',{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
  if(coldDiagnostic){
-  if(coldShareDiagnostic){const preflight=await coldShareRecordingPreflight({session,auth,save});report.coldRecording=preflight.receipt;coldShareRecordingReferences=preflight.references;}
+  if(downloadsDataDiagnostic)assert(remaining()>=10000,'No complete bounded recording preflight fits before prep admission deadline');
+  if(historicalHelperDiagnostic){const preflight=await coldShareRecordingPreflight({session,auth,save});report.coldRecording=preflight.receipt;coldShareRecordingReferences=preflight.references;}
   else report.coldRecording=await recordingPreflight({session,auth,save});
-  const runColdScenario=coldShareDiagnostic?runColdShareScenario:runColdFileScenario;
+  const runColdScenario=downloadsDataDiagnostic?runDownloadsDataScenario:coldShareDiagnostic?runColdShareScenario:runColdFileScenario;
   await runColdScenario({wd,base,source,snap,nodes,labels,touch,activate,save,report,sleep,sessionStart,output,session,
    counters:()=>({sourceCount,imageCount}),setDeadline:value=>{phaseDeadline=value;}});
  }else{
@@ -700,7 +706,7 @@ try{
  if(session&&(!boundedDiagnostic||remaining()>=(coldDiagnostic?30000:2*minute)))await source(Date.now()+30000,true).then(xml=>snap('failure',xml)).catch(()=>{});
  process.exitCode=1;
 }finally{
- if(boundedDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+(coldDiagnostic?25:110)*minute;
+ if(boundedDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+(coldDiagnostic?cleanupAgeMinutes:110)*minute;
  if(coldDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});}catch(error){report.cleanupErrors.push('Original terminate: '+redact(error.message));}
  if(boundedDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.fixture3556'});}catch(error){report.cleanupErrors.push('Fixture helper terminate: '+redact(error.message));}
  try{await stopPhysicalServer();}catch(error){report.cleanupErrors.push('Temporary control server stop: '+redact(error.message));process.exitCode=1;}
@@ -731,13 +737,13 @@ try{
   }
  }
  if(session){
-  try{await wd('DELETE',base());}catch(error){
+  try{await wd('DELETE',base());if(downloadsDataDiagnostic)report.downloadsCleanup={status:'owned-delete-returned',utc:new Date().toISOString(),sessionAgeMs:sessionAge(),withinActiveBudget:sessionAge()<=20*minute};}catch(error){
    report.cleanupErrors.push('Owned session delete: '+redact(error.message));
    // Retry only this owned session; a relay shutdown failure must not skip its release.
-   try{await wd('DELETE',base());}catch(retryError){report.cleanupErrors.push('Owned session delete retry: '+redact(retryError.message));process.exitCode=1;}
+   try{await wd('DELETE',base());if(downloadsDataDiagnostic)report.downloadsCleanup={status:'owned-delete-retry-returned',utc:new Date().toISOString(),sessionAgeMs:sessionAge(),withinActiveBudget:sessionAge()<=20*minute};}catch(retryError){if(downloadsDataDiagnostic)report.downloadsCleanup={status:'unconfirmed',utc:new Date().toISOString(),sessionAgeMs:sessionAge(),withinActiveBudget:false};report.cleanupErrors.push('Owned session delete retry: '+redact(retryError.message));process.exitCode=1;}
   }
  }
- if(coldDiagnostic&&session){try{await (coldShareDiagnostic?retainColdShareRecording:retainColdRecording)({session,auth,save,output,report,preflightReferences:coldShareRecordingReferences});}catch(error){report.status='incomplete';report.cleanupErrors.push('Continuous recording retention: '+redact(error.message));process.exitCode=1;}}
+ if(coldDiagnostic&&session){try{await (historicalHelperDiagnostic?retainColdShareRecording:retainColdRecording)({session,auth,save,output,report,preflightReferences:coldShareRecordingReferences});}catch(error){report.status='incomplete';report.cleanupErrors.push('Continuous recording retention: '+redact(error.message));process.exitCode=1;}}
  if(startedRelay){try{await r.stop();}catch(error){report.cleanupErrors.push('Relay stop: '+redact(error.message));process.exitCode=1;}}
  save('reverse-physical-controls.json',report.physicalReverseControl||{status:coldDiagnostic?'not-run-cold-selection-only':'incomplete',scope:'Transport proof only; actual LocalSend transfer gate not passed',windows:physicalCases});
  save('reverse-physical-trace.json',physicalTrace);

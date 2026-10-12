@@ -42,7 +42,9 @@ async function request(field,value,end,maxMs,cap,proxy=false){
  for(const file of [body,headers,errors])writeFileSync(file,'',{flag:'wx',mode:0o600});
  entry.files={body:path.basename(body),headers:path.basename(headers),errors:path.basename(errors)};
  let config='url = '+quote(url.href)+'\n';
- if(field==='metadata'||(field!=='video_url'&&apiHosts.has(url.hostname)))config+='user = '+quote(credentials.username+':'+credentials.key)+'\n';
+ const ownedTextLog=field==='logs'&&url.hostname==='app-automate.browserstack.com'&&
+  new RegExp('^/builds/[a-f0-9]{40}/sessions/'+session+'/logs$').test(url.pathname);
+ if(field==='metadata'||(field!=='video_url'&&apiHosts.has(url.hostname))||ownedTextLog)config+='user = '+quote(credentials.username+':'+credentials.key)+'\n';
  if(proxy)config+='proxy = '+quote('socks5h://'+options['--socks5'])+'\n';
  // Compute this immediately before spawn, after all config/filesystem preparation: queued callers cannot extend it.
  const dispatched=Date.now(),remaining=Math.floor(Math.min(end,deadline)-dispatched);
