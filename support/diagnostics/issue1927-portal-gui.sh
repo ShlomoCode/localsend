@@ -14,18 +14,63 @@ start_portal_monitor() {
   kill -0 "$monitor_pid"
 }
 start_portal_monitor initial
-launch_settings() {
-  local label=$1 existing_visible_phase=${2:-} pid
-  if [ -z "$existing_visible_phase" ]; then
-    flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
-  fi
+wait_launch_bookkeeping() {
+  local label=$1 identity_label="$1-launch-ready" transition_deadline=$2 attempt=0 rows='' previous_rows='' result uid
+  uid=$(identity_command uid id -u) || return 1
   wid=''
-  for i in $(seq 1 30); do
-    wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1 || true)
-    [ -z "$wid" ] || break
-    sleep 1
+  while [ "$SECONDS" -lt "$transition_deadline" ]; do
+    attempt=$((attempt+1))
+    identity_command "instances-$attempt" flatpak ps --columns=instance,application,pid > "$OUT/$identity_label-$attempt-instances.txt" || return 1
+    identity_command "topology-$attempt" ps -u "$uid" -o pid=,ppid=,uid=,comm= > "$OUT/$identity_label-$attempt-topology.txt" || return 1
+    identity_command "rows-$attempt" awk '$2=="org.localsend.localsend_app" {print $1,$3}' "$OUT/$identity_label-$attempt-instances.txt" > "$OUT/$identity_label-$attempt-rows.txt" || return 1
+    rows=$(identity_command "sort-$attempt" sort "$OUT/$identity_label-$attempt-rows.txt") || return 1
+    result=0
+    identity_command "anchors-$attempt" awk '
+      NR==FNR {present[$1]=1; next}
+      $2=="org.localsend.localsend_app" {rows++; if($1 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || !($3 in present)) missing=1}
+      END {exit !(rows && !missing)}
+    ' "$OUT/$identity_label-$attempt-topology.txt" "$OUT/$identity_label-$attempt-instances.txt" || result=$?
+    if [ "$result" != 0 ]; then
+      test "$result" = 1 || return 1
+      previous_rows=''
+      printf 'attempt=%s unresolved-instance-anchors; retaining snapshot, no row excluded\n' "$attempt" >> "$OUT/$identity_label-convergence.txt"
+      sleep .25
+      continue
+    fi
+    result=0
+    run_ui_observer xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/$identity_label-$attempt-windows.txt" 2> "$OUT/$identity_label-$attempt-window-error.txt" || result=$?
+    printf 'attempt=%s bounded-visible-query-status=%s\n' "$attempt" "$result" >> "$OUT/$identity_label-convergence.txt"
+    test ! -s "$OUT/$identity_label-$attempt-window-error.txt" || return 1
+    if [ "$result" = 0 ] && [ "$rows" = "$previous_rows" ]; then
+      wid=$(identity_command "window-first-$attempt" head -n 1 "$OUT/$identity_label-$attempt-windows.txt") || return 1
+      test -n "$wid" || return 1
+      break
+    fi
+    test "$result" = 0 || test "$result" = 1 || return 1
+    previous_rows=$rows
+    sleep .25
   done
-  test -n "$wid"
+  test -n "$wid" && test "$SECONDS" -lt "$transition_deadline"
+}
+launch_settings() {
+  local label=$1 existing_visible_phase=${2:-} foreground_phase=${3:-} pid launcher_pid launcher_result=0
+  local launch_deadline=$((SECONDS+30)) remaining
+  test -z "$existing_visible_phase" || test -z "$foreground_phase"
+  if [ -z "$existing_visible_phase" ]; then
+    if [ -n "$foreground_phase" ]; then
+      # Reap this owned activation launcher before observing Flatpak bookkeeping.
+      remaining=$((launch_deadline-SECONDS))
+      test "$remaining" -gt 0
+      timeout -s KILL "$remaining" flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
+      launcher_pid=$!
+      wait "$launcher_pid" || launcher_result=$?
+      printf 'owned_launcher=%s reaped_status=%s\n' "$launcher_pid" "$launcher_result" > "$OUT/$label-launcher-receipt.txt"
+      test "$launcher_result" = 0
+    else
+      flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
+    fi
+  fi
+  wait_launch_bookkeeping "$label" "$launch_deadline"
   snapshot "$label-before-input"
   wait_rendered_application "$label"
   pid=$(qualified_app_pid "$label")
@@ -33,6 +78,9 @@ launch_settings() {
   if [ -n "$existing_visible_phase" ]; then
     cmp "$OUT/$existing_visible_phase-process-identity.txt" "$OUT/$label-process-identity.txt"
     test "$wid" = "$(cat "$OUT/$existing_visible_phase-window.txt")"
+  fi
+  if [ -n "$foreground_phase" ]; then
+    cmp "$OUT/$foreground_phase-process-identity.txt" "$OUT/$label-process-identity.txt"
   fi
   stabilize_window initialized
   xdotool mousemove --window "$wid" 105 211 click 1
@@ -103,7 +151,7 @@ window_result=0
 run_ui_observer xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/hidden-login-window.txt" 2> "$OUT/hidden-login-window-error.txt" || window_result=$?
 test "$window_result" = 1 && test ! -s "$OUT/hidden-login-window.txt" && test ! -s "$OUT/hidden-login-window-error.txt"
 # Normal launcher asks the running app to foreground. Preserve PID identity.
-launch_settings hidden-login-foreground
+launch_settings hidden-login-foreground '' hidden-login
 qualified_app_pid hidden-foreground > "$OUT/hidden-foreground-pid.txt"
 cmp "$OUT/hidden-login-pid.txt" "$OUT/hidden-foreground-pid.txt"
 cmp "$OUT/hidden-login-process-identity.txt" "$OUT/hidden-foreground-process-identity.txt"
