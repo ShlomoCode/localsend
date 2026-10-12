@@ -51,6 +51,54 @@ def native_output(value):
     return value.decode(errors='replace') if isinstance(value, bytes) else value
 
 
+def receiver_display_metadata():
+    """Retain each strict read; never infer health from partial text."""
+    observations = {}
+    values = {}
+    for label, args in {'size': ['wm', 'size'], 'density': ['wm', 'density'], 'font_scale': ['settings', 'get', 'system', 'font_scale'], 'rotation': ['settings', 'get', 'system', 'user_rotation']}.items():
+        command = ['adb', '-s', serial, 'shell', *args]
+        started = time.monotonic()
+        started_at = time.time()
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=10)
+            observations[label] = {'command': command, 'returncode': result.returncode, 'stdout': native_output(result.stdout), 'stderr': native_output(result.stderr), 'started_at_unix': started_at, 'elapsed_seconds': time.monotonic()-started}
+            write('receiver-display-native.json', observations)
+            if result.returncode:
+                raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
+            values[label] = native_output(result.stdout)
+            write('receiver-display.json', values)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as primary:
+            if isinstance(primary, subprocess.TimeoutExpired):
+                observations[label] = {'command': command, 'returncode': None, 'stdout': native_output(primary.stdout), 'stderr': native_output(primary.stderr), 'started_at_unix': started_at, 'elapsed_seconds': time.monotonic()-started, 'error': 'TimeoutExpired'}
+                write('receiver-display-native.json', observations)
+            probes = {}
+            deadline = time.monotonic() + 15
+            probe_env = {**os.environ, 'ADB_TRACE': 'transport,shell'}
+            for name, probe in {
+                'version': ['adb', 'version'],
+                'devices': ['adb', 'devices', '-l'],
+                'state': ['adb', '-s', serial, 'get-state'],
+                'shell': ['adb', '-s', serial, 'shell', 'echo', 'native-adb-sentinel'],
+                'uptime': ['adb', '-s', serial, 'shell', 'cat', '/proc/uptime', '/proc/sys/kernel/random/boot_id'],
+            }.items():
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    probes[name] = {'status': 'not attempted; discriminator deadline reached'}
+                    write('receiver-display-failure-probes.json', probes)
+                    break
+                started = time.monotonic()
+                probe_started_at = time.time()
+                try:
+                    result = subprocess.run(probe, capture_output=True, timeout=min(3, remaining), env=probe_env)
+                    probes[name] = {'command': probe, 'returncode': result.returncode, 'stdout': native_output(result.stdout), 'stderr': native_output(result.stderr), 'started_at_unix': probe_started_at, 'elapsed_seconds': time.monotonic()-started}
+                except subprocess.TimeoutExpired as error:
+                    probes[name] = {'command': probe, 'returncode': None, 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr), 'started_at_unix': probe_started_at, 'elapsed_seconds': time.monotonic()-started, 'error': 'TimeoutExpired'}
+                except Exception as error:
+                    probes[name] = {'command': probe, 'error': repr(error), 'started_at_unix': probe_started_at, 'elapsed_seconds': time.monotonic()-started}
+                write('receiver-display-failure-probes.json', probes)
+            raise primary
+
+
 def wait_native_adb(phase, args, expected, not_ready, seconds):
     deadline = time.monotonic() + seconds
     command = ['adb', '-s', serial, *args]
@@ -772,7 +820,7 @@ try:
         raise RuntimeError('Installed receiver version/ABI mismatch')
     adb('shell', 'monkey', '-p', PACKAGE, '-c', 'android.intent.category.LAUNCHER', '1')
     spawn(['adb', '-s', serial, 'logcat', '-v', 'threadtime'], 'receiver-logcat.txt')
-    write('receiver-display.json', {k: adb('shell', *args) for k, args in {'size': ['wm', 'size'], 'density': ['wm', 'density'], 'font_scale': ['settings', 'get', 'system', 'font_scale'], 'rotation': ['settings', 'get', 'system', 'user_rotation']}.items()})
+    receiver_display_metadata()
     stage = 'launch-linux-sender'
     window_manager = spawn(['openbox', '--sm-disable'], 'openbox.log')
     time.sleep(.5)
