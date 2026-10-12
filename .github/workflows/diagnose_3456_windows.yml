@@ -1,0 +1,56 @@
+name: Diagnose Windows relaunch 3456
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: One native Server 2022 screening; no Windows 10 verdict
+        required: true
+        type: choice
+        options:
+          - native-server-screening-3456
+permissions:
+  contents: read
+concurrency:
+  group: diagnostic-3456
+  cancel-in-progress: false
+jobs:
+  screening:
+    if: github.repository == 'ShlomoCode/localsend' && github.ref == 'refs/heads/codex/diagnose-3456-r3' && inputs.confirmation == 'native-server-screening-3456'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Establish absolute task deadline
+        shell: pwsh
+        run: |
+          "ISSUE3456_STARTED=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_ENV
+          "ISSUE3456_EVIDENCE=$env:RUNNER_TEMP\issue3456-evidence" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\issue3456-evidence" | Out-Null
+          Get-ChildItem Env: | Where-Object Name -in @('ImageOS', 'ImageVersion', 'RUNNER_ARCH', 'RUNNER_OS', 'GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_REF') | Format-List | Out-File "$env:RUNNER_TEMP\issue3456-evidence\runner-original.txt"
+      - uses: actions/checkout@v4
+        timeout-minutes: 1
+      - name: Screen unchanged official installer and portable release
+        timeout-minutes: 20
+        shell: powershell
+        run: |
+          & support/diagnostics/3456/supervise.ps1 -Evidence $env:ISSUE3456_EVIDENCE -StartedUtc $env:ISSUE3456_STARTED
+          exit $LASTEXITCODE
+      - name: Retain raw evidence and clean owned processes
+        if: always()
+        timeout-minutes: 2
+        shell: powershell
+        run: |
+          if (Test-Path support/diagnostics/3456/retain.ps1) {
+            & support/diagnostics/3456/retain.ps1 -Evidence $env:ISSUE3456_EVIDENCE
+          } else {
+            'Checkout/setup failed; no scenario executed.' | Out-File "$env:ISSUE3456_EVIDENCE\checkout-block.txt"
+          }
+      - name: Upload original evidence even after environment/setup failure
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3456-native-server-${{ github.run_id }}
+          path: ${{ env.ISSUE3456_EVIDENCE }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
