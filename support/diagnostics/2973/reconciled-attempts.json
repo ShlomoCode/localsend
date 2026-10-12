@@ -14,5 +14,13 @@
     "terminalStatus": "done",
     "classification": "harness-before-picker",
     "resolution": "Root reconciled actual empty Send horizontal picker bar hiding Apps. No picker or Android settings inputs occurred. Independent cleanup done. Bounded observed-native-bar scrolling correction authorized."
+  },
+  {
+    "runId": "38205716624",
+    "headSha": "6c963ccc7545d7095ef39d23f09df4934be02c51",
+    "sessionId": "78fd93fa811f86c08c3e2a3db1514823a8656d84",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "resolution": "Owner inspected original final Send screenshot/XML after successful native horizontal scroll: real released picker label is App, not Apps. No picker or Android settings input occurred. Independent cleanup done. Exact observed-label correction reviewed under delegated routine authority."
   }
 ]

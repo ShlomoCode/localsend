@@ -122,8 +122,8 @@ if (mode === 'create') {
     async function openApps(label) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const screen = await capture(`${label}-${attempt}`);
-        const apps = screen.nodes.filter(node => node.clickable === 'true' && node.displayed === 'true' && (node['content-desc'] === 'Apps' || node.text === 'Apps'));
-        if (apps.length === 1) { await touch(apps[0], 'Apps'); return; }
+        const apps = screen.nodes.filter(node => node.clickable === 'true' && node.displayed === 'true' && (node['content-desc'] === 'App' || node.text === 'App'));
+        if (apps.length === 1) { await touch(apps[0], 'Observed original App picker'); return; }
         if (apps.length > 1) throw new Error('Apps touch identity ambiguous');
         if (attempt === 2) break; // The final capture observes the previous swipe; never leave an unobserved final swipe.
         const bars = screen.nodes.filter(node => node.class === 'android.widget.HorizontalScrollView' && node.scrollable === 'true' && node.displayed === 'true' && node.enabled === 'true');
@@ -189,7 +189,7 @@ if (mode === 'create') {
     if (clearTargets.length !== 1) throw new Error('Selection clear button not unique in current visible header');
     await touch(clearTargets[0], 'Observed Selection header clear X');
     const restoredSend = await capture('send-original-selection-restored');
-    if (['File','Media','Paste','Text','Folder','Apps'].filter(label => restoredSend.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true')).length < 2) throw new Error('Original empty Send selection not restored');
+    if (['File','Media','Paste','Text','Folder','App'].filter(label => restoredSend.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true')).length < 2) throw new Error('Original empty Send selection not restored');
     await openApps('send-before-picker-state-restore');
     const restoreKeyboard = await request('GET', prefix + '/appium/device/is_keyboard_shown');
     if (restoreKeyboard.value === true) await back();
