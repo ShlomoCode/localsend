@@ -1,6 +1,15 @@
 name: Issue 3441 official macOS receiver readiness
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/diagnose-3441-android-mac
+    paths:
+      - .github/workflows/diagnose_3441_macos_receiver.yml
+      - support/diagnostics/3441/setup.sh
+      - support/diagnostics/3441/ax.swift
+      - support/diagnostics/3441/receiver.mjs
+      - support/diagnostics/3441/cleanup.mjs
 permissions:
   contents: read
 concurrency:
