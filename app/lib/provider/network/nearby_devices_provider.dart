@@ -199,6 +199,7 @@ class StartStagedScan extends AsyncReduxAction<NearbyDevicesService, NearbyDevic
   final int port;
   final bool https;
   final Duration grace;
+  final bool forceSubnetScan;
 
   StartStagedScan({
     required this.favorites,
@@ -206,6 +207,7 @@ class StartStagedScan extends AsyncReduxAction<NearbyDevicesService, NearbyDevic
     required this.port,
     required this.https,
     required this.grace,
+    required this.forceSubnetScan,
   });
 
   @override
@@ -222,6 +224,7 @@ class StartStagedScan extends AsyncReduxAction<NearbyDevicesService, NearbyDevic
             port: port,
             https: https,
             grace: grace,
+            forceSubnetScan: forceSubnetScan,
           ),
         )
         .drain<void>();

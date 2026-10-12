@@ -10,7 +10,7 @@
 
 use localsend::crypto::cert::generate_self_signed;
 use localsend::discovery::{
-    self, DeviceIdentity, DiscoveryConfig, DiscoveryEvent, DiscoveryHandle,
+    self, DeviceIdentity, DiscoveryConfig, DiscoveryEvent, DiscoveryHandle, HttpChannel,
 };
 use localsend::http::server::web::WebConfig;
 use localsend::http::server::{start_with_port, ServerConfigV2, TlsConfig};
@@ -405,6 +405,102 @@ async fn test_discovery_works_without_multicast() {
     assert!(handle.device_by_fingerprint("target-fingerprint").is_some());
 
     // Stopping must not hang without multicast sockets to close.
+    drop(stop_tx);
+    handle.wait_stopped().await;
+}
+
+#[tokio::test]
+async fn test_manual_scan_finds_unknown_peer_after_favorite_confirms() {
+    let (favorite_port, _favorite_stop) =
+        start_register_server("Favorite", "favorite-fingerprint", None).await;
+    let (unknown_port, _unknown_stop) =
+        start_register_server("Unknown", "unknown-fingerprint", None).await;
+
+    // Keep multicast unavailable while using real HTTP register servers.
+    // A favorite confirmation skips the automatic fallback, but must not
+    // hide another reachable peer from an explicit scan.
+    let cert = generate_self_signed().expect("Failed to generate an identity");
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let handle = discovery::start(
+        DiscoveryConfig {
+            group: TEST_GROUP,
+            group_v6: Some(TEST_GROUP_V6),
+            port: NEXT_MULTICAST_PORT.fetch_add(1, Ordering::Relaxed),
+            interface_filter: InterfaceFilter {
+                whitelist: Some(vec!["203.0.113.1".to_string()]),
+                blacklist: None,
+            },
+            device: MulticastDevice {
+                alias: "Finder".to_string(),
+                version: PROTOCOL_VERSION_V2.to_string(),
+                device_model: Some("Rust".to_string()),
+                device_type: Some(DeviceType::Headless),
+                fingerprint: cert.fingerprint.clone(),
+                port: announce_port(),
+                protocol: ProtocolType::Http,
+                download: false,
+            },
+            identity: DeviceIdentity {
+                cert_pem: cert.certificate_pem,
+                private_key_pem: cert.private_key_pem,
+            },
+            timeout: discovery::DEFAULT_DISCOVERY_TIMEOUT,
+            event_tx: None,
+        },
+        stop_rx,
+    )
+    .await;
+    assert!(handle.multicast_error().is_some());
+
+    handle
+        .discover_staged(
+            vec![HttpChannel {
+                host: "127.0.0.1".to_string(),
+                port: favorite_port,
+                protocol: ProtocolType::Http,
+            }],
+            vec![Ipv4Addr::new(127, 0, 0, 99)],
+            unknown_port,
+            ProtocolType::Http,
+            Duration::from_millis(100),
+            false,
+        )
+        .await
+        .expect("Automatic discovery failed");
+
+    assert!(handle
+        .device_by_fingerprint("favorite-fingerprint")
+        .is_some());
+    assert!(
+        handle
+            .device_by_fingerprint("unknown-fingerprint")
+            .is_none(),
+        "the automatic scan should retain its cheap fallback policy"
+    );
+
+    handle
+        .discover_staged(
+            vec![HttpChannel {
+                host: "127.0.0.1".to_string(),
+                port: favorite_port,
+                protocol: ProtocolType::Http,
+            }],
+            vec![Ipv4Addr::new(127, 0, 0, 99)],
+            unknown_port,
+            ProtocolType::Http,
+            Duration::from_millis(100),
+            true,
+        )
+        .await
+        .expect("Manual discovery failed");
+
+    assert!(
+        handle
+            .device_by_fingerprint("unknown-fingerprint")
+            .is_some(),
+        "an explicit scan must find the reachable unknown peer even after a favorite responds"
+    );
+
     drop(stop_tx);
     handle.wait_stopped().await;
 }

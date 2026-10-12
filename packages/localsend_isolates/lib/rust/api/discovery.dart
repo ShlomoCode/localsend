@@ -88,7 +88,7 @@ abstract class RsDiscovery implements RustOpaqueInterface {
   /// back to scanning the `/24` subnets of the local interface addresses
   /// [interface_ips], for networks that do not carry multicast. The
   /// fallback only runs when nothing was confirmed until [grace_ms] after
-  /// the channels have been probed.
+  /// the channels have been probed, unless [force_subnet_scan] is true.
   ///
   /// The found devices are emitted on [RsDiscovery::listen] as they answer;
   /// returns once every stage has finished, including the whole
@@ -99,6 +99,7 @@ abstract class RsDiscovery implements RustOpaqueInterface {
     required int port,
     required ProtocolType protocol,
     required BigInt graceMs,
+    required bool forceSubnetScan,
   });
 
   /// Emits a [RsStoredDevice] for every device confirmation until the

@@ -613,6 +613,7 @@ fn wire__crate__api__discovery__RsDiscovery_discover_staged_impl(
             let api_port = <u16>::sse_decode(&mut deserializer);
             let api_protocol = <crate::api::model::ProtocolType>::sse_decode(&mut deserializer);
             let api_grace_ms = <u64>::sse_decode(&mut deserializer);
+            let api_force_subnet_scan = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -641,6 +642,7 @@ fn wire__crate__api__discovery__RsDiscovery_discover_staged_impl(
                             api_port,
                             api_protocol,
                             api_grace_ms,
+                            api_force_subnet_scan,
                         )
                         .await?;
                         Ok(output_ok)

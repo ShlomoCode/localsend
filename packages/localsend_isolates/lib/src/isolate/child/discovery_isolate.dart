@@ -57,7 +57,7 @@ class DiscoverySubnetScanTask implements DiscoveryTask {
 
 /// Discovers devices in stages, cheapest first: announcement and favorite
 /// probes right away, a subnet scan only when nothing was confirmed within
-/// the grace period.
+/// the grace period, unless [forceSubnetScan] requests a full refresh.
 /// Completes (without events) when every stage has finished; the found
 /// devices arrive on the [DiscoveryListenTask] stream.
 class DiscoveryStagedScanTask implements DiscoveryTask {
@@ -66,6 +66,7 @@ class DiscoveryStagedScanTask implements DiscoveryTask {
   final int port;
   final bool https;
   final Duration grace;
+  final bool forceSubnetScan;
 
   DiscoveryStagedScanTask({
     required this.favorites,
@@ -73,6 +74,7 @@ class DiscoveryStagedScanTask implements DiscoveryTask {
     required this.port,
     required this.https,
     required this.grace,
+    required this.forceSubnetScan,
   });
 }
 
@@ -144,6 +146,7 @@ Future<void> setupDiscoveryIsolate(
                 port: data.port,
                 https: data.https,
                 grace: data.grace,
+                forceSubnetScan: data.forceSubnetScan,
               );
           break;
         case DiscoveryAddDeviceTask data:
