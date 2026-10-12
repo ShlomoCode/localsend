@@ -98,3 +98,11 @@ Both client snapshots positively show outstanding `atspi_accessible_get_name` â†
 Reciprocal private UNIX peers are retained: before, client PID 10207 FD 22/socket 31255 connects to app FD 33/socket 31262; after, client PID 10783 FD 25/socket 32457 connects to app FD 33/socket 32459. The wait's actual connection cannot be assigned to these sockets without the missing pointer/message linkage. Tracing starts about 3.28 seconds after entry and recovers no client syscalls or private-socket IO; it cannot exclude earlier requests or replies. Both collectors correctly retain partial collection and causal linkage unknown. Actual tracer exit and 28 zero-TracerPid task checks per phase precede GDB; observer cleanup is corroborated for the recorded identities.
 
 The authorized experiment is complete, with no causal Name conclusion or complete-fix claim. A possible next source-only proposal is exact-build-ID symbol preparation with a required-symbol gate before UI work; missing symbols must not silently consume another full comparison. Any new source change or cloud dispatch returns to the parent's gate. No PR is authorized.
+
+## Next discriminator source plan (October 12)
+
+Official AT-SPI and D-Bus runtime/debug pairs are now qualified against the retained guest hashes and Build IDs. Exact retained PCs identify the closure-loop read_write_dispatch call; message serial, reply receipt, connection identity and causality remain unknown. The retained A bridge debug package is also usable without rebuilding.
+
+The next source-only plan, symbol qualification, birth-trace topology and independent review are saved beside this status. Fresh independent review has no open P2 findings after requiring exact strace binary hash/Build ID before UI. The existing blind transport socket cast remains an explicit implementation repair gate. No implementation or workload has run; root approval of exact source scope/diff and separate workload authorization are still required.
+
+Durable raw packages, runtime/debug ELFs, maps/stacks, PC disassembly/PLT/addr2line, private-type inventory and hash manifests are preserved under `.a5c/localsend-sprint/2754-next-root-name-source/2754-qualified-symbols/` in the main sprint worktree. Source planning docs are changelog-exempt.
