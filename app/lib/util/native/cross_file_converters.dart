@@ -8,6 +8,8 @@ import 'package:localsend_app/util/native/channel/android_channel.dart' as andro
 import 'package:localsend_isolates/model/file_type.dart';
 import 'package:localsend_isolates/rust/api/metadata.dart';
 import 'package:localsend_isolates/util/file_path_helper.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:share_handler/share_handler.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
@@ -16,6 +18,15 @@ class CrossFileConverters {
   static Future<CrossFile> convertAssetEntity(AssetEntity asset) async {
     final file = (await asset.originFile)!;
     final metadata = await readFileMetadata(path: file.path);
+    var lastModified = metadata?.modified;
+    // photo_manager currently exposes the original modification time only in whole seconds.
+    final originalFileModifiedSeconds = asset.modifiedDateSecond;
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        originalFileModifiedSeconds != null &&
+        p.isWithin((await getTemporaryDirectory()).path, file.path)) {
+      // Reapply the original file's modification time to the cached copy.
+      lastModified = DateTime.fromMillisecondsSinceEpoch(originalFileModifiedSeconds * 1000, isUtc: true).toIso8601String();
+    }
     return CrossFile(
       name: await asset.titleAsync,
       fileType: asset.type == AssetType.video ? FileType.video : FileType.image,
@@ -24,7 +35,7 @@ class CrossFileConverters {
       asset: asset,
       path: file.path,
       bytes: null,
-      lastModified: metadata?.modified,
+      lastModified: lastModified,
       lastAccessed: metadata?.accessed,
     );
   }
