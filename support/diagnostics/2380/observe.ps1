@@ -79,6 +79,7 @@ Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*','
 $pt=Get-ChildItem $roots -Filter '*PowerToys*.exe' -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name -eq 'PowerToys.exe'}|Select-Object -First 1
 if(!$pt){throw 'Official PowerToys executable missing; inspect installed-files and installation-registry'}
 Get-FileHash $pt.FullName|ConvertTo-Json|Set-Content "$EvidenceDirectory/powertoys-exe.json"
+if($StartupTrace -and (Get-FileHash $pt.FullName).Hash -ne '078B60A678DCE38750BD5FA86D07D36F6220BC79D462BE07C7A5B28A285F7190'){throw 'Installed PowerToys executable identity differs from retained baseline'}
 $power=Start-Process $pt.FullName -PassThru
 Start-Sleep -Seconds 12
 Snapshot 'powertoys-started' $power

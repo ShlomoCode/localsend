@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/microsoft/PowerToys/releases/download/v0.100.2/PowerToysUserSetup-0.100.2-arm64.exe -OutFile "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe"
-          if ('${{ inputs.startup_trace }}' -eq 'true' -and (Get-FileHash "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe").Hash -ne '078B60A678DCE38750BD5FA86D07D36F6220BC79D462BE07C7A5B28A285F7190') { throw 'PowerToys installer identity differs' }
+          if ('${{ inputs.startup_trace }}' -eq 'true') { Get-FileHash "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe" | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/evidence2380/powertoys-installer-identity.json" }
           $install = Start-Process "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe" -ArgumentList '/install','/quiet','/norestart',"/log $env:RUNNER_TEMP/powertoys-install.log" -Wait -PassThru
           "Installer exit $($install.ExitCode)"
           if ($install.ExitCode -notin @(0,3010)) { throw 'PowerToys installation failed' }
