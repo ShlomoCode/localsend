@@ -45,11 +45,48 @@ function Wait-ToolExit($Process, $Receipt, $Milliseconds) {
 try {
     # Tool setup remains inside the 19-minute absolute task budget.
     if (-not (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue)) {
+        $setupDeadline = [DateTime]::UtcNow.AddSeconds(90)
+        if ($setupDeadline -gt $deadline) { $setupDeadline = $deadline }
+        # Chocolatey CLI 2 installs by package ID from a local source folder.
+        # Retain and verify the exact approved package; let its original script install it.
+        $localSource = Join-Path $Evidence ffmpeg-local-source
+        New-Item -ItemType Directory -Force $localSource | Out-Null
+        $packagePath = Join-Path $localSource ffmpeg.7.1.1.nupkg
+        $remainingSeconds = [int][Math]::Floor(($setupDeadline - [DateTime]::UtcNow).TotalSeconds)
+        if ($remainingSeconds -lt 1) { throw "ENV_BLOCK: task deadline before pinned package download" }
+        $downloadReceipt = [ordered]@{
+            Source = "https://packages.chocolatey.org/ffmpeg.7.1.1.nupkg"; PackageId = "ffmpeg"; Version = "7.1.1"
+            Path = $packagePath; ExpectedBytes = 28167676; ActualBytes = $null
+            ExpectedSha256 = "6b0ed2ba5af35ddb41c8a9f25a7ea9e375733a7920c8a7a9167b5c846c61dbc0"; ActualSha256 = $null
+            TimeoutSeconds = [Math]::Min(90, $remainingSeconds); Retries = 0
+            SetupDeadlineUtc = $setupDeadline.ToString("o")
+            StartedUtc = [DateTime]::UtcNow.ToString("o"); CompletedUtc = $null; Status = "DOWNLOADING"; Error = $null
+        }
+        $receiptPath = Join-Path $Evidence ffmpeg-package-download.json
+        $downloadReceipt | ConvertTo-Json | Set-Content $receiptPath
+        try {
+            Invoke-WebRequest $downloadReceipt.Source -UseBasicParsing -OutFile $packagePath -TimeoutSec $downloadReceipt.TimeoutSeconds
+            $downloadReceipt.ActualBytes = (Get-Item $packagePath).Length
+            $downloadReceipt.ActualSha256 = (Get-FileHash $packagePath -Algorithm SHA256).Hash
+            if ($downloadReceipt.ActualBytes -ne $downloadReceipt.ExpectedBytes -or
+                $downloadReceipt.ActualSha256 -ne $downloadReceipt.ExpectedSha256) { throw "Pinned package size or SHA-256 mismatch" }
+            if ((Get-ChildItem $Evidence -File -Recurse | Measure-Object Length -Sum).Sum -gt 768MB) { throw "768 MiB evidence budget reached" }
+            if ([DateTime]::UtcNow -ge $deadline) { throw "Task deadline reached during pinned package download" }
+            if ([DateTime]::UtcNow -ge $setupDeadline) { throw "90-second capture tool setup deadline reached during pinned package download" }
+            $downloadReceipt.Status = "VERIFIED_BYTES"
+        } catch {
+            $downloadReceipt.Status = "ENV_BLOCK"; $downloadReceipt.Error = "$_"
+            $_ | Format-List * -Force | Out-File (Join-Path $Evidence ffmpeg-package-download-original-error.txt)
+            throw "ENV_BLOCK: pinned ffmpeg package download/verification: $_"
+        } finally {
+            $downloadReceipt.CompletedUtc = [DateTime]::UtcNow.ToString("o")
+            $downloadReceipt | ConvertTo-Json | Set-Content $receiptPath
+        }
         $chocoPath = (Get-Command choco.exe -ErrorAction Stop).Source
-        $tools = Start-Process $chocoPath -ArgumentList "install ffmpeg --version=7.1.1 --yes --no-progress --limit-output" -PassThru -RedirectStandardOutput (Join-Path $Evidence ffmpeg-setup-stdout.txt) -RedirectStandardError (Join-Path $Evidence ffmpeg-setup-stderr.txt)
+        $tools = Start-Process $chocoPath -ArgumentList "install ffmpeg --version=7.1.1 --source=`"$localSource`" --yes --no-progress --limit-output" -PassThru -RedirectStandardOutput (Join-Path $Evidence ffmpeg-setup-stdout.txt) -RedirectStandardError (Join-Path $Evidence ffmpeg-setup-stderr.txt)
         $toolsReceipt = New-ExitReceipt $tools "ffmpeg-setup" $chocoPath
         @{ Id = $tools.Id; StartUtc = $tools.StartTime.ToUniversalTime().ToString("o") } | ConvertTo-Json | Set-Content (Join-Path $Evidence owned-tools.json)
-        Wait-ToolExit $tools $toolsReceipt ([int][Math]::Max(0, [Math]::Min(90000, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)))
+        Wait-ToolExit $tools $toolsReceipt ([int][Math]::Max(0, [Math]::Min(90000, ($setupDeadline - [DateTime]::UtcNow).TotalMilliseconds)))
         $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH", "User")
     }
     foreach ($toolName in @("ffmpeg", "ffprobe")) {
@@ -59,6 +96,12 @@ try {
         $versionReceipt = New-ExitReceipt $version "$toolName-version" $toolPath
         @{ Id = $version.Id; StartUtc = $version.StartTime.ToUniversalTime().ToString("o") } | ConvertTo-Json | Set-Content (Join-Path $Evidence "owned-$toolName-version.json")
         Wait-ToolExit $version $versionReceipt ([int][Math]::Max(0, [Math]::Min(5000, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)))
+        $versionOutput = Get-Content (Join-Path $Evidence "$toolName-version-stdout-original.txt") -Raw
+        $bannerPattern = "(?m)^$toolName version 7\.1\.1(?:-essentials_build-www\.gyan\.dev)?(?:[ \t]|$)"
+        $banner = [regex]::Match($versionOutput, $bannerPattern)
+        @{ Tool = $toolName; ResolvedPath = $toolPath; ExpectedVersion = "7.1.1"; Pattern = $bannerPattern; Matched = $banner.Success; MatchedText = $banner.Value } |
+            ConvertTo-Json | Set-Content (Join-Path $Evidence "$toolName-version-banner.json")
+        if (-not $banner.Success) { throw "ENV_BLOCK: resolved $toolName lacks the exact anchored 7.1.1 version banner" }
     }
     $args = "-NoProfile -MTA -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot scenario.ps1)`" -Evidence `"$Evidence`" -Deadline `"$($deadline.ToString("o"))`""
     $workerPath = (Get-Command powershell.exe -ErrorAction Stop).Source
