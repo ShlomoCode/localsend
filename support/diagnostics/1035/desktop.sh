@@ -109,14 +109,38 @@ for version in 1.14.0 1.18.2; do
   timeout 5 xdotool windowsize "$window" 620 500 windowmove "$window" 30 30
   timeout 5 xdotool windowmove "$terminal" 650 550
   click_window "$window" startup
-  read_ui initial
-  if awk -F '\t' '$12=="Confirm" && $11>55{found=1}END{exit !found}' "$case_root/ui-initial.tsv"; then click_ui_label Confirm confirm; fi
-  read_ui after-confirm
-  if awk -F '\t' '$12=="Done" && $11>55{found=1}END{exit !found}' "$case_root/ui-after-confirm.tsv"; then click_ui_label Done done; fi
+  # A native GTK window can precede the first Flutter frame. Await rendered
+  # ordinary controls instead of treating that native window as UI readiness.
+  render_deadline=$((SECONDS + 45))
+  rendered=0
+  for attempt in $(seq 1 60); do
+    guard
+    test "$SECONDS" -lt "$render_deadline"
+    same_app
+    active_is "$window"
+    read_ui "startup-$attempt"
+    if awk -F '\t' '$12=="Settings" && $11>55{found=1}END{exit !found}' "$case_root/ui-startup-$attempt.tsv"; then
+      rendered=1
+      stamp "rendered Settings control observed attempt=$attempt"
+      break
+    fi
+    if awk -F '\t' '$12=="Confirm" && $11>55{found=1}END{exit !found}' "$case_root/ui-startup-$attempt.tsv"; then click_ui_label Confirm "confirm-$attempt"; fi
+    if awk -F '\t' '$12=="Done" && $11>55{found=1}END{exit !found}' "$case_root/ui-startup-$attempt.tsv"; then click_ui_label Done "done-$attempt"; fi
+    sleep 0.5
+  done
+  test "$rendered" = 1
   # An ordinary in-app navigation control establishes usable rendering before focus claims.
   click_ui_label Settings settings
-  read_ui settings-result
-  awk -F '\t' '$12=="General" && $11>50{found=1}END{exit !found}' "$case_root/ui-settings-result.tsv"
+  general_deadline=$((SECONDS + 10))
+  general=0
+  for attempt in $(seq 1 15); do
+    guard
+    test "$SECONDS" -lt "$general_deadline"
+    read_ui "settings-result-$attempt"
+    if awk -F '\t' '$12=="General" && $11>50{found=1}END{exit !found}' "$case_root/ui-settings-result-$attempt.tsv"; then general=1; break; fi
+    sleep 0.3
+  done
+  test "$general" = 1
   same_app
   capture control-ui
   find "$ISSUE1035_ROOT/profiles/$version" -type f > "$case_root/profile-files-control.txt"
