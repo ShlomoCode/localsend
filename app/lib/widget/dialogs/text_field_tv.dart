@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/provider/tv_provider.dart';
+import 'package:localsend_app/widget/dialogs/native_tv_text_field.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
 
@@ -25,32 +26,45 @@ class TextFieldTv extends StatefulWidget {
 }
 
 class _TextFieldTvState extends State<TextFieldTv> with Refena {
+  final FocusNode _buttonFocus = FocusNode();
+  final FocusNode _confirmFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _buttonFocus.dispose();
+    _confirmFocus.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTv = ref.watch(tvProvider);
 
     if (isTv) {
       return TextButton(
+        focusNode: _buttonFocus,
         style: TextButton.styleFrom(
           backgroundColor: Theme.of(context).inputDecorationTheme.fillColor,
-          shape: RoundedRectangleBorder(borderRadius: Theme.of(context).inputDecorationTheme.borderRadius),
+          shape: RoundedRectangleBorder(
+            borderRadius: Theme.of(context).inputDecorationTheme.borderRadius,
+          ),
           foregroundColor: Theme.of(context).colorScheme.onSurface,
         ),
         onPressed: () async {
-          await showDialog(
+          await showDialog<void>(
             context: context,
             builder: (context) {
               return AlertDialog(
                 title: Text(widget.name),
-                content: TextFormField(
+                content: NativeTvTextField(
                   controller: widget.controller,
-                  textAlign: TextAlign.center,
                   onChanged: widget.onChanged,
-                  autofocus: true,
-                  onFieldSubmitted: (_) => context.pop(),
+                  onSubmitted: () => context.pop(),
+                  onKeyboardDismissed: _confirmFocus.requestFocus,
                 ),
                 actions: [
                   ElevatedButton(
+                    focusNode: _confirmFocus,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       foregroundColor: Theme.of(context).colorScheme.onPrimary,
@@ -62,10 +76,14 @@ class _TextFieldTvState extends State<TextFieldTv> with Refena {
               );
             },
           );
+          if (mounted) _buttonFocus.requestFocus();
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
-          child: Text(widget.controller.text, style: Theme.of(context).textTheme.titleMedium),
+          child: Text(
+            widget.controller.text,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
         ),
       );
     } else {
