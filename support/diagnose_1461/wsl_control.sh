@@ -161,8 +161,9 @@ case "$action" in
           if [[ ${before_parts[19]} == "$tick" && ${after_parts[19]} == "$tick" && $(cat "$live/$role.exe") == "$executable" &&
                 ${before_parts[0]} != Z && ${before_parts[0]} != X && ${before_parts[0]} != x &&
                 ${after_parts[0]} != Z && ${after_parts[0]} != X && ${after_parts[0]} != x ]]; then qualified=yes; fi
-          if [[ "$role" == xvfb && ( ${after_parts[2]} != "$pid" || ${after_parts[3]} != "$pid" || ${after_parts[4]} != 0 || ${after_parts[5]} != -1 ) ]]; then qualified=no; fi
-          if [[ "$role" != xvfb && ( ${before_parts[2]} != "${original_parent_parts[2]}" || ${after_parts[2]} != "${original_parent_parts[2]}" ||
+          if [[ "$role" != app && ( ${before_parts[2]} != "$pid" || ${before_parts[3]} != "$pid" || ${before_parts[4]} != 0 || ${before_parts[5]} != -1 ||
+               ${after_parts[2]} != "$pid" || ${after_parts[3]} != "$pid" || ${after_parts[4]} != 0 || ${after_parts[5]} != -1 ) ]]; then qualified=no; fi
+          if [[ "$role" == app && ( ${before_parts[2]} != "${original_parent_parts[2]}" || ${after_parts[2]} != "${original_parent_parts[2]}" ||
                ${before_parts[3]} != "${original_parent_parts[3]}" || ${after_parts[3]} != "${original_parent_parts[3]}" ) ]]; then qualified=no; fi
           if [[ "$phase" == post-return-trace ]] && ! grep -Eq '^TracerPid:[[:space:]]+0$' "$live/$role.status"; then qualified=no; fi
         fi
@@ -183,10 +184,11 @@ case "$action" in
     awk -F '\t' 'NR>1 {print $1, $3}' "$trace/tids.tsv" > "$trace/native-role-tids.txt"
     awk 'FNR==NR {role[$2]=$1; next} /--- SIGHUP / && $1 in role {print role[$1] "\t" $0}' \
       "$trace/native-role-tids.txt" "$trace/events.txt" > "$trace/native-hup-records.tsv"
-    # Match E21's kernel-origin controls; any Xvfb HUP fails the absence gate.
-    awk -F '\t' '$1=="xvfb" || index($0,"si_code=SI_KERNEL"){n[$1]++} END{printf "app\t%d\nwm\t%d\nxvfb\t%d\n",n["app"],n["wm"],n["xvfb"]}' \
+    # App's original kernel-origin HUP is the unchanged control. Any WM or
+    # Xvfb HUP fails the separated-session absence gate.
+    awk -F '\t' '$1!="app" || index($0,"si_code=SI_KERNEL"){n[$1]++} END{printf "app\t%d\nwm\t%d\nxvfb\t%d\n",n["app"],n["wm"],n["xvfb"]}' \
       "$trace/native-hup-records.tsv" > "$trace/native-hup-counts.tsv"
-    if ! awk -F '\t' '$1=="app"{app=$2} $1=="wm"{wm=$2} $1=="xvfb"{xvfb=$2} END{exit !(app>0 && wm>0 && xvfb==0)}' "$trace/native-hup-counts.tsv"; then
+    if ! awk -F '\t' '$1=="app"{app=$2} $1=="wm"{wm=$2} $1=="xvfb"{xvfb=$2} END{exit !(app>0 && wm==0 && xvfb==0)}' "$trace/native-hup-counts.tsv"; then
       printf 'native-HUP-comparison-controls-unqualified\n' >> "$trace/collection-failure.txt"; result=1
     fi
     printf 'collected\t%s\tfailed=%s\n' "$(stamp)" "$result" > "$trace/collection-result.tsv"

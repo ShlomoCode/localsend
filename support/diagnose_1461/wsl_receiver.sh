@@ -63,7 +63,7 @@ grep -Fxq 'setsid from util-linux 2.39.3' "$out/setsid-version.txt"
 dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' util-linux > "$out/setsid-package.tsv"
 readlink -f "$(command -v setsid)" > "$out/setsid-executable.txt"
 sha256sum "$(cat "$out/setsid-executable.txt")" > "$out/setsid-executable.sha256"
-# Only behavioral intervention: default setsid prefix on original Xvfb.
+# E22 Xvfb separation remains unchanged for the E23 WM comparison.
 # No fork/wait/ctty options; $! remains the sole original PID authority.
 setsid Xvfb -displayfd 3 -screen 0 1280x900x24 -nolisten tcp 3>"$display_receipt" > "$out/xvfb.log" 2>&1 & xvfb_pid=$!
 xvfb_start_tick=$(awk '{print $22}' "/proc/$xvfb_pid/stat")
@@ -99,9 +99,16 @@ done
 xvfb_owned
 xdotool getdisplaygeometry
 eval "$(dbus-launch --sh-syntax)"
-openbox > "$out/openbox.log" 2>&1 & wm_pid=$!
-wm_start_tick=$(awk '{print $22}' "/proc/$wm_pid/stat")
+dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' openbox > "$out/openbox-package.tsv"
+grep -Fxq $'openbox\t3.6.1-12build5\tamd64' "$out/openbox-package.tsv"
+dpkg -V openbox > "$out/openbox-package-verification.txt"; [[ ! -s "$out/openbox-package-verification.txt" ]]
 wm_exe=$(readlink -f "$(command -v openbox)")
+printf '%s\n' "$wm_exe" > "$out/openbox-executable.txt"
+sha256sum "$wm_exe" > "$out/openbox-executable.sha256"
+# Sole new behavioral intervention: default setsid for original Openbox.
+# No fork/wait/ctty options or replacement PID selection.
+setsid openbox > "$out/openbox.log" 2>&1 & wm_pid=$!
+wm_start_tick=$(awk '{print $22}' "/proc/$wm_pid/stat")
 printf '%s\n' "$wm_start_tick" > "$out/wm.start-tick"
 bash "$lifetime" "$evidence" register dbus "${DBUS_SESSION_BUS_PID:?original dbus pid}"
 "$exe" > "$out/app.log" 2>&1 & app_pid=$!
@@ -167,12 +174,16 @@ for ((attempt=0; attempt<60; attempt++)); do
       # Bind the original WM only after its exec, without selecting another
       # PID or start tick. This makes later stable-desktop gates authoritative.
       bash "$lifetime" "$evidence" register wm "$wm_pid" "$wm_exe" "$wm_start_tick"
+      raw=$(cat "/proc/$wm_pid/stat"); fields=${raw##*) }; read -r -a wm_parts <<< "$fields"
+      [[ ${wm_parts[2]} == "$wm_pid" && ${wm_parts[3]} == "$wm_pid" && ${wm_parts[4]} == 0 && ${wm_parts[5]} == -1 ]]
+      printf '%s\n' "$raw" > "$out/wm-session-qualified.stat"
+      cat "/proc/${wm_parts[1]}/stat" > "$out/wm-original-parent.stat"
+      printf 'pid\tstart_tick\tpgid\tsid\ttty_nr\ttpgid\n%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$wm_pid" "$wm_start_tick" "${wm_parts[2]}" "${wm_parts[3]}" "${wm_parts[4]}" "${wm_parts[5]}" > "$out/wm-session-qualified.tsv"
       raw=$(cat "/proc/$$/stat"); fields=${raw##*) }; read -r -a parent_parts <<< "$fields"
-      for role_pid in "$app_pid" "$wm_pid"; do
-        raw=$(cat "/proc/$role_pid/stat"); fields=${raw##*) }; read -r -a role_parts <<< "$fields"
-        [[ ${role_parts[2]} == "${parent_parts[2]}" && ${role_parts[3]} == "${parent_parts[3]}" ]]
-        printf '%s\n' "$raw" >> "$out/original-app-wm-session-controls.stat"
-      done
+      raw=$(cat "/proc/$app_pid/stat"); fields=${raw##*) }; read -r -a role_parts <<< "$fields"
+      [[ ${role_parts[2]} == "${parent_parts[2]}" && ${role_parts[3]} == "${parent_parts[3]}" ]]
+      printf '%s\n' "$raw" > "$out/original-app-session-control.stat"
       printf 'receive_source\texact_word\tminimum_confidence\twindow\tpid\n%s\tReceive\t50\t%s\t%s\n' \
         "$receive_source" "$window" "$app_pid" > "$out/readiness-observation.tsv"
       printf 'WINDOW=%q\n' "$window" >> "$out/session.env"
