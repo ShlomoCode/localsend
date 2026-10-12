@@ -349,7 +349,34 @@ def native_window_geometry(window):
     return values, raw
 
 
-def rendered_sender_label(label):
+def native_dark_components(screenshot, dimensions, region, threshold):
+    width, height = dimensions
+    raw = control_cmd('ffmpeg', '-v', 'error', '-i', str(screenshot), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1', timeout=5, binary=True)
+    if len(raw) != width*height*3:
+        raise RuntimeError('Original pixel observation has unexpected dimensions')
+    x0, y0, x1, y1 = region
+    if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
+        raise RuntimeError('Native pixel observation region is outside the original screen')
+    dark = {(x, y) for y in range(y0, y1) for x in range(x0, x1) if max(raw[(y*width+x)*3:(y*width+x)*3+3]) < threshold}
+    components = []
+    while dark:
+        seed = dark.pop()
+        component = [seed]
+        pending = [seed]
+        while pending:
+            x, y = pending.pop()
+            for neighbor in ((x-1,y), (x+1,y), (x,y-1), (x,y+1)):
+                if neighbor in dark:
+                    dark.remove(neighbor)
+                    component.append(neighbor)
+                    pending.append(neighbor)
+        xs, ys = zip(*component)
+        gx, gy = min(xs), min(ys)
+        components.append({'bounds': [gx, gy, max(xs)-gx+1, max(ys)-gy+1], 'pixels': len(component)})
+    return components
+
+
+def rendered_sender_label(label, tooltip_context=None):
     """Resolve ordinary mouse input from current rendered text and native PID."""
     global sequence
     if control_deadline is not None and time.monotonic() >= control_deadline:
@@ -378,19 +405,47 @@ def rendered_sender_label(label):
     # Preserve the original pixels. Scale only the OCR observation so small
     # visible labels are readable; inverse-map every returned bound explicitly.
     ocr_scale = 3
+    ocr_origin = [0, 0]
+    ocr_padding = 0
+    ocr_psm = '11'
+    tooltip_bubble = None
+    tooltip_crop = None
     ocr_image = OUT / (prefix + '-ocr3x.png')
     ocr_filter = 'format=gray,lut=y=if(lt(val\\,180)\\,0\\,255),scale=iw*3:ih*3'
+    if tooltip_context is not None:
+        center, server_row = tooltip_context
+        _, row_top, _, row_height = server_row['bounds']
+        region = [x+width//2, max(y, int(row_top-8*row_height)), x+width, min(y+height, int(row_top+8*row_height))]
+        candidates = []
+        for component in native_dark_components(screenshot, screenshot_dimensions, region, 140):
+            bx, by, bw, bh = component['bounds']
+            if 20 <= bw <= 200 and 15 <= bh <= 50 and bx <= center[0] < bx+bw and not by <= center[1] < by+bh and component['pixels'] >= bw*bh//2:
+                candidates.append(component)
+        log('native-tooltip-bubble-observation', {'screenshot': screenshot.name, 'hover_center': center, 'region': region, 'foreground_threshold': 140, 'candidates': candidates})
+        if len(candidates) != 1:
+            raise RuntimeError('Actual hovered Tooltip bubble is absent or ambiguous')
+        tooltip_bubble = candidates[0]
+        bx, by, bw, bh = tooltip_bubble['bounds']
+        tooltip_crop = OUT / (prefix + '-tooltip-bubble.png')
+        control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', f'crop={bw}:{bh}:{bx}:{by}', '-frames:v', '1', str(tooltip_crop), timeout=5)
+        ocr_origin = [bx, by]
+        ocr_padding = 4
+        ocr_psm = '7'
+        ocr_filter = f'crop={bw}:{bh}:{bx}:{by},format=gray,lut=y=if(lt(val\\,180)\\,0\\,255),negate,pad=iw+8:ih+8:4:4:white,scale=iw*3:ih*3'
     control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', ocr_filter, '-frames:v', '1', str(ocr_image), timeout=10)
-    raw = control_cmd('tesseract', str(ocr_image), 'stdout', '--psm', '11', 'tsv', timeout=15)
+    raw = control_cmd('tesseract', str(ocr_image), 'stdout', '--psm', ocr_psm, 'tsv', timeout=15)
     (OUT / (prefix + '.tsv')).write_text(raw)
     matches = []
     for row in csv.DictReader(io.StringIO(raw), delimiter='\t'):
         if row['text'].strip() != label or float(row['conf']) < 80:
             continue
         left, top, w, h = (int(row[key])/ocr_scale for key in ('left', 'top', 'width', 'height'))
-        if w > 0 and h > 0 and x <= left and y <= top and left+w <= x+width and top+h <= y+height:
+        left += ocr_origin[0]-ocr_padding
+        top += ocr_origin[1]-ocr_padding
+        sx, sy, sw, sh = tooltip_bubble['bounds'] if tooltip_bubble else geometry
+        if w > 0 and h > 0 and sx <= left and sy <= top and left+w <= sx+sw and top+h <= sy+sh:
             matches.append({'label': label, 'bounds': [left, top, w, h], 'confidence': float(row['conf'])})
-    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': geometry, 'absolute_geometry': absolute_geometry, 'xdotool_geometry': raw_geometry, 'coordinate_system': 'X11 root pixels from original full-screen image', 'screenshot_dimensions': screenshot_dimensions, 'image_probe': image_probe, 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter}
+    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': geometry, 'absolute_geometry': absolute_geometry, 'xdotool_geometry': raw_geometry, 'coordinate_system': 'X11 root pixels from original full-screen image', 'screenshot_dimensions': screenshot_dimensions, 'image_probe': image_probe, 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter, 'ocr_origin': ocr_origin, 'ocr_padding': ocr_padding, 'ocr_psm': ocr_psm, 'tooltip_bubble': tooltip_bubble, 'tooltip_crop': tooltip_crop.name if tooltip_crop else None}
     write(prefix + '.json', observation)
     if len(matches) > 1:
         raise RuntimeError('Ambiguous rendered sender label')
@@ -447,32 +502,15 @@ def qualify_native_pointer(observation, x, y):
 
 def rendered_server_glyphs(observation, row):
     """Observe actual foreground glyphs; hover tooltips determine their meaning."""
-    width, height = observation['screenshot_dimensions']
-    raw = control_cmd('ffmpeg', '-v', 'error', '-i', str(OUT / observation['screenshot']), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1', timeout=5, binary=True)
-    if len(raw) != width*height*3:
-        raise RuntimeError('Original glyph observation has unexpected pixel dimensions')
     wx, wy, ww, wh = observation['geometry']
     left, top, row_width, row_height = row['bounds']
     x0, x1 = wx+ww//2, wx+ww
     y0, y1 = max(wy, int(top-2*row_height)), min(wy+wh, int(top+3*row_height))
-    dark = {(x, y) for y in range(y0, y1) for x in range(x0, x1) if max(raw[(y*width+x)*3:(y*width+x)*3+3]) < 100}
     glyphs = []
-    while dark:
-        seed = dark.pop()
-        component = [seed]
-        pending = [seed]
-        while pending:
-            x, y = pending.pop()
-            for neighbor in ((x-1,y), (x+1,y), (x,y-1), (x,y+1)):
-                if neighbor in dark:
-                    dark.remove(neighbor)
-                    component.append(neighbor)
-                    pending.append(neighbor)
-        xs, ys = zip(*component)
-        gx, gy = min(xs), min(ys)
-        gw, gh = max(xs)-gx+1, max(ys)-gy+1
-        if 8 <= gw <= 30 and 8 <= gh <= 30 and len(component) >= 16:
-            glyphs.append({'bounds': [gx, gy, gw, gh], 'pixels': len(component)})
+    for component in native_dark_components(OUT / observation['screenshot'], observation['screenshot_dimensions'], [x0,y0,x1,y1], 100):
+        _, _, gw, gh = component['bounds']
+        if 8 <= gw <= 30 and 8 <= gh <= 30 and component['pixels'] >= 16:
+            glyphs.append(component)
     glyphs.sort(key=lambda item: item['bounds'][0])
     log('rendered-server-glyph-observation', {'screenshot': observation['screenshot'], 'server_row': row, 'region': [x0,y0,x1-x0,y1-y0], 'foreground_rule': 'all RGB channels <100; connected native pixels', 'glyphs': glyphs})
     if not 1 <= len(glyphs) <= 4:
@@ -492,7 +530,7 @@ def rendered_server_tooltip(label, expected, tap=True):
         qualify_native_pointer(observation, *center)
         log('rendered-server-hover', {'requested_tooltip': label, 'glyph': glyph, 'original_screen': observation['screenshot']})
         time.sleep(.8)
-        tooltip_observation, tooltip = rendered_sender_label(label)
+        tooltip_observation, tooltip = rendered_sender_label(label, tooltip_context=(center, row))
         if tooltip is None:
             continue
         if tooltip_observation['window'] != observation['window'] or tooltip_observation['geometry'] != observation['geometry']:
