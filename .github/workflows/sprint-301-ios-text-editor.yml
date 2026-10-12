@@ -28,6 +28,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p evidence301
+          command -v ffprobe > evidence301/ffprobe-path.txt
+          command -v ffmpeg > evidence301/ffmpeg-path.txt
           git rev-parse HEAD > evidence301/harness-source-head.txt
           sha256sum support/diagnostics/issue301/ios-text-editor.mjs .github/workflows/sprint-301-ios-text-editor.yml > evidence301/harness-source-sha256.txt
       - name: One bounded device attempt
