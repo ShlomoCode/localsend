@@ -16,7 +16,7 @@ $references=@(
 )
 $report=[ordered]@{schema=1;mode=$Mode;utc=[DateTime]::UtcNow.ToString('o');expectedPid=$ExpectedPid;expectedHwnd=$ExpectedHwnd;
  expectedGeometry=@{width=400;height=500};rectangle=$rectangle;comparison='Exact ARGB equality at every interior pixel; no threshold';
- references=@();templateGeometry=$null;releasePin=$null;liveIdentity=$null;observations=@();passed=$false;error=$null}
+ references=@();templateGeometry=$null;releasePin=$null;liveIdentity=$null;pairs=@();observations=@();passed=$false;error=$null}
 $template=$null
 function CompareFavorites([string]$Path){
  $resolved=(Resolve-Path -LiteralPath $Path).Path
@@ -86,7 +86,9 @@ public static class FavoritesGateIdentity {
    $actionPath=(Resolve-Path -LiteralPath $ActionPaths[$index]).Path
    if($capture -in $seenCaptures -or $actionPath -in $seenActions){throw 'Runtime capture/action pairs must be distinct evidence files'}
    $seenCaptures+=@($capture);$seenActions+=@($actionPath)
-   if($actionPath -ine ([IO.Path]::ChangeExtension($capture,$null)+'-action.json')){throw 'Capture and action evidence filenames are not paired'}
+   $expectedActionPath=Join-Path ([IO.Path]::GetDirectoryName($capture)) ([IO.Path]::GetFileNameWithoutExtension($capture)+'-action.json')
+   $report.pairs+=@{capturePath=$capture;observedActionPath=$actionPath;expectedActionPath=$expectedActionPath;matches=($actionPath -ieq $expectedActionPath)}
+   if($actionPath -ine $expectedActionPath){throw 'Capture and action evidence filenames are not paired'}
    $action=Get-Content -LiteralPath $actionPath -Raw|ConvertFrom-Json
    $binding=@{actionPath=$actionPath;actionSha256=(Get-FileHash -LiteralPath $actionPath -Algorithm SHA256).Hash.ToLowerInvariant();
     action=$action.action;actionUtc=$action.utc;observedPid=$action.appPid;observedHwnd=$action.window;expectedPid=$ExpectedPid;expectedHwnd=$ExpectedHwnd;

@@ -12,10 +12,19 @@ param(
   [string] $FixtureFileName = 'fixture-old-timestamp.txt',
   [string] $ExecutablePath,
   [string] $SourceRevision,
-  [int] $DiagnosticPeerPort = 0
+  [int] $DiagnosticPeerPort = 0,
+  [switch] $SenderStartupOnly
 )
 
 $ErrorActionPreference = 'Stop'
+if ($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -eq 'true' -and -not $SenderStartupOnly) {
+  throw 'The sender qualification job cannot enter release probe click/file-selection work'
+}
+if ($SenderStartupOnly -and ($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -ne 'true' -or $env:OS -ne 'Windows_NT' -or
+    $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or $RunnerLabel -ne 'windows-2022' -or
+    $ReleaseVersion -ne '1.17.0' -or $AssetArchitecture -ne 'x86-64' -or $ExecutablePath -or $SourceRevision -or $EntryMethod -ne 'Picker' -or $DiagnosticPeerPort -ne 53318)) {
+  throw 'Sender startup-only mode requires the isolated pinned Windows qualification job'
+}
 $ProgressPreference = 'SilentlyContinue'
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
@@ -50,6 +59,7 @@ if ($RunnerLabel -eq 'windows-2025' -and $AssetArchitecture -ne 'x86-64') {
 $report = [ordered]@{
   release = if ($SourceRevision) { $SourceRevision } else { "v$ReleaseVersion" }
   entryMethod = $EntryMethod
+  senderStartupOnly = [bool] $SenderStartupOnly
   selectionMode = $SelectionMode
   selectionMethod = $SelectionMethod
   fixtureMethod = $FixtureMethod
@@ -134,6 +144,9 @@ try {
       path = $archivePath
       bytes = $archive.Length
       sha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    }
+    if ($SenderStartupOnly -and $report.archive.sha256 -ine 'a4ffb41fcbc3bd0f2f0cbd30b62a58d9a478eaf1da63eb410886886064abe70c') {
+      throw 'Sender qualification release archive differs from the untouched reference pin'
     }
 
     [System.IO.Directory]::CreateDirectory($extractPath) | Out-Null
@@ -316,6 +329,11 @@ namespace LocalSendReleaseUiProbe {
   if ($DiagnosticPeerPort -gt 0) {
     $favorite = @{id='issue3393-relay';fingerprint='issue3393-relay';ip='127.0.0.1';port=$DiagnosticPeerPort;alias='Android15 receiver';customAlias=$true} | ConvertTo-Json -Compress
     @{'flutter.ls_alias'='Windows3393';'flutter.ls_favorites'=@($favorite)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $exe.DirectoryName 'settings.json')
+    if ($SenderStartupOnly) {
+      $settingsPath = Join-Path $exe.DirectoryName 'settings.json'
+      $report.favoriteProvisioning = @{path=$settingsPath;sha256=(Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash;
+        preferences=(Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json);basis='Existing portable preferences provisioned before sender launch'}
+    }
   }
   if ($EntryMethod -eq 'SendTo') {
     $started = Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName -ArgumentList @('"' + $selectionPath + '"') -PassThru
@@ -495,6 +513,7 @@ namespace LocalSendReleaseUiProbe {
       $report.errors += "LocalSend PrintWindow capture: $($_.Exception.Message)"
     }
 
+    if (-not $SenderStartupOnly) {
     $report.sendTab = [ordered]@{
       requestedClientX = 200
       requestedClientY = 442
@@ -680,8 +699,8 @@ namespace LocalSendReleaseUiProbe {
         outcome = 'SendTo command-line launch captured; inspect screenshot for Files: 1 or No Permission'
       }
     }
+    } # Existing file-selection flow; omitted only for sender startup qualification.
   }
-
   $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
   if ($bounds.Width -le 0 -or $bounds.Height -le 0) { throw "Invalid virtual screen bounds: $bounds" }
   $bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
@@ -722,6 +741,9 @@ namespace LocalSendReleaseUiProbe {
   } else {
     $report.errors += 'LocalSend was not foreground and PrintWindow did not capture a varied app image; inspect topLevelAfter, appUiTree, and screenshot.'
   }
+  if ($SenderStartupOnly) {
+    if ($report.status -ne 'inconclusive') { $report.status = 'sender-startup-observed' }
+  } else {
   if ($EntryMethod -eq 'Picker' -and (-not $report.sendTab -or -not $report.sendTab.imageChanged)) {
     $report.status = 'inconclusive'
     $report.errors += 'Send tab selection was not verified by a changed LocalSend window image.'
@@ -733,6 +755,7 @@ namespace LocalSendReleaseUiProbe {
     $report.errors += "${SelectionMode} selection was not fully driven and captured; inspect fileSelection.driver and the after-selection screenshot."
   } elseif ($report.status -ne 'inconclusive') {
     $report.status = if ($EntryMethod -eq 'Picker') { 'selection-dialog-observed' } else { 'sendto-launch-observed' }
+  }
   }
 } catch {
   $report.errors += $_.Exception.ToString()
@@ -750,5 +773,5 @@ namespace LocalSendReleaseUiProbe {
   $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
   [System.IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $report -Depth 10), [System.Text.UTF8Encoding]::new($false))
   Write-Host "Release UI report: $reportPath"
-  if ($report.status -notin @('selection-dialog-observed', 'sendto-launch-observed')) { exit 1 }
+  if ($report.status -notin @('selection-dialog-observed', 'sendto-launch-observed', 'sender-startup-observed')) { exit 1 }
 }

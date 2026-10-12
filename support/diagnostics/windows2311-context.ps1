@@ -1,5 +1,10 @@
-param([string]$Case='on', [switch]$CompletePrevious, [string]$FixtureSource='', [string]$FixtureExtension='png', [string]$FixtureModifiedUtc='2025-02-13T14:11:00Z')
+param([string]$Case='on', [switch]$CompletePrevious, [string]$FixtureSource='', [string]$FixtureExtension='png', [string]$FixtureModifiedUtc='2025-02-13T14:11:00Z', [switch]$QualifyFavoritesPointerOnly)
 $ErrorActionPreference='Stop'
+if($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -eq 'true' -and !$QualifyFavoritesPointerOnly){throw 'The sender qualification job cannot enter the recipient workflow'}
+if($QualifyFavoritesPointerOnly -and ($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -ne 'true' -or $env:OS -ne 'Windows_NT' -or
+ $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or $CompletePrevious -or $FixtureExtension -ne 'jpg')){
+ throw 'Sender pointer qualification requires its isolated job and JPEG fixture; no recipient input is permitted'
+}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Windows.Forms,System.Drawing
 $ui="$PSScriptRoot/windows3393-ui.ps1"
 $control=Get-Content evidence/windows-control-send-action.json -Raw|ConvertFrom-Json
@@ -183,7 +188,7 @@ SaveSenderBoundary 'after-send-to'
 & $ui -Action snapshot -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -Label "windows-$Case-image-selected"
 SaveSemanticObservation 'before-favorites'
 SaveSenderBoundary 'before-favorites'
-& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground
+& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseNativePointer:$QualifyFavoritesPointerOnly
 SaveSemanticObservation 'before-send'
 SaveSenderBoundary 'before-send'
 # A queued mouse gesture and an opaque accessibility pane do not establish the
@@ -193,5 +198,10 @@ SaveSenderBoundary 'before-send'
  -CapturePaths @("evidence/windows-$Case-favorites.png","evidence/windows-$Case-before-send-original.png") `
  -ActionPaths @("evidence/windows-$Case-favorites-action.json","evidence/windows-$Case-before-send-original-action.json") `
  -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -OutputPath "evidence/$Case-favorites-gate.json"
+if($QualifyFavoritesPointerOnly){
+ SaveSenderBoundary 'after-favorites-qualification'
+ @{scope='Sender Favorites dialog only; no working transfer claim';pid=$senderPid;hwnd=$senderHwnd;recipientInputSent=$false;receiverAllocated=$false;passed=$true}|ConvertTo-Json|Set-Content "evidence/$Case-sender-qualification.json"
+ return
+}
 & $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 145 -Y 225 -Label "windows-$Case-send" -RequireForeground -UseControlSequence
 SaveSenderBoundary 'after-recipient'

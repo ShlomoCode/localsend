@@ -4,7 +4,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [software-emulator, windows11-sender-ui, physical-control, prepare-media-fixtures]
+        options: [software-emulator, windows11-sender-ui, physical-control, prepare-media-fixtures, sender-favorites-qualification]
         default: software-emulator
       bs_device:
         type: choice
@@ -44,6 +44,45 @@ permissions:
   contents: read
   actions: read
 jobs:
+  sender-favorites-qualification:
+    if: inputs.scenario == 'sender-favorites-qualification'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      ISSUE2311_SENDER_FAVORITES_QUALIFICATION: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qualify untouched positive and negative Favorites references
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          ./support/diagnostics/issue2311-favorites-gate.ps1 -Mode Preflight -OutputPath evidence/favorites-gate-preflight.json
+      - name: Require the original shared fixture artifact
+        shell: pwsh
+        env:
+          FIXTURE_RUN_ID: ${{ inputs.media_fixture_run_id }}
+        run: |
+          if ($env:FIXTURE_RUN_ID -ne '38183553686') { throw 'Sender qualification requires the original immutable fixture run' }
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.media_fixture_run_id }}
+          pattern: issue2311-media-fixtures-${{ inputs.media_fixture_run_id }}
+          merge-multiple: true
+          path: media-fixtures
+          repository: ShlomoCode/localsend
+      - name: Observe one physical Favorites gesture without allocating a receiver
+        shell: pwsh
+        run: ./support/diagnostics/issue2311-sender-favorites.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2311-sender-favorites-${{ github.run_id }}
+          path: |
+            evidence
+            !evidence/release/**
+            !evidence/**/*.zip
+          retention-days: 14
   media-fixtures:
     if: inputs.scenario == 'prepare-media-fixtures'
     runs-on: windows-2022

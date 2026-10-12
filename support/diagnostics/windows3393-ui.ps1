@@ -1,5 +1,11 @@
-param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[uint32]$ExpectedPid=0,[long]$ExpectedHwnd=0)
+param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[uint32]$ExpectedPid=0,[long]$ExpectedHwnd=0,[switch]$UseNativePointer)
 $ErrorActionPreference='Stop'
+if($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -eq 'true' -and $Action -eq 'click' -and !$UseNativePointer){throw 'Only the qualified native Favorites pointer action is permitted in the sender-only job'}
+if($UseNativePointer -and ($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -ne 'true' -or $env:OS -ne 'Windows_NT' -or
+ $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or $Action -ne 'click' -or
+ !$ExpectedPid -or !$ExpectedHwnd -or !$RequireForeground -or $UseControlSequence -or $X -ne 246 -or $Y -ne 266)){
+ throw 'Native pointer input is restricted to the isolated sender Favorites qualification'
+}
 function Write-DiagnosticPhase([string]$phase){
  @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase}|ConvertTo-Json -Compress|Add-Content "evidence/$Label-phases.jsonl"
 }
@@ -14,6 +20,13 @@ public static class W3393 {
  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h,IntPtr dc,uint flags);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
+ [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h,out Rect rect);
+ [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h,ref Point p);
+ [DllImport("user32.dll")] public static extern bool GetCursorPos(out Point p);
+ [DllImport("user32.dll",SetLastError=true)] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p);
+ [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent,IntPtr child);
+ [DllImport("user32.dll",SetLastError=true)] public static extern uint SendInput(uint count,Input[] inputs,int size);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
@@ -30,6 +43,47 @@ public static class W3393 {
  public delegate bool EnumProc(IntPtr h,IntPtr data);
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc callback,IntPtr data);
  public struct Point { public int X,Y; }
+ [StructLayout(LayoutKind.Sequential)] public struct MouseInput { public int dx,dy;public uint data,flags,time;public UIntPtr extra; }
+ [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type;public MouseInput mouse; }
+ public sealed class PointerEvidence {
+  public string method="SetCursorPos + SendInput",coordinateBasis="Intended point in bound FLUTTERVIEW client coordinates",error,beforeInputUtc;
+  public Point intendedViewClient,screenPoint,cursorBefore,cursorAtInput,cursorAfter;
+  public Rect windowRect,windowClientRect,viewRect,viewClientRect;
+  public long window,view,mappedHitWindow,hitWindow,beforeForeground,atInputForeground,afterForeground;
+  public uint expectedPid,mappedHitPid,hitPid,downSent,upSent;
+  public bool mapped,setCursor,cursorMatches,mappedHitOwned,hitOwned;public int intervalMs=80,inputSize,lastError,downLastError,upLastError;
+ }
+ public static PointerEvidence PhysicalFavoritesClick(IntPtr top,IntPtr view,Point point,uint expectedPid) {
+  var e=new PointerEvidence{window=top.ToInt64(),view=view.ToInt64(),expectedPid=expectedPid,intendedViewClient=point,screenPoint=point,inputSize=Marshal.SizeOf(typeof(Input))};
+  try {
+   if(!GetWindowRect(top,out e.windowRect)||!GetClientRect(top,out e.windowClientRect)||!GetWindowRect(view,out e.viewRect)||!GetClientRect(view,out e.viewClientRect)||!GetCursorPos(out e.cursorBefore))throw new InvalidOperationException("Pointer geometry/cursor observation failed");
+   e.beforeForeground=GetForegroundWindow().ToInt64();
+   uint topPid,viewPid;GetWindowThreadProcessId(top,out topPid);GetWindowThreadProcessId(view,out viewPid);
+   if(topPid!=expectedPid||viewPid!=expectedPid||GetForegroundWindow()!=top)throw new InvalidOperationException("Original sender identity/foreground lost before mapping");
+   if(point.X<0||point.Y<0||point.X>=e.viewClientRect.R||point.Y>=e.viewClientRect.B)throw new InvalidOperationException("Intended client point is outside the bound view");
+   e.mapped=ClientToScreen(view,ref e.screenPoint);
+   if(!e.mapped)throw new InvalidOperationException("ClientToScreen failed");
+   e.hitWindow=WindowFromPoint(e.screenPoint).ToInt64();GetWindowThreadProcessId(new IntPtr(e.hitWindow),out e.hitPid);
+   e.hitOwned=e.hitPid==expectedPid&&(new IntPtr(e.hitWindow)==view||IsChild(view,new IntPtr(e.hitWindow)));
+   e.mappedHitWindow=e.hitWindow;e.mappedHitPid=e.hitPid;e.mappedHitOwned=e.hitOwned;
+   if(!e.hitOwned)throw new InvalidOperationException("Intended screen point is not on the original-owned view or descendant");
+   e.setCursor=SetCursorPos(e.screenPoint.X,e.screenPoint.Y);e.lastError=Marshal.GetLastWin32Error();
+   if(!e.setCursor||!GetCursorPos(out e.cursorAtInput))throw new InvalidOperationException("SetCursorPos/cursor observation failed");
+   e.cursorMatches=e.cursorAtInput.X==e.screenPoint.X&&e.cursorAtInput.Y==e.screenPoint.Y;
+   e.hitWindow=WindowFromPoint(e.cursorAtInput).ToInt64();GetWindowThreadProcessId(new IntPtr(e.hitWindow),out e.hitPid);
+   e.hitOwned=e.hitPid==expectedPid&&(new IntPtr(e.hitWindow)==view||IsChild(view,new IntPtr(e.hitWindow)));
+   e.atInputForeground=GetForegroundWindow().ToInt64();
+   GetWindowThreadProcessId(top,out topPid);GetWindowThreadProcessId(view,out viewPid);
+   if(!e.cursorMatches||!e.hitOwned||e.atInputForeground!=top.ToInt64()||topPid!=expectedPid||viewPid!=expectedPid)throw new InvalidOperationException("Pointer hit/identity/foreground changed before SendInput");
+   e.beforeInputUtc=DateTime.UtcNow.ToString("o");
+   e.downSent=SendInput(1,new[]{new Input{type=0,mouse=new MouseInput{flags=2}}},e.inputSize);e.downLastError=Marshal.GetLastWin32Error();
+   if(e.downSent!=1)throw new InvalidOperationException("SendInput mouse down was not accepted");
+   System.Threading.Thread.Sleep(80);
+   e.upSent=SendInput(1,new[]{new Input{type=0,mouse=new MouseInput{flags=4}}},e.inputSize);e.upLastError=Marshal.GetLastWin32Error();
+   if(e.upSent!=1)throw new InvalidOperationException("SendInput mouse up was not accepted");
+  } catch(Exception ex) {e.error=ex.Message;}
+  GetCursorPos(out e.cursorAfter);e.afterForeground=GetForegroundWindow().ToInt64();return e;
+ }
  public static bool[] ControlClick(IntPtr target,IntPtr point) {
   bool move=PostMessage(target,0x0200,IntPtr.Zero,point);
   bool down=PostMessage(target,0x0201,new IntPtr(1),point);
@@ -79,6 +133,7 @@ $focusEvidence=$null
 $focusFailed=$false
 $foregroundInfo=$null
 $inputEvidence=$null
+$inputFailed=$false
 if($Action -eq 'click'){
  Write-DiagnosticPhase 'before-foreground-observation'
  $beforeForeground=[W3393]::GetForegroundWindow()
@@ -116,7 +171,12 @@ if($Action -eq 'click'){
  if(-not $focusFailed){
  Write-DiagnosticPhase 'before-input'
  $packed=[IntPtr](($point.Y -shl 16) -bor ($point.X -band 0xffff))
- if($UseControlSequence){
+ if($UseNativePointer){
+  if($targetClass.ToString() -ne 'FLUTTERVIEW' -or $point.X -ne 246 -or $point.Y -ne 266){throw 'Native qualification coordinate basis differs from the reviewed FLUTTERVIEW client point'}
+  $inputEvidence=[W3393]::PhysicalFavoritesClick($window,$view,$point,$ExpectedPid)
+  $inputEvidence|ConvertTo-Json -Depth 6|Set-Content "evidence/$Label-native-pointer.json"
+  $inputFailed=-not [string]::IsNullOrEmpty($inputEvidence.error)
+ }elseif($UseControlSequence){
   $posted=[W3393]::ControlClick($view,$packed)
   $inputEvidence=@{method='Control C# consecutive PostMessage';intervalMs=0;posted=$posted}
   if($posted -contains $false){throw 'Control input message failed'}
@@ -146,3 +206,4 @@ $foregroundPid=0u;[void][W3393]::GetWindowThreadProcessId($foreground,[ref]$fore
 @{action=$Action;x=$X;y=$Y;targetX=$point.X;targetY=$point.Y;targetClass=$targetClass.ToString();appPid=$appPid;targetPid=$viewPid;utc=[DateTime]::UtcNow.ToString('o');window=$window.ToInt64();view=$view.ToInt64();foregroundBefore=$foregroundInfo;focus=$focusEvidence;input=$inputEvidence;foregroundHwnd=$foreground.ToInt64();foregroundPid=$foregroundPid;ownedWindows=[W3393]::OwnedWindows($appPid)}|ConvertTo-Json -Depth 6|Set-Content "evidence/$Label-action.json"
 Write-DiagnosticPhase 'complete'
 if($focusFailed){throw 'Original LocalSend foreground could not be established; File click was not sent'}
+if($inputFailed){throw "Native pointer qualification failed; action evidence retained. $($inputEvidence.error)"}
