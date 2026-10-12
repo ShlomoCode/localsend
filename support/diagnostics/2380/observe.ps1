@@ -1,4 +1,4 @@
-param([string]$ReleaseRoot,[string]$EvidenceDirectory)
+param([string]$ReleaseRoot,[string]$EvidenceDirectory,[switch]$StartupTrace,[string]$ObserverScript,[string]$DecoderDll,[string[]]$StartupTraceCases,[int]$StartupTraceRepetitions=0)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/capture_progress.ps1"
 . "$PSScriptRoot/desktop.ps1" -ReleaseRoot $ReleaseRoot -EvidenceDirectory $EvidenceDirectory
@@ -164,8 +164,15 @@ $cases=@(
  @{name='wide-excluded';profile=$wideProfile;restore=$true;excluded='localsend_app.exe'},
  @{name='wide-enabled-again';profile=$wideProfile;restore=$true;excluded=''}
 )
- foreach($case in $cases){foreach($iteration in 1..3){
-  $name="$($case.name)-$iteration";$recording=$null;$app=$null;$launchClock=$null;$recorderStartUtc=$null;$recorderClock=$null;$progress=$null
+ $iterations=3
+ if($StartupTrace){
+  if(!$StartupTraceCases -or $StartupTraceRepetitions -lt 1 -or $StartupTraceRepetitions -gt 3){throw 'Explicit bounded trace cases and repetitions required'}
+  if(@($StartupTraceCases|Where-Object{$_ -notin @('wide-enabled','wide-disabled','wide-excluded')}).Count){throw 'Trace proposal permits only unchanged wide profile and existing restore controls'}
+  if(($StartupTraceCases -join ',') -ne 'wide-disabled,wide-enabled,wide-excluded' -or $StartupTraceRepetitions -ne 2){throw 'Trace integration permits exactly disabled, enabled, excluded in that order, each twice'}
+  $allCases=$cases;$cases=@(foreach($selected in $StartupTraceCases){$allCases|Where-Object{$_.name -eq $selected}});$iterations=$StartupTraceRepetitions
+ }
+ foreach($case in $cases){foreach($iteration in 1..$iterations){
+  $name="$($case.name)-$iteration";$recording=$null;$app=$null;$launchClock=$null;$recorderStartUtc=$null;$recorderClock=$null;$progress=$null;$trialFailure=$null;$observer=$null
   try {
    Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
    $exitDeadline=[DateTime]::UtcNow.AddSeconds(30)
@@ -184,6 +191,27 @@ $cases=@(
    if(!(Get-Process PowerToys.FancyZones -ErrorAction SilentlyContinue)){throw 'FancyZones not running for frozen trial'}
    Copy-Item $history "$EvidenceDirectory/$name-history-loaded.json"
    Copy-Item $fzFile "$EvidenceDirectory/$name-config-loaded.json"
+   $observer=$null
+   if($StartupTrace){
+    if(!$ObserverScript -or !$DecoderDll){throw 'Exact observer and decoder paths required'}
+    $traceDir=Join-Path $EvidenceDirectory ($name+'-startup-'+[Guid]::NewGuid().ToString('N'))
+    $observer=Start-Process powershell.exe -NoNewWindow -ArgumentList @('-NoProfile','-File',('"{0}"' -f $ObserverScript),'-OutputDirectory',('"{0}"' -f $traceDir),'-DurationSeconds','20') -PassThru -RedirectStandardOutput ($traceDir+'.stdout.log') -RedirectStandardError ($traceDir+'.stderr.log')
+    $observerHandle=$observer.Handle
+    $traceReadyDeadline=[DateTime]::UtcNow.AddSeconds(15)
+    do{
+     if($observer.HasExited){throw 'Observer exited before readiness'}
+     $readyPath=Join-Path $traceDir 'ready.json'
+     if(Test-Path $readyPath){
+      $raw=Get-Content $readyPath -Raw
+      if(![string]::IsNullOrEmpty($raw)){
+       try{$traceReady=$raw|ConvertFrom-Json}catch{$traceReady=$null}
+       if($traceReady -and $traceReady.observerPid -eq $observer.Id -and $traceReady.phase -eq 'hooks-and-etw-ready' -and $traceReady.session -like 'localsend2380-*'){break}
+      }
+     }
+     if([DateTime]::UtcNow -gt $traceReadyDeadline){throw 'Observer readiness timeout'}
+     Start-Sleep -Milliseconds 50
+    }while($true)
+   }
    $recorderStartUtc=[DateTime]::UtcNow.ToString('o')
    $progress=NewCaptureProgressPath $EvidenceDirectory $name
    $recorderClock=[System.Diagnostics.Stopwatch]::StartNew()
@@ -203,8 +231,13 @@ $cases=@(
    }while($true)
    if([long]$readyBlock.Groups[2].Value -gt 2000000){throw 'Recording lacks twenty-eight seconds of remaining coverage at launch'}
    if($recording.HasExited){throw 'Recorder exited immediately before application launch'}
-   $recordReadyUtc=[DateTime]::UtcNow.ToString('o');$launchUtc=[DateTime]::UtcNow.ToString('o')
+   if($StartupTrace -and $observer.HasExited){throw 'Observer not alive at launch'}
+   $recordReadyUtc=[DateTime]::UtcNow.ToString('o');$launchUtc=[DateTime]::UtcNow.ToString('o');$launchQpc=[Diagnostics.Stopwatch]::GetTimestamp()
    $app=Start-Process $exe.FullName -WorkingDirectory $exe.DirectoryName -PassThru;$launchClock=[System.Diagnostics.Stopwatch]::StartNew()
+   if($StartupTrace){
+    @{pid=$app.Id;launchUtc=$launchUtc;launchQpc=$launchQpc;observerReady=$traceReady}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $traceDir 'launch.json')
+    $pidTemp=Join-Path $traceDir 'target-pid.tmp';[IO.File]::WriteAllText($pidTemp,[string]$app.Id);Move-Item $pidTemp (Join-Path $traceDir 'target-pid.txt')
+   }
    @{case=$case.name;iteration=$iteration;pid=$app.Id;launchUtc=$launchUtc;recordStartUtc=$recorderStartUtc;firstCaptureObservedUtc=$recordReadyUtc;firstCaptureProgress=$readyBlock.Value;progressFile=$progress;recordingPid=$recording.Id}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-timing.json"
    foreach($seconds in @(0.5,1,3,10)){
     while($launchClock.Elapsed.TotalSeconds -lt $seconds){Start-Sleep -Milliseconds 50}
@@ -248,11 +281,26 @@ $cases=@(
    & $env:FFMPEG2380 -v error -i "$EvidenceDirectory/$name.mp4" -f null NUL 2> "$EvidenceDirectory/$name-decode.log"
    if($LASTEXITCODE -ne 0){throw 'Full recording decode failed'}
    @{lastObservedUtc=$lastObservedUtc;lastObservedProgress=$lastObservedProgress;recordingExitedUtc=$recordingExitedUtc;recordingDuration=[double]$video.format.duration;finalProgress=[string](Get-Content $progress -Raw);fullDecode=$true}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-coverage.json"
-  } finally {
-   [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)
-   FinishOwnedRecorder $name $recording $recorderClock $progress $EvidenceDirectory
-   if($app -and !$app.HasExited){Stop-Process -Id $app.Id -Force;$app.WaitForExit()}
-   Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
+  } catch {$trialFailure=$_;throw} finally {
+   $cleanupFailure=$null;$observerCleanupFailure=$null
+   try{
+    [Desktop2861]::mouse_event(4,0,0,0,[UIntPtr]::Zero);[Input2380]::keybd_event(0x10,0,2,[UIntPtr]::Zero)
+    FinishOwnedRecorder $name $recording $recorderClock $progress $EvidenceDirectory
+    if($app -and !$app.HasExited){Stop-Process -Id $app.Id -Force;$app.WaitForExit()}
+    Get-Process '*PowerToys*' -ErrorAction SilentlyContinue|Stop-Process -Force
+   }catch{$cleanupFailure=$_}finally{
+    if($observer){
+     try{
+      # Let the owned observer stop its own ETW session even if other cleanup fails.
+      if(!$observer.WaitForExit(45000)){throw 'Observer cleanup timeout; owned session needs recovery from retained session name'}
+      if($observer.ExitCode -ne 0){throw 'Observer channel incomplete'}
+      & dotnet $DecoderDll $traceDir $exe.FullName
+      if($LASTEXITCODE -ne 0){throw 'ETL decoder channel incomplete'}
+     }catch{$observerCleanupFailure=$_}
+    }
+   }
+   @{trialFailure=[string]$trialFailure;cleanupFailure=[string]$cleanupFailure;observerCleanupFailure=[string]$observerCleanupFailure}|ConvertTo-Json|Set-Content "$EvidenceDirectory/$name-cleanup-errors.json"
+   if(!$trialFailure){if($cleanupFailure){throw $cleanupFailure};if($observerCleanupFailure){throw $observerCleanupFailure}}
   }
  }}
 } finally {

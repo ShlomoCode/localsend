@@ -2,6 +2,11 @@ name: Diagnose 2380 actual FancyZones startup
 on:
   workflow_dispatch:
     inputs:
+      startup_trace:
+        description: Exact six historical startup observations with external WinEvent and ETW trace
+        type: boolean
+        required: false
+        default: false
       current_build_run:
         description: Exact current-source build run, empty for official 1.17 ZIP
         type: string
@@ -13,13 +18,37 @@ permissions:
 jobs:
   observe:
     runs-on: windows-11-arm
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
+      - name: Validate finite startup trace boundary
+        if: inputs.startup_trace
+        shell: pwsh
+        run: |
+          if ('${{ inputs.current_build_run }}' -ne '') { throw 'Startup trace accepts only untouched historical release' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/evidence2380" | Out-Null
+          @{sourceSha='${{ github.sha }}'; runId='${{ github.run_id }}'; cases=@('wide-disabled','wide-enabled','wide-excluded'); repetitions=2; comparisonCount=6; binary='official 1.17 x64'; profileBoundary='same raw bytes within this session; prior redacted profile is not exact raw replay'} | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP/evidence2380/trace-boundary.json"
+      - uses: actions/setup-dotnet@v5
+        if: inputs.startup_trace
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore and build pinned ETL decoder on cloud worker
+        if: inputs.startup_trace
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          dotnet --info | Set-Content "$env:RUNNER_TEMP/evidence2380/dotnet-identity.txt"
+          dotnet restore ./support/diagnostics/2380/etl-decoder/Decoder.csproj --use-lock-file
+          if ($LASTEXITCODE -ne 0) { throw 'Decoder restore failed' }
+          Copy-Item ./support/diagnostics/2380/etl-decoder/packages.lock.json "$env:RUNNER_TEMP/evidence2380/decoder-packages.lock.json"
+          dotnet build ./support/diagnostics/2380/etl-decoder/Decoder.csproj --no-restore -c Release -o "$env:RUNNER_TEMP/decoder2380"
+          if ($LASTEXITCODE -ne 0) { throw 'Decoder build failed' }
+          Get-FileHash ./support/diagnostics/2380/startup_observer.ps1,./support/diagnostics/2380/observe.ps1,./support/diagnostics/2380/etl-decoder/Decoder.csproj,./support/diagnostics/2380/etl-decoder/Program.cs,"$env:RUNNER_TEMP/decoder2380/Decoder.dll","$env:RUNNER_TEMP/decoder2380/Microsoft.Diagnostics.Tracing.TraceEvent.dll" | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/evidence2380/observer-decoder-identities.json"
       - name: Install official ARM PowerToys and untouched historical LocalSend
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/microsoft/PowerToys/releases/download/v0.100.2/PowerToysUserSetup-0.100.2-arm64.exe -OutFile "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe"
+          if ('${{ inputs.startup_trace }}' -eq 'true' -and (Get-FileHash "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe").Hash -ne '078B60A678DCE38750BD5FA86D07D36F6220BC79D462BE07C7A5B28A285F7190') { throw 'PowerToys installer identity differs' }
           $install = Start-Process "$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe" -ArgumentList '/install','/quiet','/norestart',"/log $env:RUNNER_TEMP/powertoys-install.log" -Wait -PassThru
           "Installer exit $($install.ExitCode)"
           if ($install.ExitCode -notin @(0,3010)) { throw 'PowerToys installation failed' }
@@ -27,6 +56,11 @@ jobs:
           if ('${{ inputs.current_build_run }}' -eq '') {
             Invoke-WebRequest https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x86-64.zip -OutFile "$env:RUNNER_TEMP/LocalSend.zip"
             Expand-Archive "$env:RUNNER_TEMP/LocalSend.zip" "$env:RUNNER_TEMP/localsend"
+            if ('${{ inputs.startup_trace }}' -eq 'true') {
+              $historicalExe=Get-ChildItem "$env:RUNNER_TEMP/localsend" -Filter localsend_app.exe -Recurse | Select-Object -First 1
+              if (!$historicalExe -or (Get-FileHash $historicalExe.FullName).Hash -ne '9AA728853377643FBB13368E2A52ED816A448E0B5F28404AFB2154D2068F007A') { throw 'Historical LocalSend executable identity differs' }
+              Get-FileHash $historicalExe.FullName,"$env:RUNNER_TEMP/PowerToysUserSetup-0.100.2-arm64.exe" | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/evidence2380/release-identities.json"
+            }
           }
           # Complete the runner's normal WSL setup before input reaches application windows.
           $wsl = Start-Process wsl.exe -ArgumentList '--update','--web-download' -RedirectStandardOutput "$env:RUNNER_TEMP/wsl-update.log" -RedirectStandardError "$env:RUNNER_TEMP/wsl-update-error.log" -PassThru
@@ -53,11 +87,18 @@ jobs:
       - name: Observe genuine desktop and applications
         timeout-minutes: 30
         shell: powershell
-        run: ./support/diagnostics/2380/observe.ps1 -ReleaseRoot "$env:RUNNER_TEMP/localsend" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2380"
+        run: |
+          if ('${{ inputs.startup_trace }}' -eq 'true') {
+            ./support/diagnostics/2380/observe.ps1 -ReleaseRoot "$env:RUNNER_TEMP/localsend" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2380" -StartupTrace -ObserverScript "$env:GITHUB_WORKSPACE/support/diagnostics/2380/startup_observer.ps1" -DecoderDll "$env:RUNNER_TEMP/decoder2380/Decoder.dll" -StartupTraceCases @('wide-disabled','wide-enabled','wide-excluded') -StartupTraceRepetitions 2
+          } else {
+            ./support/diagnostics/2380/observe.ps1 -ReleaseRoot "$env:RUNNER_TEMP/localsend" -EvidenceDirectory "$env:RUNNER_TEMP/evidence2380"
+          }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: evidence2380
+          retention-days: 14
+          if-no-files-found: warn
           path: |
             ${{ runner.temp }}/evidence2380
             ${{ runner.temp }}/powertoys-install*.log
@@ -65,3 +106,4 @@ jobs:
             ${{ runner.temp }}/localsend/source-identity.txt
             ${{ runner.temp }}/localsend/flutter-identity.txt
             ${{ runner.temp }}/localsend/exe-identity.json
+            ${{ runner.temp }}/decoder2380/*.deps.json
