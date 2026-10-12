@@ -64,7 +64,7 @@ flatpak-builder --user --assumeyes --install-deps-from=flathub --default-branch=
 flatpak build-bundle repo "$OUT/exposed.flatpak" org.localsend.localsend_app stable
 flatpak info --user org.freedesktop.Platform/x86_64/26.08 > "$OUT/provenance/mapping-runtime-info.txt"
 flatpak info --user --show-commit org.freedesktop.Platform/x86_64/26.08 > "$OUT/provenance/mapping-runtime-commit.txt"
-flatpak list --user --runtime --columns=application,arch,branch,version,commit > "$OUT/provenance/mapping-installed-runtimes.txt"
+flatpak list --user --runtime --columns=application,arch,branch,version > "$OUT/provenance/mapping-installed-runtimes.txt"
 cd "$OUT"
 printf '%s  baseline.flatpak\n' "$EXPECTED_BASELINE" | sha256sum -c -
 sha256sum baseline.flatpak exposed.flatpak > SHA256SUMS

@@ -130,7 +130,7 @@ printf '%s\n' "$EXPECTED_APP_COMMIT" > evidence/exposed-installed-app-commit.txt
 flatpak info --user org.localsend.localsend_app > evidence/exposed-installed-app-info.txt
 flatpak info --user org.freedesktop.Platform/x86_64/26.08 > evidence/runtime-info.txt
 flatpak info --user --show-commit org.freedesktop.Platform/x86_64/26.08 > evidence/runtime-commit.txt
-flatpak list --user --runtime --columns=application,arch,branch,version,commit > evidence/installed-runtimes.txt
+flatpak list --user --runtime --columns=application,arch,branch,version > evidence/installed-runtimes.txt
 flatpak override --user --show org.localsend.localsend_app > evidence/exposed-overrides.txt
 timeout --signal=TERM --kill-after=10s 300s bash /home/mint/mapping-probe.sh /home/mint/evidence/mapping /home/mint/mapping-predicate.sh "$EXPECTED_APP_COMMIT"
 GUEST
