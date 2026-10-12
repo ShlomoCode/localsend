@@ -38,5 +38,7 @@ cp "$BASE/Bootstrap.ps1" "$PRIVATE/seed/Bootstrap.ps1"
 hdiutil makehybrid -iso -joliet -o "$PRIVATE/seed.iso" "$PRIVATE/seed" > "$OUT/seed-build.txt" 2>&1
 qemu-img create -f qcow2 "$PRIVATE/windows.qcow2" 64G > "$OUT/disk-create.txt"
 swiftc "$BASE/setup-ocr.swift" -o "$PRIVATE/setup-ocr"
+swiftc --version > "$OUT/recovery-compiler-version.txt"
+swiftc -swift-version 5 "$BASE/recovery-ocr.swift" -o "$PRIVATE/recovery-ocr" > "$OUT/recovery-compile.txt" 2>&1
 INSTALL_ACCELERATION="$INSTALL_ACCELERATION" /usr/bin/ruby "$BASE/install.rb" "$OUT" "$PRIVATE" "$ISO"
 df -k "$OUT" > "$OUT/disk-install-after.txt"

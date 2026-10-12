@@ -70,6 +70,7 @@ begin
   count = 0
   next_capture = 0
   ready = nil
+  recovery_attempted = false
   loop do
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     raise 'QEMU exited during Windows preparation' if Process.waitpid(guest, Process::WNOHANG)
@@ -103,12 +104,14 @@ begin
       break
     end
     if now >= next_capture
+      recovery_visible = false
       begin
         path = File.join(frames, format('setup-%03d.bmp', count))
         File.open(File.join(out, 'frame-times.jsonl'), 'a') { |file| file.puts JSON.generate(utc: Time.now.utc.iso8601, frame: File.basename(path)) }
         frame(path)
         lines = observed_text(path.sub(/\.bmp$/, '.png'), private_dir)
         File.write(path.sub(/\.bmp$/, '.ocr.json'), JSON.pretty_generate(lines))
+        recovery_visible = lines.include?('Why did my PC restart?')
         if !setup_observed && lines.any? { |line| line.match?(/Windows Setup|Installing Windows|Getting files ready|Copying Windows files|Getting ready|Just a moment/i) }
           setup_observed = true
           File.write(File.join(out, 'boot-progress.json'), JSON.pretty_generate(utc: Time.now.utc.iso8601,
@@ -120,6 +123,28 @@ begin
       end
       count += 1
       next_capture = now + (setup_observed ? 60 : 15)
+      if recovery_visible && !recovery_attempted
+        recovery_attempted = true
+        remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if remaining < 160
+          File.write(File.join(out, 'oobe-recovery-refused.json'), JSON.pretty_generate(utc: Time.now.utc.iso8601,
+            remaining_seconds: remaining, reason: 'Less than bounded 160-second action budget remains; no input sent.'))
+          raise 'Insufficient remaining preparation budget for observed OOBE recovery action; no input'
+        end
+        # Only one ordinary recovery action; the helper independently requires
+        # this exact header and a unique Next whole line in fresh original pixels.
+        action = Process.spawn({'ISSUE1054_RECOVERY_DEADLINE' => deadline.to_s}, '/usr/bin/ruby', File.join(__dir__, 'recovery-action.rb'),
+          File.join(out, 'oobe-recovery'), File.join(private_dir, 'recovery-ocr'), pgroup: true)
+        begin
+          action_budget = [160, deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)].min
+          raise 'Preparation deadline reached while starting OOBE recovery action' unless action_budget > 0
+          _, status = Timeout.timeout(action_budget) { Process.waitpid2(action) }
+          raise 'Observed OOBE recovery action failed; inspect original before/after and action.json' unless status.success?
+        ensure
+          begin; Process.kill('KILL', -action); rescue Errno::ESRCH; end
+          begin; Process.wait(action); rescue Errno::ECHILD; end
+        end
+      end
     end
     identity_observed = records.any? { |record| record['stage'] == 'windows-identity' }
     if !setup_observed && !identity_observed && Process.clock_gettime(Process::CLOCK_MONOTONIC) > boot_deadline
