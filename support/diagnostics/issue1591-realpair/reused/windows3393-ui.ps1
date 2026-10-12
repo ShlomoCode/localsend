@@ -1,4 +1,4 @@
-param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence)
+param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[int]$ExpectedPid=0,[long]$ExpectedWindow=0)
 $ErrorActionPreference='Stop'
 function Write-DiagnosticPhase([string]$phase){
  @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase}|ConvertTo-Json -Compress|Add-Content "evidence/$Label-phases.jsonl"
@@ -14,6 +14,8 @@ public static class W3393 {
  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h,IntPtr dc,uint flags);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
+ [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h,out Rect rect);
+ [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h,ref Point point);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
@@ -30,6 +32,25 @@ public static class W3393 {
  public delegate bool EnumProc(IntPtr h,IntPtr data);
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc callback,IntPtr data);
  public struct Point { public int X,Y; }
+ public static int[] FavoritesMatches(byte[] reference,byte[] image,int referenceStride,int imageStride) {
+  const int cx=80,cy=165,cw=240,ch=145;
+  var source=new int[400*500];var current=new int[400*500];
+  for(int y=0;y<500;y++)for(int x=0;x<400;x++) {
+   int a=y*referenceStride+x*4,b=y*imageStride+x*4;
+   if(reference[a+3]!=255||image[b+3]!=255)throw new InvalidOperationException("Reference/current PNG is not uniformly opaque");
+   source[y*400+x]=reference[a]|reference[a+1]<<8|reference[a+2]<<16;
+   current[y*400+x]=image[b]|image[b+1]<<8|image[b+2]<<16;
+  }
+  var matches=new System.Collections.Generic.List<int>();
+  int[] anchors={8*400+5,62*400+20,118*400+55,77*400+208};
+  for(int y=0;y<=500-ch;y++)for(int x=0;x<=400-cw;x++) {
+   bool equal=true;int start=y*400+x,original=cy*400+cx;
+   foreach(int offset in anchors)if(current[start+offset]!=source[original+offset]){equal=false;break;}
+   for(int dy=0;dy<ch&&equal;dy++)for(int dx=0;dx<cw;dx++)if(current[start+dy*400+dx]!=source[original+dy*400+dx]){equal=false;break;}
+   if(equal){matches.Add(x);matches.Add(y);if(matches.Count>2)return matches.ToArray();}
+  }
+  return matches.ToArray();
+ }
  public static bool[] ControlClick(IntPtr target,IntPtr point) {
   bool move=PostMessage(target,0x0200,IntPtr.Zero,point);
   bool down=PostMessage(target,0x0201,new IntPtr(1),point);
@@ -51,6 +72,128 @@ public static class W3393 {
 }
 '@
 }
+function Capture-OwnedWindow([IntPtr]$hwnd,[string]$path){
+ $rect=New-Object W3393+Rect
+ if(-not [W3393]::GetWindowRect($hwnd,[ref]$rect)){throw 'GetWindowRect failed'}
+ $width=$rect.R-$rect.L;$height=$rect.B-$rect.T
+ if($width -ne 400 -or $height -ne 500){throw "Unexpected captured window dimensions ${width}x${height}"}
+ $bitmap=[System.Drawing.Bitmap]::new($width,$height,[System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+ try{
+  $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
+  try{$dc=$graphics.GetHdc();try{$captured=[W3393]::PrintWindow($hwnd,$dc,2)}finally{$graphics.ReleaseHdc($dc)}}finally{$graphics.Dispose()}
+  if(-not $captured){throw 'PrintWindow failed'}
+  $bitmap.Save((Join-Path $PWD $path),[System.Drawing.Imaging.ImageFormat]::Png)
+ }finally{$bitmap.Dispose()}
+ return $rect
+}
+function Assert-OwnedFavoritesWindow([IntPtr]$hwnd,[uint32]$ownerPid){
+ if($hwnd -eq [IntPtr]::Zero -or -not [W3393]::IsWindowVisible($hwnd) -or -not [W3393]::IsWindowEnabled($hwnd)){throw 'Owned runner window absent, hidden or disabled'}
+ $actualPid=0u;$thread=[W3393]::GetWindowThreadProcessId($hwnd,[ref]$actualPid)
+ if($thread -eq 0 -or $actualPid -ne $ownerPid){throw 'Runner PID changed or native ownership query failed'}
+ $cls=[System.Text.StringBuilder]::new(256);$title=[System.Text.StringBuilder]::new(512)
+ if([W3393]::GetClassName($hwnd,$cls,256) -eq 0 -or [W3393]::GetWindowText($hwnd,$title,512) -eq 0){throw 'Native runner identity query failed'}
+ if($cls.ToString() -ne 'FLUTTER_RUNNER_WIN32_WINDOW' -or $title.ToString() -ne 'LocalSend'){throw 'Runner identity changed'}
+ $process=Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction Stop
+ if(-not $process -or $process.Name -notmatch '^localsend'){throw 'Runner executable identity changed'}
+ $launchReport=Get-Content 'evidence/release-ui-report.json' -Raw|ConvertFrom-Json
+ if(-not $launchReport.executable.path -or -not $process.ExecutablePath -or $process.ExecutablePath -ine $launchReport.executable.path){throw 'Runner executable differs from owned launch report'}
+ $children=@([W3393]::Children($hwnd));$views=@($children|Where-Object {$_.cls -eq 'FLUTTERVIEW' -and $_.pid -eq $ownerPid})
+ if($views.Count -ne 1){throw 'Unique owned FLUTTERVIEW absent'}
+ $view=[IntPtr]$views[0].hwnd;$viewScreenRect=New-Object W3393+Rect
+ if(-not [W3393]::GetWindowRect($view,[ref]$viewScreenRect) -or $viewScreenRect.R-$viewScreenRect.L -ne 384 -or $viewScreenRect.B-$viewScreenRect.T -ne 461){throw 'Checked owned 384x461 FLUTTERVIEW absent'}
+ if(-not [W3393]::IsWindowVisible($view) -or -not [W3393]::IsWindowEnabled($view)){throw 'Owned FLUTTERVIEW hidden or disabled'}
+ $otherVisible=@([W3393]::OwnedWindows($ownerPid)|Where-Object {$_.visible -and $_.hwnd -ne $hwnd.ToInt64()})
+ if($otherVisible.Count){throw 'Another owned visible window prevents input'}
+ return @{view=$view;viewScreenRect=$viewScreenRect;children=$children;processName=$process.Name;executablePath=$process.ExecutablePath}
+}
+function Find-FavoritesTemplate([string]$imagePath,[string]$referencePath){
+ $reference=[System.Drawing.Bitmap]::new($referencePath);$image=[System.Drawing.Bitmap]::new((Join-Path $PWD $imagePath))
+ try{
+  if($reference.Width -ne 400 -or $reference.Height -ne 500 -or $image.Width -ne 400 -or $image.Height -ne 500){throw 'Reference or current PNG dimensions differ from pinned 400x500'}
+  # Reviewed original crop: title, complete peer alias/address, edit pencil, Error and orange information icon.
+  $crop=@{x=80;y=165;width=240;height=145};$rectangle=[System.Drawing.Rectangle]::new(0,0,400,500)
+  $referenceData=$null;$imageData=$null
+  try{
+   $referenceData=$reference.LockBits($rectangle,[System.Drawing.Imaging.ImageLockMode]::ReadOnly,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+   $imageData=$image.LockBits($rectangle,[System.Drawing.Imaging.ImageLockMode]::ReadOnly,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+   if($referenceData.Stride -le 0 -or $imageData.Stride -le 0){throw 'Unsupported native bitmap stride'}
+   $referenceBytes=[byte[]]::new($referenceData.Stride*500);$imageBytes=[byte[]]::new($imageData.Stride*500)
+   [Runtime.InteropServices.Marshal]::Copy($referenceData.Scan0,$referenceBytes,0,$referenceBytes.Length)
+   [Runtime.InteropServices.Marshal]::Copy($imageData.Scan0,$imageBytes,0,$imageBytes.Length)
+   $matches=[W3393]::FavoritesMatches($referenceBytes,$imageBytes,$referenceData.Stride,$imageData.Stride)
+  }finally{if($imageData){$image.UnlockBits($imageData)};if($referenceData){$reference.UnlockBits($referenceData)}}
+  if($matches.Length -ne 2){throw "Semantic Favorites template is absent or nonunique ($($matches.Length/2) observed matches)"}
+  # Reference icon center was visually reviewed at original bitmap pixel (135,289).
+  return @{crop=$crop;match=@{x=$matches[0];y=$matches[1]};bitmapPoint=@{x=$matches[0]+55;y=$matches[1]+124};referenceIconCenter=@{x=135;y=289};referenceIconBounds=@{left=127;top=281;right=143;bottom=297}}
+ }finally{$image.Dispose();$reference.Dispose()}
+}
+function Capture-FavoritesError{
+ $receipt=@{utc=[DateTime]::UtcNow.ToString('o');action='favorites-error';attempted=$false;status='evidence-unavailable';expectedPid=$ExpectedPid;expectedWindow=$ExpectedWindow;reference='reused/favorites-error-reference.png';referenceSha256='1fd999ee157f7a38a40419dab5565212e5d1fb04aa2c9f1d7cb77b1b578602be';referenceCrop=@{x=80;y=165;width=240;height=145};referenceIconCenter=@{x=135;y=289}}
+ $prefix="evidence/$Label";$hwnd=[IntPtr]$ExpectedWindow
+ $receipt.originals=@{before="$prefix-before.png";focusedBefore="$prefix-focused-before.png";after="$prefix-after.png"}
+ try{
+  if($ExpectedPid -le 0 -or $ExpectedWindow -le 0){throw 'Owned baseline PID/HWND missing'}
+  $reference=Join-Path $PSScriptRoot 'favorites-error-reference.png'
+  if((Get-FileHash -Algorithm SHA256 $reference).Hash.ToLowerInvariant() -ne $receipt.referenceSha256){throw 'Pinned Favorites reference hash mismatch'}
+  $owned=Assert-OwnedFavoritesWindow $hwnd ([uint32]$ExpectedPid)
+  $beforeRect=Capture-OwnedWindow $hwnd "$prefix-before.png"
+  $receipt.beforeUtc=[DateTime]::UtcNow.ToString('o');$receipt.beforeRect=$beforeRect;$receipt.beforeTree=$owned.children;$receipt.executablePath=$owned.executablePath
+  $receipt.beforeSha256=(Get-FileHash -Algorithm SHA256 "$prefix-before.png").Hash.ToLowerInvariant()
+  $before=Find-FavoritesTemplate "$prefix-before.png" $reference;$receipt.beforeMatch=$before
+  $front=[W3393]::GetForegroundWindow();$frontPid=0u;$frontThread=[W3393]::GetWindowThreadProcessId($front,[ref]$frontPid)
+  $appPid=0u;$appThread=[W3393]::GetWindowThreadProcessId($hwnd,[ref]$appPid);$currentThread=[W3393]::GetCurrentThreadId();$attached=@()
+  try{
+   foreach($thread in (@($frontThread,$appThread)|Select-Object -Unique)){if($thread -ne 0 -and $thread -ne $currentThread -and [W3393]::AttachThreadInput($currentThread,$thread,$true)){$attached+=$thread}}
+   $receipt.focusResult=[W3393]::SetForegroundWindow($hwnd)
+   [void][W3393]::SetFocus($owned.view)
+   $foreground=[W3393]::GetForegroundWindow();$foregroundPid=0u;[void][W3393]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)
+   $receipt.foreground=@{hwnd=$foreground.ToInt64();pid=$foregroundPid}
+   if($foreground -ne $hwnd -or $foregroundPid -ne $ExpectedPid){throw 'Owned runner foreground not verified'}
+  }finally{foreach($thread in $attached){[void][W3393]::AttachThreadInput($currentThread,$thread,$false)}}
+  $owned=Assert-OwnedFavoritesWindow $hwnd ([uint32]$ExpectedPid)
+  $freshRect=Capture-OwnedWindow $hwnd "$prefix-focused-before.png"
+  $receipt.focusedBeforeUtc=[DateTime]::UtcNow.ToString('o');$receipt.focusedRect=$freshRect;$receipt.focusedTree=$owned.children
+  $receipt.focusedBeforeSha256=(Get-FileHash -Algorithm SHA256 "$prefix-focused-before.png").Hash.ToLowerInvariant()
+  $match=Find-FavoritesTemplate "$prefix-focused-before.png" $reference;$receipt.focusedMatch=$match
+  $liveRect=New-Object W3393+Rect
+  if(-not [W3393]::GetWindowRect($hwnd,[ref]$liveRect) -or $liveRect.L -ne $freshRect.L -or $liveRect.T -ne $freshRect.T -or $liveRect.R -ne $freshRect.R -or $liveRect.B -ne $freshRect.B){throw 'Window moved after qualified capture'}
+  $liveViewRect=New-Object W3393+Rect
+  if(-not [W3393]::GetWindowRect($owned.view,[ref]$liveViewRect) -or $liveViewRect.L -ne $owned.viewScreenRect.L -or $liveViewRect.T -ne $owned.viewScreenRect.T -or $liveViewRect.R -ne $owned.viewScreenRect.R -or $liveViewRect.B -ne $owned.viewScreenRect.B){throw 'FLUTTERVIEW moved after qualified capture'}
+  $screen=New-Object W3393+Point;$screen.X=$liveRect.L+$match.bitmapPoint.x;$screen.Y=$liveRect.T+$match.bitmapPoint.y
+  $runnerPoint=New-Object W3393+Point;$runnerPoint.X=$screen.X;$runnerPoint.Y=$screen.Y
+  if(-not [W3393]::ScreenToClient($hwnd,[ref]$runnerPoint)){throw 'ScreenToClient failed'}
+  $runnerRect=New-Object W3393+Rect
+  if(-not [W3393]::GetClientRect($hwnd,[ref]$runnerRect) -or $runnerPoint.X -lt 0 -or $runnerPoint.Y -lt 0 -or $runnerPoint.X -ge $runnerRect.R -or $runnerPoint.Y -ge $runnerRect.B){throw 'Mapped point outside runner client'}
+  $target=[W3393]::ChildWindowFromPointEx($hwnd,$runnerPoint,1)
+  if($target -ne $owned.view){throw 'Qualified point does not hit unique FLUTTERVIEW'}
+  $viewPoint=New-Object W3393+Point;$viewPoint.X=$screen.X;$viewPoint.Y=$screen.Y
+  if(-not [W3393]::ScreenToClient($target,[ref]$viewPoint)){throw 'FLUTTERVIEW ScreenToClient failed'}
+  $viewRect=New-Object W3393+Rect
+  if(-not [W3393]::GetClientRect($target,[ref]$viewRect) -or $viewPoint.X -lt 0 -or $viewPoint.Y -lt 0 -or $viewPoint.X -ge $viewRect.R -or $viewPoint.Y -ge $viewRect.B){throw 'Mapped point outside FLUTTERVIEW client'}
+  $targetPid=0u;$targetThread=[W3393]::GetWindowThreadProcessId($target,[ref]$targetPid);$targetClass=[System.Text.StringBuilder]::new(256)
+  if($targetThread -eq 0 -or $targetPid -ne $ExpectedPid -or [W3393]::GetClassName($target,$targetClass,256) -eq 0 -or $targetClass.ToString() -ne 'FLUTTERVIEW'){throw 'Mapped target PID/class changed or query failed'}
+  $receipt.mapping=@{bitmap=$match.bitmapPoint;screen=@{x=$screen.X;y=$screen.Y};runnerClient=@{x=$runnerPoint.X;y=$runnerPoint.Y};viewClient=@{x=$viewPoint.X;y=$viewPoint.Y};runnerClientRect=$runnerRect;viewClientRect=$viewRect;viewScreenRect=$liveViewRect;targetHwnd=$target.ToInt64();targetPid=$targetPid;targetClass=$targetClass.ToString()}
+  if([W3393]::GetForegroundWindow() -ne $hwnd){throw 'Foreground changed before input'}
+  $packed=[IntPtr](($viewPoint.Y -shl 16) -bor ($viewPoint.X -band 0xffff))
+  $receipt.attempted=$true;$receipt.inputUtc=[DateTime]::UtcNow.ToString('o')
+  $posted=[W3393]::ControlClick($target,$packed);$receipt.posted=$posted
+  if($posted -contains $false){throw 'One or more ordinary mouse messages failed'}
+  Start-Sleep -Milliseconds 800
+  $receipt.status='input-posted-awaiting-after-image'
+ }catch{$receipt.reason=$_.Exception.Message}finally{
+  try{
+   $afterPid=0u;[void][W3393]::GetWindowThreadProcessId($hwnd,[ref]$afterPid)
+   if($afterPid -ne $ExpectedPid -or $afterPid -eq 0){throw 'Owned HWND/PID absent for after image'}
+   $receipt.afterRect=Capture-OwnedWindow $hwnd "$prefix-after.png";$receipt.afterUtc=[DateTime]::UtcNow.ToString('o')
+   $receipt.afterSha256=(Get-FileHash -Algorithm SHA256 "$prefix-after.png").Hash.ToLowerInvariant()
+   $receipt.afterTree=(Assert-OwnedFavoritesWindow $hwnd ([uint32]$ExpectedPid)).children
+   if($receipt.status -eq 'input-posted-awaiting-after-image'){$receipt.status='after-image-retained-for-readable-dialog-review'}
+  }catch{$receipt.afterCaptureError=$_.Exception.Message;$receipt.status='evidence-unavailable';if(-not $receipt.reason){$receipt.reason=$receipt.afterCaptureError}}
+  $receipt|ConvertTo-Json -Depth 10|Set-Content "$prefix-receipt.json"
+ }
+ if($receipt.status -ne 'after-image-retained-for-readable-dialog-review'){throw "Favorites ErrorDialog evidence unavailable: $($receipt.reason)"}
+}
+if($Action -eq 'favorites-error'){Capture-FavoritesError;return}
 Write-DiagnosticPhase 'before-find-window'
 $window=[W3393]::FindWindow('FLUTTER_RUNNER_WIN32_WINDOW','LocalSend')
 if($window -eq [IntPtr]::Zero){throw 'No LocalSend window'}

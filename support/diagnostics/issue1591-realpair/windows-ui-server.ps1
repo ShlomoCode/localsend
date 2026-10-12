@@ -8,9 +8,9 @@ while($null -ne ($line=[Console]::In.ReadLine())){
  $request=$null
  try{
   $request=$line|ConvertFrom-Json
-  if($request.action -notin @('click','snapshot')){throw 'Unsupported Windows UI action'}
+  if($request.action -notin @('click','snapshot','favorites-error')){throw 'Unsupported Windows UI action'}
   if($request.label -notmatch '^[a-zA-Z0-9-]+$'){throw 'Invalid evidence label'}
-  & $script -Action $request.action -X ([int]$request.x) -Y ([int]$request.y) -Label $request.label -RequireForeground:([bool]$request.foreground) -UseControlSequence:([bool]$request.sequence)
+  & $script -Action $request.action -X ([int]$request.x) -Y ([int]$request.y) -Label $request.label -RequireForeground:([bool]$request.foreground) -UseControlSequence:([bool]$request.sequence) -ExpectedPid ([int]$request.expectedPid) -ExpectedWindow ([long]$request.expectedWindow)
   $result=@{id=$request.id;ok=$true;utc=[DateTime]::UtcNow.ToString('o')}
  }catch{$result=@{id=$request.id;ok=$false;error=$_.Exception.ToString();utc=[DateTime]::UtcNow.ToString('o')}}
  [Console]::Out.WriteLine('ISSUE1591_RPC:'+($result|ConvertTo-Json -Compress))

@@ -142,23 +142,40 @@ function captureWindowsStreams(label) {
     executable:report.executable,observedLaunchProcesses:report.processes,streams});
 }
 async function captureTransportErrorSnapshot(failedStage) {
-  // Supplemental observation only. Geometry cannot prove Favorites/Error
-  // semantics, so no coordinate input is admitted by this snapshot.
-  const label = 'sender-transport-fault-before';
-  await powershell('windows3393-ui.ps1', ['-Action','snapshot','-Label',label]);
+  // One supplemental request after the fatal interval is frozen. The native
+  // action qualifies fresh pixels and ownership before its single info click.
+  const label = 'sender-transport-fault-dialog';
   const readJson = name => JSON.parse(readFileSync('evidence/' + name, 'utf8').replace(/^\uFEFF/, ''));
-  const baseline = readJson('windows-ui-prewarmed-action.json'), current = readJson(label + '-action.json');
-  const png = readFileSync('evidence/' + label + '.png');
-  const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
-  const tree = readJson(label + '-hwnd-tree.json'), views = (Array.isArray(tree) ? tree : [tree]).filter(row => row.cls === 'FLUTTERVIEW');
-  if (current.appPid !== baseline.appPid || current.window !== baseline.window || width !== 400 || height !== 500 || views.length !== 1 ||
-      views[0].pid !== current.appPid || views[0].rect.R - views[0].rect.L !== 384 || views[0].rect.B - views[0].rect.T !== 461) {
-    throw new Error('Supplementary sender snapshot layout/PID/HWND does not match retained evidence; ErrorDialog unavailable');
+  const receipt = {utc:new Date().toISOString(),failedStage,attempted:false,status:'evidence-unavailable',
+    outcome:'Supplemental readable ErrorDialog review only; original transport failure remains fatal'};
+  try {
+    const baseline = readJson('windows-ui-prewarmed-action.json');
+    if (!windowsReady || windowsUI?.exitCode !== null || !Number.isInteger(baseline.appPid) || baseline.appPid <= 0 || !Number.isInteger(baseline.window) || baseline.window <= 0) {
+      throw new Error('Owned prewarmed Windows RPC or baseline PID/HWND unavailable');
+    }
+    receipt.appPid = baseline.appPid; receipt.window = baseline.window;
+    receipt.attempted = 'indeterminate'; receipt.status = 'dispatch-indeterminate';
+    await powershell('windows3393-ui.ps1', ['-Action','favorites-error','-Label',label,'-ExpectedPid',String(baseline.appPid),'-ExpectedWindow',String(baseline.window)]);
+    receipt.rpcCompleted = true; receipt.status = 'rpc-completed-awaiting-native-receipt';
+  } catch (error) {
+    receipt.error = redact(error); throw error;
+  } finally {
+    // A timed-out request may still post input. Never dispatch a replacement.
+    // Keep a native receipt separately even if the controller lost its reply.
+    const nativePath = 'evidence/' + label + '-receipt.json';
+    try {
+      if (existsSync(nativePath)) {
+        const native = readJson(label + '-receipt.json');
+        if (native.action !== 'favorites-error' || native.expectedPid !== receipt.appPid || native.expectedWindow !== receipt.window ||
+            !Number.isFinite(Date.parse(native.utc)) || Date.parse(native.utc) < Date.parse(receipt.utc)) {
+          throw new Error('Native details receipt does not belong to this request');
+        }
+        receipt.native = native;
+        receipt.attempted = native.attempted; receipt.status = native.status;
+      }
+    } catch (error) {receipt.nativeReceiptError = redact(error);}
+    save(label + '-controller-receipt.json', receipt);
   }
-  save('sender-transport-fault-dialog-receipt.json', {utc:new Date().toISOString(),failedStage,appPid:current.appPid,window:current.window,width,height,attempted:false,status:'evidence-unavailable',
-    prospectiveInput:{x:127,y:258},authority:'38186635961 original 400x500 window PNG: info center135,289 minus measured window-to-client offset8,31; original native FLUTTERVIEW384x461',
-    semanticLimit:'Same PID/HWND/dimensions do not prove the orange Error information control is present. Source favorite_dialog.dart opens ErrorDialog SelectableText only from that control',
-    outcome:'not attempted; ErrorDialog evidence unavailable without semantic UI qualification; original transport failure remains fatal'});
 }
 async function elements(using, value) { return wd('POST', prefix() + '/elements', {using, value}); }
 async function unique(using, value, timeout = 10000) {
@@ -184,7 +201,8 @@ async function powershell(script, args = []) {
       const timer = setTimeout(() => {windowsRequests.delete(id);reject(new Error('Prewarmed Windows UI deadline exceeded'));}, 30000);
       windowsRequests.set(id, {ok, reject, timer});
       windowsUI.stdin.write(JSON.stringify({id,action:value('-Action'),x:Number(value('-X') || 0),y:Number(value('-Y') || 0),label:value('-Label'),
-        foreground:args.includes('-RequireForeground'),sequence:args.includes('-UseControlSequence')}) + '\n');
+        foreground:args.includes('-RequireForeground'),sequence:args.includes('-UseControlSequence'),
+        expectedPid:Number(value('-ExpectedPid') || 0),expectedWindow:Number(value('-ExpectedWindow') || 0)}) + '\n');
     });
   }
   const started = Date.now();
