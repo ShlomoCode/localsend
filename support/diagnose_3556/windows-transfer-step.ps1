@@ -8,6 +8,8 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $coldFileDiagnostic=$env:COLD_FILE_DIAGNOSTIC -eq '1'
 $coldShareDiagnostic=$env:COLD_SHARE_DIAGNOSTIC -eq '1'
+$coldShareStateObservation=$env:COLD_SHARE_STATE_OBSERVATION -eq '1'
+if($coldShareStateObservation -and -not $coldShareDiagnostic){throw 'State observation requires historical cold Share setup.'}
 $coldDiagnostic=$coldFileDiagnostic -or $coldShareDiagnostic
 $historicalShareReference=$coldShareDiagnostic -and -not [string]::IsNullOrWhiteSpace($env:COLD_SHARE_HISTORICAL_HELPER_APP)
 if(-not $EvidenceDirectory) { $EvidenceDirectory=Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'evidence/windows-transfer' }
@@ -60,9 +62,10 @@ try {
   }
   if(($coldFileDiagnostic -and $coldShareDiagnostic) -or $env:LARGE_TRANSFER_DIAGNOSTIC -eq '1' -or $env:MODERATE_TRANSFER_CONTROL -eq '1' -or $env:SHARE_AFTER_CONTROL -eq '1'){throw 'Cold File rejects transfer and Share controls before provider upload.'}
   [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'cold-workflow-binding.json'),(ConvertTo-Json @{
-   scenario=$(if($coldShareDiagnostic){'cold-share-onset'}else{'cold-file-onset'}); fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
+   scenario=$(if($coldShareStateObservation){'cold-share-state'}elseif($coldShareDiagnostic){'cold-share-onset'}else{'cold-file-onset'}); fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
    syntaxChecked=@('windows-transfer-control.mjs','cold-file-scenario.mjs','cold-share-scenario.mjs'); sourceCommit=$env:GITHUB_SHA
    cleanupAgeMinutes=25; artifactRetentionMinutes=5; workflowMinutes=45; deadlineUtc=$env:COLD_JOB_DEADLINE_UTC; requiredMinutesBeforeSessionPost=30
+   stateObservationOnly=$coldShareStateObservation; processReads=$(if($coldShareStateObservation){1}else{0}); originalActivation=$false
    outcomeGate='First touch and full ten-minute onset coverage remain unverified until original decoded video frames align with native input/log evidence.'
   }),[Text.UTF8Encoding]::new($false))
  }else{

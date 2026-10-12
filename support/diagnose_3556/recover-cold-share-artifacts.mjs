@@ -16,6 +16,7 @@ assert(!options['--socks5']||options['--socks5']==='100.108.223.54:38471','Unadm
 const originalBytes=readFileSync(options['--receipt']),originalSha=createHash('sha256').update(originalBytes).digest('hex');
 assert(originalSha===options['--receipt-sha256'],'Immutable original cloud retention receipt hash differs');
 const original=JSON.parse(originalBytes.toString()),session=original.session,deadline=Date.parse(original.deadlineUtc);
+const stateObservation=original.stateObservationOnly===true,artifactFields=['video_url','device_logs_url','appium_logs_url',...(stateObservation?['logs']:[])];
 assert(typeof session==='string'&&/^[a-f0-9]{32,64}$/.test(session)&&Number.isFinite(deadline),'Original cloud receipt session/deadline unavailable');
 const output=path.resolve(options['--output']);assert(!existsSync(output),'Recovery output must be a new directory; existing/late artifacts are never overwritten');mkdirSync(output,{mode:0o700});
 const receipt={status:'incomplete',session,originalReceiptSha256:originalSha,deadlineUtc:original.deadlineUtc,startedUtc:new Date().toISOString(),attempts:[],
@@ -98,20 +99,21 @@ try{
   assert(statSync(options['--metadata']).size<=1024*1024,'Private metadata file byte limit exceeded');let privateValue;
   try{privateValue=JSON.parse(readFileSync(options['--metadata'],'utf8'));}catch{throw Error('Private same-session metadata must be valid JSON');}metadata=privateValue.automation_session||privateValue;
   assert(metadata?.hashed_id===session,'Private metadata does not identify the exact original session');
-  for(const field of ['video_url','device_logs_url','appium_logs_url'])if(metadata[field])checked(metadata[field],field);
+  for(const field of artifactFields)if(metadata[field])checked(metadata[field],field);
   receipt.initialMetadataSessionValidated=true;
   const chunks=[];let bytes=0;for await(const chunk of process.stdin){bytes+=chunk.length;assert(bytes<=65536,'Credential stdin byte limit exceeded');chunks.push(chunk);}
   try{credentials=JSON.parse(Buffer.concat(chunks).toString());}catch{throw Error('Credential stdin must be valid JSON');}
   assert(typeof credentials.username==='string'&&credentials.username&&typeof credentials.key==='string'&&credentials.key,'Recovery credentials unavailable on stdin');
   // Reserve up to thirty seconds independently for each log, sharing short remaining budgets without extending them.
-  const logReserve=Math.min(30000,Math.max(0,Math.floor((deadline-Date.now())/2))),videoEnd=deadline-2*logReserve,deviceEnd=deadline-logReserve;
+  const logCount=stateObservation?3:2,logReserve=Math.min(30000,Math.max(0,Math.floor((deadline-Date.now())/logCount))),
+   videoEnd=deadline-logCount*logReserve,deviceEnd=deadline-(logCount-1)*logReserve,appiumEnd=deadline-(stateObservation?1:0)*logReserve;
   receipt.logReservationMsEach=logReserve;let meta;
   try{meta=await request('metadata','https://api-cloud.browserstack.com/app-automate/sessions/'+session+'.json',videoEnd,10000,1024*1024);}
   catch{receipt.metadataRefresh='unavailable-private-original-same-session-references-preserved';}
   const previousMetadata=metadata;let metadataPromoted=false;
   if(meta?.entry.exitCode===0&&meta.entry.httpStatus===200&&!meta.entry.finishedAfterPhaseDeadline&&!meta.entry.finishedAfterRequestDeadline&&!meta.entry.finishedAfterOriginalDeadline){
    try{const fresh=JSON.parse(readFileSync(meta.body,'utf8')).automation_session;assert(fresh?.hashed_id===session,'Fresh recovery metadata does not identify the exact original session');
-    const candidate={...metadata};for(const field of ['video_url','device_logs_url','appium_logs_url'])if(fresh[field])candidate[field]=checked(fresh[field],field).href;
+    const candidate={...metadata};for(const field of artifactFields)if(fresh[field])candidate[field]=checked(fresh[field],field).href;
     receipt.metadataRefreshCompletedUtc=new Date().toISOString();assert(Date.now()<Math.min(videoEnd,deadline,Date.parse(meta.entry.requestDeadlineUtc)),'Fresh metadata validation completed late');metadata=candidate;metadataPromoted=true;
     receipt.metadataRefresh='same-session-validated';}catch{receipt.metadataRefresh='unavailable-private-original-same-session-references-preserved';}
   }else receipt.metadataRefresh='unavailable-private-original-same-session-references-preserved';save();
@@ -119,8 +121,9 @@ try{
   if(metadataPromoted&&Date.now()>=Math.min(videoEnd,deadline,Date.parse(meta.entry.requestDeadlineUtc))){metadata=previousMetadata;receipt.metadataRefresh='late-unusable-private-original-same-session-references-preserved';save();}
   const video=await artifact('video_url',videoEnd,35000,1024*1024*1024);
   const device=await artifact('device_logs_url',deviceEnd,10000,100*1024*1024);
-  const appium=await artifact('appium_logs_url',deadline,10000,100*1024*1024);
-  receipt.artifacts={video,device,appium};receipt.status=video&&device&&appium?'candidates-retained-pending-independent-audit':'incomplete';
+  const appium=await artifact('appium_logs_url',appiumEnd,10000,100*1024*1024);
+  const text=stateObservation?await artifact('logs',deadline,10000,100*1024*1024):null;
+  receipt.artifacts={video,device,appium,...(stateObservation?{text}: {})};receipt.status=video&&device&&appium&&(!stateObservation||text)?'candidates-retained-pending-independent-audit':'incomplete';
   if(receipt.status==='incomplete')process.exitCode=1;
  }
 }catch(error){receipt.error=safeError(error);process.exitCode=1;}

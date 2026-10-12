@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import {readFileSync,openSync,writeSync,closeSync,renameSync,createWriteStream} from 'node:fs';
+import {readFileSync,writeFileSync,openSync,writeSync,closeSync,renameSync,createWriteStream} from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
+const stateObservation=process.env.COLD_SHARE_STATE_OBSERVATION==='1';
+const artifactFields=['video_url','device_logs_url','appium_logs_url',...(stateObservation?['logs']:[])];
 const minute=60000,original='org.localsend.localsend_app',helper='org.localsend.fixture3556';
 
 // Keep signed references in memory; public receipts omit their queries and fragments.
@@ -14,13 +16,13 @@ export async function coldShareRecordingPreflight({session,auth,save}){
  assert(value?.hashed_id===session,'Share preflight metadata does not identify the exact owned session');
  assert(value.video_url&&value.device_logs_url,'Share recording precondition: video/native log references unavailable');
  const references={hashed_id:session};const publicReferences={};
- for(const field of ['video_url','device_logs_url','appium_logs_url'])if(value[field]){
+ for(const field of artifactFields)if(value[field]){
   const u=new URL(value[field]);assert(u.protocol==='https:'&&!u.username&&!u.password&&(!u.port||u.port==='443')&&
    ['api.browserstack.com','api-cloud.browserstack.com','app-automate.browserstack.com'].includes(u.hostname),'Unexpected Share preflight artifact origin');
   references[field]=u.href;u.search='';u.hash='';publicReferences[field]=u.href;
  }
  const receipt={status:'configured+artifactreference',requestedVideo:true,checkedUtc:new Date().toISOString(),session,
-  videoReference:publicReferences.video_url,deviceLogReference:publicReferences.device_logs_url,appiumLogReference:publicReferences.appium_logs_url,
+  videoReference:publicReferences.video_url,deviceLogReference:publicReferences.device_logs_url,appiumLogReference:publicReferences.appium_logs_url,textLogReference:publicReferences.logs,
   limitation:'References do not prove playable continuous coverage; private same-session references retained in memory only.'};
  save('cold-recording-preflight.json',receipt);return {receipt,references};
 }
@@ -72,8 +74,32 @@ export async function runColdShareScenario(api){
  report.fixture={name,bytes,recipeIdentityOnly:true,uri:details.match(/\nuri=([^\n]+)/)?.[1],details,sha256:null};save('fixture.json',report.fixture);await snap('cold-fixture-ready',staged);
  // Stage before the original receives this URI, then prepare installed/not-running startup entry.
  assert(/^content:\/\/media\/external\/video\/media\/\d+$/.test(report.fixture.uri||''),'Pinned MediaStore video route missing');
- await wd('POST',base()+'/appium/device/terminate_app',{appId:original},0,Date.now()+10000);
- const stopped=await ledger('ordinary-terminate-before-incoming-Share');assert(stopped.state===1,'Original is not observed installed/not-running');
+ const terminateResult=await wd('POST',base()+'/appium/device/terminate_app',{appId:original},0,Date.now()+10000);
+ const stopped=await ledger('ordinary-terminate-before-incoming-Share');
+ if(process.env.COLD_SHARE_STATE_OBSERVATION==='1'){
+  report.scenario='Historical cold Share setup with one documented preShare process observation; no Share or onset test';
+  const started=Date.now(),deadline=Math.min(started+10000,sessionStart+10*minute,Date.parse(process.env.COLD_JOB_DEADLINE_UTC));
+  const observation=cold.stateObservation={status:'incomplete',session,terminateResult,originalAppState:stopped.state,foregroundBefore:stopped.foreground,
+   startedUtc:new Date(started).toISOString(),deadlineUtc:new Date(deadline).toISOString(),processAbsence:'unknown',executorAttempts:0,
+   command:'dumpsys activity -p org.localsend.localsend_app processes',
+   outputContract:'Official docs promise output in dashboard text logs; execute/sync stdout return is unspecified.',
+   acceptance:'Reject unsupported, empty, incomplete, truncated, late, or ambiguous process evidence. Full native UID/PID/package records require independent same-session textlog audit.'};
+  try{
+   assert(stopped.foreground===helper,'Helper foreground changed before the single process read');
+   observation.executorAttempts=1;
+   await wd('POST',base()+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:observation.command}}),args:[]},0,deadline,false,observation);
+   observation.foregroundAfter=await wd('GET',base()+'/appium/device/current_package',undefined,0,deadline);
+   assert(observation.foregroundAfter===helper,'Helper foreground changed during process observation');
+   observation.status='pending-independent-audit';
+   observation.immediateOutput=observation.executorResult?.value==null||observation.executorResult?.value===''?'empty-or-null-textlog-required':'unclassified-native-output';
+  }catch(error){observation.status=observation.responseOverCap?'incomplete-response-rejected':/late|deadline/i.test(error.message)?'late-unusable':
+    /unsupported|unknown command|not implemented/i.test(error.message)?'unsupported':'unavailable-or-ambiguous';observation.error=String(error.message);throw error;}
+  finally{observation.finishedUtc=new Date().toISOString();save('cold-share-state-observation.json',observation);
+   if(Date.now()>=deadline){observation.status='late-unusable';save('cold-share-state-observation.json',observation);}}
+  assert(observation.status==='pending-independent-audit','Single process observation receipt completed late');
+  cold.status='state-observation-pending-independent-audit';report.status=cold.status;event('state-observation-stop-before-Share');return;
+ }
+ assert(stopped.state===1,'Original is not observed installed/not-running');
  const checked=await capacity('Check picker storage',16000000000+2*1024*1024*1024);
  const beforeShare=await read(sessionStart+10*minute);await tap(beforeShare,'Share owned fixture');
  const searchEnd=Math.min(Date.now()+minute,sessionStart+10*minute);
@@ -266,11 +292,18 @@ export async function retainColdShareRecording({session,auth,save,output,report,
   try{
   const response=await fetch('https://api-cloud.browserstack.com/app-automate/sessions/'+encodeURIComponent(session)+'.json',{
    headers:{authorization:auth},signal:AbortSignal.timeout(bound(requestEnd))});
-  const chunks=[];let bytes=0;for await(const chunk of response.body){bytes+=chunk.length;assert(bytes<=1024*1024,'Session metadata byte cap exceeded');chunks.push(Buffer.from(chunk));}
+  const chunks=[];let bytes=0;
+  try{for await(const chunk of response.body){bytes+=chunk.length;assert(bytes<=1024*1024,'Session metadata byte cap exceeded');chunks.push(Buffer.from(chunk));}attempt.bodyEof=true;}
+  finally{if(stateObservation){const raw=Buffer.concat(chunks);attempt.rawResponseFile='cold-share-state-metadata-'+receipt.metadataRefreshes.length+'.response.private';
+   writeFileSync(path.join(output,attempt.rawResponseFile),raw,{mode:0o600});attempt.responseBytes=raw.length;
+   attempt.responseSha256=createHash('sha256').update(raw).digest('hex');attempt.httpStatus=response.status;
+   const headerBytes=JSON.stringify(Object.fromEntries(response.headers));attempt.rawHeadersFile=attempt.rawResponseFile+'.headers.private';
+   writeFileSync(path.join(output,attempt.rawHeadersFile),headerBytes,{mode:0o600});attempt.headersSha256=createHash('sha256').update(headerBytes).digest('hex');
+   attempt.responseOverCap=bytes>1024*1024;}}
   assert(response.ok,'Owned session metadata failed '+response.status);const value=JSON.parse(Buffer.concat(chunks).toString()).automation_session;
   assert(value?.hashed_id===session,'Metadata does not identify the exact owned session');
   const candidate={...metadata,hashed_id:session};
-  for(const field of ['video_url','device_logs_url','appium_logs_url'])if(value[field])candidate[field]=checkedUrl(value[field]).href;
+  for(const field of artifactFields)if(value[field])candidate[field]=checkedUrl(value[field]).href;
   assert(completed(attempt,end,requestEnd),'Metadata completed after its request, phase, or aggregate deadline');
   metadata=candidate;attempt.status='validated';
   }catch(error){attempt.error=scrub(error);throw error;}
@@ -278,7 +311,10 @@ export async function retainColdShareRecording({session,auth,save,output,report,
    save('cold-share-recording-retention.json',receipt);
    if(!completed(attempt,end,requestEnd)){metadata=previousMetadata;attempt.status='late-unusable';save('cold-share-recording-retention.json',receipt);throw Error('Metadata completion exceeded its immutable deadline');}}
  };
- try{await refreshMetadata(deadline-minute);}catch(error){receipt.initialMetadataRefreshError=scrub(error);save('cold-share-recording-retention.json',receipt);}
+ const logReserve=Math.min(30000,Math.max(0,Math.floor((deadline-Date.now())/(stateObservation?3:2))));
+ const videoEnd=Math.min(deadline-(stateObservation?3:2)*logReserve,Date.now()+2*minute),deviceEnd=deadline-(stateObservation?2:1)*logReserve,appiumEnd=deadline-(stateObservation?1:0)*logReserve;
+ receipt.stateObservationOnly=stateObservation;receipt.logReservationMsEach=logReserve;
+ try{await refreshMetadata(videoEnd);}catch(error){receipt.initialMetadataRefreshError=scrub(error);save('cold-share-recording-retention.json',receipt);}
  const download=async(field,file,end)=>{
   let totalBytes=0;const cap=field==='video_url'?1024*1024*1024:100*1024*1024;
   for(let attempt=1;attempt<=3&&Date.now()<end;attempt++){
@@ -321,10 +357,13 @@ export async function retainColdShareRecording({session,auth,save,output,report,
   }
   receipt.attempts.push({field,status:'unavailable',reason:'Finite attempts/phase exhausted',utc:new Date().toISOString()});save('cold-share-recording-retention.json',receipt);return false;
  };
- const video=await download('video_url','cold-share-provider-original.mp4',Math.min(deadline-minute,Date.now()+2*minute));
+ const video=await download('video_url','cold-share-provider-original.mp4',videoEnd);
  // Both primary log artifacts are attempted independently before decoder failure can end retention.
- await download('device_logs_url','cold-share-provider-device.log',Math.min(deadline,Date.now()+30000));
- await download('appium_logs_url','cold-share-provider-appium.log',Math.min(deadline,Date.now()+30000));
+ const device=await download('device_logs_url','cold-share-provider-device.log',deviceEnd);
+ const appium=await download('appium_logs_url','cold-share-provider-appium.log',appiumEnd);
+ const text=stateObservation?await download('logs','cold-share-provider-text.log',deadline):null;
+ receipt.artifacts={video,device,appium,...(stateObservation?{text}: {})};save('cold-share-recording-retention.json',receipt);
+ if(stateObservation)assert(text&&device&&appium,'State observation same-session text/native/Appium logs incomplete; process absence remains unknown');
  assert(video,'Original Share video unavailable; native/error receipts retained');
  const decodeEnd=Math.min(deadline,Date.now()+2*minute);
  const run=async(command,args,onData)=>{
@@ -342,7 +381,7 @@ export async function retainColdShareRecording({session,auth,save,output,report,
   finally{await new Promise(ok=>stream.end(ok));}
   assert(frames>0&&last>first,'Original frame timeline unavailable');receipt.timeline={ptsFile,frames,firstPts:first,lastPts:last,maxGapSeconds:maxGap,regressions,mapping:'Pending independent native input/source-frame audit'};
   receipt.decode={status:'complete',stderr:await run('ffmpeg',['-v','error','-xerror','-i',videoPath,'-map','0:v:0','-f','null','-'],()=>{})};
-  receipt.status='coverage-pending-independent-audit';
+  receipt.status=stateObservation?'state-observation-pending-independent-audit':'coverage-pending-independent-audit';
  }catch(error){receipt.validationError=scrub(error);throw error;}finally{save('cold-share-recording-retention.json',receipt);}
 }
 

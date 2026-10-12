@@ -15,6 +15,8 @@ import {runColdShareScenario,coldShareRecordingPreflight,retainColdShareRecordin
 const largeDiagnostic=process.env.LARGE_TRANSFER_DIAGNOSTIC==='1';
 const coldFileDiagnostic=process.env.COLD_FILE_DIAGNOSTIC==='1';
 const coldShareDiagnostic=process.env.COLD_SHARE_DIAGNOSTIC==='1';
+const coldShareStateObservation=process.env.COLD_SHARE_STATE_OBSERVATION==='1';
+assert(!coldShareStateObservation||coldShareDiagnostic,'State observation requires the historical cold Share setup');
 assert([largeDiagnostic,coldFileDiagnostic,coldShareDiagnostic].filter(Boolean).length<=1,'Diagnostic modes are mutually exclusive');
 const coldDiagnostic=coldFileDiagnostic||coldShareDiagnostic;
 assert(!coldDiagnostic||(process.env.SHARE_AFTER_CONTROL!=='1'&&process.env.MODERATE_TRANSFER_CONTROL!=='1'),'Cold onset is incompatible with Share/moderate controls');
@@ -62,7 +64,7 @@ function admit(){assert(!largeDiagnostic||sessionAge()<20*minute,'Large stage/co
 function commandLimit(url){if(coldDiagnostic&&url!=='/session')return 10000;if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
 const r=coldDiagnostic?null:relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
-async function wd(method,url,body,attempt=0,readDeadline=Infinity,terminalRead=false){
+async function wd(method,url,body,attempt=0,readDeadline=Infinity,terminalRead=false,observation=null){
  const started=Date.now();
  assert(!wdBusy,'WebDriver commands must remain serial');
  const timeout=Math.floor(Math.min(commandLimit(url),remaining(),readDeadline-Date.now()));assert(timeout>0,'WebDriver phase deadline expired');
@@ -74,7 +76,24 @@ async function wd(method,url,body,attempt=0,readDeadline=Infinity,terminalRead=f
  response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{
   method,headers:{authorization:auth,'content-type':'application/json'},
   body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(boundedDiagnostic?timeout:(url==='/session'?300000:120000))});
- const json=await response.json();
+ let json;
+ if(observation){
+  const chunks=[];let bytes=0;
+  observation.httpStatus=response.status;observation.responseHeaders=Object.fromEntries(['content-type','content-length','date'].map(key=>[key,response.headers.get(key)]).filter(([,value])=>value!==null));
+  try{for await(const chunk of response.body){bytes+=chunk.length;
+   if(bytes>1024*1024){observation.responseOverCap=true;throw Error('State executor response exceeds 1 MiB; incomplete evidence rejected');}
+   chunks.push(Buffer.from(chunk));}
+   observation.bodyEof=true;
+  }finally{
+   const raw=Buffer.concat(chunks);observation.responseBytes=raw.length;observation.responseSha256=createHash('sha256').update(raw).digest('hex');
+   observation.rawResponseFile='cold-share-state-executor.response.private';
+   writeFileSync(path.join(output,observation.rawResponseFile),raw,{mode:0o600});
+   observation.bodyFinishedUtc=new Date().toISOString();
+  }
+  assert(Date.now()<Math.min(started+timeout,readDeadline),'State executor body completed late; retained response unusable');
+  json=JSON.parse(Buffer.concat(chunks).toString());
+  observation.executorResult=json;observation.responseComplete=true;
+ }else json=await response.json();
  // Never retain capabilities containing private uploaded-app references.
  appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
   utc:new Date(started).toISOString(),method,path:url,body:url==='/session'?'[private capability references omitted]':body,
