@@ -281,7 +281,8 @@ def rendered_sender_label(label):
     # visible labels are readable; inverse-map every returned bound explicitly.
     ocr_scale = 3
     ocr_image = OUT / (prefix + '-ocr3x.png')
-    control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', 'scale=iw*3:ih*3', '-frames:v', '1', str(ocr_image), timeout=10)
+    ocr_filter = 'format=gray,lut=y=if(lt(val\\,180)\\,0\\,255),scale=iw*3:ih*3'
+    control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', ocr_filter, '-frames:v', '1', str(ocr_image), timeout=10)
     raw = control_cmd('tesseract', str(ocr_image), 'stdout', '--psm', '11', 'tsv', timeout=15)
     (OUT / (prefix + '.tsv')).write_text(raw)
     matches = []
@@ -291,7 +292,7 @@ def rendered_sender_label(label):
         left, top, w, h = (int(row[key])/ocr_scale for key in ('left', 'top', 'width', 'height'))
         if w > 0 and h > 0 and x <= left and y <= top and left+w <= x+width and top+h <= y+height:
             matches.append({'label': label, 'bounds': [left, top, w, h], 'confidence': float(row['conf'])})
-    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': [x, y, width, height], 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale}
+    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': [x, y, width, height], 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter}
     write(prefix + '.json', observation)
     if len(matches) > 1:
         raise RuntimeError('Ambiguous rendered sender label')
@@ -329,6 +330,23 @@ def qualify_sender_input_actions():
         raise RuntimeError('No baseline port53317 listener owned by actual senderPID')
     stage = 'rendered-control-settings'
     rendered_sender_tap('Settings')
+    if os.environ.get('SETTINGS_ONLY_2955') == '1':
+        stage = 'rendered-settings-native-controls-observation'
+        observations = []
+        for attempt in range(9):
+            observation, server = rendered_sender_label('Server')
+            observations.append(observation)
+            write('sender-settings-observation.json', {'server_row_observed': server is not None, 'observations': observations, 'control': 'Settings clicked; Start/Stop not attempted', 'delivery': 'not attempted'})
+            if server is not None:
+                return
+            if attempt < 8:
+                if control_cmd('xdotool', 'getactivewindow', timeout=5).strip() != observation['window'] or sender_process.poll() is not None:
+                    raise RuntimeError('Sender identity changed before Settings observation scroll')
+                x, y, width, height = observation['geometry']
+                log('rendered-settings-observation-scroll', observation)
+                control_cmd('xdotool', 'mousemove', '--sync', str(x+width*3//4), str(y+height//2), 'click', '--repeat', '3', '--delay', '100', '5', timeout=5)
+                time.sleep(.3)
+        raise RuntimeError('Server row not located; retain actual Settings observations')
     stage = 'rendered-control-stop'
     rendered_sender_tap('Stop', scroll=True)
     stage = 'rendered-control-stopped'

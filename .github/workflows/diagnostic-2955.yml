@@ -25,6 +25,7 @@ jobs:
       NO_AT_BRIDGE: '0'
       OBSERVE_2955: '1'
       CONTROL_2955: '1'
+      SETTINGS_ONLY_2955: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Install native diagnostic tools
