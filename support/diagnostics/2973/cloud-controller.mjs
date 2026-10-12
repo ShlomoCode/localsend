@@ -30,8 +30,8 @@ capabilities.capabilities.alwaysMatch['appium:app'] = process.env.APK_APP_URL;
 capabilities.capabilities.alwaysMatch['bstack:options'].buildName = buildName;
 capabilities.capabilities.alwaysMatch['bstack:options'].sessionName = `${buildName}-original`;
 if (!/^bs:\/\/[a-zA-Z0-9_-]+$/.test(process.env.APK_APP_URL ?? '')) throw new Error('A verified original APK upload identity is required');
-const planFile = process.env.PICKER_PLAN === 'preflight' ? 'preflight.json' : process.env.PICKER_PLAN === 'observation' ? 'observation.json' : 'matrix.json';
-if (!['preflight', 'observation', 'matrix'].includes(process.env.PICKER_PLAN)) throw new Error('Unknown reviewed plan');
+const planFile = { preflight: 'preflight.json', observation: 'observation.json', native_observation: 'native-observation.json', matrix: 'matrix.json' }[process.env.PICKER_PLAN];
+if (!planFile) throw new Error('Unknown reviewed plan');
 const plan = JSON.parse(await readFile(resolve(root, planFile), 'utf8'));
 if (JSON.stringify(plan).includes('REPLACE_')) throw new Error('Observed native controls and restoration values are not filled in; no session allocated');
 const matrix = process.env.PICKER_PLAN === 'matrix';
@@ -159,6 +159,7 @@ try {
   if (info.device !== expected.deviceName || String(info.os_version) !== expected.osVersion) throw new Error('Actual allocated model/OS differs from reviewed substitute');
   await transport('snapshot', '00-original-app-start');
   if (process.env.PICKER_PLAN === 'observation') await transport('observe', 'control');
+  if (process.env.PICKER_PLAN === 'native_observation') await transport('observe', 'settings');
   for (const [index, step] of plan.steps.entries()) {
     if (Date.now() > deadline) throw new Error('Bounded cloud scenario deadline reached');
     if (!['tap', 'swipe', 'snapshot'].includes(step.mode)) throw new Error('Unsupported UI plan operation');

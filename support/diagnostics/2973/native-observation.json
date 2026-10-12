@@ -1,0 +1,6 @@
+{
+  "purpose": "Observe actual About version and original Samsung native font/display controls without slider, switch or app-selection changes. Keep matrix blocked until original controls, values and ranges are inspected.",
+  "scope": "about-and-original-native-settings-only",
+  "steps": [],
+  "restore": []
+}

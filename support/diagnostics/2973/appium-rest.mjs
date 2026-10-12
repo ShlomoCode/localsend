@@ -71,6 +71,7 @@ if (mode === 'create') {
   const { sessionId } = JSON.parse(await readFile(resolve(evidence, 'owned-session.json'), 'utf8'));
   const prefix = `/session/${encodeURIComponent(sessionId)}`;
   if (mode === 'observe') {
+    if (!['control', 'settings'].includes(args[0])) throw new Error('Observe requires an explicit reviewed control or settings scope');
     // This stage exercises the real picker and reads Android settings without slider inputs.
     const events = [];
     let serial = 0;
@@ -142,6 +143,7 @@ if (mode === 'create') {
       }
       throw new Error('Apps remains unavailable after bounded actual picker-bar navigation');
     }
+    if (args[0] === 'control') {
     await byLabel('Send', 'receive');
     const initialSend = await capture('initial-send-selection');
     if (!['File','Media','Paste'].every(label => initialSend.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true'))) throw new Error('Initial Send selection is not observed empty; preserve it and stop');
@@ -195,7 +197,6 @@ if (mode === 'create') {
     if (!restoredPicker.nodes.some(node => node.class === 'android.widget.Switch' && node.checked === 'false')) throw new Error('Original picker switch off not verified');
     await writeFile(resolve(evidence, 'observation-state.json'), JSON.stringify({ originalSendSelection: 'empty-observed', originalMultipleSwitch: false, mutationMayHaveOccurred: false, restorationVerified: true }, null, 2));
     await back();
-    if (args[0] === 'control') {
       await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ scope: 'default-picker-control-only', originalSelectionAndSwitchRestorationVerified: true, androidSettingsChanged: false, aboutAndNativeSettingsObserved: false, enlargementProductFailureValidated: false }, null, 2));
     } else {
     await byLabel('Settings', 'send-after-apps');
@@ -221,7 +222,7 @@ if (mode === 'create') {
     // Real notification shade gestures use the live window dimensions, not stored coordinates.
     const { value: size } = await request('GET', prefix + '/window/rect');
     if (!Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) throw new Error('Live window dimensions unavailable');
-    const x = Math.floor(size.width / 2), startY = 1, endY = Math.floor(size.height * 0.8);
+    const x = Math.floor(size.width * 0.85), startY = 1, endY = Math.floor(size.height * 0.8);
     for (let attempt = 0; attempt < 2; attempt++) {
       await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
         { type: 'pointerMove', duration: 0, x, y: startY }, { type: 'pointerDown', button: 0 }, { type: 'pointerMove', duration: 600, x, y: endY }, { type: 'pointerUp', button: 0 },
@@ -235,15 +236,35 @@ if (mode === 'create') {
     await byLabel('Display', 'android-settings');
     await capture('display-original');
     await byLabel('Screen zoom', 'display-before-zoom');
+    function describeOriginalSettingsScreen(screen, heading) {
+      const headings = screen.nodes.filter(node => node.displayed === 'true' && (node.text === heading || node['content-desc'] === heading));
+      const toolbarHeadings = headings.filter(node => {
+        let ancestor = node;
+        for (let depth = 0; depth < 30 && ancestor.parentIndex !== null; depth++) {
+          ancestor = screen.nodes[ancestor.parentIndex];
+          if (/Toolbar/.test(ancestor.class ?? '') && ancestor.package === 'com.android.settings') return true;
+        }
+        return false;
+      });
+      return {
+        subpageIdentityVerified: toolbarHeadings.length > 0 && screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true'),
+        expectedHeading: heading, nativeHeadingCandidates: headings, observedToolbarHeadings: toolbarHeadings,
+        nativeControls: screen.nodes.filter(node => node.package === 'com.android.settings' && node.displayed === 'true' && /SeekBar|Slider/.test(node.class ?? '')),
+        nativeLabels: screen.nodes.filter(node => node.text || node['content-desc']),
+        rangeEstablished: false, screenshotInspectionRequired: true,
+      };
+    }
     const zoom = await capture('screen-zoom-original');
-    const originalControls = { screenZoom: { nativeControls: zoom.nodes.filter(node => /SeekBar|Slider/.test(node.class ?? '')), nativeLabels: zoom.nodes.filter(node => node.text || node['content-desc']), rangeEstablished: false, screenshotInspectionRequired: true } };
+    const originalControls = { screenZoom: describeOriginalSettingsScreen(zoom, 'Screen zoom') };
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
     await back();
     await byLabel('Font size and style', 'display-before-font');
     const font = await capture('font-size-original');
-    originalControls.fontSize = { nativeControls: font.nodes.filter(node => /SeekBar|Slider/.test(node.class ?? '')), nativeLabels: font.nodes.filter(node => node.text || node['content-desc']), rangeEstablished: false, screenshotInspectionRequired: true };
+    originalControls.fontSize = describeOriginalSettingsScreen(font, 'Font size and style');
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
-    await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ settingsChanged: false, productValidated: false, originalNativeScreensCaptured: true }, null, 2));
+    const identitiesVerified = originalControls.screenZoom.subpageIdentityVerified && originalControls.fontSize.subpageIdentityVerified;
+    await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ settingsChanged: false, productValidated: false, originalNativeSnapshotsCaptured: true, originalNativeSubpageIdentitiesVerified: identitiesVerified, rangesEstablished: false }, null, 2));
+    if (!identitiesVerified) throw new Error('Native target subpage identity requires original screenshot inspection; matrix remains blocked');
     }
   } else if (mode === 'snapshot') {
     const label = args[0];
