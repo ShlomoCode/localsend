@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
 # Actual visible UI controls: wait for app initialization and identify rows by text.
 stop_ui_recording() {
-  local result=0
+  local result=0 signal attempt ticks
   if [ -z "${recording_pid:-}" ]; then return 0; fi
   # A command-substitution subshell must never stop its parent's recording.
   if [ "${recording_owner:-}" != "$BASHPID" ]; then return 0; fi
-  kill -INT "$recording_pid" 2>/dev/null || true
+  for signal in INT TERM KILL; do
+    if [ ! -f "/proc/$recording_pid/stat" ]; then break; fi
+    ticks=$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$recording_pid/stat") || return 1
+    if [ -z "${recording_ticks:-}" ] || [ "$ticks" != "$recording_ticks" ]; then
+      printf 'recording_pid_reused_or_unqualified=%s; no signal\n' "$recording_pid" >> "$OUT/recording-results.txt"
+      recording_pid=''
+      return 1
+    fi
+    printf '%s recorder_signal=%s owned_pid=%s start=%s\n' "$(date -u --iso-8601=ns)" "$signal" "$recording_pid" "$ticks" >> "$OUT/recording-results.txt"
+    kill -"$signal" "$recording_pid" 2>/dev/null || true
+    for attempt in $(seq 1 20); do
+      test -f "/proc/$recording_pid/stat" || break
+      sleep .1
+    done
+  done
+  if [ -f "/proc/$recording_pid/stat" ]; then
+    printf 'recorder_shutdown_incomplete=%s; no unbounded wait\n' "$recording_pid" >> "$OUT/recording-results.txt"
+    recording_pid=''
+    return 1
+  fi
   wait "$recording_pid" || result=$?
   recording_pid=''
   printf 'ffmpeg_exit=%s\n' "$result" >> "$OUT/recording-results.txt"
-  # ffmpeg returns 255 after the requested SIGINT; the MP4 is finalized.
+  # 255 can be a normal signal status; retained decode/frame checks qualify media.
   [ "$result" = 0 ] || [ "$result" = 255 ]
 }
 trap stop_ui_recording EXIT
@@ -18,6 +37,8 @@ start_ui_recording() {
   ffmpeg -nostdin -y -f x11grab -video_size 1280x800 -framerate 15 -i "$DISPLAY" -t 360 -c:v libx264 -pix_fmt yuv420p "$OUT/$label.mp4" > "$OUT/$label-recording.log" 2>&1 &
   recording_pid=$!
   recording_owner=$BASHPID
+  recording_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$recording_pid/stat")
+  [[ "$recording_ticks" =~ ^[0-9]+$ ]]
   sleep 1
   kill -0 "$recording_pid"
 }
@@ -244,6 +265,7 @@ qualified_app_pid() {
   # Flatpak ps reports the supervisor, not the executable leaf. Resolve the
   # unique actual app leaf across ALL app-ID rows, including nested sandboxes.
   local identity_label=$1 transition_deadline=$((SECONDS+12)) uid rows instance anchor descendants pid actual expected status info ticks before_ticks gtk_path found=''
+  if [ -n "${2:-}" ] && [ "$2" -lt "$transition_deadline" ]; then transition_deadline=$2; fi
   local qualified_count=0 qualified_tokens='' token row_count=0 row_qualified result evidence_prefix pid_namespace mount_namespace
   [[ "${EXPECTED_APP_COMMIT:-}" =~ ^[0-9a-f]{64}$ ]] || return 1
   uid=$(id -u) || return 1
@@ -388,6 +410,7 @@ start_xres_control() {
 }
 qualified_visible_window() {
   local identity_label=$1 pid=$2 transition_deadline=$((SECONDS+8)) windows expected_ticks actual_ticks actual_inode expected_inode uid
+  if [ -n "${3:-}" ] && [ "$3" -lt "$transition_deadline" ]; then transition_deadline=$3; fi
   windows=$(identity_command windows xdotool search --onlyvisible --name '^LocalSend$') || return 1
   [[ "$windows" =~ ^[0-9]+$ ]] || return 1
   identity_command window-properties xprop -id "$windows" WM_CLASS _NET_WM_PID > "$OUT/$identity_label-window-properties.txt" || return 1

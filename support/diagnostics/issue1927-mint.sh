@@ -25,6 +25,7 @@ cp support/diagnostics/issue1927.sh /tmp/issue1927-mint/seed/scenario.sh
 cp support/diagnostics/issue1927-portal-gui.sh /tmp/issue1927-mint/seed/portal-gui.sh
 cp support/diagnostics/issue1927-ui.sh /tmp/issue1927-mint/seed/ui.sh
 cp support/diagnostics/issue1927-xres-owner.c /tmp/issue1927-mint/seed/xres-owner.c
+cp support/diagnostics/issue1927-dbus-owner.c /tmp/issue1927-mint/seed/dbus-owner.c
 cp evidence/packages/{baseline,candidate}.flatpak /tmp/issue1927-mint/seed/
 cat > /tmp/issue1927-mint/seed/bootstrap.sh <<'BOOT'
 #!/bin/bash
@@ -36,6 +37,7 @@ cp /mnt/scenario.sh /home/mint/scenario.sh
 cp /mnt/portal-gui.sh /home/mint/portal-gui.sh
 cp /mnt/ui.sh /home/mint/ui.sh
 cp /mnt/xres-owner.c /home/mint/xres-owner.c
+cp /mnt/dbus-owner.c /home/mint/dbus-owner.c
 cp /mnt/{baseline,candidate}.flatpak /home/mint/
 chown -R mint:mint /home/mint/.ssh /home/mint/evidence /home/mint/scenario.sh
 chmod 700 /home/mint/.ssh
@@ -58,8 +60,10 @@ for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
   sed -i '/^[[:space:]]*deb.*cdrom:/s/^/# Live-media cdrom source disabled: /' "$source"
 done
 timeout --foreground 240 apt-get update
-timeout --foreground 600 apt-get install -y openssh-server xdotool imagemagick tesseract-ocr ffmpeg gcc pkg-config libx11-dev libxres-dev gjs gir1.2-atspi-2.0 jq
+timeout --foreground 600 apt-get install -y openssh-server xdotool imagemagick tesseract-ocr ffmpeg gcc pkg-config libx11-dev libxres-dev libglib2.0-dev gjs gir1.2-atspi-2.0 jq
 gcc -std=c11 -Wall -Wextra -Werror /home/mint/xres-owner.c -o /home/mint/xres-owner $(pkg-config --cflags --libs x11 xres)
+gcc -std=c11 -Wall -Wextra -Werror /home/mint/dbus-owner.c -o /home/mint/dbus-owner $(pkg-config --cflags --libs gio-2.0 gio-unix-2.0)
+{ pkg-config --modversion gio-2.0 gio-unix-2.0; dpkg-query -W libglib2.0-dev libglib2.0-0t64; sha256sum /home/mint/dbus-owner.c /home/mint/dbus-owner; } > /home/mint/evidence/dbus-owner-build-provenance.txt
 { pkg-config --modversion x11 xres; dpkg-query -W libxres1 libxres-dev libx11-6; sha256sum /home/mint/xres-owner.c /home/mint/xres-owner; } > /home/mint/evidence/xres-build-provenance.txt
 systemctl start ssh
 touch /home/mint/evidence/bootstrap-complete

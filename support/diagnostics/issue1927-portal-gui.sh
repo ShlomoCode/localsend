@@ -9,6 +9,69 @@ APP=org.localsend.localsend_app
 HOST_CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
 ENTRY="$HOST_CONFIG/autostart/$APP.desktop"
 request_pending=0
+credential_pid=''
+credential_owner=''
+credential_ticks=''
+monitor_pid=''
+start_credential_observer() {
+  local label=$1 deadline=$((SECONDS+8)) marker pid ticks obs ctrl began extra
+  test -z "$credential_pid" || fail_case "$label-credential-already-running"
+  CREDENTIAL_LOG="$OUT/$label-credentials.tsv"
+  CREDENTIAL_ERROR="$OUT/$label-credentials.stderr"
+  CREDENTIAL_READY="$OUT/$label-credentials.ready"
+  /home/mint/dbus-owner "$CREDENTIAL_READY" 900 > "$CREDENTIAL_LOG" 2> "$CREDENTIAL_ERROR" &
+  credential_pid=$!
+  credential_owner=$BASHPID
+  credential_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$credential_pid/stat") || fail_case "$label-credential-start-stat"
+  [[ "$credential_ticks" =~ ^[0-9]+$ ]] || fail_case "$label-credential-start-ticks"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    kill -0 "$credential_pid" 2>/dev/null || fail_case "$label-credential-early-exit"
+    test ! -s "$CREDENTIAL_ERROR" || fail_case "$label-credential-stderr"
+    if [ -s "$CREDENTIAL_READY" ]; then
+      read -r marker pid ticks obs ctrl began extra < "$CREDENTIAL_READY" || fail_case "$label-credential-partial-ready"
+      test "$marker" = READY && test "$pid" = "$credential_pid" && test "$ticks" = "$credential_ticks" && test -z "$extra" || fail_case "$label-credential-ready-identity"
+      [[ "$obs" =~ ^:[0-9]+\.[0-9]+$ && "$ctrl" =~ ^:[0-9]+\.[0-9]+$ && "$began" =~ ^[0-9]+$ ]] || fail_case "$label-credential-ready-format"
+      test "$obs" != "$ctrl" || fail_case "$label-credential-own-names"
+      test "$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$credential_pid/stat")" = "$credential_ticks" || fail_case "$label-credential-ready-reused"
+      awk -F '\t' -v obs="$obs" -v ctrl="$ctrl" -v pid="$pid" -v uid="$(id -u)" -v ticks="$ticks" '
+        $1=="CREDENTIAL" && ($2==obs || $2==ctrl) {if($3!="collector-own" || $4!=pid || $5!=uid || $6!=ticks)bad=1; seen[$2]++}
+        $1=="TERMINAL" {bad=1}
+        END{exit !(seen[obs]==1 && seen[ctrl]==1 && !bad)}
+      ' "$CREDENTIAL_LOG" || fail_case "$label-credential-controls"
+      printf '%s segment=%s pid=%s start=%s ready_monotonic_us=%s\n' "$(date -u --iso-8601=ns)" "$label" "$pid" "$ticks" "$began" >> "$OUT/credential-segments.txt"
+      return
+    fi
+    sleep .1
+  done
+  fail_case "$label-credential-ready-deadline"
+}
+stop_credential_observer() {
+  local allow_closed=${1:-false} n signal ticks result=0 terminal
+  test -n "$credential_pid" || return 0
+  test "$credential_owner" = "$BASHPID" || return 0
+  for signal in TERM KILL; do
+    test -f "/proc/$credential_pid/stat" || break
+    ticks=$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$credential_pid/stat") || return 1
+    test "$ticks" = "$credential_ticks" || { credential_pid=''; return 1; }
+    kill -"$signal" "$credential_pid" 2>/dev/null || true
+    for n in $(seq 1 20); do
+      test -f "/proc/$credential_pid/stat" || break
+      sleep .1
+    done
+  done
+  if [ -f "/proc/$credential_pid/stat" ]; then credential_pid=''; return 1; fi
+  wait "$credential_pid" || result=$?
+  credential_pid=''
+  test ! -s "$CREDENTIAL_ERROR" || return 1
+  terminal=$(awk -F '\t' '$1=="TERMINAL"{print $2}' "$CREDENTIAL_LOG")
+  printf '%s segment=%s terminal=%s exit=%s real_session_boundary=%s\n' "$(date -u --iso-8601=ns)" "$CREDENTIAL_LOG" "$terminal" "$result" "$allow_closed" >> "$OUT/credential-segments.txt"
+  { test "$terminal" = stopped && test "$result" = 0; } || { test "$allow_closed" = true && test "$terminal" = connection-closed && test "$result" = 1; }
+}
+credential_observer_live() {
+  test -n "$credential_pid" && kill -0 "$credential_pid" 2>/dev/null &&
+    test "$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$credential_pid/stat")" = "$credential_ticks" &&
+    test ! -s "$CREDENTIAL_ERROR" && ! grep -q '^TERMINAL' "$CREDENTIAL_LOG"
+}
 start_portal_monitor() {
   local label=$1 owner
   test "$request_pending" = 0
@@ -41,7 +104,6 @@ stop_portal_monitor() {
   wait "$monitor_pid" || true
   monitor_pid=''
 }
-start_portal_monitor initial
 wait_launch_bookkeeping() {
   local label=$1 identity_label="$1-launch-ready" transition_deadline=$2 attempt=0 rows='' previous_rows='' result uid
   uid=$(identity_command uid id -u) || return 1
@@ -157,9 +219,11 @@ permission_read() {
 permission_set() {
   local label=$1 value=$2 result=0
   test "$request_pending" = 0 || fail_case "$label-live-request"
+  credential_observer_live || fail_case "$label-credential-observer-not-live"
   permission_read "$label-before" ''
   portal_index
   test "$(wc -l < "$OUT/portal-calls.txt")" = "$known_call_count" || fail_case "$label-late-request-before-permission-mutation"
+  credential_observer_live || fail_case "$label-credential-observer-failed-before-mutation"
   timeout -s KILL 8 flatpak permission-set background background "$APP" "$value" > "$OUT/$label-permission-operation.txt" 2>&1 || result=$?
   printf '%s exit=%s exact_app=%s value=%s\n' "$(date -u --iso-8601=ns)" "$result" "$APP" "$value" >> "$OUT/$label-permission-operation.txt"
   if [ "$result" != 0 ]; then
@@ -216,9 +280,9 @@ entry_read() {
   ' "$OUT/$label-entry.desktop" > "$OUT/$label-entry-state.txt" || fail_case "$label-entry-parser"
 }
 visible_identity() {
-  local label=$1 original=$2 leaf
-  leaf=$(qualified_app_pid "$label") || fail_case "$label-app-identity"
-  wid=$(qualified_visible_window "$label" "$leaf") || fail_case "$label-window-identity"
+  local label=$1 original=$2 deadline=${3:-} leaf
+  leaf=$(qualified_app_pid "$label" "$deadline") || fail_case "$label-app-identity"
+  wid=$(qualified_visible_window "$label" "$leaf" "$deadline") || fail_case "$label-window-identity"
   printf '%s\n' "$wid" > "$OUT/$label-window.txt"
   if [ -n "$original" ]; then
     cmp "$OUT/$original-process-identity.txt" "$OUT/$label-process-identity.txt" || fail_case "$label-replacement-process"
@@ -262,6 +326,7 @@ portal_index() {
   ' callsfile="$OUT/portal-calls.txt" "$PORTAL_LOG" > "$OUT/portal-index.txt"
 }
 portal_mark() {
+  credential_observer_live || fail_case "$1-credential-observer-not-live"
   portal_index
   mark_calls=$(wc -l < "$OUT/portal-calls.txt")
   test "$mark_calls" = "$known_call_count" || fail_case "$1-unexpected-between-actions-mutation"
@@ -270,6 +335,7 @@ portal_mark() {
 }
 passive_boundary() {
   local label=$1
+  credential_observer_live || fail_case "$label-credential-observer-not-live"
   portal_index
   test "$(wc -l < "$OUT/portal-calls.txt")" = "$mark_calls" || fail_case "$label-unexpected-passive-mutation"
   cp "$OUT/portal-index.txt" "$OUT/$label-index-after.txt"
@@ -290,28 +356,40 @@ terminal_payload() {
   printf '%s handle=%s sender=%s serial=%s\n' "$(date -u --iso-8601=ns)" "$handle" "$sender" "$serial" >> "$OUT/$label-request-attribution.txt"
 }
 attribute_request() {
-  local label=$1 sender=$2 instance anchor leaf ticks sender_pid before_ticks after_ticks
-  read -r instance anchor leaf ticks < "$OUT/$label-before-input-process-identity.txt"
-  timeout -s KILL 8 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.GetConnectionUnixProcessID "$sender" > "$OUT/$label-sender-credential.txt"
-  sender_pid=$(sed -n 's/^(uint32 \([0-9]*\),)$/\1/p' "$OUT/$label-sender-credential.txt")
-  [[ "$sender_pid" =~ ^[0-9]+$ ]] || fail_case "$label-sender-credential"
-  timeout -s KILL 8 sudo -n cat "/proc/$sender_pid/stat" > "$OUT/$label-sender-stat-before.txt"
+  local label=$1 sender=$2 instance anchor leaf ticks sender_pid sender_uid captured_ticks before_ticks after_ticks count=0
+  local identity_label="$label-sender"
+  read -r instance anchor leaf ticks < "$OUT/$label-before-input-process-identity.txt" || fail_case "$label-original-identity-read"
+  while [ "$SECONDS" -lt "$transition_deadline" ]; do
+    credential_observer_live || fail_case "$label-credential-observer-not-live"
+    count=$(awk -F '\t' -v sender="$sender" '$1=="CREDENTIAL" && $2==sender{n++}END{print n+0}' "$CREDENTIAL_LOG") || fail_case "$label-credential-row-count"
+    test "$count" -le 1 || fail_case "$label-credential-duplicate"
+    if [ "$count" = 1 ]; then break; fi
+    sleep .1
+  done
+  test "$count" = 1 && test "$SECONDS" -lt "$transition_deadline" || fail_case "$label-credential-missing"
+  awk -F '\t' -v sender="$sender" '$1=="CREDENTIAL" && $2==sender{print; if(NF!=8 || $3!="captured" || $4!~/^[0-9]+$/ || $5!~/^[0-9]+$/ || $6!~/^[0-9]+$/ || $7!~/^[0-9]+$/ || $8!~/^[0-9]+$/ || $8<$7)exit 2}' "$CREDENTIAL_LOG" > "$OUT/$label-sender-credential.txt" || fail_case "$label-credential-incomplete"
+  read -r _ _ _ sender_pid sender_uid captured_ticks _ _ < "$OUT/$label-sender-credential.txt" || fail_case "$label-credential-read"
+  test "$sender_uid" = "$(id -u)" || fail_case "$label-credential-uid"
+  cp "$CREDENTIAL_READY" "$OUT/$label-credential-segment-ready.txt"
+  cp "$CREDENTIAL_LOG" "$OUT/$label-credential-segment-through-attribution.tsv"
+  identity_command stat-before sudo -n cat "/proc/$sender_pid/stat" > "$OUT/$label-sender-stat-before.txt" || fail_case "$label-sender-stat-before"
   before_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "$OUT/$label-sender-stat-before.txt")
-  timeout -s KILL 8 ps -u "$(id -u)" -o pid=,ppid=,uid=,comm= > "$OUT/$label-sender-topology.txt"
+  test "$before_ticks" = "$captured_ticks" || fail_case "$label-sender-captured-pid-reused"
+  identity_command topology ps -u "$sender_uid" -o pid=,ppid=,uid=,comm= > "$OUT/$label-sender-topology.txt" || fail_case "$label-sender-topology"
   # Flatpak 1.14.6 separately spawns its proxy with the same immutable app-info
   # bytes (flatpak-run-common.c:add_bwrap_wrapper/start_dbus_proxy). The proxy
   # is not a descendant of the app anchor and owns a different namespace.
-  timeout -s KILL 8 sudo -n readlink "/proc/$sender_pid/exe" > "$OUT/$label-sender-executable.txt"
+  identity_command executable sudo -n readlink "/proc/$sender_pid/exe" > "$OUT/$label-sender-executable.txt" || fail_case "$label-sender-executable"
   test "$(basename "$(cat "$OUT/$label-sender-executable.txt")")" = xdg-dbus-proxy || fail_case "$label-sender-not-proxy"
   awk -v pid="$sender_pid" -v uid="$(id -u)" '$1==pid && $3==uid{found++}END{exit found!=1}' "$OUT/$label-sender-topology.txt" || fail_case "$label-sender-uid"
-  timeout -s KILL 8 sudo -n cat "/proc/$sender_pid/root/.flatpak-info" > "$OUT/$label-sender-flatpak-info.txt"
-  timeout -s KILL 8 sudo -n cat "/proc/$leaf/root/.flatpak-info" > "$OUT/$label-leaf-flatpak-info.txt"
+  identity_command proxy-info sudo -n cat "/proc/$sender_pid/root/.flatpak-info" > "$OUT/$label-sender-flatpak-info.txt" || fail_case "$label-sender-info"
+  identity_command leaf-info sudo -n cat "/proc/$leaf/root/.flatpak-info" > "$OUT/$label-leaf-flatpak-info.txt" || fail_case "$label-leaf-info"
   cmp "$OUT/$label-sender-flatpak-info.txt" "$OUT/$label-leaf-flatpak-info.txt" || fail_case "$label-sender-other-instance"
-  timeout -s KILL 8 sudo -n readlink "/proc/$sender_pid/ns/pid" "/proc/$sender_pid/ns/mnt" > "$OUT/$label-sender-namespaces.txt"
-  timeout -s KILL 8 sudo -n cat "/proc/$sender_pid/stat" > "$OUT/$label-sender-stat-after.txt"
+  identity_command namespaces sudo -n readlink "/proc/$sender_pid/ns/pid" "/proc/$sender_pid/ns/mnt" > "$OUT/$label-sender-namespaces.txt" || fail_case "$label-sender-namespaces"
+  identity_command stat-after sudo -n cat "/proc/$sender_pid/stat" > "$OUT/$label-sender-stat-after.txt" || fail_case "$label-sender-stat-after"
   after_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "$OUT/$label-sender-stat-after.txt")
   [[ "$before_ticks" =~ ^[0-9]+$ ]] && test "$before_ticks" = "$after_ticks" || fail_case "$label-sender-reused"
-  visible_identity "$label-attributed" "$label-before-input"
+  visible_identity "$label-attributed" "$label-before-input" "$transition_deadline"
   printf '%s sender=%s sender_host_pid=%s sender_start=%s instance=%s anchor=%s leaf=%s leaf_start=%s\n' "$(date -u --iso-8601=ns)" "$sender" "$sender_pid" "$before_ticks" "$instance" "$anchor" "$leaf" "$ticks" > "$OUT/$label-request-attribution.txt"
 }
 request_click() {
@@ -510,6 +588,7 @@ revocation_cleanup() {
   trap - EXIT
   printf '%s harness_exit=%s request_pending=%s; cleanup never mutates uncertain portal request\n' "$(date -u --iso-8601=ns)" "$result" "$request_pending" >> "$OUT/cleanup-receipt.txt"
   stop_ui_recording || true
+  stop_credential_observer || printf 'credential cleanup incomplete\n' >> "$OUT/cleanup-receipt.txt"
   if [ -n "$monitor_pid" ]; then stop_portal_monitor; fi
   if [ -n "$startup_launcher" ]; then
     if [ -f "/proc/$startup_launcher/stat" ] && [ "$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$startup_launcher/stat")" = "$startup_launcher_ticks" ]; then
@@ -541,6 +620,8 @@ startup_switch() {
   y=$(jq -r '.candidates[0]|(.y+.h/2)|floor' "$OUT/$label-accessibility.json")
   printf '%s %s %s %s\n' "$startup_window" "$startup_pid" "$x" "$y"
 }
+start_credential_observer initial
+start_portal_monitor initial
 portal_mark initial-passive
 migration_gate initial-prelaunch
 launch_settings initial
@@ -586,6 +667,8 @@ passive_boundary A-login-close
 wid=''
 printf '%s old session monitor retained until LightDM ends session; new monitor begins after relogin\n' "$(date -u --iso-8601=ns)" > "$OUT/A-session-monitor-boundary.txt"
 relogin
+stop_credential_observer true || fail_case A-login-old-credential-segment
+start_credential_observer A-login
 start_portal_monitor A-login
 sleep 3
 snapshot A-next-login
@@ -672,4 +755,5 @@ wait_app_exit cleanup-close || fail_case cleanup-close
 passive_boundary cleanup-close
 test "$request_pending" = 0
 stop_portal_monitor
+stop_credential_observer || fail_case cleanup-credential-terminal
 printf 'A–D bounded revocation diagnostic completed; E stock read-only mapping only. Shipping, repetition and reboot remain unvalidated.\n' > "$OUT/result.txt"
