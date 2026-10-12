@@ -271,11 +271,36 @@ try {
 '@,[Text.UTF8Encoding]::new($false))
 $uiaWorker=Join-Path $OutputDirectory 'uia-worker.ps1'
 [IO.File]::WriteAllText($uiaWorker,@'
-param([long]$Hwnd,[string]$Result,[string]$Operation='snapshot',[string]$Value)
+param([long]$Hwnd,[string]$Result,[string]$Operation='snapshot',[string]$Value,[int]$ExpectedPid)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $root=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($Hwnd))
+if($Operation -eq 'focused-read'){
+ $r=@{startedUtc=[DateTime]::UtcNow.ToString('o');acted=$false;ownershipQualified=$false;focused=$null;valueSupported=$false;textSupported=$false;selection=@();errors=@()}
+ try{
+  $e=[System.Windows.Automation.AutomationElement]::FocusedElement
+  if($null -eq $e){throw 'No actual focused UIA element.'}
+  $v=$e.Current;$b=$v.BoundingRectangle
+  $r.focused=@{processId=$v.ProcessId;nativeWindow=$v.NativeWindowHandle;name=$v.Name;id=$v.AutomationId;type=$v.ControlType.ProgrammaticName;hasKeyboardFocus=$v.HasKeyboardFocus;x=$b.X;y=$b.Y;width=$b.Width;height=$b.Height}
+  $ancestor=$e
+  for($depth=0;$depth -lt 16 -and $null -ne $ancestor;$depth++){
+   $a=$ancestor.Current
+   if($a.NativeWindowHandle -eq $Hwnd -and $a.ProcessId -eq $ExpectedPid){$r.ownershipQualified=$v.ProcessId -eq $ExpectedPid -and $v.HasKeyboardFocus;break}
+   $ancestor=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
+  }
+  if(-not $r.ownershipQualified){throw 'Focused UIA element not qualified under the original app HWND/PID.'}
+  $pattern=$null
+  if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$r.valueSupported=$true;$r['value']=$pattern.Current.Value;$r['readOnly']=$pattern.Current.IsReadOnly}
+  $pattern=$null
+  if($e.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)){
+   $r.textSupported=$true
+   foreach($range in $pattern.GetSelection()){$r.selection+=@{text=$range.GetText(256);degenerate=$range.CompareEndpoints([System.Windows.Automation.TextPatternRangeEndpoint]::Start,$range,[System.Windows.Automation.TextPatternRangeEndpoint]::End) -eq 0}}
+  }
+ }catch{$r.errors+=$_.Exception.ToString()}
+ $r['endedUtc']=[DateTime]::UtcNow.ToString('o')
+ [IO.File]::WriteAllText($Result,(ConvertTo-Json $r -Depth 8),[Text.UTF8Encoding]::new($false));exit
+}
 $elements=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $tree=@()
 function Finite([double]$v){if([double]::IsNaN($v) -or [double]::IsInfinity($v)){return $null};return $v}
@@ -294,6 +319,19 @@ function Window([IntPtr]$hwnd=$appHwnd){
  $w=@([ReceiverNative]::All()|Where-Object{$_.Hwnd -eq $hwnd.ToInt64() -and $_.Pid -eq $app.Id -and $_.Visible});if($w.Count -ne 1 -or $w[0].Width -lt 100){throw 'Owned visible window unavailable.'};return $w[0]
 }
 function Focus([IntPtr]$hwnd=$appHwnd){[void][ReceiverNative]::Activate($hwnd);Start-Sleep -Milliseconds 200;if([ReceiverNative]::GetForegroundWindow() -ne $hwnd){throw 'Owned window is not foreground; input withheld.'}}
+function CacheInputObservationRuntime{
+ $started=[DateTime]::UtcNow.ToString('o');$clock=[Diagnostics.Stopwatch]::StartNew()
+ $script:inputObservationRuntime=@{startedUtc=$started;errors=@();scope='Startup metadata/hash observation; elapsed time is not isolated hash profiling'}
+ try{
+  $assembly=[Windows.Forms.SendKeys].Assembly;$location=$assembly.Location
+  $script:inputObservationRuntime['powershell']=$PSVersionTable.PSVersion.ToString();$script:inputObservationRuntime['framework']=[Runtime.InteropServices.RuntimeInformation]::FrameworkDescription
+  $script:inputObservationRuntime['clr']=[Environment]::Version.ToString();$script:inputObservationRuntime['apartment']=[Threading.Thread]::CurrentThread.GetApartmentState().ToString()
+  $script:inputObservationRuntime['winFormsAssembly']=$assembly.FullName;$script:inputObservationRuntime['winFormsLocation']=$location
+  $script:inputObservationRuntime['winFormsSha256']=if($location -and [IO.File]::Exists($location)){(Get-FileHash -LiteralPath $location -Algorithm SHA256).Hash}else{$null}
+ }catch{$script:inputObservationRuntime.errors+=$_.Exception.ToString()}
+ $clock.Stop();$script:inputObservationRuntime['endedUtc']=[DateTime]::UtcNow.ToString('o');$script:inputObservationRuntime['elapsedMilliseconds']=$clock.Elapsed.TotalMilliseconds
+ $report['inputObservationRuntime']=$script:inputObservationRuntime
+}
 function InputObservation([string]$label,[bool]$rawFrame=$false){
  # Read-only receipts: no activation, worker, OCR, UIA, extra input or polling.
  try{
@@ -310,10 +348,6 @@ function InputObservation([string]$label,[bool]$rawFrame=$false){
   $receipt.captureOwnershipQualified=$b.Hwnd -eq $a.Hwnd -and $b.Left -eq $a.Left -and $b.Top -eq $a.Top -and $b.Width -eq $a.Width -and $b.Height -eq $a.Height -and $receipt.beforeNative.AppPid -eq $app.Id -and $receipt.afterNative.AppPid -eq $app.Id -and $receipt.beforeNative.Foreground.Hwnd -eq $appHwnd.ToInt64() -and $receipt.afterNative.Foreground.Hwnd -eq $appHwnd.ToInt64() -and $receipt.beforeProcessStartedTicks -eq $appStartedTicks -and $receipt.processStartedTicks -eq $appStartedTicks
  }
  try{
-  if(-not $script:inputObservationRuntime){
-  $assembly=[Windows.Forms.SendKeys].Assembly;$location=$assembly.Location
-  $script:inputObservationRuntime=@{observedUtc=[DateTime]::UtcNow.ToString('o');powershell=$PSVersionTable.PSVersion.ToString();framework=[Runtime.InteropServices.RuntimeInformation]::FrameworkDescription;clr=[Environment]::Version.ToString();apartment=[Threading.Thread]::CurrentThread.GetApartmentState().ToString();winFormsAssembly=$assembly.FullName;winFormsLocation=$location;winFormsSha256=if($location -and [IO.File]::Exists($location)){(Get-FileHash -LiteralPath $location -Algorithm SHA256).Hash}else{$null}}
-  }
   $receipt['runtime']=$script:inputObservationRuntime
  }catch{$receipt.errors+=$_.Exception.Message}
  $receipt['endedUtc']=[DateTime]::UtcNow.ToString('o');$report.actions+=@{name='read-only input observation';label=$label;receipt=$receipt}
@@ -425,6 +459,16 @@ function FavoriteFieldReadback([string]$expected,[string]$field){
  [Windows.Forms.Clipboard]::SetText($marker)
  if([Windows.Forms.Clipboard]::GetText() -cne $marker){throw 'Fresh clipboard marker was not established; favorite readback withheld.'}
  ControlShortcut 'A'
+ # One bounded read-only observation phase after the unchanged Select All,
+ # before Copy: actual focused UIA patterns, native focus/caret and pixels.
+ # The samples are adjacent/bracketed, not an atomic selection getter.
+ $selectionBefore=Window;$selectionNativeBefore=[SenderObservationNative]::Read($appHwnd)
+ $selectionPath=Join-Path $OutputDirectory ('favorite-'+($field -replace '[^a-zA-Z0-9-]','-')+'-selection-uia.json')
+ $selectionUia=$null;$selectionError=$null
+ try{$selectionUia=Worker $uiaWorker @('-Hwnd',$appHwnd.ToInt64(),'-ExpectedPid',$app.Id,'-Operation','focused-read','-Result',('"'+$selectionPath+'"')) $selectionPath 2000}catch{$selectionError=$_.Exception.ToString()}
+ InputObservation ('favorite-'+$field+'-after-select-all-before-copy') $true
+ $selectionAfter=Window;$selectionNativeAfter=[SenderObservationNative]::Read($appHwnd)
+ $report.actions+=@{name='favorite selection observation only';field=$field;before=$selectionBefore;after=$selectionAfter;nativeBefore=$selectionNativeBefore;nativeAfter=$selectionNativeAfter;uia=$selectionUia;uiaError=$selectionError;scope='Unsupported UIA Value/Text patterns stay unavailable; GUITHREADINFO caret is not a selection range; observations never satisfy the clipboard gate'};Persist
  if((Window).Hwnd -ne $before.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw 'Original favorite window lost foreground between Select All and Copy; copy withheld.'}
  ControlShortcut 'C'
  $copyDeadline=[DateTime]::UtcNow.AddMilliseconds((Remaining 2000));$actual=$marker
@@ -804,6 +848,7 @@ try {
   foreach($key in $initialPreferences.Keys){if($actualPreferences.$key -cne $initialPreferences[$key]){throw "Actual startup preference differs from supported initialization: $key"}}
   if([string]::IsNullOrWhiteSpace($report.startupPreferences.alias) -or $report.startupPreferences.listeningSockets.Count -eq 0){throw 'Actual generated sender alias and app-owned reception listener are required at startup.'}
  }
+ CacheInputObservationRuntime
  $report.status='ready';Persist
  Json $readyPath @{ready=$true;utc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;fixtures=$report.fixtures;commands=$commands;results=$results;status=$statusPath;initial=$initial.screenshot;interface='commands/<id>.json -> results/<id>.json; successful command status passed; one pending command at a time'}
  $seen=@{}
