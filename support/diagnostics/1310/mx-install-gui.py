@@ -2,7 +2,7 @@
 """Cloud live-VM GUI observer/driver for the unmodified MX 23.2 installer.
 
 Run on the live desktop's session bus, AFTER no-argument minstall-launcher.
-Requires Debian python3-pyatspi and scrot. Never launches an installer, fabricates
+Requires Debian python3-pyatspi, scrot, xdotool, and x11-utils. Never launches an installer, fabricates
 Qt events, supplies configuration, or bypasses authentication. Accessibility
 absence is a recorded failure, not permission to switch to a guessed UI path.
 Success means observed Installation complete + reboot disabled + Finish closure;
@@ -36,6 +36,7 @@ limit = min(max(args.timeout, 30), 1080)
 at = None
 observed_app = None
 destroyed_branches = 0
+finish_pressed = False
 
 
 def emit(kind, **data):
@@ -97,34 +98,22 @@ def destroyed_object(error):
         re.search(r'object /org/a11y/atspi/accessible/[0-9]+ does not exist', str(error)))
 
 
-def terminal_app_disappeared(error):
-    # Exact teardown errors observed after the successful Finish Press in
-    # run 38254109659; only the original app node may use this terminal rule.
-    return bool(re.fullmatch(
-        r"atspi_error: (?:No such object path '/org/a11y/atspi/accessible/root'|"
-        r"The name :[0-9]+\.[0-9]+ was not provided by any \.service files) \(1\)",
-        str(error).strip()))
-
-
-def scan(root=None, max_depth=35, terminal_app=None):
+def scan(root=None, max_depth=35):
     global destroyed_branches
     root = root if root is not None else (observed_app if observed_app is not None else at.Registry.getDesktop(0))
     found = []
     pending = [(root, '0', 0)]
     skipped = 0
 
-    def skip(error, path, node):
+    def skip(error, path):
         nonlocal skipped
         global destroyed_branches
-        terminal_disappearance = (terminal_app is not None and node == terminal_app
-                                  and terminal_app_disappeared(error))
-        if not destroyed_object(error) and not terminal_disappearance:
+        if not destroyed_object(error):
             raise error
         skipped += 1
         destroyed_branches += 1
         emit('destroyed-object-observation', path=path, error=str(error),
-             snapshot_skips=skipped, total_skips=destroyed_branches,
-             terminal_original_app_disappearance=terminal_disappearance)
+             snapshot_skips=skipped, total_skips=destroyed_branches)
         if skipped > 8 or destroyed_branches > 40:
             raise Stop('destroyed-object observation bound exceeded')
 
@@ -136,14 +125,14 @@ def scan(root=None, max_depth=35, terminal_app=None):
             record = info(node, path)
             child_count = node.childCount if depth < max_depth else 0
         except Exception as error:
-            skip(error, path, node)
+            skip(error, path)
             continue
         found.append((node, record))
         for index in reversed(range(child_count)):
             try:
                 child = node.getChildAtIndex(index)
             except Exception as error:
-                skip(error, path + '.' + str(index), node)
+                skip(error, path + '.' + str(index))
                 continue
             if child is not None:
                 pending.append((child, path + '.' + str(index), depth + 1))
@@ -183,6 +172,7 @@ def unique(matches, description):
 
 
 def click(node, description, terminal_finish=False):
+    global finish_pressed
     if not state(node, at.STATE_SHOWING) or not state(node, at.STATE_ENABLED):
         raise Stop(description + ': widget is not visible and enabled')
     action = node.queryAction()
@@ -194,10 +184,12 @@ def click(node, description, terminal_finish=False):
          accessible_action=action.getName(allowed[0]))
     if not action.doAction(allowed[0]):
         raise Stop(description + ': accessibility action refused')
+    if terminal_finish:
+        finish_pressed = True
     time.sleep(.4)
     # gotoPage(next > END) calls qApp->exit(EXIT_SUCCESS), so Finish destroys
-    # its accessibility provider. Its post-action evidence must use a fresh
-    # desktop inventory, never the cached original application's root.
+    # its accessibility provider. Its post-action evidence must use native
+    # window/process observations, never the cached application's root.
     if not terminal_finish:
         capture('after-action')
 
@@ -417,18 +409,10 @@ def authentication(rows):
     return True
 
 
-def minstall_apps(after_finish=False):
+def minstall_apps():
     # Application nodes need not report SHOWING. Inspect only the desktop's
     # immediate children, never recursively traverse unrelated desktop apps.
-    desktop = at.Registry.getDesktop(0)
-    if after_finish:
-        # libatspi 2.46 get_child_count/get_child_at_index may reuse cached
-        # desktop children. Clear only during terminal observation so each
-        # closure inventory queries the registry's current application list.
-        desktop.clear_cache()
-        emit('terminal-desktop-cache-cleared', api='Atspi.Accessible.clear_cache')
-    inventory = scan(desktop, max_depth=1,
-                     terminal_app=observed_app if after_finish else None)
+    inventory = scan(at.Registry.getDesktop(0), max_depth=1)
     matches = [(node, rec) for node, rec in inventory
                if rec['role'] == 'application' and rec['name'] == 'minstall']
     if len(matches) > 1:
@@ -439,6 +423,49 @@ def minstall_apps(after_finish=False):
 def top_windows(app):
     return [(node, rec) for node, rec in visible(scan(app, max_depth=1))
             if rec['path'].count('.') == 1 and rec['role'] in ('dialog', 'frame')]
+
+
+def native_client_list():
+    # EWMH _NET_CLIENT_LIST is a WINDOW[] root property of managed clients.
+    # Require a positive typed response, not an ambiguous search exit code.
+    # https://specifications.freedesktop.org/wm-spec/latest/ar01s03.html
+    result = subprocess.run(['xprop', '-root', '_NET_CLIENT_LIST'],
+                            capture_output=True, text=True, timeout=5)
+    emit('native-client-list-query', status=result.returncode, stdout=result.stdout, stderr=result.stderr)
+    match = re.fullmatch(r'_NET_CLIENT_LIST\(WINDOW\): window id #\s*'
+                         r'(0x[0-9a-fA-F]+(?:,\s*0x[0-9a-fA-F]+)*)?\s*', result.stdout.strip())
+    if result.returncode != 0 or result.stderr.strip() or match is None:
+        raise Stop('native client list query did not return a valid WINDOW property')
+    return [int(item.strip(), 16) for item in match.group(1).split(',')] if match.group(1) else []
+
+
+def process_identity(pid):
+    try:
+        text = Path(f'/proc/{pid}/stat').read_text()
+    except FileNotFoundError:
+        return None
+    # comm (field 2) can contain spaces and parentheses; state is field 3,
+    # therefore starttime (field 22) is index 19 after the final closing ')'.
+    head, tail = text.rsplit(')', 1)
+    fields = tail.split()
+    if int(head.split(' ', 1)[0]) != pid or len(fields) < 20 or not fields[19].isdigit():
+        raise Stop('malformed original installer process identity')
+    return {'pid': pid, 'starttime': int(fields[19])}
+
+
+def native_finish_identity(root):
+    windows = top_windows(observed_app)
+    if len(windows) != 1 or windows[0][0] != root:
+        raise Stop('Finish identity requires sole original installer window')
+    window = int(xdotool('getactivewindow'))
+    pid = int(xdotool('getwindowpid', str(window)))
+    if pid <= 0 or pid != observed_app.get_process_id():
+        raise Stop('Finish native window is not owned by original installer process')
+    identity = process_identity(pid)
+    if identity is None or window not in native_client_list():
+        raise Stop('original installer lacks positive native process/window baseline')
+    emit('native-finish-baseline', window=window, **identity)
+    return window, identity
 
 
 def run():
@@ -587,25 +614,29 @@ def run():
     capture('positive-end-page', rows)
     toggle(rows, 'Automatically reboot the system when the installer is closed', False)
     capture('reboot-disabled')
+    original_window, original_identity = native_finish_identity(root)
     click(button(scan(root), 'Finish'), 'actual Finish', terminal_finish=True)
     until = time.monotonic() + 10
     clean_closed_observations = 0
     captured_finish = False
     while time.monotonic() < until:
-        previous_skips = destroyed_branches
-        apps, inventory = minstall_apps(after_finish=True)
+        clients = native_client_list()
+        current_identity = process_identity(original_identity['pid'])
+        closed = original_window not in clients and current_identity != original_identity
+        emit('native-finish-observation', original_window=original_window, clients=clients,
+             original_identity=original_identity, current_identity=current_identity, closed=closed)
         if not captured_finish:
-            capture('after-finish', inventory)
+            capture('after-finish', [])
             captured_finish = True
-        # A skipped destroyed object alone cannot prove closure. Require two
-        # consecutive clean fresh desktop observations of app absence. Do not
-        # traverse a disappearing provider even if an app node lingers briefly.
-        if not apps and previous_skips == destroyed_branches:
+        # Both queries must succeed: the original managed X window is absent
+        # and the captured PID/starttime identity has ended. Never dereference
+        # the vanished accessibility provider to establish terminal success.
+        if closed:
             clean_closed_observations += 1
         else:
             clean_closed_observations = 0
         if clean_closed_observations >= 2:
-            capture('finish-closed', inventory)
+            capture('finish-closed', [])
             emit('GUIFinished', shell_finished_gate_still_required=True)
             (out / 'GUIFinished').write_text('Observed End, reboot disabled, Finish, window closed.\n')
             return
@@ -623,7 +654,7 @@ except BaseException as error:
     try:
         signal.signal(signal.SIGALRM, alarm)
         signal.alarm(10)
-        capture('failure')
+        capture('failure', [] if finish_pressed else None)
     except BaseException as capture_error:
         emit('failure-capture-error', error=str(capture_error))
     sys.exit(1)

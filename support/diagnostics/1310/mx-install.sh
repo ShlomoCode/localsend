@@ -21,7 +21,7 @@ if test "${INSTALLER_TRACE:-0}" = 0 && mountpoint -q /mnt; then exit 2; fi
 { sha256sum /usr/bin/minstall-launcher; cat /usr/bin/minstall-launcher; cat /usr/share/gazelle-installer-data/installer.conf; } > evidence/install/launcher-original.txt
 dpkg-query -W > evidence/install/packages-before-observer.txt
 # Normal distro accessibility tooling observes and operates actual widgets.
-observer_packages=(python3-pyatspi scrot xdotool)
+observer_packages=(python3-pyatspi scrot xdotool x11-utils)
 if test "${INSTALLER_TRACE:-0}" = 1; then observer_packages+=(strace); fi
 printf 'demo\n' | sudo -S apt-get install -y "${observer_packages[@]}" > evidence/install/observer-install.log 2>&1
 dpkg-query -W > evidence/install/packages-after-observer.txt
