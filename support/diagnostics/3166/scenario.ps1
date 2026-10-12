@@ -28,6 +28,12 @@ function Tray-Control($Name){
  $found=@();foreach($r in @([Controls3536]::Roots()|Where-Object ClassName -in @('Shell_TrayWnd','NotifyIconOverflowWindow'))){$found+=@([Controls3536]::Snapshot($r.Handle,$r.Pid)|Where-Object {$_.Name -eq $Name -and $_.Enabled -and $_.Type -eq 50000})}
  if($found.Count -gt 1){throw "ENV_BLOCK: ambiguous tray control $Name"};if($found.Count -eq 1){return $found[0]};return $null
 }
+function Qualify-RenewedTray($ExpectedShell){
+ $actual=Shell;if($actual.Id -ne $ExpectedShell.Id -or $actual.StartUtc -ne $ExpectedShell.StartUtc){throw 'ENV_BLOCK: renewed shell changed during tray qualification'}
+ $nodes=@([Controls3536]::Snapshot($actual.Hwnd,$actual.Id));$regions=@($nodes|Where-Object {$_.ClassName -eq 'TrayNotifyWnd' -or $_.Name -in @('System Promoted Notification Area','User Promoted Notification Area','Notification area')})
+ Json @{Shell=$actual;VisibleNotificationRegions=$regions;Nodes=$nodes} renewed-tray-readiness;Save-Desktop renewed-tray-readiness
+ if($regions.Count -eq 0){throw 'ENV_BLOCK: renewed notification-area provider readiness unavailable; absent icon cannot be attributed'}
+}
 function Find-Tray([int]$Seconds=12){
  $end=[DateTime]::UtcNow.AddSeconds($Seconds);$opened=$false
  do{Check-Budget;$icon=Tray-Control 'LocalSend';if($icon){return $icon};if(-not $opened){$chevron=Tray-Control 'Show hidden icons';if(-not $chevron){$chevron=Tray-Control 'Notification Chevron'};if($chevron){Shell-Click $chevron;$opened=$true}};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
@@ -96,11 +102,15 @@ try {
  Desktop-Snapshot restart-after|Out-Null
  if(-not $newShell){throw 'ENV_BLOCK: actual Explorer identity transition not confirmed'}
  Json @{Before=$oldShell;After=$newShell;SameApp=Alive $script:App|Select-Object Id,Path,StartTime,MainWindowHandle} actual-shell-transition
+ Qualify-RenewedTray $newShell
  $icon=Find-Tray
  if(-not $icon){Json @{Status='CURRENT_RELEASE_FAILURE';ProductExperiments=1;Symptom='No actual LocalSend tray icon after valid Explorer Restart';SameApp=$script:App;OS='Server2022 build20348';HistoricalAttribution='UNKNOWN'} final-result;exit 1}
  Json $icon actual-after-tray;Shell-Click $icon
  $end=[DateTime]::UtcNow.AddSeconds(12);$activated=$false;do{Check-Budget;$null=Alive $script:App;if([Tray3166Native]::Visible([IntPtr]$script:App.Hwnd) -and [Issue3456Native]::GetForegroundWindow().ToInt64() -eq $script:App.Hwnd){$activated=$true;break};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
  Desktop-Snapshot actual-tray-activation-after|Out-Null
+ $windowVisible=[Tray3166Native]::Visible([IntPtr]$script:App.Hwnd);$foreground=[Issue3456Native]::GetForegroundWindow().ToInt64()
+ Json @{SameApp=$script:App;WindowVisible=$windowVisible;ActualForeground=$foreground;ExpectedForeground=$script:App.Hwnd;ActualActivation=$activated} activation-observation
+ if($windowVisible -and $foreground -ne $script:App.Hwnd){throw 'ENV_BLOCK: same app window visible but owned foreground unavailable after actual tray click'}
  Json @{Status=if($activated){'CURRENT_RELEASE_NON_REPRODUCTION'}else{'CURRENT_RELEASE_FAILURE'};ProductExperiments=1;TrayRenderedAndLocated=$true;ActualTrayActivation=$activated;SameApp=$script:App;OS='Server2022 build20348';OriginalWindows25H2='UNTESTED';HistoricalAttribution='UNKNOWN'} final-result
  if(-not $activated){exit 1}
 }catch{try{Desktop-Snapshot "$script:Stage-exception"|Out-Null}catch{};$_|Format-List * -Force|Out-File (Join-Path $Evidence scenario-original-error.txt);Json @{Status='ENV_BLOCK';Error="$_";RestartInputAttempted=$script:Triggered;ProductExperiments=0;Verdict='No valid completed shell transition outcome'} final-result;exit 2}
