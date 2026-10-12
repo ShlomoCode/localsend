@@ -16,17 +16,18 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      PRIVATE_DIR: ${{ runner.temp }}/issue1054-linux-private
       ISSUE1054_HOST: linux
       INSTALL_ACCELERATION: kvm
     steps:
       - uses: actions/checkout@v4
       - name: Entire prelaunch allowance (14 minutes)
         env:
+          PRIVATE_DIR: ${{ runner.temp }}/issue1054-linux-private
           EVIDENCE_DIR: ${{ github.workspace }}/evidence/1054-linux-kvm
         run: timeout --signal=TERM --kill-after=5s 840s bash support/diagnostics/1054-linux-kvm/prepare.sh
       - name: Windows and official app readiness (40 minutes including GUI)
         env:
+          PRIVATE_DIR: ${{ runner.temp }}/issue1054-linux-private
           EVIDENCE_DIR: ${{ github.workspace }}/evidence/1054-linux-kvm/install
           CAPABILITY_DIR: ${{ github.workspace }}/evidence/1054-linux-kvm
           QEMU: /usr/bin/qemu-system-x86_64
@@ -36,6 +37,8 @@ jobs:
       - name: Scoped cleanup and receipts
         if: always()
         timeout-minutes: 3
+        env:
+          PRIVATE_DIR: ${{ runner.temp }}/issue1054-linux-private
         run: timeout --signal=TERM --kill-after=5s 150s bash support/diagnostics/1054-linux-kvm/cleanup.sh
       - name: Allowlisted evidence only
         if: always()
