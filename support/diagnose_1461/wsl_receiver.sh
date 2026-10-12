@@ -58,7 +58,14 @@ mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
 display_receipt="$out/xvfb-display-number.txt"
 [[ ! -e "$display_receipt" ]]
 xvfb_exe=$(readlink -f "$(command -v Xvfb)")
-Xvfb -displayfd 3 -screen 0 1280x900x24 -nolisten tcp 3>"$display_receipt" > "$out/xvfb.log" 2>&1 & xvfb_pid=$!
+setsid --version > "$out/setsid-version.txt"
+grep -Fxq 'setsid from util-linux 2.39.3' "$out/setsid-version.txt"
+dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' util-linux > "$out/setsid-package.tsv"
+readlink -f "$(command -v setsid)" > "$out/setsid-executable.txt"
+sha256sum "$(cat "$out/setsid-executable.txt")" > "$out/setsid-executable.sha256"
+# Only behavioral intervention: default setsid prefix on original Xvfb.
+# No fork/wait/ctty options; $! remains the sole original PID authority.
+setsid Xvfb -displayfd 3 -screen 0 1280x900x24 -nolisten tcp 3>"$display_receipt" > "$out/xvfb.log" 2>&1 & xvfb_pid=$!
 xvfb_start_tick=$(awk '{print $22}' "/proc/$xvfb_pid/stat")
 printf '%s\n' "$xvfb_pid" > "$out/xvfb.pid"
 printf '%s\n' "$xvfb_start_tick" > "$out/xvfb.start-tick"
@@ -77,6 +84,12 @@ display_number=$(cat "$display_receipt")
 [[ "$display_number" =~ ^[0-9]+$ ]]
 export DISPLAY=":$display_number"
 xvfb_owned
+raw=$(cat "/proc/$xvfb_pid/stat"); fields=${raw##*) }; read -r -a xvfb_parts <<< "$fields"
+[[ ${xvfb_parts[2]} == "$xvfb_pid" && ${xvfb_parts[3]} == "$xvfb_pid" && ${xvfb_parts[4]} == 0 && ${xvfb_parts[5]} == -1 ]]
+printf '%s\n' "$raw" > "$out/xvfb-session-qualified.stat"
+cat "/proc/${xvfb_parts[1]}/stat" > "$out/xvfb-original-parent.stat"
+printf 'pid\tstart_tick\tpgid\tsid\ttty_nr\ttpgid\n%s\t%s\t%s\t%s\t%s\t%s\n' \
+  "$xvfb_pid" "$xvfb_start_tick" "${xvfb_parts[2]}" "${xvfb_parts[3]}" "${xvfb_parts[4]}" "${xvfb_parts[5]}" > "$out/xvfb-session-qualified.tsv"
 date -u --iso-8601=ns > "$out/xvfb-assigned.utc"
 for ((attempt=0; attempt<40; attempt++)); do
   xvfb_owned || { echo 'Owned Xvfb identity failed during display readiness'; exit 1; }
@@ -87,7 +100,9 @@ xvfb_owned
 xdotool getdisplaygeometry
 eval "$(dbus-launch --sh-syntax)"
 openbox > "$out/openbox.log" 2>&1 & wm_pid=$!
-bash "$lifetime" "$evidence" register wm "$wm_pid"
+wm_start_tick=$(awk '{print $22}' "/proc/$wm_pid/stat")
+wm_exe=$(readlink -f "$(command -v openbox)")
+printf '%s\n' "$wm_start_tick" > "$out/wm.start-tick"
 bash "$lifetime" "$evidence" register dbus "${DBUS_SESSION_BUS_PID:?original dbus pid}"
 "$exe" > "$out/app.log" 2>&1 & app_pid=$!
 printf 'DISPLAY=%q\nAPP_PID=%q\nDEST=%q\nSETTINGS=%q\nEXE=%q\n' "$DISPLAY" "$app_pid" "$dest" "$settings" "$exe" > "$out/session.env"
@@ -149,6 +164,15 @@ for ((attempt=0; attempt<60; attempt++)); do
       # start-tick readiness gate, never to the pre-exec child shell image.
       bash "$lifetime" "$evidence" register app "$app_pid" "$exe" "$(cat "$out/app.start-tick")"
       bash "$lifetime" "$evidence" register xvfb "$xvfb_pid" "$xvfb_exe" "$xvfb_start_tick"
+      # Bind the original WM only after its exec, without selecting another
+      # PID or start tick. This makes later stable-desktop gates authoritative.
+      bash "$lifetime" "$evidence" register wm "$wm_pid" "$wm_exe" "$wm_start_tick"
+      raw=$(cat "/proc/$$/stat"); fields=${raw##*) }; read -r -a parent_parts <<< "$fields"
+      for role_pid in "$app_pid" "$wm_pid"; do
+        raw=$(cat "/proc/$role_pid/stat"); fields=${raw##*) }; read -r -a role_parts <<< "$fields"
+        [[ ${role_parts[2]} == "${parent_parts[2]}" && ${role_parts[3]} == "${parent_parts[3]}" ]]
+        printf '%s\n' "$raw" >> "$out/original-app-wm-session-controls.stat"
+      done
       printf 'receive_source\texact_word\tminimum_confidence\twindow\tpid\n%s\tReceive\t50\t%s\t%s\n' \
         "$receive_source" "$window" "$app_pid" > "$out/readiness-observation.tsv"
       printf 'WINDOW=%q\n' "$window" >> "$out/session.env"

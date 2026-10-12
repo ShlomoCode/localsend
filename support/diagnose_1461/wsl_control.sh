@@ -98,7 +98,7 @@ case "$action" in
     (( initial_status == 0 )) || result=1
     if [[ ! -s "$trace/completed.tsv" ]]; then
       printf 'trace completion missing at collection deadline\n' > "$trace/collection-failure.txt"; result=1
-    elif [[ $(cat "$trace/strace.exit") != 0 ]]; then
+    elif [[ $(cat "$trace/strace.exit") != 0 && $(cat "$trace/strace.exit") != 130 ]]; then
       printf 'unexpected trace timeout/exit; inspect native output\n' > "$trace/collection-failure.txt"; result=1
     fi
     detach_status=0
@@ -132,6 +132,63 @@ case "$action" in
         printf '%s\t%s\tdetach-unqualified-read-failure-reuse-or-attached\n' "$name" "$tid" >> "$trace/collection-failure.txt"; result=1
       fi
     done < "$trace/tids.tsv"
+    if [[ -s "$trace/strace.exit" && $(cat "$trace/strace.exit") == 130 ]]; then
+      # Bookkeeping only: never classify130 as routine without the observed
+      # bounded INT marker and all actual native detach receipts qualifying.
+      if (( result == 0 )) && [[ -r "$trace/deadline.txt" ]] &&
+         grep -Fxq 'observer-deadline-INT' "$trace/deadline.txt" &&
+         grep -Fq 'observed_shell_interrupt=yes' "$trace/completed.tsv"; then
+        printf '130\tobserved-bounded-INT-and-qualified-detach\n' > "$trace/strace-exit-classification.tsv"
+      else
+        printf '130\tunqualified-native-exit\n' > "$trace/strace-exit-classification.tsv"; result=1
+      fi
+    fi
+    # Both actual postreturn snapshots must retain the same original stable
+    # desktop. HUP removal or app survival alone never qualifies this result.
+    raw=$(cat "$evidence/receiver/lifetime/receiver.registration.stat"); fields=${raw##*) }; read -r -a original_parent_parts <<< "$fields"
+    for phase in post-return-trace-before-wait post-return-trace; do
+      live="$evidence/receiver/lifetime/$phase"
+      for role in app wm xvfb; do
+        read -r pid tick executable < "$evidence/receiver/lifetime/$role.ref"
+        qualified=no
+        receipts_ok=yes
+        for probe in before.stat after.stat exe status; do
+          if [[ ! -s "$live/$role.$probe" || ! -r "$live/$role.$probe.exit" || $(cat "$live/$role.$probe.exit") != 0 ]]; then receipts_ok=no; fi
+        done
+        if [[ "$receipts_ok" == yes ]]; then
+          raw=$(cat "$live/$role.before.stat"); fields=${raw##*) }; read -r -a before_parts <<< "$fields"
+          raw=$(cat "$live/$role.after.stat"); fields=${raw##*) }; read -r -a after_parts <<< "$fields"
+          if [[ ${before_parts[19]} == "$tick" && ${after_parts[19]} == "$tick" && $(cat "$live/$role.exe") == "$executable" &&
+                ${before_parts[0]} != Z && ${before_parts[0]} != X && ${before_parts[0]} != x &&
+                ${after_parts[0]} != Z && ${after_parts[0]} != X && ${after_parts[0]} != x ]]; then qualified=yes; fi
+          if [[ "$role" == xvfb && ( ${after_parts[2]} != "$pid" || ${after_parts[3]} != "$pid" || ${after_parts[4]} != 0 || ${after_parts[5]} != -1 ) ]]; then qualified=no; fi
+          if [[ "$role" != xvfb && ( ${before_parts[2]} != "${original_parent_parts[2]}" || ${after_parts[2]} != "${original_parent_parts[2]}" ||
+               ${before_parts[3]} != "${original_parent_parts[3]}" || ${after_parts[3]} != "${original_parent_parts[3]}" ) ]]; then qualified=no; fi
+          if [[ "$phase" == post-return-trace ]] && ! grep -Eq '^TracerPid:[[:space:]]+0$' "$live/$role.status"; then qualified=no; fi
+        fi
+        printf '%s\t%s\toriginal-live=%s\n' "$phase" "$role" "$qualified" >> "$trace/stable-desktop-qualification.tsv"
+        if [[ "$qualified" != yes ]]; then result=1; fi
+      done
+      for receipt in listeners.txt window-pid.txt visible-windows.txt; do
+        if [[ ! -s "$live/$receipt" || ! -r "$live/$receipt.exit" || $(cat "$live/$receipt.exit") != 0 ]]; then result=1; fi
+      done
+      if [[ $(cat "$live/window-pid.txt") != "$APP_PID" ]] || ! grep -Fxq "$WINDOW" "$live/visible-windows.txt" ||
+         ! grep -E ':41631[[:space:]].*pid='"$APP_PID"',' "$live/listeners.txt" >/dev/null; then
+        printf '%s\toriginal-owned-window-or-listener-missing\n' "$phase" >> "$trace/collection-failure.txt"; result=1
+      fi
+    done
+    # Parse only cloud native records for exact original enumerated TIDs.
+    # Retain matching raw lines and per-role counts; lack of controls fails.
+    [[ -s "$trace/events.txt" ]]
+    awk -F '\t' 'NR>1 {print $1, $3}' "$trace/tids.tsv" > "$trace/native-role-tids.txt"
+    awk 'FNR==NR {role[$2]=$1; next} /--- SIGHUP / && $1 in role {print role[$1] "\t" $0}' \
+      "$trace/native-role-tids.txt" "$trace/events.txt" > "$trace/native-hup-records.tsv"
+    # Match E21's kernel-origin controls; any Xvfb HUP fails the absence gate.
+    awk -F '\t' '$1=="xvfb" || index($0,"si_code=SI_KERNEL"){n[$1]++} END{printf "app\t%d\nwm\t%d\nxvfb\t%d\n",n["app"],n["wm"],n["xvfb"]}' \
+      "$trace/native-hup-records.tsv" > "$trace/native-hup-counts.tsv"
+    if ! awk -F '\t' '$1=="app"{app=$2} $1=="wm"{wm=$2} $1=="xvfb"{xvfb=$2} END{exit !(app>0 && wm>0 && xvfb==0)}' "$trace/native-hup-counts.tsv"; then
+      printf 'native-HUP-comparison-controls-unqualified\n' >> "$trace/collection-failure.txt"; result=1
+    fi
     printf 'collected\t%s\tfailed=%s\n' "$(stamp)" "$result" > "$trace/collection-result.tsv"
     exit "$result"
     ;;
