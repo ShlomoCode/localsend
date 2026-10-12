@@ -167,7 +167,8 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   await wait(value=>nodes(value).some(n=>pathMatch(n)&&label(n)==='Issue3441_'+c.id));
   const albumState=await settledUi(original);save(c.id+'-album-transition-settled.xml',albumState.xml);
   const selected=[],remaining=new Set(c.names);
-  const mediaName=n=>/^(Image|Video)\d+, /.test(label(n))?label(n).split(', ').at(-1):null;
+  // Android prepends the positive selected-order Semantics value (observed: "1, Image1, ...").
+  const mediaName=n=>/^(?:[1-9]\d*, )?(Image|Video)\d+, /.test(label(n))?label(n).split(', ').at(-1):null;
   for(let scroll=0;scroll<60&&remaining.size;scroll++) {
     xml=await source();save(c.id+'-grid-'+scroll+'.xml',xml);
     if(scroll===0)await snap(c.id+'-album-grid-raw',xml);
