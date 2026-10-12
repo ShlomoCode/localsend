@@ -1,0 +1,157 @@
+name: Diagnose pending approval destination picker
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/issue1982-r4]
+    paths: [.github/workflows/diagnose-1982.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: diagnose-1982-device
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      BS_LOCAL_ID: issue1982-${{ github.run_id }}
+      BS_DEVICE: Samsung Galaxy S21
+      BS_OS: '11.0'
+    steps:
+      - name: Start bounded qualification clock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_RUN: ${{ github.run_id }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const response = await fetch('https://api.github.com/repos/ShlomoCode/localsend/actions/runs/' + process.env.QUALIFICATION_RUN + '/jobs', {headers:{authorization:'Bearer ' + process.env.GH_TOKEN, 'X-GitHub-Api-Version':'2022-11-28'}, signal:AbortSignal.timeout(15000)});
+          if (!response.ok) throw new Error('Job start receipt unavailable');
+          const jobs = (await response.json()).jobs.filter(job => job.name === 'qualify' && job.status === 'in_progress');
+          if (jobs.length !== 1) throw new Error('Current owned job start is ambiguous');
+          const started = Date.parse(jobs[0].started_at);
+          if (!Number.isFinite(started)) throw new Error('Current owned job start timestamp missing');
+          fs.writeFileSync('/tmp/issue1982-job-clock.json', JSON.stringify({jobId:jobs[0].id, startedAt:jobs[0].started_at, observedAt:new Date().toISOString(), run:process.env.QUALIFICATION_RUN}));
+          fs.appendFileSync(process.env.GITHUB_ENV, 'ISSUE1982_JOB_STARTED_MS=' + started + '\n');
+          JS
+      - uses: actions/checkout@v6
+      - name: Validate diagnostic sources in cloud
+        timeout-minutes: 2
+        run: |
+          mkdir -p evidence released
+          cp /tmp/issue1982-job-clock.json evidence/job-clock.json
+          node --check support/diagnostics/1982/runner.mjs
+          node --check support/diagnostics/1982/scenario.mjs
+          bash -n support/diagnostics/1982/sender.sh
+          python3 -m py_compile support/diagnostics/1982/sender.py
+          mkdir -p support/cloud_transport
+          cp -r support/diagnostics/1982/reused/cloud_transport/. support/cloud_transport/
+          bash -n support/cloud_transport/build-helper.sh
+          find support/diagnostics/1982 support/cloud_transport -type f -not -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum > evidence/diagnostic-source-sha256.txt
+      - uses: actions/download-artifact@v5
+        with:
+          repository: ShlomoCode/localsend
+          run-id: 38210564207
+          name: 2007-source-build-pair-38210564207
+          github-token: ${{ github.token }}
+          path: source-pair
+      - uses: actions/download-artifact@v5
+        with:
+          repository: ShlomoCode/localsend
+          run-id: 38132747719
+          name: issue2754-c1ce-flutter3419-linux-x64
+          github-token: ${{ github.token }}
+          path: current-reuse
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare normal desktop and verify untouched artifacts
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr python3-pil python3-pyatspi ffmpeg network-manager gsettings-desktop-schemas at-spi2-core libayatana-appindicator3-1 libsecret-1-0 libgtk-3-0 libegl1 libgles2 libgl1-mesa-dri libopengl0 libglx-mesa0
+          sudo systemctl start NetworkManager
+          test "$(cat current-reuse/provenance/source-sha.txt)" = c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          test ! -s current-reuse/provenance/source-status-before.txt
+          test ! -s current-reuse/provenance/source-status-after.txt
+          test ! -s current-reuse/provenance/source-diff-after.patch
+          printf '%s  %s\n' 98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b current-reuse/source-bundle.tar.gz | sha256sum -c -
+          printf '%s  %s\n' 4e83fb49ae093995d11987948a2ac9f9c5b8b368cc98a49851de472a4067aaef source-pair/baseline/app-arm64-v8a-release.apk | sha256sum -c -
+          test ! -s source-pair/baseline/post-build-tracked-source.diff
+          test ! -s source-pair/baseline/post-build-status.txt
+          cp -r current-reuse/provenance evidence/linux-provenance
+          cp -r source-pair/baseline evidence/android-build-provenance
+          rm evidence/android-build-provenance/app-arm64-v8a-release.apk
+          tar xf current-reuse/source-bundle.tar.gz -C released
+          find released -type f -print0 | sort -z | xargs -0 sha256sum > evidence/linux-installed-file-sha256.txt
+      - name: Verify byte-exact opaque transport mechanics
+        timeout-minutes: 2
+        run: node support/cloud_transport/control.mjs
+      - name: Build isolated helper with unchanged transport source
+        timeout-minutes: 4
+        run: |
+          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+          bash support/cloud_transport/build-helper.sh
+          sha256sum /tmp/helper/cloud-transport-helper.apk > evidence/helper-apk-sha256.txt
+      - name: Connect only the owned BrowserStack Local tunnel
+        timeout-minutes: 2
+        run: |
+          npm install --prefix /tmp/bs-local browserstack-local --no-audit --no-fund >/dev/null
+          cp /tmp/bs-local/package-lock.json evidence/browserstack-local-package-lock.json
+          node support/cloud_transport/local.mjs > evidence/browserstack-local.log 2>&1 &
+          local_pid=$!
+          echo "$local_pid" > evidence/local-parent-pid.txt
+          awk '{print $22}' "/proc/$local_pid/stat" > evidence/local-parent-start-ticks.txt
+          for attempt in $(seq 1 30); do test -f /tmp/helper/local-ready && break; sleep 2; done
+          test -f /tmp/helper/local-ready
+          kill -0 "$local_pid"
+          node support/diagnostics/1982/local-cleanup.mjs record
+      - name: Upload separate helper
+        timeout-minutes: 2
+        run: |
+          curl --fail --silent --show-error --max-time 90 -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" https://api-cloud.browserstack.com/app-automate/upload -F file=@/tmp/helper/cloud-transport-helper.apk -o /tmp/helper/upload.json
+          node --input-type=module -e 'import fs from "node:fs";const app=JSON.parse(fs.readFileSync("/tmp/helper/upload.json")).app_url;if(!app)throw new Error("Helper upload failed");fs.appendFileSync(process.env.GITHUB_ENV,"HELPER_APP="+app+"\n");'
+      - name: One unchanged approval and picker pair
+        timeout-minutes: 25
+        run: node support/diagnostics/1982/runner.mjs
+      - name: Stop owned tunnel
+        if: always()
+        timeout-minutes: 3
+        run: |
+          mkdir -p evidence
+          node support/diagnostics/1982/local-cleanup.mjs
+      - name: Delete only owned session and observe explicit terminal provider state
+        if: always()
+        timeout-minutes: 3
+        run: node support/diagnostics/1982/terminal.mjs
+      - name: Retain complete original continuous device recording
+        if: always()
+        timeout-minutes: 5
+        run: |
+          if test -f evidence/browserstack-session.json; then
+            node support/diagnostics/1982/reused/video-evidence.mjs evidence
+          fi
+      - name: Inspect original desktop recording metadata and decoding
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if test -f evidence/1982-desktop-original.mp4; then
+            timeout 15 ffprobe -v error -show_format -show_streams -of json evidence/1982-desktop-original.mp4 > evidence/1982-desktop-media.json
+            timeout 40 ffmpeg -v error -i evidence/1982-desktop-original.mp4 -f null - > evidence/1982-desktop-decode.stdout.txt 2> evidence/1982-desktop-decode.stderr.txt
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue1982-qualification-${{ github.run_id }}
+          path: |
+            evidence/
+            control-results.json
