@@ -54,11 +54,42 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  const base=()=>'/session/'+session;
  async function api(url) {const remaining=(cleaning?cleanupDeadline:deadline)-Date.now();assert(remaining>0,'Provider API budget expired');const response=await fetch('https://api-cloud.browserstack.com/app-automate/'+url,{headers:{authorization:auth},signal:AbortSignal.timeout(Math.min(cleaning?10000:30000,remaining))});assert(response.ok,'Provider API HTTP '+response.status);return response.json();}
  async function wd(method,url,body) {
-  assert(Date.now()<(cleaning?cleanupDeadline:deadline),'Owned session budget expired');
-  const time=Date.now(),timeout=Math.max(1,Math.min(cleaning?10000:url==='/session'?180000:45000,(cleaning?cleanupDeadline:deadline)-time));
-  const response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{method,headers:{authorization:auth,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(timeout)});
-  const json=await response.json();appendFileSync(path.join(output,'android-commands.jsonl'),redact(JSON.stringify({utc:new Date(time).toISOString(),method,path:url,status:response.status,elapsedMs:Date.now()-time,body:url==='/session'?'[private capability references]':body}))+'\n');
-  assert(response.ok&&!json.value?.error,'WebDriver HTTP '+response.status+' '+redact(json.value?.error||''));return json.value;
+  const observation=method==='GET'&&/^\/session\/[^/]+\/(?:source|screenshot|orientation|window\/rect|appium\/device\/current_package|element\/[^/]+\/(?:rect|text|attribute\/[^/]+))$/.test(url);
+  for(let attempt=1;attempt<=(observation?2:1);attempt++) {
+   assert(Date.now()<(cleaning?cleanupDeadline:deadline),'Owned session budget expired');
+   const time=Date.now(),timeout=Math.max(1,Math.min(cleaning?10000:url==='/session'?180000:45000,(cleaning?cleanupDeadline:deadline)-time));
+   let response,reader,readError,complete=false,oversized=false;const chunks=[];let bytes=0;
+   const hash=createHash('sha256');
+   try {
+    response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{method,headers:{authorization:auth,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(timeout)});
+    reader=response.body?.getReader();assert(reader,'WebDriver response body missing');
+    for(;;) {
+     const chunk=await reader.read();if(chunk.done){complete=true;break;}
+     bytes+=chunk.value.length;hash.update(chunk.value);
+     oversized=bytes>16*1024*1024;assert(!oversized,'WebDriver response exceeds16MiB retention bound');
+     chunks.push(Buffer.from(chunk.value));
+    }
+   }catch(error){readError=error;}
+   finally{if(reader&&!complete)await reader.cancel().catch(()=>{});}
+   // Redact the complete bounded buffered text before clipping its preview, so
+   // credentials spanning response chunks cannot escape into retained evidence.
+   // Leave a truncated final UTF-8 scalar buffered rather than appending U+FFFD,
+   // which would conceal a partial configured secret from suffix redaction.
+   const text=new TextDecoder('utf-8').decode(Buffer.concat(chunks),{stream:!complete});let redacted=redact(text);
+   if(!complete)for(const secret of secrets)for(let length=secret.length-1;length>=1;length--)if(redacted.endsWith(secret.slice(0,length))){redacted=redacted.slice(0,-length)+'[redacted partial secret]';break;}
+   const receipt={utc:new Date(time).toISOString(),method,path:url,attempt,status:response?.status??null,contentType:response?.headers.get('content-type')??null,elapsedMs:Date.now()-time,body:url==='/session'?'[private capability references]':body,responseBytes:bytes,responseSha256:hash.digest('hex'),responseComplete:complete,responsePreview:redacted.slice(0,4096),responsePreviewTruncated:redacted.length>4096,readError:readError?redact(readError.message):null};
+   appendFileSync(path.join(output,'android-commands.jsonl'),redact(JSON.stringify(receipt))+'\n');
+   let json,invalid=readError;
+   if(!invalid)try{json=JSON.parse(text);}catch{invalid=new Error('Invalid JSON; inspect the redacted response preview');}
+   if(invalid) {
+    const retry=observation&&attempt===1&&!oversized;
+    appendFileSync(path.join(output,'android-commands.jsonl'),redact(JSON.stringify({utc:new Date().toISOString(),method,path:url,attempt,responseFailure:invalid.message,retry}))+'\n');
+    if(retry){await sleep(Math.min(500,Math.max(0,(cleaning?cleanupDeadline:deadline)-Date.now())));continue;}
+    throw Error('WebDriver response unreadable for '+method+' '+url+': '+redact(invalid.message));
+   }
+   assert(response.ok&&json&&typeof json==='object'&&Object.hasOwn(json,'value')&&!json.value?.error,'WebDriver HTTP '+response.status+' '+redact(json?.value?.error||'invalid envelope'));
+   return json.value;
+  }
  }
  async function source(){assert(++sourceReads<=1800,'Hierarchy budget exhausted');return wd('GET',base()+'/source');}
  async function snap(name,xml){save(name+'.xml',xml||await source());assert(++screenshots<=90,'Screenshot budget exhausted');const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');writeFileSync(path.join(output,name+'.png'),png);assert(png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Provider screenshot is not PNG');return {width:png.readUInt32BE(16),height:png.readUInt32BE(20)};}
