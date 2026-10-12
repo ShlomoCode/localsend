@@ -35,7 +35,7 @@ on:
         default: historical
       validation_suite:
         type: choice
-        options: [png, extended]
+        options: [png, extended, precision-source-control]
         default: png
       media_fixture_run_id:
         type: string

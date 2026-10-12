@@ -8,9 +8,13 @@ const exec=promisify(execFile);
 export default async function({session,wd,senderPort,transportStatus}){
  const prefix=`/session/${session}`,results=[],precisionFailures=[],mtimeFailures=[];
  const extended=process.env.VALIDATION_SUITE==='extended';
+ const precisionSourceControl=process.env.VALIDATION_SUITE==='precision-source-control';
+ if(precisionSourceControl&&(process.env.SOURCE_APP_FAMILY!=='current'||process.env.SOURCE_APK_KIND!=='tagged'))throw new Error('Precision source control requires the current tagged observer APK');
  const fixtureDirectory=process.env.MEDIA_FIXTURE_DIRECTORY;
  const fixtureManifest=extended?JSON.parse(readFileSync(join(fixtureDirectory||'__missing_media_fixture_artifact__','manifest.json'))):null;
- const cases=['on','off','on-repeat','off-repeat'].map(label=>({label,gallery:label.startsWith('on'),extension:'png'}));
+ const cases=precisionSourceControl
+  ?[false,true].map(gallery=>({label:'source-precision-'+(gallery?'on':'off'),gallery,extension:'png',fixtureModifiedUtc:'2025-02-13T14:11:00.123Z',sourceBoundaryObservation:true}))
+  :['on','off','on-repeat','off-repeat'].map(label=>({label,gallery:label.startsWith('on'),extension:'png'}));
  if(extended){
   cases.push({label:'precision-on',gallery:true,extension:'png',fixtureModifiedUtc:'2025-02-13T14:11:00.123Z'});
   for(const [type,extension,artifactName] of [['jpeg','jpg','capture.jpg'],['video','mp4','capture.mp4']]){
@@ -172,6 +176,41 @@ export default async function({session,wd,senderPort,transportStatus}){
    await capture(gallery+'-completed');
    const filename=`issue2311-${process.env.GITHUB_RUN_ID}-${gallery}.${testCase.extension}`;
    const savedPath=`/sdcard/${desired?(testCase.extension==='mp4'?'Movies':'Pictures'):'Download'}/${filename}`;
+   if(testCase.sourceBoundaryObservation){
+    const source=JSON.parse(readFileSync(`evidence/source-${gallery}.json`));
+    const requestedMtimeMs=Date.parse(testCase.fixtureModifiedUtc);
+    const sourceExact=source.mtimeMs===requestedMtimeMs&&source.requestedMtimeMs===requestedMtimeMs;
+    const fixtureExact=source.bytes===1042&&source.sha256.toLowerCase()==='561fa660b1ee2b0a3ab29d36c157ae238a0b27d4db0b6aa4154e892b4699a7ef';
+    const normalMetadata=await helperMetadata(filename,gallery),observed=[];
+    for(const file of normalMetadata.filesystem||[]){
+     if(file.error||!file.sha256)continue;
+     const entry={...file};
+     try{
+      const bytes=Buffer.from(await wd('POST',prefix+'/appium/device/pull_file',{path:file.path}),'base64');
+      entry.pulledSha256=createHash('sha256').update(bytes).digest('hex');entry.pulledBytes=bytes.length;
+      entry.byteExact=entry.pulledSha256===source.sha256.toLowerCase()&&file.sha256===entry.pulledSha256&&file.size===bytes.length;
+      const destination=file.path.includes('/Pictures/')?'gallery':'directory';
+      writeFileSync(`evidence/saved-${gallery}-${destination}.png`,bytes);
+     }catch(error){entry.pullError=String(error);}
+     observed.push(entry);
+    }
+    const galleryFile=observed.find(file=>file.path===`/sdcard/Pictures/${filename}`),directoryFile=observed.find(file=>file.path===`/sdcard/Download/${filename}`);
+    const expectedFile=desired?galleryFile:directoryFile;
+    const observation={case:gallery,mode:'precision-source-control',galleryEnabled:desired,mediaType:'png',source,requestedMtimeMs,sourceExact,fixtureExact,
+     expectedSavedPath:savedPath,observed,normalMetadata,
+     expectedDestinationObserved:!!expectedFile,byteExact:expectedFile?.byteExact===true,
+     filesystemMtimeMs:expectedFile?.filesystemMtimeMs??null,
+     filesystemMatchesWindowsSource:expectedFile?.filesystemMtimeMs===source.mtimeMs,
+     saveOutcome:galleryFile?(directoryFile?'gallery-and-directory-observed':'gallery-observed'):(directoryFile?(desired?'directory-fallback-observed':'directory-observed'):'no-saved-file-observed'),
+     precisionGate:'Observational source boundary only; does not assert fractional timestamp preservation',
+     receiverObserver:{sourceFamily:process.env.SOURCE_APP_FAMILY,sourceApkKind:process.env.SOURCE_APK_KIND,filename,correlation:'Match this filename with the tagged APK incoming-metadata and cache-before-Gal logs'}};
+    results.push(observation);writeFileSync(`evidence/${gallery}-source-boundary.json`,JSON.stringify(observation,null,2));
+    writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));
+    if(!sourceExact||!fixtureExact)throw new Error('Precision source-control Windows fixture differs from the requested timestamp or original PNG; raw evidence retained');
+    if(!expectedFile?.byteExact||!Number.isFinite(expectedFile.filesystemMtimeMs))throw new Error('Precision source-control expected destination did not independently verify saved PNG bytes and native millisecond timestamp; raw evidence retained');
+    if(normalMetadata.mediaStoreError)throw new Error('Precision source-control MediaStore observation failed: '+normalMetadata.mediaStoreError);
+    await click('Done');continue;
+   }
    if(testCase.fixtureModifiedUtc){
     const source=JSON.parse(readFileSync(`evidence/source-${gallery}.json`));
     const normalMetadata=await helperMetadata(filename,gallery);
@@ -262,7 +301,7 @@ export default async function({session,wd,senderPort,transportStatus}){
    finally{await wd('POST',prefix+'/appium/device/activate_app',{appId:'org.localsend.localsend_app'});}
    await click('Done');
   }
-  await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
+  if(!precisionSourceControl)await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
   if(precisionFailures.length)throw new Error('Candidate strict gallery millisecond preservation failed; precision result and gallery/fallback artifacts retained');
   if(mtimeFailures.length)throw new Error('Required media modification-time verdicts failed: '+mtimeFailures.map(result=>result.case).join(', ')+'; raw per-case results retained');
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
