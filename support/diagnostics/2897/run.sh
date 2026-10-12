@@ -334,7 +334,7 @@ snapshot control-go-path-readback "$bundle"
 run control-go-confirm 10 "$ax" "$bundle" picker-confirm "$fixture_dir/2897-control.txt"
 wait_picker picker-suggestion control-native-go-suggestion "$fixture_dir/2897-control.txt"
 snapshot control-go-selected-suggestion "$bundle"
-run control-go-open-suggestion 10 "$ax" "$bundle" picker-open-suggestion "$fixture_dir/2897-control.txt"
+run control-go-submit-suggestion 10 "$ax" "$bundle" picker-submit-suggestion "$fixture_dir/2897-control.txt"
 wait_picker picker-go-closed control-native-go-closed
 snapshot control-go-closed "$bundle"
 wait_picker picker-selected control-native-fixture-selected 2897-control.txt

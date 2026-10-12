@@ -163,7 +163,7 @@ if mode.hasPrefix("picker-") {
         guard remaining.isEmpty else { fail("Native GoToWindow remains open", 32) }
         try emit(["nativeGoToWindowClosed": true, "nativeOpenPanelRemains": true]); exit(0)
     }
-    if ["picker-suggestion", "picker-open-suggestion"].contains(mode) {
+    if ["picker-suggestion", "picker-open-suggestion", "picker-submit-suggestion"].contains(mode) {
         guard args.count == 4, args[3].hasPrefix("/") else { fail("Expected absolute native picker fixture path", 32) }
         let expected = args[3]
         let filename = URL(fileURLWithPath: expected).lastPathComponent
@@ -171,6 +171,11 @@ if mode.hasPrefix("picker-") {
             (attr($0, "AXRole") as? String) == "AXSheet" && (attr($0, "AXIdentifier") as? String) == "GoToWindow" && hasBounds($0)
         }
         guard sheets.count == 1 else { fail("Expected one native GoToWindow suggestion sheet", 32) }
+        if mode == "picker-submit-suggestion" {
+            let raised = AXUIElementPerformAction(sheets[0], kAXRaiseAction as CFString)
+            try emit(["raisedSheetIdentifier": "GoToWindow", "raiseResult": raised.rawValue, "ownerPid": app.processIdentifier])
+            guard raised == .success, app.isActive else { fail("Could not raise the owned native GoToWindow", 32) }
+        }
         let suggestionRows = tree(sheets[0]).map { $0.0 }
         let fields = suggestionRows.filter {
             (attr($0, "AXRole") as? String) == "AXTextField" && (attr($0, "AXIdentifier") as? String) == "PathTextField" && visible($0) && hasBounds($0)
@@ -198,6 +203,28 @@ if mode.hasPrefix("picker-") {
             let result = AXUIElementPerformAction(leaves[0], "AXOpen" as CFString)
             try emit(["nativeSuggestionAction": "AXOpen", "result": result.rawValue])
             guard result == .success else { fail("Native GoToWindow suggestion AXOpen failed", 32) }
+        }
+        if mode == "picker-submit-suggestion" {
+            let system = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(system, 1)
+            guard let focusedValue = attr(root, "AXFocusedUIElement") ?? attr(system, "AXFocusedUIElement"),
+                  CFGetTypeID(focusedValue as AnyObject) == AXUIElementGetTypeID() else { fail("Native keyboard focus unavailable", 32) }
+            let focused = focusedValue as! AXUIElement
+            var focusedPid: pid_t = 0
+            let pidResult = AXUIElementGetPid(focused, &focusedPid)
+            try emit(["ownerPid": app.processIdentifier, "focusedPid": focusedPid, "focusedPidResult": pidResult.rawValue,
+                "focusedRole": attr(focused, "AXRole") as? String ?? "", "focusedIdentifier": attr(focused, "AXIdentifier") as? String ?? "",
+                "focusedLabels": labels(focused), "focusWithinGoToWindow": suggestionRows.contains { CFEqual($0, focused) }])
+            guard pidResult == .success, focusedPid == app.processIdentifier, app.isActive,
+                  suggestionRows.contains(where: { CFEqual($0, focused) }) else { fail("Keyboard focus is outside the owned GoToWindow", 32) }
+            guard let source = CGEventSource(stateID: .privateState),
+                  let down = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false) else { fail("Could not create native Return events", 32) }
+            down.flags = []; up.flags = []
+            down.postToPid(app.processIdentifier)
+            up.postToPid(app.processIdentifier)
+            try emit(["nativeSuggestionAction": "Return", "keyCode": 36, "modifiers": [String](), "posting": "CGEventPostToPid",
+                "targetPid": app.processIdentifier, "verification": "Native GoToWindow closure and actual fixture selection remain mandatory"])
         }
         exit(0)
     }
