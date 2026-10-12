@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert' show LineSplitter;
+import 'dart:io' show File;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -291,12 +293,24 @@ Future<void> _pickText(BuildContext context, Ref ref) async {
 
 Future<void> _pickClipboard(BuildContext context, Ref ref) async {
   final data = await Clipboard.getData(Clipboard.kTextPlain);
+  List<String>? clipboardFiles;
   if (data?.text != null) {
-    ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: data!.text!));
-    return;
+    final text = data!.text!;
+    final paths = const LineSplitter().convert(text);
+    if (!kIsWeb &&
+        checkPlatformIsDesktop() &&
+        paths.isNotEmpty &&
+        (await Future.wait(paths.map((path) => File(path).exists()))).every((exists) => exists)) {
+      // Some file managers also put copied file paths on the clipboard as text, one per line: https://github.com/localsend/localsend/issues/3499
+      clipboardFiles = await Pasteboard.files();
+    }
+    if (clipboardFiles?.isNotEmpty != true) {
+      ref.redux(selectedSendingFilesProvider).dispatch(AddMessageAction(message: text));
+      return;
+    }
   }
 
-  final image = await Pasteboard.image;
+  final image = clipboardFiles == null ? await Pasteboard.image : null;
   if (image != null) {
     // Adding temporary variable because Dart analyzer somehow doesn't properly downcast Uint8List? to Uint8List
     Uint8List currImage = image;
@@ -328,7 +342,7 @@ Future<void> _pickClipboard(BuildContext context, Ref ref) async {
     return;
   }
 
-  final List<String> files = await Pasteboard.files();
+  final List<String> files = clipboardFiles ?? await Pasteboard.files();
   if (files.isNotEmpty) {
     await ref
         .redux(selectedSendingFilesProvider)
