@@ -18,7 +18,7 @@ on:
       apk:
         description: Existing APK, diagnostic source pair, or clean production source pair
         type: choice
-        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair]
+        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair, format-helper]
         default: original
       candidate_commit:
         description: Reviewed production candidate full 40-character commit SHA (production-pair only)
@@ -46,6 +46,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   baseline:
+    if: inputs.apk != 'format-helper'
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.apk == 'production-pair' && 150 || 60 }}
     steps:
@@ -312,3 +313,117 @@ jobs:
         with:
           name: issue1864-tv29-initial
           path: evidence-cloud
+  format:
+    if: inputs.apk == 'format-helper'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ISSUE1864_CANDIDATE: 8dae8cbf053195f913cf132f4d07ff9f76da5278
+      ISSUE1864_HELPER: app/lib/util/ui/keyboard_asset_picker.dart
+    steps:
+      - name: Require the fork and initialize evidence
+        run: |
+          mkdir -p format-evidence
+          printf 'repository=%s\nworkflow_sha=%s\ncandidate=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$ISSUE1864_CANDIDATE" > format-evidence/request.txt
+          test "$GITHUB_REPOSITORY" = ShlomoCode/localsend
+
+      - name: Check out the immutable candidate separately
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: 8dae8cbf053195f913cf132f4d07ff9f76da5278
+          path: issue1864-candidate
+          persist-credentials: false
+
+      - name: Require clean source and reviewed file hashes
+        id: original
+        working-directory: issue1864-candidate
+        run: |
+          git rev-parse HEAD > ../format-evidence/candidate-head.txt
+          test "$(git rev-parse HEAD)" = "$ISSUE1864_CANDIDATE"
+          ! git symbolic-ref -q HEAD
+          git status --porcelain=v1 --untracked-files=all > ../format-evidence/status-before.txt
+          test ! -s ../format-evidence/status-before.txt
+          cp "$ISSUE1864_HELPER" ../format-evidence/keyboard_asset_picker.original.dart
+          cp app/lib/util/native/file_picker.dart ../format-evidence/file_picker.original.dart
+          cp app/analysis_options.yaml ../format-evidence/analysis_options.original.yaml
+          cp .fvmrc ../format-evidence/fvmrc.original.json
+          cp pubspec.lock ../format-evidence/pubspec.original.lock
+          cp pubspec.yaml ../format-evidence/pubspec.original.yaml
+          cp app/pubspec.yaml ../format-evidence/app-pubspec.original.yaml
+          sha256sum "$ISSUE1864_HELPER" app/lib/util/native/file_picker.dart app/analysis_options.yaml pubspec.lock > ../format-evidence/original-sha256.txt
+          printf '%s\n' \
+            '023e7d532e2e24685bc30615811b034924f6e33dc2df3196baa525ec5b014cef  app/lib/util/native/file_picker.dart' \
+            '7e91be6855ba0fd3a495b7afb2a4c881a43e595addccc878d59776599f6d4f7c  app/lib/util/ui/keyboard_asset_picker.dart' \
+            | sha256sum -c - > ../format-evidence/original-hash-check.txt
+          grep -Eq '^  page_width: 150$' app/analysis_options.yaml
+          grep -Eq '^  trailing_commas: preserve$' app/analysis_options.yaml
+
+      - name: Install the pinned Flutter toolchain
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+
+      - name: Record and require Flutter and Dart versions
+        run: |
+          timeout --kill-after=10s 60s flutter --version --machine > format-evidence/toolchain.json
+          timeout --kill-after=10s 60s dart --version > format-evidence/dart-version.txt 2>&1
+          jq -e '.frameworkVersion == "3.41.9" and .dartSdkVersion == "3.11.5"' format-evidence/toolchain.json
+
+      - name: Resolve normal workspace dependencies
+        id: dependencies
+        working-directory: issue1864-candidate/app
+        run: |
+          timeout --kill-after=10s 240s flutter pub get > ../../format-evidence/pub-get.txt 2>&1
+
+      - name: Format only the shipping helper with inherited configuration
+        id: formatter
+        working-directory: issue1864-candidate/app
+        run: |
+          timeout --kill-after=10s 60s dart format lib/util/ui/keyboard_asset_picker.dart > ../../format-evidence/formatter.txt 2>&1
+
+      - name: Retain source, dependency resolution, and exact patches
+        if: always() && steps.checkout.outcome == 'success'
+        working-directory: issue1864-candidate
+        env:
+          ISSUE1864_ORIGINAL_RESULT: ${{ steps.original.outcome }}
+          ISSUE1864_DEPENDENCY_RESULT: ${{ steps.dependencies.outcome }}
+          ISSUE1864_FORMAT_RESULT: ${{ steps.formatter.outcome }}
+        run: |
+          printf 'original_guard=%s\ndependency_resolution=%s\nformatter=%s\n' "$ISSUE1864_ORIGINAL_RESULT" "$ISSUE1864_DEPENDENCY_RESULT" "$ISSUE1864_FORMAT_RESULT" > ../format-evidence/step-results.txt
+          cp "$ISSUE1864_HELPER" ../format-evidence/keyboard_asset_picker.after.dart
+          cp app/analysis_options.yaml ../format-evidence/analysis_options.after.yaml
+          cp pubspec.lock ../format-evidence/pubspec.resolved.lock
+          sha256sum "$ISSUE1864_HELPER" app/lib/util/native/file_picker.dart app/analysis_options.yaml pubspec.lock > ../format-evidence/after-sha256.txt
+          git diff --binary -- "$ISSUE1864_HELPER" > ../format-evidence/helper-format.patch
+          git diff --binary -- pubspec.lock > ../format-evidence/dependency-resolution.patch
+          git diff --binary > ../format-evidence/full-working-tree.patch
+          git status --porcelain=v1 --untracked-files=all > ../format-evidence/status-after.txt
+          git diff --name-only > ../format-evidence/changed-tracked-files.txt
+          git ls-files --others --exclude-standard > ../format-evidence/untracked-files.txt
+
+      - name: Require the helper to be the only source change
+        if: success()
+        working-directory: issue1864-candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "$ISSUE1864_CANDIDATE"
+          ! git symbolic-ref -q HEAD
+          test ! -s ../format-evidence/untracked-files.txt
+          # Dependency lock changes are retained separately from the helper patch.
+          git diff --name-only -- . ':!pubspec.lock' > ../format-evidence/changed-source-files.txt
+          if test -s ../format-evidence/changed-source-files.txt; then
+            test "$(cat ../format-evidence/changed-source-files.txt)" = "$ISSUE1864_HELPER"
+          fi
+          cmp app/analysis_options.yaml ../format-evidence/analysis_options.original.yaml
+          printf '%s\n' '023e7d532e2e24685bc30615811b034924f6e33dc2df3196baa525ec5b014cef  app/lib/util/native/file_picker.dart' | sha256sum -c - > ../format-evidence/unchanged-native-hash-check.txt
+          cp "$ISSUE1864_HELPER" ../format-evidence/keyboard_asset_picker.formatted.dart
+          sha256sum "$ISSUE1864_HELPER" > ../format-evidence/formatted-sha256.txt
+
+      - name: Upload formatting evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue1864-helper-format
+          path: format-evidence
+          if-no-files-found: error
