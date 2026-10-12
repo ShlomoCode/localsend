@@ -40,6 +40,7 @@ def capture(role, stage):
     modes=[('full', ['-colorspace','Gray','-resize','200%','-threshold','70%','-negate'],2,0,0,11),
            ('full-color', ['-resize','300%'],3,0,0,11),
            ('nav', ['-crop','256x250+0+100','+repage','-resize','300%'],3,0,100,6),
+           ('footer-progress', ['-crop','980x120+10+600','+repage','-resize','300%'],3,10,600,6),
            ('footer-white', ['-crop','900x250+100+500','+repage','-colorspace','Gray','-resize','300%',
                              '-threshold','70%','-negate','-fill','white','-draw','color 0,0 floodfill'],3,100,500,11),
            ('footer', ['-crop','600x400+500+400','+repage','-resize','300%'],3,500,400,6)]
