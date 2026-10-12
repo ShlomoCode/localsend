@@ -253,7 +253,7 @@ if (mode === 'create') {
         if (attempt === 3 || swipes === 2) break;
         if (screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true' && /SeekBar|Slider/.test(node.class ?? ''))) continue;
         const lists = screen.nodes.filter(node => node.package === 'com.android.settings' && node.scrollable === 'true' && node.enabled === 'true' &&
-          node.displayed === 'true' && /ScrollView|RecyclerView|ListView/.test(node.class ?? ''));
+          node.displayed === 'true' && node.class === 'androidx.recyclerview.widget.RecyclerView' && node['resource-id'] === 'com.android.settings:id/recycler_view');
         if (lists.length !== 1) throw new Error(`Native Settings ${label} list not uniquely observable; no guessed swipe`);
         const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(lists[0].bounds ?? '');
         if (!bounds) throw new Error('Observed native Settings list has no bounds');
@@ -274,18 +274,21 @@ if (mode === 'create') {
     await capture('display-original');
     await openNativePreference('Screen zoom', 'display-before-zoom', 'Display');
     function describeOriginalSettingsScreen(screen, heading) {
-      const headings = screen.nodes.filter(node => node.displayed === 'true' && (node.text === heading || node['content-desc'] === heading));
-      const toolbarHeadings = headings.filter(node => {
+      const headings = screen.nodes.filter(node => node.package === 'com.android.settings' && node.displayed === 'true' && (node.text === heading || node['content-desc'] === heading));
+      const headerHeadings = headings.filter(node => {
         let ancestor = node;
         for (let depth = 0; depth < 30 && ancestor.parentIndex !== null; depth++) {
           ancestor = screen.nodes[ancestor.parentIndex];
           if (/Toolbar/.test(ancestor.class ?? '') && ancestor.package === 'com.android.settings') return true;
+          if (ancestor.package === 'com.android.settings' && ancestor['resource-id'] === 'com.android.settings:id/action_bar') return true;
+          if (node['resource-id'] === 'com.android.settings:id/collapsing_appbar_extended_title' && ancestor.package === 'com.android.settings' &&
+            ancestor['resource-id'] === 'com.android.settings:id/collapsing_app_bar') return true;
         }
         return false;
       });
       return {
-        subpageIdentityVerified: toolbarHeadings.length > 0 && screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true'),
-        expectedHeading: heading, nativeHeadingCandidates: headings, observedToolbarHeadings: toolbarHeadings,
+        subpageIdentityVerified: headerHeadings.length > 0 && screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true'),
+        expectedHeading: heading, nativeHeadingCandidates: headings, observedNativeHeaderHeadings: headerHeadings,
         nativeControls: screen.nodes.filter(node => node.package === 'com.android.settings' && node.displayed === 'true' && /SeekBar|Slider/.test(node.class ?? '')),
         nativeLabels: screen.nodes.filter(node => node.text || node['content-desc']),
         rangeEstablished: false, screenshotInspectionRequired: true,

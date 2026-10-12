@@ -50,5 +50,14 @@
     "classification": "harness-before-picker",
     "androidSettingsChanged": false,
     "resolution": "Original screenshot shows Samsung Settings top while paired source still contains only prior systemui shade and no native Settings nodes. Display is not in screenshot viewport. No setting controls touched. Independent cleanup unresolved false and provider done. Correction waits for observed native package and uses at most two observed native-list swipes with retained results, not guessed coordinates or idle-setting changes."
+  },
+  {
+    "runId": "38209209922",
+    "headSha": "e43e7dc274da217ce0a34cd0cbcb64d428a3c34b",
+    "sessionId": "880695294ea40db8c9ccb7663d4552fb4fa0c2bc",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "androidSettingsChanged": false,
+    "resolution": "Four stable native Settings originals show exact Settings title in collapsing_appbar_extended_title under collapsing_app_bar, with action_bar ViewGroup rather than Toolbar class. Native coordinator ScrollView wraps resource-identified RecyclerView. No list swipe or setting change occurred. Provider done and independent cleanup unresolved false. Correction recognizes actual native header ancestry and only the uniquely observed RecyclerView; parent, slider and viewport gates remain."
   }
 ]
