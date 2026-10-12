@@ -4,7 +4,8 @@ from pathlib import Path
 
 OUT = Path(sys.argv[1])
 SENDER = Path('/home/sender1425')
-DEST = Path('/home/receiver1425/Downloads')
+# Original ReceiveController logs confirm the default save target is the receiver home.
+DEST = Path('/home/receiver1425')
 DISPLAYS = {'sender': ':81', 'receiver': ':82'}
 COUNTERS = {'sender': 0, 'receiver': 0}
 EVENTS = (OUT / 'inputs.jsonl').open('w')
@@ -39,6 +40,8 @@ def capture(role, stage):
     modes=[('full', ['-colorspace','Gray','-resize','200%','-threshold','70%','-negate'],2,0,0,11),
            ('full-color', ['-resize','300%'],3,0,0,11),
            ('nav', ['-crop','256x250+0+100','+repage','-resize','300%'],3,0,100,6),
+           ('footer-white', ['-crop','900x250+100+500','+repage','-colorspace','Gray','-resize','300%',
+                             '-threshold','70%','-negate','-fill','white','-draw','color 0,0 floodfill'],3,100,500,11),
            ('footer', ['-crop','600x400+500+400','+repage','-resize','300%'],3,500,400,6)]
     for name,filters,scale,offset_x,offset_y,psm in modes:
         variant=str(stem)+'-ocr-'+name+'.png'
@@ -153,7 +156,8 @@ def file_state():
     files={}
     for p in DEST.rglob('*'):
         try:
-            if p.is_file(): files[str(p.relative_to(DEST))]=p.stat().st_size
+            relative=p.relative_to(DEST)
+            if p.is_file() and not any(part.startswith('.') for part in relative.parts): files[str(relative)]=p.stat().st_size
         except FileNotFoundError:
             pass  # A native unlink is a normal observation transition, not an assertion.
     return files
