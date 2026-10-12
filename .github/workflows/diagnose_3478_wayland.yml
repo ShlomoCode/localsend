@@ -1,6 +1,11 @@
 name: Diagnose 3478 native Wayland clipboard
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/bug-3478-wayland-clipboard-read
+    paths:
+      - .github/workflows/diagnose_3478_wayland.yml
 permissions:
   contents: read
 concurrency:
