@@ -30,13 +30,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Require existing recording tools and resolve exact unchanged upload
-        timeout-minutes: 1
+      - name: Install normal packaged recording tools within 150 seconds
+        timeout-minutes: 3
         run: |
-          command -v ffmpeg
-          command -v ffprobe
-          node support/diagnostics/1774/prepare.mjs
-      - name: One ordinary native file and default to maximum screen zoom scenario
+          mkdir -p evidence/issue1774
+          setup_started_ns=$(date +%s%N)
+          setup_status=0
+          sudo timeout --signal=TERM --kill-after=5s 140s bash -euc '
+            apt-get update
+            apt-get install -y --no-install-recommends ffmpeg
+            ffmpeg -version
+            ffprobe -version
+          ' > evidence/issue1774/recording-tools-install.log 2>&1 || setup_status=$?
+          setup_elapsed_ms=$(( ($(date +%s%N) - setup_started_ns) / 1000000 ))
+          printf '{"elapsedMs":%s,"exitStatus":%s,"maximumMs":150000,"commandDeadlineSeconds":140,"terminationGraceSeconds":5,"receiptReserveSeconds":5}\n' "$setup_elapsed_ms" "$setup_status" > evidence/issue1774/recording-tools-setup.json
+          test "$setup_elapsed_ms" -le 150000
+          exit "$setup_status"
+      - name: Resolve exact unchanged upload after packaged tools
+        timeout-minutes: 1
+        run: node support/diagnostics/1774/prepare.mjs
+      - name: One ordinary native file and original to maximum screen zoom scenario
         timeout-minutes: 13
         run: node support/diagnostics/1774/controller.mjs
       - name: Independently restore and delete only exact owned session

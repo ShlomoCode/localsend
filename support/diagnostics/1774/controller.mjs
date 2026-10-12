@@ -106,8 +106,16 @@ try {
     cleanupPhase = true; stage = 'independent-native-restore';
     await save('independent-native-restoration.json', await ui.restore());
   } else {
-    const start = Date.now(); deviceHardDeadline = start + 12 * 60000; deadline = deviceHardDeadline - 30000; productDeadline = start + 9 * 60000;
+    const start = Date.now(), jobDeadline = Date.parse(process.env.ISSUE1774_JOB_DEADLINE_UTC);
+    if (!Number.isFinite(jobDeadline)) throw new Error("Actual 20-minute job deadline unavailable");
+    deviceHardDeadline = Math.min(start + 12 * 60000, jobDeadline - 8 * 60000);
+    deadline = deviceHardDeadline - 30000; productDeadline = Math.min(start + 9 * 60000, deadline - 150000);
+    if (productDeadline - start < 5 * 60000) throw new Error("Insufficient actual job reserve before device creation");
+    await save("actual-budget.json", { jobDeadlineUtc: new Date(jobDeadline).toISOString(), productDeadlineUtc: new Date(productDeadline).toISOString(), nativeDeadlineUtc: new Date(deadline).toISOString(), deviceHardDeadlineUtc: new Date(deviceHardDeadline).toISOString(), deviceMaximumMs: deviceHardDeadline-start, cleanupRetentionUploadReserveMinutes: 8 });
     const fixture = await preflight();
+    if (productDeadline - Date.now() < 5 * 60000) throw new Error("Actual product reserve exhausted before creation");
+    const creationAdmission = await readJson(process.env.COORDINATOR_ADMISSION_FILE);
+    if (Date.parse(creationAdmission.expiresAt) <= Date.now() || Date.now() - Date.parse(creationAdmission.admittedAt) > 300000) throw new Error("Coordinator admission expired before creation");
     // Exclusive marker prevents re-creating after any uncertain POST response.
     ownership = { runId, runAttempt, buildName: `issue1774-${runId}-attempt-${runAttempt}`, creationAttempted: true,
       attemptedAt: new Date().toISOString(), deviceDeadlineUtc: new Date(deviceHardDeadline).toISOString(),
