@@ -2,6 +2,9 @@
 # the root reviews this final packet and supplies fresh coordination admission.
 name: Issue 2453 retained paired replay
 on:
+  push:
+    branches: [codex/issue2453-investigation]
+    paths: [.github/workflows/issue2453-paired-replay.yml]
   workflow_dispatch:
     inputs:
       root_admission_base64:

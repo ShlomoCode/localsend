@@ -57,3 +57,7 @@ Root can assess the final source-only packet. Execution remains separately gated
 ## Focused secret-name correction
 
 Accepted the two-line workflow correction mapping `secrets.BS_SPRINT_USERNAME` to `BROWSERSTACK_USERNAME` and `secrets.BS_SPRINT_ACCESS_KEY` to `BROWSERSTACK_ACCESS_KEY`. The executor's environment contract remains unchanged. Parent supplied the actual fork secret-name inventory; this review did not retrieve or expose secret values. No new P1/P2 finding. The updated workflow SHA-256 is `06bdfc26ede89cf84945c4d75fcc0cd6976ff1d953066d6623f578fee55e3c0b`, superseding the workflow hash above. Source-only read/hash review; no parser, test, runtime, or network operation.
+
+## Focused registration-event correction
+
+Accepted the added `on.push` selector for branch `codex/issue2453-investigation` and path `.github/workflows/issue2453-paired-replay.yml` in the adopted workflow source at `/tmp/localsend-bug-2453/.github/workflows/issue2453-paired-replay.yml`. The existing sole job requires both the fork repository and `github.event_name == 'workflow_dispatch'`; therefore a push event does not execute its provider steps. No new P1/P2 finding in this correction. Source-only review does not establish that GitHub will register or accept a later dispatch. Workflow SHA-256 is `a1ce070dd01f0b0dfc9dddea52eaab3fba0e5d892bb672ca2c839c689f28885a`, superseding the preceding workflow hash. No parser, network, or execution operation was performed.
