@@ -9,10 +9,10 @@ class TextFieldWithActions extends StatefulWidget {
   final String name;
   final TextEditingController controller;
 
-  /// Called while typing. Without [onSubmitted], edits are kept on cancellation.
+  /// Called while typing. Cancellation does not undo this callback's effects.
   final ValueChanged<String>? onChanged;
 
-  /// Called on confirmation. When provided, cancellation restores the original text.
+  /// Called on confirmation. Cancellation always restores the original text in the controller.
   final ValueChanged<String>? onSubmitted;
   final List<Widget> actions;
 
@@ -84,7 +84,7 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
         setState(() {
           if (confirmedText != null) {
             widget.controller.text = confirmedText;
-          } else if (widget.onSubmitted != null) {
+          } else {
             widget.controller.text = originalText;
           }
         });
