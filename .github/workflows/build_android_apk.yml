@@ -16,10 +16,14 @@ on:
         options: [adb, w3c-native]
         default: adb
       apk:
-        description: Original release or exact existing c1ce current artifact; no build
+        description: Existing APK, diagnostic source pair, or clean production source pair
         type: choice
-        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse]
+        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair]
         default: original
+      candidate_commit:
+        description: Reviewed production candidate full 40-character commit SHA (production-pair only)
+        type: string
+        default: ''
       focus_trace:
         description: Observational Flutter focus/action trace; requires new source-pair build
         type: boolean
@@ -43,9 +47,33 @@ concurrency:
 jobs:
   baseline:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: ${{ inputs.apk == 'production-pair' && 150 || 60 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Require isolated production comparison inputs
+        if: inputs.apk == 'production-pair'
+        env:
+          ISSUE1864_CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          ISSUE1864_IMAGE: ${{ inputs.image }}
+          ISSUE1864_MOUSE: ${{ inputs.mouse }}
+          ISSUE1864_FOCUS_TRACE: ${{ inputs.focus_trace }}
+          ISSUE1864_PROBE: ${{ inputs.probe }}
+          ISSUE1864_RECORDING_STOP: ${{ inputs.recording_stop }}
+          ISSUE1864_REPOSITORY: ${{ github.repository }}
+        run: |
+          test "$ISSUE1864_REPOSITORY" = ShlomoCode/localsend
+          [[ "$ISSUE1864_CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$ISSUE1864_IMAGE" = 'system-images;android-36;android-tv;x86_64'
+          test "$ISSUE1864_MOUSE" = w3c-native
+          test "$ISSUE1864_FOCUS_TRACE" = false
+          test "$ISSUE1864_PROBE" = thumbnail-focus
+          test "$ISSUE1864_RECORDING_STOP" = natural
+          test -f support/tests/issue1864-production-replay.sh
+          mkdir -p evidence-cloud
+          ISSUE1864_JOB_START_EPOCH=$(date +%s)
+          ISSUE1864_HOST_DEADLINE_EPOCH_MS=$(((ISSUE1864_JOB_START_EPOCH + 145 * 60) * 1000))
+          echo "ISSUE1864_HOST_DEADLINE_EPOCH_MS=$ISSUE1864_HOST_DEADLINE_EPOCH_MS" >> "$GITHUB_ENV"
+          printf 'job timeout: 150 minutes\nhost deadline: %s ms since epoch (145 minutes from gate)\neach release build timeout: 1800 seconds, then 60-second kill grace\n' "$ISSUE1864_HOST_DEADLINE_EPOCH_MS" > evidence-cloud/production-job-budget.txt
       - name: Require normal source build for Flutter instrumentation
         if: inputs.focus_trace && inputs.apk != 'source-pair' && inputs.apk != 'source-trace-reuse'
         run: exit 1
@@ -59,19 +87,24 @@ jobs:
         if: inputs.probe == 'collapsed-path' && (inputs.apk != 'source-pair' || !inputs.focus_trace)
         run: exit 1
       - uses: actions/setup-java@v5
-        if: inputs.apk == 'source-pair'
+        if: inputs.apk == 'source-pair' || inputs.apk == 'production-pair'
         with:
           distribution: temurin
           java-version: '17'
       - uses: subosito/flutter-action@v2
-        if: inputs.apk == 'source-pair'
+        if: inputs.apk == 'source-pair' || inputs.apk == 'production-pair'
         with:
           flutter-version: '3.41.9'
           cache: true
       - uses: dtolnay/rust-toolchain@stable
-        if: inputs.apk == 'source-pair'
+        if: inputs.apk == 'source-pair' || inputs.apk == 'production-pair'
         with:
           toolchain: '1.97.1'
+      - name: Build exact clean production pair through normal release route
+        if: inputs.apk == 'production-pair'
+        env:
+          ISSUE1864_CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: bash support/tests/issue1864-production-build.sh
       - name: Build controlled source pair through normal Flutter build
         if: inputs.apk == 'source-pair'
         working-directory: app
@@ -179,7 +212,7 @@ jobs:
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/current-c1ce.apk
             echo '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea  evidence-cloud/current-c1ce.apk' | sha256sum -c -
             echo 'Existing build run38107226429, artifact11691000051, workflow head6dd3184ef65cb473a717fd52dd37b9b88ae4edc4; app source c1ce322fb3acf08e44f329b8b7208b8b0d91e244; Flutter3.41.9, Dart3.11.5, Rust1.97.1; legitimate runtime ARM64 ABI/native bridge only; no new build.' > evidence-cloud/current-build-provenance.txt
-          elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ]; then
+          elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ] || [ '${{ inputs.apk }}' = production-pair ]; then
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/source-baseline.apk
           else
             curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
@@ -222,7 +255,9 @@ jobs:
           for color in red green blue yellow purple orange; do adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/issue1864/$color.jpg; done
           sleep 3
           adb shell content query --uri content://media/external/images/media --projection _id:_display_name > evidence-cloud/seeded-mediastore.txt
-          for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_MEDIA_IMAGES READ_MEDIA_VIDEO; do adb shell pm grant org.localsend.localsend_app android.permission.$permission 2>&1 | tee -a evidence-cloud/permission-grants.txt || true; done
+          if [ '${{ inputs.apk }}' != production-pair ]; then
+            for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_MEDIA_IMAGES READ_MEDIA_VIDEO; do adb shell pm grant org.localsend.localsend_app android.permission.$permission 2>&1 | tee -a evidence-cloud/permission-grants.txt || true; done
+          fi
           npm install -g appium
           appium driver install uiautomator2
           appium --version > evidence-cloud/appium-version.txt
@@ -233,7 +268,9 @@ jobs:
           curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
           ISSUE_TV_SCRIPT=support/tests/issue1864-tv.mjs
           if [ '${{ inputs.recording_stop }}' = whole ]; then ISSUE_TV_SCRIPT=support/tests/issue1864-whole.mjs; fi
-          if [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ]; then
+          if [ '${{ inputs.apk }}' = production-pair ]; then
+            bash support/tests/issue1864-production-replay.sh
+          elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ]; then
             ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-baseline node "$ISSUE_TV_SCRIPT"
             kill "$ISSUE_APPIUM_PID"
             wait "$ISSUE_APPIUM_PID" || true
