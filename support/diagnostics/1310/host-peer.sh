@@ -1,17 +1,38 @@
 #!/usr/bin/env bash
 # Real receiver app control. No protocol sender or mocked peer.
 set -euo pipefail
+phase=${1:-all}
+case "$phase" in all|prepare|run) ;; *) exit 2;; esac
 mkdir -p evidence/host-peer /home/runner/issue1310-peer/bundle /home/runner/Downloads
 printf 'Issue 1310 real file selection control\n' > evidence/host-peer/expected-control.txt
 peerroot=/home/runner/issue1310-peer
 test ! -e /home/runner/control.txt
 test ! -e /home/runner/Downloads/control.txt
-sudo apt-get install -y xvfb openbox xdotool scrot tesseract-ocr libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgl1-mesa-dri network-manager at-spi2-core
-sudo systemctl start NetworkManager
-{ systemctl status NetworkManager --no-pager; busctl --system list; } > evidence/host-peer/desktop-services.txt
-curl -fL --retry 3 -o "$peerroot/release.tar.gz" https://github.com/localsend/localsend/releases/download/v1.14.0/LocalSend-1.14.0-linux-x86-64.tar.gz
-sha256sum "$peerroot/release.tar.gz" > evidence/host-peer/release-sha256.txt
-tar xf "$peerroot/release.tar.gz" -C "$peerroot/bundle"
+if test "$phase" != run; then
+  sudo apt-get install -y bash coreutils diffutils mawk curl tar dbus-x11 xvfb xauth x11-utils imagemagick openbox xdotool scrot tesseract-ocr tesseract-ocr-eng libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgl1-mesa-dri network-manager at-spi2-core
+  sudo systemctl start NetworkManager
+  { systemctl status NetworkManager --no-pager; busctl --system list; } > evidence/host-peer/desktop-services.txt
+  curl -fL --retry 3 -o "$peerroot/release.tar.gz" https://github.com/localsend/localsend/releases/download/v1.14.0/LocalSend-1.14.0-linux-x86-64.tar.gz
+  sha256sum "$peerroot/release.tar.gz" > evidence/host-peer/release-sha256.txt
+  tar xf "$peerroot/release.tar.gz" -C "$peerroot/bundle"
+fi
+# Close the full remaining command path before either LocalSend app starts.
+# Internal bash operations (mapfile/read/test/printf/kill) are shell builtins.
+for required in bash timeout date mkdir cp wc head sleep sha256sum cmp awk curl tar dbus-run-session xvfb-run Xvfb xauth mktemp openbox xdotool scrot xprop xwininfo convert tesseract systemctl busctl dpkg-query ldd; do
+  command -v "$required" >> evidence/host-peer/command-inventory.txt
+done
+dpkg-query -W bash coreutils diffutils mawk curl tar dbus-x11 xvfb xauth x11-utils imagemagick openbox xdotool scrot tesseract-ocr tesseract-ocr-eng > evidence/host-peer/tool-package-versions.txt
+timeout 10 convert -version > evidence/host-peer/imagemagick-version.txt
+awk 'NR==1 && $3=="6.9.11-60"{found=1}END{exit !found}' evidence/host-peer/imagemagick-version.txt
+timeout 10 tesseract --list-langs > evidence/host-peer/ocr-languages.txt 2>&1
+awk '$0=="eng"{found=1}END{exit !found}' evidence/host-peer/ocr-languages.txt
+# Qualify the exact installed serialization, not an inferred quantum format.
+timeout 10 convert -size 2x2 xc:white -colorspace Gray -alpha off -depth 8 -define connected-components:verbose=true -connected-components 8 null: > evidence/host-peer/component-preflight.txt
+awk '$2=="2x2+0+0" && $4==4 && ($5=="gray(255)" || $5=="gray(100%)"){found=1}END{exit !found}' evidence/host-peer/component-preflight.txt
+ldd "$peerroot/bundle/localsend_app" > evidence/host-peer/receiver-ldd.txt
+if awk '/not found/{found=1}END{exit !found}' evidence/host-peer/receiver-ldd.txt; then exit 1; fi
+printf '%s receiver preparation qualified\n' "$(date --iso-8601=ns)" > evidence/host-peer/prepared.txt
+if test "$phase" = prepare; then exit 0; fi
 # Use the app's normal fresh profile and observe its actual save destination.
 dbus-run-session -- xvfb-run -a -s '-screen 0 1100x800x24' bash -s <<'DESKTOP'
 set -euo pipefail

@@ -89,7 +89,8 @@ if ! timeout 12 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then
 fi
 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'id; cat /etc/os-release; command -v xdotool || true; command -v scrot || true; command -v tesseract || true'
 sshpass -p demo scp -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" support/diagnostics/1310/mx-guest.sh support/diagnostics/1310/actions.sh demo@127.0.0.1:/home/demo/
-bash support/diagnostics/1310/host-peer.sh > evidence/host-peer-workload.log 2>&1 &
+bash support/diagnostics/1310/host-peer.sh prepare > evidence/host-peer-preflight.log 2>&1
+bash support/diagnostics/1310/host-peer.sh run > evidence/host-peer-workload.log 2>&1 &
 peer_job=$!
 timeout 1200 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 "TRANSFER_CONTROL=1 PACKAGE_FORMAT=${PACKAGE_FORMAT:-tar} bash /home/demo/mx-guest.sh" | tee evidence/mx/scenario.log
 wait "$peer_job"
