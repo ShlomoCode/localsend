@@ -7,7 +7,13 @@ if(-not $global:Issue1591SendingUIAPrewarmed){
  $global:Issue1591SendingUIAPrewarmed=$true
  try{
   Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
-  if(-not ('SendingUIA' -as [type])){Add-Type -ReferencedAssemblies @([System.Windows.Automation.AutomationElement].Assembly.Location,[System.Windows.Automation.ControlType].Assembly.Location,[System.Windows.Rect].Assembly.Location) @'
+  $desktopReferences=@([System.Windows.Automation.AutomationElement].Assembly.Location,[System.Windows.Automation.ControlType].Assembly.Location,[System.Windows.Rect].Assembly.Location)
+  $desktopNames=@($desktopReferences|ForEach-Object {Split-Path -Leaf $_})
+  # Explicit references replace PowerShell's defaults; retain its shipped .NET
+  # reference catalog and use the exact loaded desktop assemblies for duplicates.
+  $frameworkReferences=@(Get-ChildItem -LiteralPath (Join-Path $PSHOME 'ref') -File -Filter '*.dll'|Where-Object {$_.Name -notin $desktopNames}|ForEach-Object {$_.FullName})
+  if(-not $frameworkReferences.Count){throw 'PowerShell shipped reference assembly catalog unavailable'}
+  if(-not ('SendingUIA' -as [type])){Add-Type -ReferencedAssemblies @($frameworkReferences+$desktopReferences) @'
 using System;using System.Collections.Generic;using System.Threading;using System.Windows.Automation;
 public static class SendingUIA {
  public sealed class Node {public string Name;public int Pid;public bool Enabled;public bool Offscreen;public bool Invokable;public double X,Y,Width,Height;}
@@ -54,7 +60,7 @@ public static class SendingUIA {
 '@}
   $global:Issue1591SendingUIAAvailable=$true
  }catch{$global:Issue1591SendingUIAAvailable=$false;$global:Issue1591SendingUIAReason=$_.Exception.Message}
- @{utc=[DateTime]::UtcNow.ToString('o');available=$global:Issue1591SendingUIAAvailable;reason=$global:Issue1591SendingUIAReason;authority='Assembly/type loading only; actual Flutter provider is not established'}|ConvertTo-Json|Set-Content 'evidence/sending-uia-prewarm.json'
+ @{utc=[DateTime]::UtcNow.ToString('o');available=$global:Issue1591SendingUIAAvailable;reason=$global:Issue1591SendingUIAReason;frameworkReferenceCount=$frameworkReferences.Count;desktopReferences=$desktopReferences;authority='Assembly/type loading only; actual Flutter provider is not established'}|ConvertTo-Json|Set-Content 'evidence/sending-uia-prewarm.json'
 }
 Write-DiagnosticPhase 'before-drawing-assembly'
 Add-Type -AssemblyName System.Drawing
