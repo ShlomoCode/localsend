@@ -9,6 +9,9 @@ set -Eeuo pipefail
 evidence=${1:?evidence}; action=${2:?action}; shift 2
 scripts=$(cd "$(dirname "$0")" && pwd)
 if [[ "$action" == prepare || "$action" == start ]]; then exec bash "$scripts/wsl_prepare.sh" "$evidence" "${1:?pinned DEB sha256}"; fi
+if [[ "$action" == receiver-trace ]]; then
+  exec timeout --kill-after=1s 15s bash "$0" "$evidence" receiver-trace-bounded
+fi
 if [[ "$action" == receiver-liveness ]]; then
   # The whole observation, including receipt collection, is guest-bounded.
   # GNU timeout owns only the observer group and attempts TERM at 8s, KILL
@@ -79,6 +82,59 @@ restore() {
   rm -f "$out/guardian.active"
 }
 case "$action" in
+  receiver-trace-bounded)
+    root
+    trace="$evidence/receiver/lifetime/trace"
+    [[ -s "$trace/attached.tsv" ]]
+    # Host waited 12s after normal return. The 20s observer started earlier,
+    # leaving at most 8s nominal trace time; all collection shares this 15s
+    # outer bound. Missing completion is infrastructure, never a fresh attach.
+    deadline=$((SECONDS+8))
+    initial_status=0
+    timeout --kill-after=1s 2s bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot post-return-trace-before-wait || initial_status=$?
+    printf '%s\n' "$initial_status" > "$trace/collection-initial-snapshot.exit"
+    while [[ ! -s "$trace/completed.tsv" ]] && (( SECONDS < deadline )); do sleep 0.1; done
+    result=0
+    (( initial_status == 0 )) || result=1
+    if [[ ! -s "$trace/completed.tsv" ]]; then
+      printf 'trace completion missing at collection deadline\n' > "$trace/collection-failure.txt"; result=1
+    elif [[ $(cat "$trace/strace.exit") != 0 ]]; then
+      printf 'unexpected trace timeout/exit; inspect native output\n' > "$trace/collection-failure.txt"; result=1
+    fi
+    detach_status=0
+    timeout --kill-after=1s 2s bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" trace-state detached || detach_status=$?
+    printf '%s\n' "$detach_status" > "$trace/collection-detach.exit"
+    (( detach_status == 0 )) || result=1
+    snapshot_status=0
+    timeout --kill-after=1s 3s bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot post-return-trace || snapshot_status=$?
+    printf '%s\n' "$snapshot_status" > "$trace/collection-snapshot.exit"
+    (( snapshot_status == 0 )) || result=1
+    # A surviving original TID must have detached. Absent TIDs are recorded
+    # by raw receipts, not interpreted as an identity-equivalent replacement.
+    while IFS=$'\t' read -r name pid tid tick executable; do
+      [[ "$name" != role ]] || continue
+      path="$trace/detached/$name-$tid.status"
+      qualified=no
+      if [[ -s "$path" && -r "$path.exit" && $(cat "$path.exit") == 0 ]]; then
+        prefix="$trace/detached/$name-$tid"
+        if [[ -s "$prefix.stat" && -s "$prefix.after.stat" && -s "$prefix.exe" ]]; then
+          raw=$(cat "$prefix.stat"); fields=${raw##*) }; read -r -a before_parts <<< "$fields"
+          raw=$(cat "$prefix.after.stat"); fields=${raw##*) }; read -r -a after_parts <<< "$fields"
+          if [[ ${before_parts[19]} == "$tick" && ${after_parts[19]} == "$tick" && $(cat "$prefix.exe") == "$executable" ]] &&
+             grep -Eq '^TracerPid:[[:space:]]+0$' "$path"; then qualified=original-detached; fi
+        fi
+      elif [[ -r "$path.exit" && $(cat "$path.exit") == 1 && ! -d "/proc/$pid/task/$tid" ]] &&
+           grep -Fq 'No such file or directory' "$path.stderr"; then
+        qualified=original-task-absent
+      fi
+      printf '%s\t%s\t%s\n' "$name" "$tid" "$qualified" >> "$trace/detach-qualification.tsv"
+      if [[ "$qualified" == no ]]; then
+        printf '%s\t%s\tdetach-unqualified-read-failure-reuse-or-attached\n' "$name" "$tid" >> "$trace/collection-failure.txt"; result=1
+      fi
+    done < "$trace/tids.tsv"
+    printf 'collected\t%s\tfailed=%s\n' "$(stamp)" "$result" > "$trace/collection-result.tsv"
+    exit "$result"
+    ;;
   receiver-liveness-bounded)
     root; label=${1:?label}; [[ "$label" =~ ^post-return-[12]$ ]]
     live="$evidence/receiver/lifetime/$label"; mkdir "$live"

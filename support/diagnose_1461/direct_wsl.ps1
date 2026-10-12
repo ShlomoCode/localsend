@@ -88,21 +88,22 @@ try{
  $lifetimeResult.status='preparing';Json $lifetimePath $lifetimeResult
  Wsl @('bash',$linuxScript,$linuxEvidence,'prepare','9a823f990eab24d33c0d3c27698a15812f08a266f342462ed4755afa52d703ca') 900 (Join-Path $evidence 'guest-prepare-command.json')|Set-Content (Join-Path $evidence 'guest-prepare-output.txt')
  $lifetimeResult['preparationReceipt']='guest-prepare-command.json';$lifetimeResult['normalReturnObservedUtc']=[DateTime]::UtcNow.ToString('o');$lifetimeResult.status='post-return-observing';Json $lifetimePath $lifetimeResult
- foreach($probe in @(@{label='post-return-1';idleSeconds=2},@{label='post-return-2';idleSeconds=3})){
-  # No guest invocation occurs in this host-only interval. Probe 2 is reached
-  # only after probe 1 returned successfully with the original identities.
+ foreach($probe in @(@{label='post-return-trace';idleSeconds=12})){
+  # No guest command in this interval. The already-attached 20s tracer remains
+  # a live guest observer; the gap is not an observer-free WSL survival test.
   $clock=[Diagnostics.Stopwatch]::StartNew();$idleStart=[DateTime]::UtcNow.ToString('o')
   Start-Sleep -Seconds $probe.idleSeconds;$clock.Stop()
-  $observation=@{label=$probe.label;idleStartedUtc=$idleStart;idleFinishedUtc=[DateTime]::UtcNow.ToString('o');idleElapsedMilliseconds=$clock.Elapsed.TotalMilliseconds;requestedIdleSeconds=$probe.idleSeconds;guestWholeBoundSeconds=8;guestKillGraceSeconds=1;hostBoundSeconds=12;receipt=($probe.label+'-command.json');status='starting'}
+  $observation=@{label=$probe.label;idleStartedUtc=$idleStart;idleFinishedUtc=[DateTime]::UtcNow.ToString('o');idleElapsedMilliseconds=$clock.Elapsed.TotalMilliseconds;requestedIdleSeconds=$probe.idleSeconds;guestWholeBoundSeconds=15;guestKillGraceSeconds=1;hostBoundSeconds=20;traceWholeBoundSeconds=20;traceKillGraceSeconds=1;receipt=($probe.label+'-command.json');status='starting'}
   $lifetimeResult.observations+=@($observation);Json $lifetimePath $lifetimeResult
-  Wsl @('bash',$linuxScript,$linuxEvidence,'receiver-liveness',$probe.label) 12 (Join-Path $evidence $observation.receipt)|Set-Content (Join-Path $evidence ($probe.label+'-output.txt'))
+  Wsl @('bash',$linuxScript,$linuxEvidence,'receiver-trace') 20 (Join-Path $evidence $observation.receipt)|Set-Content (Join-Path $evidence ($probe.label+'-output.txt'))
   $observation.status='passed';Json $lifetimePath $lifetimeResult
  }
- $lifetimeResult.status='bounded-original-receiver-survival-passed';Json $lifetimePath $lifetimeResult
+ $lifetimeResult.status='bounded-native-receiver-trace-collected';Json $lifetimePath $lifetimeResult
  if($ReceiverLifetimeOnly){
   Json (Join-Path $evidence 'controller-result.json') @{status='receiver-only-discriminator-completed';productCredit=$false;nativeTerminalObserved=$false;lifetimeReceipt='receiver-lifetime-result.json'}
   return
  }
+ throw 'Full sender sequence held; this reviewed discriminator is receiver-only.'
  $ipOutput=Wsl @('ip','-j','-4','address','show','dev','eth0','scope','global') 30 (Join-Path $evidence 'guest-ip-command.json')
  $ipInterfaces=@($ipOutput|ConvertFrom-Json)
  if($ipInterfaces.Count -ne 1 -or $ipInterfaces[0].ifname -cne 'eth0'){throw 'Actual IP JSON must identify exactly one eth0 interface.'}

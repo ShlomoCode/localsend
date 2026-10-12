@@ -80,7 +80,13 @@ if grep -Fq '.X11-unix/' "$socket_receipts/after-unix-sockets.txt"; then reject_
 printf 'verified\t%s\n' "$(date -u --iso-8601=ns)" > "$socket_receipts/verified.tsv"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y curl xvfb openbox xdotool tesseract-ocr ffmpeg dbus-x11 iproute2 util-linux libgtk-3-0 libayatana-appindicator3-1 libsecret-1-0 libnotify4
+apt-get install -y curl xvfb openbox xdotool tesseract-ocr ffmpeg dbus-x11 iproute2 util-linux strace libgtk-3-0 libayatana-appindicator3-1 libsecret-1-0 libnotify4
+# Flags and printleader timestamp behavior are reviewed against upstream 6.8.
+# An unsupported package is infrastructure failure, never a silent fallback.
+strace --version > "$evidence/strace-version.txt"
+grep -Fxq 'strace -- version 6.8' "$evidence/strace-version.txt"
+dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' strace > "$evidence/strace-package.tsv"
+sha256sum "$(readlink -f "$(command -v strace)")" > "$evidence/strace-executable.sha256"
 url=https://github.com/localsend/localsend/releases/download/v1.14.0/LocalSend-1.14.0-linux-x86-64.deb
 deb="$evidence/LocalSend-1.14.0-linux-x86-64.deb"
 printf '%s\n' "$url" > "$evidence/linux-artifact-url.txt"
@@ -111,6 +117,9 @@ supervisor=$!
 bash "$lifetime" "$evidence" register supervisor "$supervisor"
 for ((attempt=0; attempt<120; attempt++)); do
   if [[ -s "$evidence/receiver/ready.tsv" ]]; then
+    # Root attaches only after unchanged strict readiness. This adds ptrace
+    # stops and one live observer; it does not repair the original session.
+    timeout --kill-after=1s 5s bash "$lifetime" "$evidence" trace-attach original
     snapshot_status=0
     timeout --kill-after=1s 2s bash "$lifetime" "$evidence" snapshot prepare-before-normal-return || snapshot_status=$?
     printf '%s\n' "$snapshot_status" > "$evidence/receiver/lifetime/prepare-before-normal-return.exit"

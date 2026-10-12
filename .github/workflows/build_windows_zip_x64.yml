@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       receiver_lifetime_only:
-        description: Observe original receiver lifetime only; no Windows sender or fixtures
+        description: Bounded original receiver delivered-signal/exit trace only; no sender or fixtures
         type: boolean
         default: true
         required: true
@@ -55,16 +55,14 @@ jobs:
             & wsl -d Ubuntu-24.04 -u root -- bash -n "$linuxRoot/support/diagnose_1461/$name"
             if($LASTEXITCODE){throw 'Guest source syntax failed'}
           }
-      - name: Bounded receiver discriminator or original peer sequence
+      - name: Bounded original receiver native signal and exit trace
         shell: pwsh
         env:
           RECEIVER_LIFETIME_ONLY: ${{ inputs.receiver_lifetime_only }}
         run: |
           if($env:RECEIVER_LIFETIME_ONLY -ceq 'true'){
             ./support/diagnose_1461/direct_wsl.ps1 -ReceiverLifetimeOnly
-          }elseif($env:RECEIVER_LIFETIME_ONLY -ceq 'false'){
-            ./support/diagnose_1461/direct_wsl.ps1
-          }else{throw 'Explicit receiver-only routing input required'}
+          }else{throw 'Full transfer held; explicit receiver-only routing required'}
       - name: Preserve environment and verify real recordings
         if: always()
         shell: pwsh
