@@ -8,13 +8,13 @@ import 'package:routerino/routerino.dart';
 class TextFieldWithActions extends StatefulWidget {
   final String name;
   final TextEditingController controller;
-  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
   final List<Widget> actions;
 
   const TextFieldWithActions({
     required this.name,
     required this.controller,
-    required this.onChanged,
+    required this.onSubmitted,
     required this.actions,
   });
 
@@ -32,10 +32,10 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
         foregroundColor: Theme.of(context).colorScheme.onSurface,
       ),
       onPressed: () async {
-        final originalValue = widget.controller.text;
-        final result = await showDialog<String>(
+        final originalText = widget.controller.text;
+        final confirmedText = await showDialog<String>(
           context: context,
-          builder: (context) {
+          builder: (dialogContext) {
             return AlertDialog(
               title: Text(widget.name),
               content: Column(
@@ -51,17 +51,20 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
                     controller: widget.controller,
                     textAlign: TextAlign.center,
                     autofocus: true,
-                    onFieldSubmitted: (value) => context.pop(value),
+                    onFieldSubmitted: (text) => dialogContext.pop(text),
                   ),
                 ],
               ),
               actions: [
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    backgroundColor: Theme.of(dialogContext).colorScheme.primary,
+                    foregroundColor: Theme.of(dialogContext).colorScheme.onPrimary,
                   ),
-                  onPressed: () => context.pop(widget.controller.text),
+                  onPressed: () {
+                    final editedText = widget.controller.text;
+                    dialogContext.pop(editedText);
+                  },
                   child: Text(t.general.confirm),
                 ),
               ],
@@ -71,9 +74,10 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
         if (!mounted) {
           return;
         }
-        setState(() => widget.controller.text = result ?? originalValue);
-        if (result != null) {
-          widget.onChanged(result);
+        final textToDisplay = confirmedText ?? originalText;
+        setState(() => widget.controller.text = textToDisplay);
+        if (confirmedText != null) {
+          widget.onSubmitted(confirmedText);
         }
       },
       child: Padding(

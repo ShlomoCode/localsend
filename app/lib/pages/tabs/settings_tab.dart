@@ -368,28 +368,36 @@ class SettingsTab extends StatelessWidget {
                   child: TextFieldWithActions(
                     name: t.settingsTab.network.alias,
                     controller: vm.aliasController,
-                    onChanged: (s) async {
-                      await ref.notifier(settingsProvider).setAlias(s);
+                    onSubmitted: (confirmedAlias) async {
+                      await ref.notifier(settingsProvider).setAlias(confirmedAlias);
                     },
                     actions: [
                       Tooltip(
                         message: t.settingsTab.network.generateRandomAlias,
                         child: IconButton(
-                          onPressed: () => vm.aliasController.text = generateRandomAlias(),
+                          onPressed: () {
+                            final randomAlias = generateRandomAlias();
+                            vm.aliasController.text = randomAlias;
+                          },
                           icon: const Icon(Icons.casino),
                         ),
                       ),
                       Builder(
-                        builder: (context) => Tooltip(
+                        builder: (dialogContext) => Tooltip(
                           message: t.settingsTab.network.useSystemName,
                           child: IconButton(
                             onPressed: () async {
-                              final newAlias = await getDeviceName();
-                              if (newAlias == null || !context.mounted || ModalRoute.of(context)?.isCurrent != true) {
+                              final systemName = await getDeviceName();
+                              if (systemName == null || !dialogContext.mounted) {
                                 return;
                               }
 
-                              vm.aliasController.text = newAlias;
+                              final isDialogOpen = ModalRoute.of(dialogContext)?.isCurrent ?? false;
+                              if (!isDialogOpen) {
+                                return;
+                              }
+
+                              vm.aliasController.text = systemName;
                             },
                             icon: const Icon(Icons.desktop_windows_rounded),
                           ),

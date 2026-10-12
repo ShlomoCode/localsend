@@ -13,7 +13,7 @@ void main() {
           body: TextFieldWithActions(
             name: 'Alias',
             controller: controller,
-            onChanged: saved.add,
+            onSubmitted: saved.add,
             actions: const [],
           ),
         ),
