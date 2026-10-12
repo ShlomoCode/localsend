@@ -13,6 +13,7 @@ import android.media.MediaMetadataRetriever;
 import java.io.*;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import org.json.*;
 
 /** Public MediaStore staging only. LocalSend is installed and driven separately. */
@@ -115,10 +116,31 @@ public final class MainActivity extends Activity {
       }
       receipt.put(verify(file,uri,i));show("FIXTURE_STAGING verified="+(i+1)+"/"+files.length());
     }
-    String result=new JSONObject().put("files",receipt).put("android",Build.VERSION.RELEASE).put("sdk",Build.VERSION.SDK_INT).put("model",Build.MODEL).put("verifiedUtcMs",System.currentTimeMillis()).toString();
+    String result=new JSONObject().put("files",receipt).put("android",Build.VERSION.RELEASE).put("sdk",Build.VERSION.SDK_INT)
+      .put("manufacturer",Build.MANUFACTURER).put("brand",Build.BRAND).put("model",Build.MODEL)
+      .put("display",Build.DISPLAY).put("fingerprint",Build.FINGERPRINT).put("securityPatch",Build.VERSION.SECURITY_PATCH)
+      .put("incremental",Build.VERSION.INCREMENTAL).put("oneUiObservation",oneUiObservation())
+      .put("verifiedUtcMs",System.currentTimeMillis()).toString();
     try(FileOutputStream out=openFileOutput("source-manifest.json",MODE_PRIVATE)){out.write(result.getBytes("UTF-8"));}
     // Retain every readback hash in the observable helper UI, without private-files access.
     show("FIXTURE_READY\n"+result);
+  }
+  private JSONObject oneUiObservation() throws Exception {
+    JSONObject result=new JSONObject().put("property","ro.build.version.oneui").put("interpretation","No version inferred from Android version or model");
+    Process process=null;
+    try {
+      process=new ProcessBuilder("/system/bin/getprop","ro.build.version.oneui").redirectErrorStream(true).start();
+      if(!process.waitFor(1500,TimeUnit.MILLISECONDS)) {
+        process.destroyForcibly();process.waitFor(100,TimeUnit.MILLISECONDS);
+        return result.put("status","unknown").put("reason","Native property read deadline expired");
+      }
+      byte[] buffer=new byte[512];int count;
+      try(InputStream in=process.getInputStream()){count=in.read(buffer);}
+      String raw=count>0?new String(buffer,0,count,"UTF-8").trim():"";
+      if(process.exitValue()!=0||raw.isEmpty())return result.put("status","unknown").put("reason","Native property unavailable").put("exitCode",process.exitValue());
+      return result.put("status","raw-property-observed").put("rawValue",raw);
+    }catch(Exception error){return result.put("status","unknown").put("reason",error.getClass().getSimpleName());}
+    finally{if(process!=null&&process.isAlive())process.destroyForcibly();}
   }
   private void expose(String id) throws Exception {
     JSONArray cases=manifest.getJSONArray("cases"),selected=null;

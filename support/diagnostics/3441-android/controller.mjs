@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import {readFileSync,writeFileSync,appendFileSync,mkdirSync,existsSync,createWriteStream,mkdtempSync,rmSync,renameSync} from 'node:fs';
+import {readFileSync,writeFileSync,appendFileSync,mkdirSync,existsSync,renameSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawn,execFileSync} from 'node:child_process';
-import {Readable,Transform} from 'node:stream';
-import {pipeline} from 'node:stream/promises';
 import path from 'node:path';
+import {retainProviderArtifacts} from './provider-artifacts.mjs';
 
 const original='org.localsend.localsend_app',fixture='org.localsend.fixture3441',transport='org.localsend.cloudtransport';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function decode(value) {return value.replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
-const nodes=xml=>[...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fromEntries([...m[0].matchAll(/([\w.:-]+)="([^"]*)"/g)].map(a=>[a[1],decode(a[2])])));
+function decode(value) {return value.replace(/&#x([a-f0-9]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16))).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
+// Appium chooses single quotes when an attribute contains the fixture JSON's double quotes.
+const nodes=xml=>[...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fromEntries([...m[0].matchAll(/([\w.:-]+)=(["'])([\s\S]*?)\2/g)].map(a=>[a[1],decode(a[3])])));
 const label=n=>n['content-desc']||n.text||'';
 const rect=n=>{const m=n.bounds?.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);assert(m,'UI bounds missing');return {x:+m[1],y:+m[2],width:+m[3]-m[1],height:+m[4]-m[2]};};
 const elementId=e=>e['element-6066-11e4-a52e-4f735466cecf']||e.ELEMENT;
@@ -141,9 +141,11 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   stage('owned-session-created');
   await click('Stage and verify all fixtures');
   const staged=await wait(xml=>{assert(!xml.includes('FIXTURE_FAILED'),'Native fixture staging failed');return xml.includes('FIXTURE_READY');},300000);
-  const detail=nodes(staged).find(n=>label(n).startsWith('FIXTURE_READY\n'));assert(detail,'Readback manifest not observable');
-  const actual=JSON.parse(label(detail).slice('FIXTURE_READY\n'.length));save('source-media-native-manifest.json',actual);
+  const details=nodes(staged).filter(n=>label(n).startsWith('FIXTURE_READY\n'));assert(details.length===1,'Exactly one complete readback manifest must be observable');
+  const actual=JSON.parse(label(details[0]).slice('FIXTURE_READY\n'.length));save('source-media-native-manifest.json',actual);
   assert(actual.files.length===manifest.files.length,'Native staged count mismatch');
+  assert.deepEqual(actual.files.map(item=>item.name),manifest.files.map(item=>item.name),'Native source name/order mismatch');
+  assert(new Set(actual.files.map(item=>item.uri)).size===actual.files.length,'Native source URIs must be distinct');
   for(const item of actual.files){const expected=files.get(item.name);assert(expected&&item.bytes===expected.bytes&&item.sha256===expected.sha256&&item.decodedWidth>0&&item.decodedHeight>0,'Native source hash/decode mismatch');}
   await snap('source-fixtures-verified',staged);
   stage('all208-native-readback-hash-and-decode-complete');
@@ -202,49 +204,8 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
     await wd('DELETE',base()).catch(retry=>report.cleanupErrors.push('Owned session delete retry: '+redact(retry.message)));
    });
    try{
-    const metadata=(await api('sessions/'+session+'.json')).automation_session;
-    const receipt={session,status:'retention-pending',artifacts:[]};
-    for(const [field,name,maxBytes] of [['video_url','android-provider-original.mp4',300*1024*1024],['device_logs_url','android-provider-device.log',32*1024*1024],['appium_logs_url','android-provider-appium.log',32*1024*1024]]) {
-     const entry={name,status:'incomplete',rawBytes:0,rawSha256:null,retainedBytes:null,retainedSha256:null,plaintextRedacted:field!=='video_url'};
-     receipt.artifacts.push(entry);let privateDirectory;
-     const hash=createHash('sha256');
-     try {
-      assert(metadata[field],'Provider artifact reference missing: '+field);
-      const url=new URL(metadata[field]);assert(url.protocol==='https:','Provider artifact must use HTTPS');entry.referenceOrigin=url.origin;
-      assert(cleanupDeadline-Date.now()>10000,'Cleanup recording reserve expired');
-      const response=await fetch(url,{signal:AbortSignal.timeout(Math.min(90000,cleanupDeadline-Date.now()-5000))});assert(response.ok&&response.body,'Provider artifact HTTP '+response.status);
-      let destination=path.join(output,name);
-      if(entry.plaintextRedacted) {
-       assert(process.env.RUNNER_TEMP,'Private runner directory required for raw provider logs');
-       privateDirectory=mkdtempSync(path.join(process.env.RUNNER_TEMP,privatePrefix+'private-logs-'));
-       destination=path.join(privateDirectory,'raw.log');
-      }
-      const boundedHash=new Transform({transform(chunk,encoding,callback){
-       if(entry.rawBytes+chunk.length>maxBytes){callback(Error('Provider artifact exceeds retained bound'));return;}
-       entry.rawBytes+=chunk.length;hash.update(chunk);callback(null,chunk);
-      }});
-      // pipeline installs error handlers before streaming and awaits output closure on failure.
-      await pipeline(Readable.fromWeb(response.body),boundedHash,createWriteStream(destination,{mode:0o600}));
-      entry.rawComplete=true;entry.rawSha256=hash.digest('hex');
-      if(entry.plaintextRedacted) {
-       // Whole bounded text redaction also catches secrets split across network chunks.
-       const retained=Buffer.from(redact(readFileSync(destination,'utf8')),'utf8');
-       writeFileSync(path.join(output,name),retained);
-       entry.retainedBytes=retained.length;entry.retainedSha256=createHash('sha256').update(retained).digest('hex');
-      } else {entry.retainedBytes=entry.rawBytes;entry.retainedSha256=entry.rawSha256;}
-      entry.status='retained';entry.retainedUtc=new Date().toISOString();
-     }catch(error){
-      if(!entry.rawSha256)entry.rawSha256=hash.digest('hex');
-      entry.rawComplete??=false;entry.rawHashScope=entry.rawComplete?'complete original response':'partial received chunks; output may contain fewer bytes';
-      entry.error=redact(error.message);report.cleanupErrors.push('Provider artifact '+name+': '+entry.error);
-      // Partial plaintext stays private and is removed; never expose an unredacted prefix.
-      if(entry.plaintextRedacted)rmSync(path.join(output,name),{force:true});
-     }finally{
-      if(privateDirectory)rmSync(privateDirectory,{recursive:true,force:true});
-      save('provider-recording-retention.json',receipt);
-     }
-    }
-    receipt.status=receipt.artifacts.every(entry=>entry.status==='retained')?'original-video-and-redacted-logs-retained-decode-and-frame-audit-required':'partial-retention';save('provider-recording-retention.json',receipt);
+    const receipt=await retainProviderArtifacts({session,auth,output,privatePrefix,deadline:cleanupDeadline,redact,save});
+    if(receipt.status==='partial-retention')report.cleanupErrors.push('Provider evidence incomplete; inspect response generations and validation receipts');
    }catch(error){report.cleanupErrors.push('Recording retention: '+redact(error.message));}
   }
   if(tunnel&&tunnelExited===undefined) {
