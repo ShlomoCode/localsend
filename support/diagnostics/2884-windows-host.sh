@@ -72,7 +72,7 @@ wsl_sha=28b1a0d013640a2ac95898ea705fa186e5b4ff767a1c1b49257161bc106599c6
 ubuntu_url=https://releases.ubuntu.com/24.04.5/ubuntu-24.04.5-wsl-amd64.wsl
 ubuntu_sha=bb415d824822c4b878125729af451a5d18fb13d1cf5cbed9a7393ad64ac6039e
 printf 'windows_iso_url=%s\nwindows_iso_expected_length=5387960320\nwindows_iso_publisher_sha256=unavailable_record_actual_hash_without_claiming_publisher_checksum\nwsl_url=%s\nwsl_sha256=%s\nubuntu_url=%s\nubuntu_sha256=%s\n' "$iso_url" "$wsl_url" "$wsl_sha" "$ubuntu_url" "$ubuntu_sha" > "$evidence/media-identity.txt"
-curl --fail --location --connect-timeout 15 --max-time 300 --dump-header "$evidence/windows-iso-download-headers.txt" --output "$work_dir/windows.iso" "$iso_url"
+curl --fail --location --connect-timeout 15 --max-time 600 --dump-header "$evidence/windows-iso-download-headers.txt" --output "$work_dir/windows.iso" "$iso_url"
 if [ "$(stat -c %s "$work_dir/windows.iso")" -ne 5387960320 ]; then printf 'official_windows_iso_length_mismatch\n'; exit 2; fi
 sha256sum "$work_dir/windows.iso" > "$evidence/windows-iso-actual-sha256.txt"
 curl --fail --location --connect-timeout 15 --max-time 180 --output "$work_dir/payload/wsl.msi" "$wsl_url"
