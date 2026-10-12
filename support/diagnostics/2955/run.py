@@ -1,5 +1,7 @@
 """Cloud-only native UI capture. Do not run during source preparation."""
 import hashlib
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -24,6 +26,7 @@ serial = 'emulator-5554'
 PACKAGE = 'org.localsend.localsend_app'
 original_show_touches = None
 sender_process = None
+control_deadline = None
 
 
 def write(name, value):
@@ -244,6 +247,154 @@ def observe_sender_environment():
         except subprocess.TimeoutExpired as error:
             sample['tree_observer'] = {'error': 'TimeoutExpired', 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr)}
         write('sender-environment-observation.json', samples)
+
+
+def control_cmd(*args, timeout=30):
+    remaining = control_deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError('Rendered control exceeded its120s deadline')
+    return cmd(*args, timeout=min(timeout, remaining))
+
+
+def rendered_sender_label(label):
+    """Resolve ordinary mouse input from current rendered text and native PID."""
+    global sequence
+    if control_deadline is not None and time.monotonic() >= control_deadline:
+        raise RuntimeError('Rendered control exceeded its120s deadline')
+    if sender_process.poll() is not None:
+        raise RuntimeError('Sender exited before rendered control qualification')
+    ids = control_cmd('xdotool', 'search', '--all', '--onlyvisible', '--pid', str(sender_process.pid), '--name', '^LocalSend$', timeout=5).split()
+    if len(ids) != 1:
+        raise RuntimeError('Expected one visible LocalSend window for actual sender PID')
+    window = ids[0]
+    control_cmd('xdotool', 'windowactivate', '--sync', window, timeout=5)
+    if control_cmd('xdotool', 'getactivewindow', timeout=5).strip() != window:
+        raise RuntimeError('Rendered sender input has wrong foreground window')
+    raw_geometry = control_cmd('xdotool', 'getwindowgeometry', '--shell', window, timeout=5)
+    geometry = dict(line.split('=', 1) for line in raw_geometry.splitlines() if '=' in line)
+    x, y, width, height = (int(geometry[key]) for key in ('X', 'Y', 'WIDTH', 'HEIGHT'))
+    sequence += 1
+    prefix = f'{sequence:04d}-{stage}-rendered'
+    screenshot = OUT / (prefix + '.png')
+    control_cmd('scrot', str(screenshot), timeout=10)
+    raw = control_cmd('tesseract', str(screenshot), 'stdout', '--psm', '11', 'tsv', timeout=15)
+    (OUT / (prefix + '.tsv')).write_text(raw)
+    matches = []
+    for row in csv.DictReader(io.StringIO(raw), delimiter='\t'):
+        if row['text'].strip() != label or float(row['conf']) < 80:
+            continue
+        left, top, w, h = (int(row[key]) for key in ('left', 'top', 'width', 'height'))
+        if w > 0 and h > 0 and x <= left and y <= top and left+w <= x+width and top+h <= y+height:
+            matches.append({'label': label, 'bounds': [left, top, w, h], 'confidence': float(row['conf'])})
+    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': [x, y, width, height], 'label': label, 'matches': matches, 'screenshot': screenshot.name}
+    write(prefix + '.json', observation)
+    if len(matches) > 1:
+        raise RuntimeError('Ambiguous rendered sender label')
+    return observation, matches[0] if matches else None
+
+
+def rendered_sender_tap(label, scroll=False):
+    for attempt in range(25 if scroll else 1):
+        observation, target = rendered_sender_label(label)
+        if sender_process.poll() is not None or control_cmd('xdotool', 'getactivewindow', timeout=5).strip() != observation['window']:
+            raise RuntimeError('Sender process/foreground changed after rendered target capture')
+        ids = control_cmd('xdotool', 'search', '--all', '--onlyvisible', '--pid', str(sender_process.pid), '--name', '^LocalSend$', timeout=5).split()
+        if ids != [observation['window']]:
+            raise RuntimeError('Sender native PID/window identity changed before input')
+        if target is not None:
+            left, top, width, height = target['bounds']
+            log('rendered-sender-click', {**observation, 'target': target})
+            control_cmd('xdotool', 'mousemove', '--sync', str(left+width//2), str(top+height//2), 'click', '1', timeout=5)
+            time.sleep(.5)
+            return
+        if scroll and attempt < 24:
+            x, y, width, height = observation['geometry']
+            log('rendered-sender-scroll', {**observation, 'direction': 'down' if attempt < 12 else 'up'})
+            control_cmd('xdotool', 'mousemove', '--sync', str(x+width*3//4), str(y+height//2), 'click', '--repeat', '3', '--delay', '100', '5' if attempt < 12 else '4', timeout=5)
+            time.sleep(.3)
+    raise RuntimeError(f'Absent rendered sender label {label!r}')
+
+
+def qualify_sender_input_actions():
+    global stage
+    stage = 'rendered-control-listener-baseline'
+    baseline = control_cmd('ss', '-ltnp')
+    (OUT / 'rendered-control-baseline-listeners.txt').write_text(baseline)
+    if not any(re.search(r':53317\s', line) and f'pid={sender_process.pid},' in line for line in baseline.splitlines()):
+        raise RuntimeError('No baseline port53317 listener owned by actual senderPID')
+    stage = 'rendered-control-settings'
+    rendered_sender_tap('Settings')
+    stage = 'rendered-control-stop'
+    rendered_sender_tap('Stop', scroll=True)
+    stage = 'rendered-control-stopped'
+    _, target = rendered_sender_label('Start')
+    if target is None:
+        raise RuntimeError('Actual Stop input did not expose rendered Start control')
+    stopped = control_cmd('ss', '-ltnp')
+    (OUT / 'rendered-control-stopped-listeners.txt').write_text(stopped)
+    if re.search(r':53317\s', stopped):
+        raise RuntimeError('Actual Stop input did not release sender port53317')
+    stage = 'rendered-control-restore-start'
+    rendered_sender_tap('Start')
+    stage = 'rendered-control-restored'
+    _, target = rendered_sender_label('Stop')
+    if target is None:
+        raise RuntimeError('Actual Start input did not expose rendered Stop control')
+    restored = control_cmd('ss', '-ltnp')
+    (OUT / 'rendered-control-restored-listeners.txt').write_text(restored)
+    if not any(re.search(r':53317\s', line) and f'pid={sender_process.pid},' in line for line in restored.splitlines()):
+        raise RuntimeError('Actual Start input did not restore port53317 owned by senderPID')
+    write('sender-rendered-control.json', {'control': 'Settings Stop Start', 'port_release': 'observed', 'port_restore': 'observed', 'delivery': 'not attempted'})
+
+
+def qualify_sender_input():
+    global control_deadline
+    video = OUT / 'sender-rendered-control.mp4'
+    recorder = spawn(['ffmpeg', '-y', '-f', 'x11grab', '-video_size', '1600x1000', '-framerate', '15', '-i', ':99', '-t', '160', str(video)], 'sender-rendered-control-ffmpeg.log')
+    time.sleep(1)
+    if recorder.poll() is not None:
+        raise RuntimeError('Native desktop recording exited before control input')
+    control_started = time.monotonic()
+    control_deadline = control_started + 120
+    try:
+        qualify_sender_input_actions()
+    finally:
+        primary_error = sys.exc_info()[1]
+        control_finished = time.monotonic()
+        cleanup = []
+        def retain(label, fn):
+            try:
+                result = fn()
+                cleanup.append({'step': label, 'status': 'completed'})
+                return result
+            except Exception as error:
+                cleanup.append({'step': label, 'status': 'failed', 'error': repr(error)})
+                return None
+        if recorder.poll() is None:
+            retain('stop', lambda: recorder.send_signal(signal.SIGINT))
+        retain('wait', lambda: recorder.wait(timeout=15))
+        def probe():
+            raw = cmd('ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(video), timeout=10)
+            (OUT / 'sender-rendered-control-video-probe.json').write_text(raw)
+            return json.loads(raw)
+        metadata = retain('probe', probe)
+        def decode():
+            decoded = subprocess.run(['ffmpeg', '-v', 'warning', '-i', str(video), '-f', 'null', '-'], capture_output=True, timeout=30)
+            (OUT / 'sender-rendered-control-video-decode.txt').write_bytes(decoded.stderr)
+            if decoded.returncode:
+                raise RuntimeError('Native control recording failed full decode')
+        retain('decode', decode)
+        if metadata is not None:
+            def coverage():
+                duration = float(metadata['format']['duration'])
+                elapsed = control_finished-control_started
+                write('sender-rendered-control-video-timing.json', {'recorded_seconds': duration, 'control_seconds': elapsed})
+                if duration < elapsed:
+                    raise RuntimeError('Native recording does not cover the complete input episode')
+            retain('coverage', coverage)
+        write('sender-rendered-control-video-coverage.json', {'primary_error': repr(primary_error) if primary_error else None, 'cleanup': cleanup})
+        if primary_error is None and any(row['status'] == 'failed' for row in cleanup):
+            raise RuntimeError('Native control recording retention/decode/coverage failed')
 
 
 def desktop_find(label, seconds=30, role=None):
@@ -572,6 +723,8 @@ try:
     if os.environ.get('OBSERVE_2955') == '1':
         stage = 'observe-linux-sender-environment'
         observe_sender_environment()
+        if os.environ.get('CONTROL_2955') == '1':
+            qualify_sender_input()
         write('result.json', {'stage': stage, 'delivery': 'not attempted', 'observation': 'requires original rendered/native evidence review'})
     else:
         desktop_find('Settings', seconds=60)
