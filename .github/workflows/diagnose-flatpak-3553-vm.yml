@@ -1,4 +1,4 @@
-name: Diagnose GNOME source Flatpak 3161
+name: Diagnose original GNOME Zoom 3161 finite
 concurrency:
   group: issue3161-gnome-diagnostic
   cancel-in-progress: false
@@ -7,25 +7,24 @@ on:
 jobs:
   gnome-zoom:
     runs-on: ubuntu-26.04
-    timeout-minutes: 360
+    timeout-minutes: 100
     steps:
+      - name: Fix absolute whole-job budget before checkout
+        run: |
+          cut -d' ' -f1 /proc/uptime > /tmp/3161-job-start
+          date -u +%FT%T.%N > /tmp/3161-job-start-utc
       - uses: actions/checkout@v4
-      - name: Check source diagnostic script syntax on the cloud runner
+        timeout-minutes: 2
+      - name: Check immutable finite sources on cloud and stage oracle
         run: |
           set -euo pipefail
-          bash -n .diagnostics/3161/prepare-whole-bundle.sh
-          bash -n .diagnostics/3161/build-flatpak-matrix.sh
-          bash -n .diagnostics/3161/verify-packaged-bundle.sh
-          bash -n .diagnostics/3161/launch-source-flatpak.sh
-          bash -n .diagnostics/3161/verify-live-flatpak.sh
-      - name: Verify approved complete control and B source bundles
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          bash .diagnostics/3161/prepare-whole-bundle.sh .diagnostics/3161/whole-bundle-descriptor.accepted.json control /tmp/localsend-source-input/control
-          bash .diagnostics/3161/prepare-whole-bundle.sh .diagnostics/3161/whole-bundle-descriptor.accepted.json B /tmp/localsend-source-input/B
-          cp .diagnostics/3161/whole-bundle-descriptor.accepted.json .diagnostics/3161/flatpak-original.yml .diagnostics/3161/A-production.patch .diagnostics/3161/build-flatpak-matrix.sh .diagnostics/3161/verify-packaged-bundle.sh .diagnostics/3161/launch-source-flatpak.sh .diagnostics/3161/verify-live-flatpak.sh /tmp/localsend-source-input/
+          for source in .diagnostics/3161/finite-original/*.sh; do bash -n "$source"; done
+          python3 -m py_compile .diagnostics/3161/finite-original/display-session.py
+          mkdir -p /tmp/localsend-source-input
           cp -r .diagnostics/3161/geometry-oracle /tmp/localsend-source-input/
+          mkdir -p evidence/vm
+          cp /tmp/3161-job-start /tmp/3161-job-start-utc evidence/vm/
+          sha256sum .diagnostics/3161/finite-original/*.sh .diagnostics/3161/finite-original/*.py > evidence/vm/finite-source-SHA256SUMS
       - name: Install VM tools and prepare Debian 13 guest
         env:
           START_VERSION: trixie
@@ -170,6 +169,9 @@ jobs:
           # Deploy the runtime declared by the historical app, without altering its contents.
           runtime=$(flatpak info --show-runtime org.localsend.localsend_app)
           sudo flatpak install -y flathub "$runtime"
+          sudo flatpak update -y --commit=d27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf "$runtime"
+          test "$(flatpak info --show-commit org.localsend.localsend_app)" = "$old_commit"
+          test "$(flatpak info --show-commit "$runtime")" = d27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf
           flatpak info org.localsend.localsend_app
           flatpak info org.localsend.localsend_app | grep -Eq "Version: +1.17.0"
           flatpak info --show-metadata org.localsend.localsend_app
@@ -183,13 +185,9 @@ jobs:
           loginctl list-sessions
           GUEST
 
-      - name: Build normal source-defined Flatpak packages inside the pinned SDK
+      - name: Stage the checked-out supported compositor oracle
         run: |
-          set -euo pipefail
-          ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
-          scp "${ssh_opts[@]/-p/-P}" -r /tmp/localsend-source-input probe@127.0.0.1:/home/probe/source-input
-          timeout 10200 ssh "${ssh_opts[@]}" probe@127.0.0.1 "bash /home/probe/source-input/build-flatpak-matrix.sh /home/probe/source-input" > evidence/vm/source-flatpak-build.log 2>&1
-
+          timeout --kill-after=1s 20s scp -i /tmp/localsend-vm/id_ed25519 -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -r /tmp/localsend-source-input probe@127.0.0.1:/home/probe/source-input
       - name: Install supported compositor oracle before a fresh GNOME session
         run: |
           set -euo pipefail
@@ -222,556 +220,29 @@ jobs:
           ENV
           mkdir -p /home/probe/evidence
           . /home/probe/session-env
-          gsettings set org.gnome.desktop.session idle-delay 0
-          gsettings set org.gnome.desktop.screensaver lock-enabled false
           gsettings get org.gnome.desktop.interface toolkit-accessibility
           gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled
           GUEST
-          cat > /tmp/localsend-vm/round <<'CONTROL'
-          #!/bin/bash
-          set -euo pipefail
-          round=$1
-          mkdir -p "evidence/vm/round-$round"
-          target="$GITHUB_WORKSPACE/evidence/vm/round-$round"
-          for attempt in $(seq 1 1080); do
-            if ! gh api "repos/ShlomoCode/localsend/contents/.diagnostics/3161/command.json?ref=codex/bug-3161-gnome-zoom-diagnostics" --jq .content | base64 -d > /tmp/localsend-vm/command.json; then sleep 10; continue; fi
-            if [ "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round" ]; then break; fi
-            sleep 10
-          done
-          test "$(jq -r .round /tmp/localsend-vm/command.json)" = "$round"
-          cp /tmp/localsend-vm/command.json "$target/command.json"
-          ssh_opts=(-n -i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
-          export DISPLAY=:99
-          qemu_window=$(xdotool search --onlyvisible --name QEMU | head -1)
-          xdotool windowfocus "$qemu_window"
-          action_index=0
-          jq -c '.actions[]' /tmp/localsend-vm/command.json | while IFS= read -r action; do
-            date -u +%FT%T.%N >> "$target/timing.txt"
-            printf '%s\n' "$action" >> "$target/timing.txt"
-            kind=$(jq -r .kind <<< "$action")
-            case "$kind" in
-              capture) : ;;
-              click) xdotool mousemove "$(jq -r .x <<< "$action")" "$(jq -r .y <<< "$action")" click 1 ;;
-              move) xdotool mousemove "$(jq -r .x <<< "$action")" "$(jq -r .y <<< "$action")" ;;
-              key) xdotool key "$(jq -r .value <<< "$action")" ;;
-              text) xdotool type --clearmodifiers "$(jq -r .value <<< "$action")" ;;
-              scroll) xdotool click --repeat "$(jq -r '.count // 1' <<< "$action")" "$(jq -r '.button // 5' <<< "$action")" ;;
-              wait) sleep "$(jq -r .seconds <<< "$action")" ;;
-              flatpak) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup flatpak run org.localsend.localsend_app > /home/probe/evidence/localsend.log 2>&1 < /dev/null &' ;;
-              settings) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-control-center universal-access > /home/probe/evidence/settings.log 2>&1 < /dev/null &' ;;
-              calculator) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; nohup gnome-calculator > /home/probe/evidence/calculator.log 2>&1 < /dev/null &' ;;
-              stop-app) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pkill -x localsend || true; pkill -x localsend_app || true' ;;
-              sample) timeout 20 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u +%FT%T.%N; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); if [ -n "$pid" ]; then getconf CLK_TCK; cat "/proc/$pid/task/$pid/stat"; sleep 5; date -u +%FT%T.%N; cat "/proc/$pid/task/$pid/stat"; ps -T -p "$pid" -o pid,tid,stat,pcpu,wchan:32,comm; fi' > "$target/sample-$(date +%s).txt" ;;
-              stack) timeout 40 ssh "${ssh_opts[@]}" probe@127.0.0.1 'pid=$(pgrep -n -x localsend_app || pgrep -n -x localsend || true); date -u +%FT%T.%N; if [ -n "$pid" ]; then cat "/proc/$pid/stat"; sudo timeout 30 gdb -q -batch -ex "set sysroot /proc/$pid/root" -ex "file /proc/$pid/root$(sudo readlink /proc/$pid/exe)" -p "$pid" -ex "thread apply all bt 40"; fi; date -u +%FT%T.%N' > "$target/backtrace.txt" 2>&1 || true ;;
-              probe) timeout 90 ssh "${ssh_opts[@]}" probe@127.0.0.1 "$(jq -r .value <<< "$action")" > "$target/probe-$action_index.txt" 2>&1 || true ;;
-              finish) touch evidence/vm/finished ;;
-              *) echo "Unsupported action=$kind"; exit 1 ;;
-            esac
-            sleep 2
-            action_index=$((action_index + 1))
-            /tmp/localsend-vm/capture "$target/action-$action_index.png"
-          done
-          /tmp/localsend-vm/capture "$target/screen.png"
-          timeout 25 ssh "${ssh_opts[@]}" probe@127.0.0.1 '. /home/probe/session-env; date -u; gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled; gsettings get org.gnome.desktop.interface toolkit-accessibility; gsettings list-recursively org.gnome.desktop.a11y.magnifier; ps -eLo pid,tid,stat,pcpu,wchan:30,comm | grep -E "localsend|gnome-shell|calculator|control-center"; cat /home/probe/evidence/localsend.log 2>/dev/null || true' > "$target/state.txt"
-          CONTROL
-          chmod +x /tmp/localsend-vm/round
           DISPLAY=:99 ffmpeg -y -f x11grab -video_size 1280x800 -framerate 10 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p evidence/vm/live-ui.mp4 > evidence/vm/video.log 2>&1 &
           echo $! > /tmp/localsend-vm/video.pid
           /tmp/localsend-vm/capture "$GITHUB_WORKSPACE/evidence/vm/ready.png"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gnome-source-3161-ready
-          path: evidence/vm/ready.png
-      - name: Live UI round 1
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 1
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-1
-          path: evidence/vm/round-1/
-      - name: Live UI round 2
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 2
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-2
-          path: evidence/vm/round-2/
-      - name: Live UI round 3
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 3
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-3
-          path: evidence/vm/round-3/
-      - name: Live UI round 4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 4
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-4
-          path: evidence/vm/round-4/
-      - name: Live UI round 5
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 5
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-5
-          path: evidence/vm/round-5/
-      - name: Live UI round 6
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 6
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-6
-          path: evidence/vm/round-6/
-      - name: Live UI round 7
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 7
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-7
-          path: evidence/vm/round-7/
-      - name: Live UI round 8
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 8
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-8
-          path: evidence/vm/round-8/
-      - name: Live UI round 9
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 9
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-9
-          path: evidence/vm/round-9/
-      - name: Live UI round 10
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 10
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-10
-          path: evidence/vm/round-10/
-      - name: Live UI round 11
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 11
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-11
-          path: evidence/vm/round-11/
-      - name: Live UI round 12
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 12
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-12
-          path: evidence/vm/round-12/
-      - name: Live UI round 13
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 13
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-13
-          path: evidence/vm/round-13/
-      - name: Live UI round 14
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 14
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-14
-          path: evidence/vm/round-14/
-      - name: Live UI round 15
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 15
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-15
-          path: evidence/vm/round-15/
-      - name: Live UI round 16
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 16
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-16
-          path: evidence/vm/round-16/
-      - name: Live UI round 17
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 17
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-17
-          path: evidence/vm/round-17/
-      - name: Live UI round 18
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 18
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-18
-          path: evidence/vm/round-18/
-      - name: Live UI round 19
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 19
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-19
-          path: evidence/vm/round-19/
-      - name: Live UI round 20
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 20
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-20
-          path: evidence/vm/round-20/
-      - name: Live UI round 21
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 21
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-21
-          path: evidence/vm/round-21/
-      - name: Live UI round 22
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 22
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-22
-          path: evidence/vm/round-22/
-      - name: Live UI round 23
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 23
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-23
-          path: evidence/vm/round-23/
-      - name: Live UI round 24
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 24
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-24
-          path: evidence/vm/round-24/
-      - name: Live UI round 25
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 25
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-25
-          path: evidence/vm/round-25/
-      - name: Live UI round 26
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 26
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-26
-          path: evidence/vm/round-26/
-      - name: Live UI round 27
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 27
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-27
-          path: evidence/vm/round-27/
-      - name: Live UI round 28
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 28
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-28
-          path: evidence/vm/round-28/
-      - name: Live UI round 29
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 29
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-29
-          path: evidence/vm/round-29/
-      - name: Live UI round 30
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 30
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-30
-          path: evidence/vm/round-30/
-      - name: Live UI round 31
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 31
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-31
-          path: evidence/vm/round-31/
-      - name: Live UI round 32
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 32
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-32
-          path: evidence/vm/round-32/
-      - name: Live UI round 33
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 33
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-33
-          path: evidence/vm/round-33/
-      - name: Live UI round 34
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 34
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-34
-          path: evidence/vm/round-34/
-      - name: Live UI round 35
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 35
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-35
-          path: evidence/vm/round-35/
-      - name: Live UI round 36
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 36
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-36
-          path: evidence/vm/round-36/
-      - name: Live UI round 37
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 37
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-37
-          path: evidence/vm/round-37/
-      - name: Live UI round 38
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 38
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-38
-          path: evidence/vm/round-38/
-      - name: Live UI round 39
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 39
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-39
-          path: evidence/vm/round-39/
-      - name: Live UI round 40
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 40
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-40
-          path: evidence/vm/round-40/
-      - name: Live UI round 41
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 41
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-41
-          path: evidence/vm/round-41/
-      - name: Live UI round 42
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 42
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-42
-          path: evidence/vm/round-42/
-      - name: Live UI round 43
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 43
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-43
-          path: evidence/vm/round-43/
-      - name: Live UI round 44
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 44
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-44
-          path: evidence/vm/round-44/
-      - name: Live UI round 45
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 45
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-45
-          path: evidence/vm/round-45/
-      - name: Live UI round 46
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 46
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-46
-          path: evidence/vm/round-46/
-      - name: Live UI round 47
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 47
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-47
-          path: evidence/vm/round-47/
-      - name: Live UI round 48
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /tmp/localsend-vm/round 48
-      - uses: actions/upload-artifact@v4
-        if: ${{ success() && !hashFiles('evidence/vm/finished') }}
-        with:
-          name: gnome-source-3161-round-48
-          path: evidence/vm/round-48/
+      - name: One immutable finite original episode including immediate cleanup
+        run: bash .diagnostics/3161/finite-original/run-finite.sh .diagnostics/3161/finite-original
       - name: Collect session diagnostics and identities
         if: always()
         run: |
+          set -euo pipefail
+          # Refuse collection if cancellation skipped controller/fallback joins.
+          test -e evidence/vm/finite-original/scenario-joined
+          test -e evidence/vm/finite-original/cleanup-joined
           ssh_opts=(-i /tmp/localsend-vm/id_ed25519 -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/localsend-vm/known_hosts -o ConnectTimeout=5)
           if [ -f /tmp/localsend-vm/video.pid ]; then kill -INT "$(cat /tmp/localsend-vm/video.pid)" || true; sleep 3; fi
           timeout 30 ssh "${ssh_opts[@]}" probe@127.0.0.1 'journalctl --user -b --no-pager; sudo journalctl -b -p warning --no-pager' > evidence/vm/session-journal.txt 2>&1 || true
-          # Keep normal package outputs/provenance, excluding build cache and
-          # live runtime mounts; recursive SCP stalled there in the failed run.
+          # Sample live application stdout separately; exclude active log writers
+          # from the frozen guest tar. Samples are not complete final app logs.
+          timeout --kill-after=1s 10s ssh "${ssh_opts[@]}" probe@127.0.0.1 'date -u +%FT%T.%N; cat /home/probe/evidence/localsend.log /home/probe/evidence/gtk-editor.log; date -u +%FT%T.%N' > evidence/vm/application-log-sample.txt 2>&1 || true
           if timeout 600 ssh "${ssh_opts[@]}" probe@127.0.0.1 \
-            "tar -C /home/probe/evidence --exclude='./source-flatpak/flathub/.flatpak-builder' --exclude='./source-flatpak/*/build/var' -czf - ." \
+            "tar -C /home/probe/evidence --exclude='./localsend.log' --exclude='./gtk-editor.log' -czf - ." \
             > evidence/vm/guest-evidence.tar.gz 2> evidence/vm/guest-collection.log; then
             mkdir -p evidence/vm/guest-files
             tar -xzf evidence/vm/guest-evidence.tar.gz -C evidence/vm/guest-files
