@@ -58,13 +58,18 @@ cp "$SOURCE/app/lib/util/native/autostart_helper.dart" "$OUT/provenance/consumed
 sudo apt-get update
 sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev libssl-dev ruby
 mkdir -p "$RUNNER_TEMP/issue1927-flutter"
-curl -fL --connect-timeout 20 --max-time 120 https://storage.googleapis.com/flutter_infra_release/flutter/releases/releases_linux.json -o "$OUT/provenance/flutter-releases.json"
-mapfile -t release < <(ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])).fetch("releases").find { |x| x["version"]=="3.41.9" && x["channel"]=="stable" }; abort "Pinned Flutter absent" unless r; puts r.fetch("archive"),r.fetch("sha256")' "$OUT/provenance/flutter-releases.json")
-test "${#release[@]}" = 2
-curl -fL --connect-timeout 20 --max-time 180 "https://storage.googleapis.com/flutter_infra_release/flutter/${release[0]}" -o "$RUNNER_TEMP/issue1927-flutter.tar.xz"
-printf '%s  %s\n' "${release[1]}" "$RUNNER_TEMP/issue1927-flutter.tar.xz" | sha256sum -c - | tee "$OUT/provenance/flutter-archive-check.txt"
-tar -xf "$RUNNER_TEMP/issue1927-flutter.tar.xz" -C "$RUNNER_TEMP/issue1927-flutter"
+FLUTTER_REVISION=00b0c91f06209d9e4a41f71b7a512d6eb3b9c694
+FLUTTER_BOOTSTRAP="$RUNNER_TEMP/issue1927-flutter/flutter"
+git clone --depth 1 --branch 3.41.9 https://github.com/flutter/flutter.git "$FLUTTER_BOOTSTRAP"
+test "$(git -C "$FLUTTER_BOOTSTRAP" rev-parse HEAD)" = "$FLUTTER_REVISION"
+test "$(git -C "$FLUTTER_BOOTSTRAP" rev-parse 'refs/tags/3.41.9^{commit}')" = "$FLUTTER_REVISION"
+{
+  git -C "$FLUTTER_BOOTSTRAP" remote get-url origin
+  git -C "$FLUTTER_BOOTSTRAP" rev-parse HEAD 'refs/tags/3.41.9^{commit}'
+  sha256sum "$FLUTTER_BOOTSTRAP/bin/dart" "$FLUTTER_BOOTSTRAP/bin/internal/shared.sh" "$FLUTTER_BOOTSTRAP/bin/internal/update_dart_sdk.sh"
+} > "$OUT/provenance/flutter-bootstrap-source.txt"
 export PATH="$RUNNER_TEMP/issue1927-flutter/flutter/bin:$HOME/.pub-cache/bin:$PATH"
+dart --version > "$OUT/provenance/bootstrap-dart-version.txt" 2>&1
 dart pub global activate fvm 4.3.1
 rustup toolchain install 1.97.1 --profile minimal
 export RUSTUP_TOOLCHAIN=1.97.1
