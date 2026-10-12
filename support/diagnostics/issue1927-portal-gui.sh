@@ -553,6 +553,8 @@ mount_inspection() {
 cat > "$OUT/startup-accessibility.js" <<'GJS'
 const A=imports.gi.Atspi;
 A.init();
+const targetName=ARGV[0],targetPid=Number(ARGV[1]);
+if(!targetName || !Number.isInteger(targetPid) || targetPid<1) throw Error("invalid qualified Startup target");
 let nodes=[],candidates=[];
 function visit(n,parent,depth) {
     if(depth>40 || nodes.length>4000) throw Error("accessibility traversal bound");
@@ -564,23 +566,26 @@ function visit(n,parent,depth) {
 }
 visit(A.get_desktop(0),-1,0);
 function under(n,id){let p=n.id;for(let i=0;i<50 && p>=0;i++){if(p===id)return true;p=nodes[p].parent;}return false;}
-for(const label of nodes.filter(n=>n.name==="LocalSend" && n.showing)) {
+const frames=nodes.filter(n=>n.pid===targetPid && n.role==="frame" && n.name==="Startup Applications" && n.showing && n.enabled);
+if(frames.length!==1) throw Error("ambiguous qualified Startup frame");
+for(const label of nodes.filter(n=>n.pid===targetPid && n.role==="label" && n.name===targetName && n.showing && under(n,frames[0].id))) {
     let p=label.parent;
     for(let i=0;i<5 && p>=0;i++,p=nodes[p].parent) {
-        const matches=nodes.filter(n=>under(n,p) && n.showing && n.enabled &&
+        if(!under(nodes[p],frames[0].id)) break;
+        const matches=nodes.filter(n=>n.pid===targetPid && under(n,p) && n.showing && n.enabled &&
             [A.Role.CHECK_BOX,A.Role.TOGGLE_BUTTON,A.Role.SWITCH].includes(n.obj.get_role()));
-        const labels=nodes.filter(n=>under(n,p) && n.name==="LocalSend" && n.showing);
+        const labels=nodes.filter(n=>n.pid===targetPid && n.role==="label" && under(n,p) && n.name===targetName && n.showing);
         if(matches.length===1 && labels.length===1) {
             const n=matches[0],r=n.obj.get_component_iface().get_extents(A.CoordType.SCREEN);
             const action=n.obj.get_action_iface();
             if(!action || action.get_n_actions()<1) throw Error("missing accessible action API");
             let actions=[];for(let j=0;j<action.get_n_actions();j++)actions.push(action.get_action_name(j));
-            candidates.push({id:n.id,pid:n.pid,row:p,checked:n.checked,x:r.x,y:r.y,w:r.width,h:r.height,actions});
+            candidates.push({id:n.id,pid:n.pid,frame:frames[0].id,name:targetName,row:p,checked:n.checked,x:r.x,y:r.y,w:r.width,h:r.height,actions});
             break;
         }
     }
 }
-print(JSON.stringify({tree:nodes.map(({obj,...rest})=>rest),candidates}));
+print(JSON.stringify({targetName,targetPid,tree:nodes.map(({obj,...rest})=>rest),candidates}));
 if(candidates.length!==1) throw Error("ambiguous/unavailable LocalSend Startup switch");
 GJS
 revocation_cleanup() {
@@ -604,17 +609,29 @@ startup_launcher=''
 startup_launcher_ticks=''
 trap revocation_cleanup EXIT
 startup_switch() {
-  local label=$1 expected=$2 startup_pid startup_window x y
-  timeout -s KILL 12 gjs "$OUT/startup-accessibility.js" > "$OUT/$label-accessibility.json" 2> "$OUT/$label-accessibility-error.txt" || fail_case "$label-accessibility"
-  jq -e --argjson expected "$expected" '.candidates|length==1 and .[0].checked==$expected and .[0].w>0 and .[0].h>0 and .[0].x>=0 and .[0].y>=0' "$OUT/$label-accessibility.json" > /dev/null || fail_case "$label-switch-state"
-  startup_pid=$(jq -r '.candidates[0].pid' "$OUT/$label-accessibility.json")
+  local label=$1 expected=$2 startup_pid startup_window target_name x y before_ticks after_ticks
+  entry_read "$label-startup-target"
+  test -f "$OUT/$label-startup-target-entry.desktop" || fail_case "$label-startup-target-absent"
+  target_name=$(awk '
+    /^\[/ {group=$0;next}
+    group=="[Desktop Entry]" && /^Name=/ {count++; name=substr($0,6)}
+    END{if(count!=1 || name=="")exit 2;print name}
+  ' "$OUT/$label-startup-target-entry.desktop") || fail_case "$label-startup-target-name"
   startup_window=$(timeout -s KILL 8 xdotool search --onlyvisible --name '^Startup Applications$') || fail_case "$label-startup-window"
   [[ "$startup_window" =~ ^[0-9]+$ ]] || fail_case "$label-multiple-startup-windows"
-  timeout -s KILL 8 /home/mint/xres-owner "$startup_window" > "$OUT/$label-startup-xres.txt" 2> "$OUT/$label-startup-xres-error.txt"
-  test "$(cat "$OUT/$label-startup-xres.txt")" = "$startup_pid" || fail_case "$label-startup-xres-owner"
-  timeout -s KILL 8 cat "/proc/$startup_pid/cmdline" | tr '\0' ' ' > "$OUT/$label-startup-command.txt"
+  timeout -s KILL 8 /home/mint/xres-owner "$startup_window" > "$OUT/$label-startup-xres.txt" 2> "$OUT/$label-startup-xres-error.txt" || fail_case "$label-startup-xres-owner"
+  startup_pid=$(cat "$OUT/$label-startup-xres.txt")
+  [[ "$startup_pid" =~ ^[0-9]+$ ]] && test "$startup_pid" -gt 0 || fail_case "$label-startup-xres-pid"
+  timeout -s KILL 8 cat "/proc/$startup_pid/stat" > "$OUT/$label-startup-stat-before.txt" || fail_case "$label-startup-stat-before"
+  before_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "$OUT/$label-startup-stat-before.txt")
+  [[ "$before_ticks" =~ ^[0-9]+$ ]] || fail_case "$label-startup-ticks"
+  timeout -s KILL 8 cat "/proc/$startup_pid/cmdline" | tr '\0' ' ' > "$OUT/$label-startup-command.txt" || fail_case "$label-startup-cmdline"
   grep -q cinnamon-settings "$OUT/$label-startup-command.txt" || fail_case "$label-startup-command"
-  timeout -s KILL 8 cat "/proc/$startup_pid/stat" > "$OUT/$label-startup-stat.txt"
+  timeout -s KILL 12 gjs "$OUT/startup-accessibility.js" "$target_name" "$startup_pid" > "$OUT/$label-accessibility.json" 2> "$OUT/$label-accessibility-error.txt" || fail_case "$label-accessibility"
+  jq -e --argjson expected "$expected" --argjson pid "$startup_pid" --arg name "$target_name" '.candidates|length==1 and .[0].pid==$pid and .[0].name==$name and .[0].checked==$expected and .[0].w>0 and .[0].h>0 and .[0].x>=0 and .[0].y>=0' "$OUT/$label-accessibility.json" > /dev/null || fail_case "$label-switch-state"
+  timeout -s KILL 8 cat "/proc/$startup_pid/stat" > "$OUT/$label-startup-stat.txt" || fail_case "$label-startup-stat-after"
+  after_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "$OUT/$label-startup-stat.txt")
+  test "$before_ticks" = "$after_ticks" || fail_case "$label-startup-pid-reused"
   timeout -s KILL 8 import -window "$startup_window" "$OUT/$label-startup.png"
   x=$(jq -r '.candidates[0]|(.x+.w/2)|floor' "$OUT/$label-accessibility.json")
   y=$(jq -r '.candidates[0]|(.y+.h/2)|floor' "$OUT/$label-accessibility.json")
