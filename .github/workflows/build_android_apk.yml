@@ -18,7 +18,7 @@ on:
       apk:
         description: Existing APK, diagnostic source pair, or clean production source pair
         type: choice
-        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair, format-helper]
+        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair, format-helper, ndk-toolchain]
         default: original
       candidate_commit:
         description: Reviewed production candidate full 40-character commit SHA (production-pair only)
@@ -46,7 +46,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   baseline:
-    if: inputs.apk != 'format-helper'
+    if: inputs.apk != 'format-helper' && inputs.apk != 'ndk-toolchain'
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.apk == 'production-pair' && 150 || 60 }}
     steps:
@@ -313,6 +313,30 @@ jobs:
         with:
           name: issue1864-tv29-initial
           path: evidence-cloud
+  ndk-toolchain:
+    if: inputs.apk == 'ndk-toolchain'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the fork
+        run: test "$GITHUB_REPOSITORY" = ShlomoCode/localsend
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          cache: true
+      - name: Qualify the required NDK through the existing SDK Manager
+        run: bash support/tests/issue1864-ndk-toolchain.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue1864-ndk-toolchain
+          path: evidence-cloud/ndk-toolchain
+          if-no-files-found: error
   format:
     if: inputs.apk == 'format-helper'
     runs-on: ubuntu-24.04

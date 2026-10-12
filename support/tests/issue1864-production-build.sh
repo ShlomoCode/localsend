@@ -24,6 +24,9 @@ grep -E '^rustc 1\.97\.1 ' "$evidence/rust.txt"
 java -version 2> "$evidence/java.txt"
 grep -E 'version "17\.' "$evidence/java.txt"
 
+# Every ephemeral pair runner must independently qualify its required NDK.
+bash "$root/support/tests/issue1864-ndk-toolchain.sh"
+
 verify_candidate_source() {
   printf '%s  %s\n' \
     023e7d532e2e24685bc30615811b034924f6e33dc2df3196baa525ec5b014cef app/lib/util/native/file_picker.dart \
