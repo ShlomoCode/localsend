@@ -102,7 +102,6 @@ try{
   Json (Join-Path $evidence 'controller-result.json') @{status='receiver-only-untraced-admission-completed';productCredit=$false;nativeTerminalObserved=$false;lifetimeReceipt='receiver-lifetime-result.json'}
   return
  }
- throw 'Full sender sequence held; this reviewed discriminator is receiver-only.'
  $ipOutput=Wsl @('ip','-j','-4','address','show','dev','eth0','scope','global') 30 (Join-Path $evidence 'guest-ip-command.json')
  $ipInterfaces=@($ipOutput|ConvertFrom-Json)
  if($ipInterfaces.Count -ne 1 -or $ipInterfaces[0].ifname -cne 'eth0'){throw 'Actual IP JSON must identify exactly one eth0 interface.'}
@@ -199,9 +198,11 @@ try{
  Json (Join-Path $evidence 'controller-result.json') @{status='native-error-sequence-completed';productVerdict='Requires raw/video independent review; no claim of Android equivalence or causal fix'}
 }catch{
  $primaryFailure=$_
- if($lifetimeResult.status -ne 'bounded-original-receiver-survival-passed'){
+ if($lifetimeResult.status -ne 'bounded-untraced-receiver-admission-passed'){
   $lifetimeResult.status='infrastructure-lifetime-failure';$lifetimeResult['error']=$primaryFailure.Exception.ToString()
   try{Json $lifetimePath $lifetimeResult}catch{}
+ }else{
+  try{Json (Join-Path $evidence 'sequence-error.json') @{status='sequence-failure-after-receiver-admission';receiverAdmissionStatus=$lifetimeResult.status;error=$primaryFailure.Exception.ToString();observedUtc=[DateTime]::UtcNow.ToString('o')}}catch{}
  }
  try{Json (Join-Path $evidence 'controller-result.json') @{status='infrastructure-or-admission-failure';error=$primaryFailure.Exception.ToString();nativeTerminalObserved=(Test-Path (Join-Path $evidence 'native-terminal.json'))}}catch{}
  throw $primaryFailure
