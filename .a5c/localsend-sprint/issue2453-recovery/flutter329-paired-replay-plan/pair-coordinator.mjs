@@ -169,7 +169,7 @@ async function settings(arm) {
 async function setup(arm) {
   await request('POST', 'orientation', `${arm}-setup-portrait`, {orientation: 'PORTRAIT'});
   let xml = await source(`${arm}-launch`);
-  if (xml.includes('name="Allow"') && xml.includes('Local Network')) {
+  if (/<XCUIElementTypeAlert[^>]*name="Allow “LocalSend” to find devices on local networks\?"[^>]*visible="true"/.test(xml) && /<XCUIElementTypeButton[^>]*name="Allow"[^>]*visible="true"/.test(xml)) {
     await execute(`${arm}-allow-network`, 'mobile: alert', {action: 'accept', buttonLabel: 'Allow'});
     xml = await source(`${arm}-after-network`);
   }
