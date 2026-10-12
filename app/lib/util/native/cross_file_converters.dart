@@ -16,6 +16,9 @@ class CrossFileConverters {
   static Future<CrossFile> convertAssetEntity(AssetEntity asset) async {
     final file = (await asset.originFile)!;
     final metadata = await readFileMetadata(path: file.path);
+    final usePhotoLibraryDates = defaultTargetPlatform == TargetPlatform.iOS;
+    final modified = usePhotoLibraryDates ? _assetDateFromSeconds(asset.modifiedDateSecond) : null;
+    final created = usePhotoLibraryDates ? _assetDateFromSeconds(asset.createDateSecond) : null;
     return CrossFile(
       name: await asset.titleAsync,
       fileType: asset.type == AssetType.video ? FileType.video : FileType.image,
@@ -24,7 +27,7 @@ class CrossFileConverters {
       asset: asset,
       path: file.path,
       bytes: null,
-      lastModified: metadata?.modified,
+      lastModified: modified ?? created ?? metadata?.modified,
       lastAccessed: metadata?.accessed,
     );
   }
@@ -105,6 +108,13 @@ class CrossFileConverters {
       lastAccessed: null,
     );
   }
+}
+
+String? _assetDateFromSeconds(int? seconds) {
+  if (seconds == null || seconds <= 0) {
+    return null;
+  }
+  return DateTime.fromMillisecondsSinceEpoch(seconds * Duration.millisecondsPerSecond, isUtc: true).toIso8601String();
 }
 
 extension CompareFile on CrossFile {
