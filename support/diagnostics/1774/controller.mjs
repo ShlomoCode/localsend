@@ -140,7 +140,7 @@ try {
     await save('session-attempt.json', ownership);
     stage = 'session-create';
     await request('POST', '/session', { capabilities: { alwaysMatch: { platformName: 'Android', 'appium:automationName': 'UiAutomator2',
-      'appium:deviceName': 'Samsung Galaxy S23', 'appium:platformVersion': '13.0', 'appium:app': app,
+      'appium:deviceName': 'Samsung Galaxy S23', 'appium:platformVersion': '13.0', 'appium:app': app, 'appium:orientation': 'PORTRAIT',
       'bstack:options': { projectName: 'LocalSend issue1774 frozen short round', buildName: ownership.buildName,
         sessionName: 'unchanged-1.18.2-original-max-restored', debug: true, video: true, networkLogs: false, idleTimeout: 60 } } } });
     if (!session) throw new Error('Creation result has no owned handle; do not POST again; reconcile unique build');
@@ -150,7 +150,9 @@ try {
     if (creationBudget.productRemainingMs < creationBudget.minimumProductRemainingMs) throw new Error('Actual product reserve exhausted after creation; owned handle retained for cleanup');
     stage = 'observed-provider-device-identity';
     const providerSession = await request('GET', `/app-automate/sessions/${encodeURIComponent(session)}.json`, undefined, true);
-    await save('observed-provider-session.json', providerSession);
+    await save('observed-provider-session.json', { automation_session: Object.fromEntries(
+      ['hashed_id', 'status', 'reason', 'device', 'os', 'os_version', 'created_at', 'duration', 'build_hashed_id']
+        .map(name => [name, providerSession.automation_session?.[name] ?? null])) });
     const actual = providerSession.automation_session;
     if (actual?.hashed_id !== session || actual.device !== 'Samsung Galaxy S23' || actual.os?.toLowerCase() !== 'android' ||
         !['13', '13.0'].includes(String(actual.os_version))) throw new Error('Observed provider session/device/Android13 identity mismatch or unavailable');

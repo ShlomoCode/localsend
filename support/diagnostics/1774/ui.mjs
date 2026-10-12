@@ -126,6 +126,7 @@ export function createUi({ command, save, evidence, checkDeadline }) {
   async function preference(label, parentHeading) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const screen = await capture(`native-${parentHeading}-${label}-${attempt}`);
+      requirePortrait(screen);
       if (!heading(screen, parentHeading)) throw new Error('Native Settings header gate failed');
       const matches = [...new Set(screen.nodes.filter(node => node.package === SETTINGS && visible(node) && named(node, label)).map(node => target(screen, node)))];
       if (matches.length > 1) throw new Error('Native preference ambiguous');
@@ -146,10 +147,18 @@ export function createUi({ command, save, evidence, checkDeadline }) {
     }
     throw new Error(`Native ${label} preference unavailable after bounded navigation`);
   }
+  function requirePortrait(screen) {
+    const m = screen.metadata, rect = m.windowRect;
+    if (m.orientation !== 'PORTRAIT' || m.sourceRotation !== 0 || m.imageWidth >= m.imageHeight ||
+        !['x', 'y', 'width', 'height'].every(key => Number.isFinite(rect?.[key])) || rect.width <= 0 || rect.height <= rect.width) {
+      throw new Error('Reported portrait geometry unavailable before native Settings navigation');
+    }
+  }
   async function settingsPage(name) {
-    await activate(SETTINGS);
+    requirePortrait(await activate(SETTINGS));
     for (let step = 0; step < 4; step++) {
       const screen = await capture(`settings-page-${name}-${step}`);
+      requirePortrait(screen);
       const observed = ['Settings', 'Display', 'Screen zoom', 'Font size and style'].filter(text => heading(screen, text));
       const current = unique(observed, 'Native Settings heading');
       if (current === name) return;
@@ -184,6 +193,7 @@ export function createUi({ command, save, evidence, checkDeadline }) {
   }
   async function originals() {
     if (state) throw new Error('Original setting state already exists');
+    requirePortrait(await capture('reported-portrait-before-native-settings'));
     await settingsPage('Font size and style');
     const font = await stable('font', 'original-font');
     await settingsPage('Screen zoom');
