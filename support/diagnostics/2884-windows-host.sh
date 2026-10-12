@@ -39,7 +39,7 @@ lscpu
 ls -l /dev/kvm
 df -B1 "$work_dir"
 free -b
-sha256sum support/diagnostics/2884-windows-{host.sh,bridge.cjs,unattend.xml,wsl.ps1,cpuid.c,recovery.sh} .github/workflows/diagnose-2884-windows-wsl.yml > "$evidence/source-sha256.txt"
+sha256sum support/diagnostics/2884-windows-{host.sh,bridge.cjs,unattend.xml,wsl.ps1,cpuid.c,recovery.sh,iso-download.sh} .github/workflows/diagnose-2884-windows-wsl.yml > "$evidence/source-sha256.txt"
 stage=host_cpu_resource_gate
 cpu_vendor=$(awk -F: '/^vendor_id/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' /proc/cpuinfo)
 free_bytes=$(df -B1 --output=avail "$work_dir" | tail -n 1 | tr -d ' ')
@@ -80,9 +80,11 @@ wsl_sha=28b1a0d013640a2ac95898ea705fa186e5b4ff767a1c1b49257161bc106599c6
 ubuntu_url=https://releases.ubuntu.com/24.04.5/ubuntu-24.04.5-wsl-amd64.wsl
 ubuntu_sha=bb415d824822c4b878125729af451a5d18fb13d1cf5cbed9a7393ad64ac6039e
 printf 'windows_iso_url=%s\nwindows_iso_expected_length=5387960320\nwindows_iso_publisher_sha256=unavailable_record_actual_hash_without_claiming_publisher_checksum\nwsl_url=%s\nwsl_sha256=%s\nubuntu_url=%s\nubuntu_sha256=%s\n' "$iso_url" "$wsl_url" "$wsl_sha" "$ubuntu_url" "$ubuntu_sha" > "$evidence/media-identity.txt"
-curl --fail --location --connect-timeout 15 --max-time 600 --dump-header "$evidence/windows-iso-download-headers.txt" --output "$work_dir/windows.iso" "$iso_url"
+timeout --signal=TERM --kill-after=5s 600s /bin/bash support/diagnostics/2884-windows-iso-download.sh "$iso_url" "$work_dir/windows.iso" "$evidence"
 if [ "$(stat -c %s "$work_dir/windows.iso")" -ne 5387960320 ]; then printf 'official_windows_iso_length_mismatch\n'; exit 2; fi
 sha256sum "$work_dir/windows.iso" > "$evidence/windows-iso-actual-sha256.txt"
+# This is the previously observed complete official object, not a publisher digest.
+printf '%s  %s\n' '755a90d43e826a74b9e1932a34788b898e028272439b777e5593dee8d53622ae' "$work_dir/windows.iso" | sha256sum --check > "$evidence/windows-iso-prior-object-verification.txt"
 curl --fail --location --connect-timeout 15 --max-time 180 --output "$work_dir/payload/wsl.msi" "$wsl_url"
 printf '%s  %s\n' "$wsl_sha" "$work_dir/payload/wsl.msi" | sha256sum --check > "$evidence/wsl-installer-verification.txt"
 curl --fail --location --connect-timeout 15 --max-time 180 --output "$work_dir/payload/ubuntu.wsl" "$ubuntu_url"
