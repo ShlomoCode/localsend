@@ -97,22 +97,34 @@ def destroyed_object(error):
         re.search(r'object /org/a11y/atspi/accessible/[0-9]+ does not exist', str(error)))
 
 
-def scan(root=None, max_depth=35):
+def terminal_app_disappeared(error):
+    # Exact teardown errors observed after the successful Finish Press in
+    # run 38254109659; only the original app node may use this terminal rule.
+    return bool(re.fullmatch(
+        r"atspi_error: (?:No such object path '/org/a11y/atspi/accessible/root'|"
+        r"The name :[0-9]+\.[0-9]+ was not provided by any \.service files) \(1\)",
+        str(error).strip()))
+
+
+def scan(root=None, max_depth=35, terminal_app=None):
     global destroyed_branches
     root = root if root is not None else (observed_app if observed_app is not None else at.Registry.getDesktop(0))
     found = []
     pending = [(root, '0', 0)]
     skipped = 0
 
-    def skip(error, path):
+    def skip(error, path, node):
         nonlocal skipped
         global destroyed_branches
-        if not destroyed_object(error):
+        terminal_disappearance = (terminal_app is not None and node == terminal_app
+                                  and terminal_app_disappeared(error))
+        if not destroyed_object(error) and not terminal_disappearance:
             raise error
         skipped += 1
         destroyed_branches += 1
         emit('destroyed-object-observation', path=path, error=str(error),
-             snapshot_skips=skipped, total_skips=destroyed_branches)
+             snapshot_skips=skipped, total_skips=destroyed_branches,
+             terminal_original_app_disappearance=terminal_disappearance)
         if skipped > 8 or destroyed_branches > 40:
             raise Stop('destroyed-object observation bound exceeded')
 
@@ -124,14 +136,14 @@ def scan(root=None, max_depth=35):
             record = info(node, path)
             child_count = node.childCount if depth < max_depth else 0
         except Exception as error:
-            skip(error, path)
+            skip(error, path, node)
             continue
         found.append((node, record))
         for index in reversed(range(child_count)):
             try:
                 child = node.getChildAtIndex(index)
             except Exception as error:
-                skip(error, path + '.' + str(index))
+                skip(error, path + '.' + str(index), node)
                 continue
             if child is not None:
                 pending.append((child, path + '.' + str(index), depth + 1))
@@ -170,7 +182,7 @@ def unique(matches, description):
     return matches[0][0]
 
 
-def click(node, description):
+def click(node, description, terminal_finish=False):
     if not state(node, at.STATE_SHOWING) or not state(node, at.STATE_ENABLED):
         raise Stop(description + ': widget is not visible and enabled')
     action = node.queryAction()
@@ -183,7 +195,11 @@ def click(node, description):
     if not action.doAction(allowed[0]):
         raise Stop(description + ': accessibility action refused')
     time.sleep(.4)
-    capture('after-action')
+    # gotoPage(next > END) calls qApp->exit(EXIT_SUCCESS), so Finish destroys
+    # its accessibility provider. Its post-action evidence must use a fresh
+    # desktop inventory, never the cached original application's root.
+    if not terminal_finish:
+        capture('after-action')
 
 
 def button(rows, name):
@@ -401,10 +417,18 @@ def authentication(rows):
     return True
 
 
-def minstall_apps():
+def minstall_apps(after_finish=False):
     # Application nodes need not report SHOWING. Inspect only the desktop's
     # immediate children, never recursively traverse unrelated desktop apps.
-    inventory = scan(at.Registry.getDesktop(0), max_depth=1)
+    desktop = at.Registry.getDesktop(0)
+    if after_finish:
+        # libatspi 2.46 get_child_count/get_child_at_index may reuse cached
+        # desktop children. Clear only during terminal observation so each
+        # closure inventory queries the registry's current application list.
+        desktop.clear_cache()
+        emit('terminal-desktop-cache-cleared', api='Atspi.Accessible.clear_cache')
+    inventory = scan(desktop, max_depth=1,
+                     terminal_app=observed_app if after_finish else None)
     matches = [(node, rec) for node, rec in inventory
                if rec['role'] == 'application' and rec['name'] == 'minstall']
     if len(matches) > 1:
@@ -563,18 +587,20 @@ def run():
     capture('positive-end-page', rows)
     toggle(rows, 'Automatically reboot the system when the installer is closed', False)
     capture('reboot-disabled')
-    click(button(scan(root), 'Finish'), 'actual Finish')
+    click(button(scan(root), 'Finish'), 'actual Finish', terminal_finish=True)
     until = time.monotonic() + 10
     clean_closed_observations = 0
+    captured_finish = False
     while time.monotonic() < until:
         previous_skips = destroyed_branches
-        apps, inventory = minstall_apps()
-        windows = top_windows(apps[0][0]) if apps else []
-        if len(windows) > 1:
-            raise Stop('ambiguous minstall windows after Finish')
+        apps, inventory = minstall_apps(after_finish=True)
+        if not captured_finish:
+            capture('after-finish', inventory)
+            captured_finish = True
         # A skipped destroyed object alone cannot prove closure. Require two
-        # consecutive clean observations of app absence or no visible window.
-        if not windows and previous_skips == destroyed_branches:
+        # consecutive clean fresh desktop observations of app absence. Do not
+        # traverse a disappearing provider even if an app node lingers briefly.
+        if not apps and previous_skips == destroyed_branches:
             clean_closed_observations += 1
         else:
             clean_closed_observations = 0
