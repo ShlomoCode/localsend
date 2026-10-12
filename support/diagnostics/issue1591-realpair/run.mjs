@@ -630,7 +630,9 @@ try {
   const caps = {platformName:'iOS', 'appium:deviceName':'iPad 9th', 'appium:platformVersion':'18', 'appium:automationName':'XCUITest',
     'appium:app':process.env.RECEIVER_APP, 'appium:otherApps':[process.env.PROXY_APP], 'appium:autoAcceptAlerts':false,
     'bstack:options':{local:true, localIdentifier:process.env.BS_LOCAL_ID, projectName:'LocalSend diagnostic', buildName:'issue1591-'+process.env.GITHUB_RUN_ID,
-      sessionName:'Windows 1.17 real selection to unchanged iPad receiver', idleTimeout:120, debug:true, video:true, networkLogs:false}};
+      // The second arm's bounded host-only preparation can exceed 120 seconds.
+      // Provider session retention adds no device input or product timeout change.
+      sessionName:'Windows 1.17 real selection to unchanged iPad receiver', idleTimeout:nodelayComparison ? 300 : 120, debug:true, video:true, networkLogs:false}};
   save('requested-capabilities.json', caps);
   const created = await wd('POST','/session',{capabilities:{alwaysMatch:caps,firstMatch:[{}]}},120000);
   session = created.sessionId; if (!session) throw new Error('Session ID missing in W3C response');
@@ -721,6 +723,8 @@ if($window -ne $expected.window){throw 'Live sender main HWND ownership changed;
 $receipt=@{pid=$expected.pid;window=$window;executablePath=$live.ExecutablePath;creationDate=$live.CreationDate;qualifiedUtc=[DateTime]::UtcNow.ToString('o')}
 & taskkill /PID $expected.pid /T /F | Out-Null
 if($LASTEXITCODE -ne 0){throw 'Qualified sender taskkill failed'}
+$stopDeadline=[DateTime]::UtcNow.AddSeconds(5)
+while((Get-CimInstance Win32_Process -Filter ('ProcessId = '+$expected.pid)) -and [DateTime]::UtcNow -lt $stopDeadline){Start-Sleep -Milliseconds 100}
 if(Get-CimInstance Win32_Process -Filter ('ProcessId = '+$expected.pid)){throw 'Sender PID still present after taskkill'}
 $receipt.stopped=$true;$receipt|ConvertTo-Json -Compress
 `],{timeout:30000});
