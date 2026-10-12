@@ -1,6 +1,9 @@
 name: Diagnose 2884 KVM capability
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2884-kvm-capability]
+    paths: [.github/workflows/diagnose-2884-kvm-capability.yml]
 permissions:
   contents: read
 concurrency:
@@ -8,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   capability:
-    if: github.repository == 'ShlomoCode/localsend'
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
