@@ -160,6 +160,11 @@ def native_geometry_calibration():
                      "PROBE_CAPTURE_ROOT_NAME_EVIDENCE","PROBE_OBSERVER_POLICY_DISCRIMINATOR"))):
             raise RuntimeError("Calibration requires exclusive staged Mint geometry-only scope")
         execute("tool-versions","dpkg-query","-W","x11-utils","wmctrl","xdotool")
+        execute("wm-description","wmctrl","-m")
+        packages=execute("installed-package-inventory","dpkg-query","-W","-f=${binary:Package}\t${Version}\t${db:Status-Status}\n")
+        (phase/"installed-wm-packages.tsv").write_text("\n".join(line for line in packages.splitlines()
+            if line.split("\t")[0].startswith(("cinnamon","muffin","libmuffin")) and line.endswith("\tinstalled"))+"\n")
+        execute("client-normal-hints","xprop","-id",w[-1],"WM_NORMAL_HINTS")
         supported=execute("root-supported","xprop","-root","_NET_SUPPORTED")
         supported_lines=[line.strip() for line in supported.splitlines()
                          if re.match(r"^_NET_SUPPORTED(?:\(|:|\s|$)",line.strip())]
@@ -173,19 +178,21 @@ def native_geometry_calibration():
             raise RuntimeError("Window manager does not advertise X-only EWMH movement")
         execute("initial-size","xdotool","windowsize",w[-1],"1100","700")
         before=settled("before-move",deadline-15)
-        command=["wmctrl","-i","-r",w[-1],"-e","0,60,-1,-1,-1"]
+        command=["wmctrl","-i","-r",w[-1],"-e","10,60,-1,-1,-1"]
         log("native-geometry-horizontal-input",case="native-geometry-horizontal",command=command,
             stable_native_before=before,controls_admitted=False,policy_admitted=False,pixels_review_required=True)
         move_wall=time.time(); status["horizontal_requests"]=1
         execute("horizontal-request",*command,limit=deadline-12)
         after=settled("after-move",deadline-2)
         # Preserve true native Y and size, including the outer frame. No
-        # xdotool getter-derived point, fixed X result or border formula gate.
+        # xdotool getter-derived point or inferred border formula is used.
         if any(before[target][key]!=after[target][key] for target in ("client","frame")
                for key in ("id","root","y","width","height","border")):
             raise RuntimeError("Actual client/frame Y, size or identity changed after X-only request")
         if before["extents"]!=after["extents"] or before["keyboard_top"]!=after["keyboard_top"]:
             raise RuntimeError("Frame extents or keyboard condition changed during calibration")
+        if after["client"]["x"]!=60 or after["client"]["x"]==before["client"]["x"]:
+            raise RuntimeError("StaticGravity request did not move the actual native client to X60")
         status.update(status="stable-native-pixels-review-required",before=before,after=after,
                       horizontal_native_change=before["client"]["x"]!=after["client"]["x"])
     except Exception as error:
