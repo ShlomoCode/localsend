@@ -10,6 +10,10 @@ on:
         type: choice
         options: [tar, appimage, deb, flatpak]
         default: tar
+      mx_session:
+        type: choice
+        options: [live, installed]
+        default: live
 permissions:
   contents: read
 jobs:
@@ -27,9 +31,11 @@ jobs:
         id: control
         env:
           PACKAGE_FORMAT: ${{ inputs.package_format || 'tar' }}
+          MX_SESSION: ${{ inputs.mx_session || 'live' }}
+          RELEASE_VERSIONS: ${{ inputs.desktop == 'mx' && inputs.mx_session == 'installed' && '1.14.0' || '1.14.0 1.18.2' }}
         run: |
           if [ '${{ inputs.desktop }}' = mx ]; then
-            bash support/diagnostics/1310/mx.sh
+            timeout --signal=TERM --kill-after=180s 58m bash support/diagnostics/1310/mx.sh
           else
             bash support/diagnostics/1310/vm.sh
           fi

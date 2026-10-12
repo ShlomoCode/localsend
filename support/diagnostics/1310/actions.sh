@@ -44,7 +44,9 @@ click_label() {
   xdotool mousemove --sync $point click 1
   sleep 3
 }
-for version in 1.14.0 1.18.2; do
+read -r -a release_versions <<< "${RELEASE_VERSIONS:-1.14.0 1.18.2}"
+for version in "${release_versions[@]}"; do
+  case "$version" in 1.14.0|1.18.2) ;; *) exit 2;; esac
   mkdir -p "releases/$version"
   package_format=${PACKAGE_FORMAT:-tar}
   args=()
