@@ -81,9 +81,13 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
         if (!mounted) {
           return;
         }
-        final textIfCancelled = widget.onSubmitted != null ? originalText : widget.controller.text;
-        final textToDisplay = confirmedText ?? textIfCancelled;
-        setState(() => widget.controller.text = textToDisplay);
+        setState(() {
+          if (confirmedText != null) {
+            widget.controller.text = confirmedText;
+          } else if (widget.onSubmitted != null) {
+            widget.controller.text = originalText;
+          }
+        });
         if (confirmedText != null) {
           widget.onSubmitted?.call(confirmedText);
         }
