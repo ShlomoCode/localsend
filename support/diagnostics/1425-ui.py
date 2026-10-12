@@ -129,13 +129,13 @@ def select(role, path, folder, stage):
     key(role, 'ctrl+l')
     command(role, 'xdotool', 'type', '--clearmodifiers', '--delay', '2', str(path))
     event('type', role=role, text=str(path), purpose='native chooser location')
-    if folder:
-        # GTK SELECT_FOLDER accepts a typed existing directory on Return as well.
-        # Use its observed native Open button directly, avoiding a second response.
-        click(role, locate(role, 'Open', stage+'-picker-open'), 'Open selected folder')
-    else:
-        key(role, 'Return')
-    time.sleep(1)
+    # The original retained File chooser did not accept the typed path on Return.
+    # Use its observed native Open for both chooser modes and require actual app selection.
+    click(role, locate(role, 'Open', stage+'-picker-open', bottom=True), 'Open selected folder' if folder else 'Open selected file')
+    locate(role, 'Edit', stage+'-selection-accepted', timeout=30)
+    selected_window=command(role,'xdotool','getactivewindow').strip()
+    if command(role,'xdotool','getwindowname',selected_window).strip()!='LocalSend':
+        raise RuntimeError('Native chooser did not return to actual selected app')
     capture(role, stage+'-selected')
 
 def send(path, folder, stage):
@@ -342,7 +342,9 @@ stop=threading.Event(); sampler=threading.Thread(target=sample,args=(stop,));sam
 try:
     app_ready('sender'); app_ready('receiver')
     receiver_words=capture('receiver','observed-alias')
-    alias_candidates=[w for w in receiver_words if w['h']>=25 and w['text']!='LocalSend']
+    # Threshold OCR can interpret the large logo as a word; use clear body text from original color pixels.
+    alias_candidates=[w for w in receiver_words if w.get('ocr_region')=='full-color' and w['conf']>=90
+                      and w['h']>=25 and w['x']>256 and w['text'].isalpha() and w['text']!='LocalSend']
     if not alias_candidates: raise RuntimeError('Cannot read receiver alias from actual Receive pixels')
     ALIAS_WORD=max(alias_candidates,key=lambda w:w['h'])['text']
     event('receiver_alias_word',word=ALIAS_WORD,entire_large_alias_words=alias_candidates)
