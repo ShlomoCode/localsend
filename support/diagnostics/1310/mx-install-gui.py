@@ -84,6 +84,7 @@ def info(node, path):
     return {'path': path, 'role': role, 'name': node.name or '',
             'states': [str(item) for item in node.getState().getStates()],
             'text': text, 'bounds': bounds, 'actions': actions,
+            'interfaces': list(node.get_interfaces()),
             'showing': state(node, at.STATE_SHOWING),
             'enabled': state(node, at.STATE_ENABLED)}
 
@@ -196,6 +197,20 @@ def toggle(rows, name, wanted):
     if state(node, at.STATE_CHECKED) != wanted:
         raise Stop(name + ': checked state did not change')
     emit('checked-readback', name=name, checked=state(node, at.STATE_CHECKED))
+
+
+def refresh_root_account(rows):
+    group = unique(named(rows, 'Root (administrator) Account', ['check box']),
+                   'root account group for metadata refresh')
+    # pyatspi exposes Atspi.Accessible directly. Its supported clear_cache()
+    # invalidates this object AND descendants, including NAME/ROLE/INTERFACES.
+    # https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Accessible.clear_cache.html
+    # This makes the following snapshot/field lookup query fresh bridge data;
+    # it cannot turn a genuinely generic bridge object into an editable field.
+    group.clear_cache()
+    emit('metadata-cache-cleared', scope='root-account-and-descendants',
+         api='Atspi.Accessible.clear_cache', action_retries=0)
+    capture('root-account-fresh-metadata')
 
 
 def field(rows, label):
@@ -403,6 +418,7 @@ def run():
     for label in ('Default user password:', 'Confirm user password:'):
         edit(field(scan(root), label), 'demo', label, secret=True)
     toggle(scan(root), 'Root (administrator) Account', True)
+    refresh_root_account(scan(root))
     for label in ('Root password:', 'Confirm root password:'):
         edit(field(scan(root), label), 'demo', label, secret=True)
     toggle(scan(root), 'Autologin', True)
