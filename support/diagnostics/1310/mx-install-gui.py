@@ -208,9 +208,122 @@ def refresh_root_account(rows):
     # This makes the following snapshot/field lookup query fresh bridge data;
     # it cannot turn a genuinely generic bridge object into an editable field.
     group.clear_cache()
+    # clear_cache recursively visits known cached children. Enumerate the
+    # current direct QFormLayout components too, so an incomplete client child
+    # cache cannot leave either row's metadata stale before label lookup.
+    if group.childCount != 4:
+        raise Stop('root account metadata refresh requires four current direct components')
+    for index in range(4):
+        child = group.getChildAtIndex(index)
+        if child is None:
+            raise Stop('root account direct component disappeared during metadata refresh')
+        child.clear_cache()
     emit('metadata-cache-cleared', scope='root-account-and-descendants',
-         api='Atspi.Accessible.clear_cache', action_retries=0)
+         api='Atspi.Accessible.clear_cache', current_direct_children=4, action_retries=0)
     capture('root-account-fresh-metadata')
+
+
+def generic_root_entries(rows):
+    group = unique(named(rows, 'Root (administrator) Account', ['check box']), 'checked root account')
+    if not state(group, at.STATE_CHECKED) or not state(group, at.STATE_ENABLED):
+        raise Stop('root keyboard route requires checked enabled root account')
+    observed = scan(group, max_depth=1)
+    group_bounds = observed[0][1]['bounds']
+    children = [(node, rec) for node, rec in observed if rec['path'].count('.') == 1]
+    if len(children) != 4 or group_bounds is None:
+        raise Stop('generic root account does not expose exactly four direct components')
+    # Official meinstall.ui QFormLayout has label/entry at row 0 (Root
+    # password), then label/entry at row 1 (Confirm root password). Fresh run
+    # 38249190033 shows these exact components as filler, with SetFocus only
+    # on the entries. Identify current geometry; never substitute saved pixels.
+    gx, gy, gw, gh = group_bounds
+    for index, (node, rec) in enumerate(children):
+        b = rec['bounds']
+        if (not rec['showing'] or not rec['enabled'] or rec['role'] != 'filler'
+                or set(rec['interfaces']) != {'Accessible', 'Action', 'Component'}
+                or state(node, at.STATE_FOCUSABLE) != bool(index % 2)
+                or b is None or b[2] <= 0 or b[3] <= 0
+                or b[0] < gx or b[1] < gy or b[0]+b[2] > gx+gw or b[1]+b[3] > gy+gh):
+            raise Stop('generic root components differ from observed source-backed shape')
+    entries = []
+    for row in (0, 1):
+        label = children[row*2][1]['bounds']
+        node, rec = children[row*2+1]
+        entry = rec['bounds']
+        if (entry[0] < label[0]+label[2]
+                or abs(entry[1]+entry[3]/2-label[1]-label[3]/2) > 6
+                or rec['actions'] != ['SetFocus']):
+            raise Stop('root row does not uniquely pair left label component with focusable entry')
+        entries.append(node)
+    upper, lower = children[1][1]['bounds'], children[3][1]['bounds']
+    if upper[1]+upper[3] > lower[1]:
+        raise Stop('root entry source order is not upper then nonoverlapping lower row')
+    emit('generic-root-row-evidence', components=[rec for _, rec in children],
+         source_order=['Root password:', 'Confirm root password:'])
+    return entries
+
+
+def xdotool(*arguments):
+    result = subprocess.run(['xdotool', *arguments], capture_output=True, text=True, timeout=5)
+    if result.returncode:
+        raise Stop('native xdotool action/query failed: ' + result.stderr.strip())
+    return result.stdout.strip()
+
+
+def root_input_ready(node, root, expected_window=None):
+    node.clear_cache()
+    if not all(state(node, flag) for flag in (at.STATE_SHOWING, at.STATE_ENABLED, at.STATE_FOCUSED)):
+        raise Stop('root keyboard target lacks fresh visible enabled focused state')
+    windows = top_windows(observed_app)
+    if len(windows) != 1 or windows[0][0] != root:
+        raise Stop('root keyboard route lacks sole original installer window')
+    active = xdotool('getactivewindow')
+    pid = int(xdotool('getwindowpid', active))
+    # Native app-owner PID API:
+    # https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Accessible.get_process_id.html
+    app_pid = observed_app.get_process_id()
+    if pid <= 0 or pid != app_pid or (expected_window is not None and active != expected_window):
+        raise Stop('native active window is not the same observed minstall process/window')
+    emit('root-input-ready', focused=True, native_window=active, native_pid=pid, atspi_app_pid=app_pid)
+    return active
+
+
+def edit_root_passwords(root):
+    labels = ('Root password:', 'Confirm root password:')
+    rows = scan(root)
+    counts = [len(named(rows, label, ['label'])) for label in labels]
+    if counts == [1, 1]:
+        for label in labels:
+            edit(field(scan(root), label), 'demo', label, secret=True)
+        return
+    if counts != [0, 0]:
+        raise Stop('ambiguous root password labels; native keyboard route refused')
+    entries = generic_root_entries(rows)
+    for index, node in enumerate(entries):
+        emit('focus-request', description=labels[index], api='Component.grabFocus')
+        if not node.queryComponent().grabFocus():
+            raise Stop('actual root component refused focus')
+        time.sleep(.2)
+        active = root_input_ready(node, root)
+        capture('root-focus')
+        root_input_ready(node, root, active)
+        xdotool('key', '--clearmodifiers', 'ctrl+a')
+        root_input_ready(node, root, active)
+        xdotool('type', '--clearmodifiers', '--delay', '80', 'demo')
+        time.sleep(.2)
+        root_input_ready(node, root, active)
+        emit('native-root-input', description=labels[index], native_window=active,
+             value='[public test password]', method='xdotool active-window key/type')
+        capture('root-typed')
+        # The official userPassValidationChanged() disables Next when root
+        # and confirmation disagree, then enables it when both match. This
+        # supplies real widget validation despite the missing text interface.
+        next_button = button(scan(root), 'Next')
+        next_button.clear_cache()
+        next_enabled = state(next_button, at.STATE_ENABLED)
+        emit('root-password-validation', row=index, next_enabled=next_enabled)
+        if next_enabled != bool(index):
+            raise Stop('native root input did not produce expected Next validation')
 
 
 def field(rows, label):
@@ -419,8 +532,7 @@ def run():
         edit(field(scan(root), label), 'demo', label, secret=True)
     toggle(scan(root), 'Root (administrator) Account', True)
     refresh_root_account(scan(root))
-    for label in ('Root password:', 'Confirm root password:'):
-        edit(field(scan(root), label), 'demo', label, secret=True)
+    edit_root_passwords(root)
     toggle(scan(root), 'Autologin', True)
     toggle(scan(root), 'Save live desktop changes', False)
     capture('user-account-configured')
