@@ -692,7 +692,9 @@ def case(name, quick, arabic, apk):
 
 try:
     stage = 'download-official-release'
-    with urllib.request.urlopen('https://api.github.com/repos/localsend/localsend/releases/tags/v1.17.0', timeout=60) as response:
+    release_request = urllib.request.Request('https://api.github.com/repos/localsend/localsend/releases/tags/v1.17.0', headers={'Accept': 'application/vnd.github+json'})
+    release_request.add_unredirected_header('Authorization', 'Bearer ' + os.environ['RELEASE_API_TOKEN'])
+    with urllib.request.urlopen(release_request, timeout=60) as response:
         release = json.load(response)
     write('official-release.json', release)
     assets = release['assets']

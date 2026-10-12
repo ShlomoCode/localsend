@@ -26,6 +26,7 @@ jobs:
       OBSERVE_2955: '1'
       CONTROL_2955: '1'
       SETTINGS_ONLY_2955: '1'
+      RELEASE_API_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Install native diagnostic tools
