@@ -1,5 +1,5 @@
 """Cloud-only inputs and observation of two unmodified original applications."""
-import csv, hashlib, io, json, os, shutil, subprocess, sys, threading, time
+import csv, hashlib, io, json, os, re, shutil, subprocess, sys, threading, time
 from pathlib import Path
 
 OUT = Path(sys.argv[1])
@@ -78,10 +78,70 @@ def click(role, point, label):
     uid=subprocess.check_output(['ps','-o','uid=','-p',pid],text=True).strip()
     expected_uid=subprocess.check_output(['id','-u',role+'1425'],text=True).strip()
     if uid!=expected_uid: raise RuntimeError('Foreground input target belongs to unexpected uid: '+uid)
-    event('click', role=role, label=label, x=point[0], y=point[1], source_frame=LATEST.get(role),
-          native_window=wid,native_pid=pid,native_uid=uid,geometry=command(role,'xdotool','getwindowgeometry','--shell',wid))
+    geometry=command(role,'xdotool','getwindowgeometry','--shell',wid)
+    source_native=json.loads(Path(LATEST[role]+'-native-window.json').read_text())
+    if source_native.get('window')!=wid or source_native.get('pid')!=pid or source_native.get('geometry')!=geometry:
+        raise RuntimeError('Native input mapping changed since source frame')
+    mark=event('click', role=role, label=label, x=point[0], y=point[1], source_frame=LATEST.get(role),
+               native_window=wid,native_pid=pid,native_uid=uid,geometry=geometry)
     command(role, 'xdotool', 'mousemove', '--sync', str(round(point[0])), str(round(point[1])), 'click', '1')
     time.sleep(.4)
+    return mark
+
+def modal_cancel_target(stage):
+    # The retained failed attempt clicked dimmed footer Cancel outside the modal.
+    # Derive the actual bright modal rectangle from this fresh original native viewport.
+    words=capture('sender',stage+'-fresh-modal-target')
+    stem=LATEST['sender']
+    native=json.loads(Path(stem+'-native-window.json').read_text())
+    if native.get('name')!='LocalSend': raise RuntimeError('Cancel modal is not in actual sender app')
+    geometry=dict(line.split('=',1) for line in native['geometry'].splitlines() if '=' in line)
+    x,y,width,height=(int(geometry[k]) for k in ['X','Y','WIDTH','HEIGHT'])
+    mask=stem+'-modal-mask.png'
+    command('sender','convert',stem+'.png','-crop','%dx%d+%d+%d'%(width,height,x,y),'+repage',
+            '-colorspace','Gray','-threshold','90%','-depth','8',mask)
+    raw=command('sender','convert',mask,'-define','connected-components:verbose=true','-connected-components','8','null:')
+    Path(stem+'-modal-components.txt').write_text(raw)
+    # Connected regions exclude the separate bright window-border strip, which broad trim would merge.
+    regions=[]
+    for line in raw.splitlines():
+        match=re.fullmatch(r'\s*\d+: (\d+)x(\d+)\+(\d+)\+(\d+) \S+ ([\d.]+) gray\((255|100%)\)',line)
+        if match:
+            rw,rh,rx,ry=map(int,match.groups()[:4]);area=float(match.group(5))
+            if 250<=rw<width*.9 and 100<=rh<height*.6 and area>rw*rh*.75:
+                regions.append((rw,rh,rx,ry))
+    if len(regions)!=1: raise RuntimeError('Expected one actual bright modal rectangle: '+str(regions))
+    mw,mh,mx,my=regions[0];mx+=x;my+=y
+    inside=lambda w: mx<=w['x'] and my<=w['y'] and w['x']+w['w']<=mx+mw and w['y']+w['h']<=my+mh
+    modal=[w for w in words if inside(w)]
+    descriptions=[w for w in modal if w['text'].strip('?,.')=='really']
+    if not descriptions: raise RuntimeError('Modal cancellation description missing')
+    titles=[w for w in modal if w['text']=='Cancel' and w['y']<min(d['y'] for d in descriptions)
+            and all(any(t['text']==label and abs(t['y']-w['y'])<=14 for t in modal) for label in ['file','transfer'])]
+    if not titles: raise RuntimeError('Actual Cancel file transfer modal title missing')
+    continues=[w for w in modal if w['text']=='Continue']
+    candidates=[w for w in modal if w['text']=='Cancel' and any(abs(w['y']-c['y'])<=14 and w['x']>c['x']+c['w'] for c in continues)]
+    if not candidates: raise RuntimeError('Exact Cancel action inside actual modal missing')
+    selected=max(candidates,key=lambda w:w['conf'])
+    point=(selected['x']+selected['w']/2,selected['y']+selected['h']/2)
+    if any(abs(w['x']+w['w']/2-point[0])>6 or abs(w['y']+w['h']/2-point[1])>6 for w in candidates):
+        raise RuntimeError('Multiple distinct Cancel actions inside modal')
+    event('modal_cancel_target_observed',stage=stage,source_frame=stem,native_window=native,
+          bounds={'x':mx,'y':my,'width':mw,'height':mh},point=point,candidates=candidates,
+          excluded_cancel_words=[w for w in words if w['text']=='Cancel' and not inside(w)])
+    return point
+
+def verified_sender_cancel_return(stage):
+    end=time.monotonic()+10
+    while True:
+        words=capture('sender',stage+'-verify-confirmation-result')
+        native=json.loads(Path(LATEST['sender']+'-native-window.json').read_text())
+        if native.get('name')=='LocalSend' and all(any(w['text']==label for w in words) for label in ['Receive','Send','Settings']) \
+                and not any(w['text']=='Sending' or w['text'].strip('?,.')=='really' for w in words):
+            event('sender_cancel_returned_to_root',stage=stage,source_frame=LATEST['sender'])
+            return
+        if time.monotonic()>=end: raise RuntimeError('Cancel approval not verified: sender did not return to actual app root')
+        time.sleep(.3)
 
 def key(role, *keys):
     event('key', role=role, keys=keys)
@@ -273,19 +333,20 @@ def cancel_case(stage):
             if sum(n for p,n in file_state().items() if stage in p)>=total_expected:
                 event('nonqualifying_finished_before_confirmation',stage=stage); return {'stage':stage,'qualifying':False}
             raise RuntimeError('Real cancel confirmation not shown')
-        confirmation=locate('sender','Cancel',stage+'-confirm-cancel',timeout=10,bottom=True)
-        before=file_state()
         sockets(stage+'-before-confirmation')
+        confirmation=modal_cancel_target(stage)
+        before=file_state()
         total_before=sum(n for p,n in before.items() if stage in p)
         if not any(stage in p and 0<n<512*1024*1024 for p,n in before.items()) or not total_expected*.4 <= total_before <= total_expected*.6:
             event('nonqualifying_midpoint_window_missed',stage=stage,total_native_bytes=total_before,total_expected=total_expected)
             return {'stage':stage,'qualifying':False,'reason':'midpoint window missed before actual confirmation'}
-        click('sender',confirmation,'Confirm Cancel transfer')
+        mark=click('sender',confirmation,'Confirm Cancel transfer inside actual modal')
         confirmation_state=file_state()
         if sum(n for p,n in confirmation_state.items() if stage in p) >= 6*512*1024*1024:
             event('nonqualifying_all_files_finished_at_confirmation',stage=stage)
             return {'stage':stage,'qualifying':False}
-        mark=event('cancel_confirmed',stage=stage,before=before)
+        verified_sender_cancel_return(stage)
+        event('cancel_confirmed',stage=stage,before=before,input_wall_ns=mark['wall_ns'],source_frame=mark['source_frame'])
         time.sleep(3)
         quiet=file_state()
         quiet_mark=event('quiet_sample',stage=stage,elapsed_since_confirmation_s=(time.time_ns()-mark['wall_ns'])/1e9)
