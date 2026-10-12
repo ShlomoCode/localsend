@@ -191,6 +191,9 @@ jobs:
       BS_OS: ${{ inputs.bs_os || '15.0' }}
       VALIDATION_SUITE: ${{ inputs.validation_suite || 'png' }}
       ISSUE2311_PHYSICAL_REMAINING_FAVORITES: ${{ inputs.validation_suite == 'remaining-media' && 'true' || 'false' }}
+      ISSUE2311_API29_EXTENDED_FAVORITES: ${{ inputs.validation_suite == 'extended' && inputs.bs_device == 'Samsung Galaxy S20' && inputs.bs_os == '10.0' && inputs.physical_runner == 'windows-2022' && inputs.source_family == 'candidate' && (inputs.source_apk_kind == 'baseline' || inputs.source_apk_kind == 'candidate') && inputs.source_run_id == '38184232921' && inputs.media_fixture_run_id == '38183553686' && 'true' || 'false' }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      MEDIA_FIXTURE_RUN_ID: ${{ inputs.media_fixture_run_id }}
       MEDIA_FIXTURE_DIRECTORY: ${{ github.workspace }}/media-fixtures
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2311.mjs
       SOURCE_APK_KIND: ${{ inputs.source_apk_kind || 'original-release' }}

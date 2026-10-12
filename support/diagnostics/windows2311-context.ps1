@@ -13,6 +13,17 @@ if($physicalRemainingFavorites -and ($QualifyFavoritesPointerOnly -or $env:ISSUE
  ($Case -eq 'jpeg-off' -and $FixtureExtension -ne 'jpg') -or ($Case -ne 'jpeg-off' -and $FixtureExtension -ne 'mp4'))){
  throw 'Physical native Favorites delivery is restricted to the three remaining media cases on the authorized Windows 2022 job'
 }
+$api29ExtendedFavorites=$env:ISSUE2311_API29_EXTENDED_FAVORITES -eq 'true'
+if($api29ExtendedFavorites -and ($QualifyFavoritesPointerOnly -or $physicalRemainingFavorites -or $env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -eq 'true' -or
+ $env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or
+ $env:DIAGNOSTIC_RUNNER_LABEL -ne 'windows-2022' -or $env:BS_DEVICE -ne 'Samsung Galaxy S20' -or $env:BS_OS -ne '10.0' -or
+ $env:VALIDATION_SUITE -ne 'extended' -or $env:SOURCE_APP_FAMILY -ne 'candidate' -or $env:SOURCE_APK_KIND -notin @('baseline','candidate') -or
+ $env:SOURCE_RUN_ID -ne '38184232921' -or $env:MEDIA_FIXTURE_RUN_ID -ne '38183553686' -or
+ $Case -notin @('on','off','on-repeat','off-repeat','precision-on','jpeg-on','jpeg-off','video-on','video-off') -or
+ ($Case -in @('on','off','on-repeat','off-repeat','precision-on') -and $FixtureExtension -ne 'png') -or
+ ($Case -in @('jpeg-on','jpeg-off') -and $FixtureExtension -ne 'jpg') -or ($Case -in @('video-on','video-off') -and $FixtureExtension -ne 'mp4'))){
+ throw 'API29 native Favorites delivery requires the exact nine-case Samsung Android 10 comparison and immutable APK/fixture runs'
+}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Windows.Forms,System.Drawing
 $ui="$PSScriptRoot/windows3393-ui.ps1"
 $control=Get-Content evidence/windows-control-send-action.json -Raw|ConvertFrom-Json
@@ -196,7 +207,7 @@ SaveSenderBoundary 'after-send-to'
 & $ui -Action snapshot -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -Label "windows-$Case-image-selected"
 SaveSemanticObservation 'before-favorites'
 SaveSenderBoundary 'before-favorites'
-& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseNativePointer:($QualifyFavoritesPointerOnly -or $physicalRemainingFavorites)
+& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseNativePointer:($QualifyFavoritesPointerOnly -or $physicalRemainingFavorites -or $api29ExtendedFavorites)
 SaveSemanticObservation 'before-send'
 SaveSenderBoundary 'before-send'
 # A queued mouse gesture and an opaque accessibility pane do not establish the
