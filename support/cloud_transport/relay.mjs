@@ -85,7 +85,44 @@ export function relay({httpPort=8080,tcpPort=53318,token=randomBytes(24).toStrin
   });
   return {token,metrics,trace,record,status:()=>({...metrics,queued,peak,peers:peers.size,pollPending:!!waiter}),
     start:async()=>{await new Promise(r=>tcp.listen(tcpPort,'127.0.0.1',r));await new Promise(r=>server.listen(httpPort,'0.0.0.0',r));},
-    stop:async()=>{record('relay-stop');if(waiter){clearTimeout(waiter.timer);waiter.res.end('[]');waiter=null;}for(const [id,p] of peers){record('relay-stop-close',id);p.destroy();}server.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),new Promise(r=>tcp.close(r))]);}};
+    stop:async()=>{
+      record('relay-stop');
+      const stopStarted=process.hrtime.bigint(),closeTimeoutMs=10000;
+      const receipt={started:new Date().toISOString(),closeTimeoutMs,peers:[],listeners:[],actionErrors:[],completed:false};
+      const ownedPeers=[...peers.entries()];
+      // Register every peer close observation before requesting destruction.
+      // The original close handler remains the only owner of map removal.
+      const peerCompletions=ownedPeers.map(([id,socket])=>new Promise(resolve=>{
+        const started=process.hrtime.bigint(),peer={id,started:new Date().toISOString(),closeObserved:false,timedOut:false};receipt.peers.push(peer);
+        function finish(){peer.ended=new Date().toISOString();peer.elapsedMs=Number(process.hrtime.bigint()-started)/1e6;resolve();}
+        function closed(hadError){clearTimeout(timer);peer.closeObserved=true;peer.hadError=hadError;finish();}
+        const timer=setTimeout(()=>{socket.off('close',closed);peer.timedOut=true;finish();},closeTimeoutMs);
+        socket.once('close',closed);
+      }));
+      // Stop accepting connections and retain each listener's actual callback.
+      const listenerCompletions=[['http',server],['tcp',tcp]].map(([name,listener])=>new Promise(resolve=>{
+        const started=process.hrtime.bigint(),state={name,started:new Date().toISOString(),callbackObserved:false,timedOut:false};receipt.listeners.push(state);
+        let settled=false;
+        function finish(){if(settled)return;settled=true;clearTimeout(timer);state.ended=new Date().toISOString();state.elapsedMs=Number(process.hrtime.bigint()-started)/1e6;resolve();}
+        const timer=setTimeout(()=>{state.timedOut=true;finish();},closeTimeoutMs);
+        try{listener.close(error=>{if(settled)return;state.callbackObserved=true;if(error)state.error=error.code||String(error);finish();});}
+        catch(error){state.error=error.code||String(error);finish();}
+      }));
+      if(waiter){
+        clearTimeout(waiter.timer);
+        try{waiter.res.end('[]');}catch(error){receipt.actionErrors.push({action:'end-pending-poll',error:String(error)});}
+        waiter=null;
+      }
+      for(const [id,socket] of ownedPeers){record('relay-stop-close',id);try{socket.destroy();}catch(error){receipt.actionErrors.push({action:'destroy-peer',id,error:String(error)});}}
+      try{server.closeAllConnections();}catch(error){receipt.actionErrors.push({action:'close-http-connections',error:String(error)});}
+      await Promise.all([...peerCompletions,...listenerCompletions]);
+      receipt.ended=new Date().toISOString();receipt.elapsedMs=Number(process.hrtime.bigint()-stopStarted)/1e6;
+      receipt.remainingPeers=peers.size;receipt.pollPending=!!waiter;
+      receipt.completed=receipt.actionErrors.length===0&&receipt.peers.every(peer=>peer.closeObserved&&!peer.timedOut)&&receipt.listeners.every(listener=>listener.callbackObserved&&!listener.timedOut&&!listener.error)&&receipt.remainingPeers===0&&!receipt.pollPending;
+      record('relay-stop-completion',undefined,{receipt});
+      if(!receipt.completed){const error=new Error('Relay close completion failed or timed out');error.closeCompletionReceipt=receipt;throw error;}
+      return receipt;
+    }};
 }
 
 if(process.argv[1]?.endsWith('/relay.mjs')) {

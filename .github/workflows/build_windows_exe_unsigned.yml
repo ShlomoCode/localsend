@@ -136,7 +136,7 @@ jobs:
           $receipt = @{schema=1; phase='entry'; admitted=$false; repository=$env:GITHUB_REPOSITORY; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; runnerName=$env:RUNNER_NAME; powerShellVersion=$PSVersionTable.PSVersion.ToString(); powerShellEdition=$PSVersionTable.PSEdition; localTimeZoneId=[TimeZoneInfo]::Local.Id; localBaseUtcOffsetMinutes=[TimeZoneInfo]::Local.BaseUtcOffset.TotalMinutes; culture=[Globalization.CultureInfo]::CurrentCulture.Name; enteredUtc=[DateTimeOffset]::UtcNow.ToString('o')}
           $metadataFailure = $null
           try {
-            if ($env:BS_DEVICE -ne 'Samsung Galaxy S25' -or $env:BS_OS -ne '15.0' -or $env:BACKGROUND_POLICY_EXPERIMENT -ne 'samsung-enable-and-restore' -or $env:HELPER_SERVICE_MODE -ne 'foreground' -or $env:HELPER_OBSERVATION_MODE -ne 'native') { throw '90-second condition configuration is not admitted' }
+            if ($env:BS_DEVICE -ne 'Samsung Galaxy S25' -or $env:BS_OS -ne '15.0' -or $env:BACKGROUND_POLICY_EXPERIMENT -notin @('samsung-enable-and-restore', 'samsung-observe-optimized') -or $env:HELPER_SERVICE_MODE -ne 'foreground' -or $env:HELPER_OBSERVATION_MODE -ne 'native') { throw '90-second condition configuration is not admitted' }
             $receipt.phase = 'date-kind-contract'
             $dateKindParameter = (Get-Command ConvertFrom-Json).Parameters['DateKind']
             $receipt.dateKindStringSupported = [bool]($dateKindParameter -and $dateKindParameter.ParameterType.IsEnum -and ([Enum]::GetNames($dateKindParameter.ParameterType) -contains 'String'))

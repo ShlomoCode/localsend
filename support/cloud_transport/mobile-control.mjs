@@ -99,7 +99,7 @@ function allowlistedCapabilities(caps={}){
 }
 try {
  if(natural90){
-  assert(process.env.DIAGNOSTIC_SCENARIO==='physical-control'&&process.env.BS_DEVICE==='Samsung Galaxy S25'&&process.env.BS_OS==='15.0'&&process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-enable-and-restore'&&helperMode==='foreground'&&helperObservationMode==='native','90-second condition configuration is not admitted');
+  assert(process.env.DIAGNOSTIC_SCENARIO==='physical-control'&&process.env.BS_DEVICE==='Samsung Galaxy S25'&&process.env.BS_OS==='15.0'&&['samsung-enable-and-restore','samsung-observe-optimized'].includes(process.env.BACKGROUND_POLICY_EXPERIMENT)&&helperMode==='foreground'&&helperObservationMode==='native','90-second condition configuration is not admitted');
   assert(Number(process.env.TRANSPORT_HOLD_SECONDS||0)===0,'90-second condition excludes transport keepalive holds');
  }
  const localUrl=new URL('https://www.browserstack.com/local/v1/list');localUrl.searchParams.set('auth_token',process.env.BROWSERSTACK_ACCESS_KEY);
@@ -195,8 +195,8 @@ try {
   }catch(error){deletion.error=String(error);cleanupErrors.push(deletion.error);}
   finally{deletion.ended=new Date().toISOString();deletion.elapsedMs=Number(process.hrtime.bigint()-deletionStart)/1e6;writeFileSync('evidence/natural90-session-delete.json',JSON.stringify(deletion,null,2));}
   const relayStop={started:new Date().toISOString(),before:r.status(),verified:false},relayStopStart=process.hrtime.bigint();
-  try{await r.stop();relayStop.completed=true;relayStop.after=r.status();relayStop.verified=relayStop.after.peers===0&&!relayStop.after.pollPending;if(!relayStop.verified)throw new Error('Relay stop did not drain its peers/poll');}
-  catch(error){relayStop.error=String(error);cleanupErrors.push(relayStop.error);}
+  try{relayStop.closeCompletion=await r.stop();relayStop.completed=true;relayStop.after=r.status();relayStop.verified=relayStop.after.peers===0&&!relayStop.after.pollPending;if(!relayStop.verified)throw new Error('Relay stop did not drain its peers/poll');}
+  catch(error){if(error.closeCompletionReceipt)relayStop.closeCompletion=error.closeCompletionReceipt;relayStop.error=String(error);cleanupErrors.push(relayStop.error);}
   finally{relayStop.ended=new Date().toISOString();relayStop.elapsedMs=Number(process.hrtime.bigint()-relayStopStart)/1e6;writeFileSync('evidence/natural90-relay-stop.json',JSON.stringify(relayStop,null,2));writeFileSync('relay-trace.json',JSON.stringify(r.trace,null,2));}
   if(cleanupErrors.length)throw new Error('90-second cleanup incomplete: '+cleanupErrors.join('; '));
  }

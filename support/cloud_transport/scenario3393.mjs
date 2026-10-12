@@ -16,9 +16,9 @@ export default async function({session,wd,senderPort,transportStatus,transportSn
  if(ordinaryHelper&&!samsungPolicyObserved)throw new Error('Ordinary helper comparison requires the matched Samsung Optimized condition');
  const samsungDiscovery=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-policy-discovery';
  if(samsungDiscovery&&process.env.BS_DEVICE!=='Samsung Galaxy S25')throw new Error('Samsung policy discovery requires Samsung Galaxy S25');
- if(natural90&&(process.env.DIAGNOSTIC_SCENARIO!=='physical-control'||process.env.BS_DEVICE!=='Samsung Galaxy S25'||process.env.BS_OS!=='15.0'||!samsungPolicyOn||ordinaryHelper||process.env.HELPER_SERVICE_MODE!=='foreground'||process.env.HELPER_OBSERVATION_MODE!=='native'))throw new Error('90-second condition requires the matched Samsung Android15 physical foreground/native experiment');
+ if(natural90&&(process.env.DIAGNOSTIC_SCENARIO!=='physical-control'||process.env.BS_DEVICE!=='Samsung Galaxy S25'||process.env.BS_OS!=='15.0'||!(samsungPolicyOn||samsungPolicyObserved)||ordinaryHelper||process.env.HELPER_SERVICE_MODE!=='foreground'||process.env.HELPER_OBSERVATION_MODE!=='native'))throw new Error('90-second condition requires the matched Samsung Android15 physical foreground/native experiment');
  if(policyOn&&(process.env.BS_DEVICE!==(samsungPolicyOn?'Samsung Galaxy S25':'OnePlus 13R')||(!natural90&&Number(process.env.PICKER_LONG_DWELL_MS)!==20000)))throw new Error('Policy experiment requires its selected device and scheduled 20 s or admitted Samsung 90 s');
- if(samsungPolicyObserved&&(process.env.BS_DEVICE!=='Samsung Galaxy S25'||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Samsung Optimized observation requires Samsung Galaxy S25 and scheduled 20 s');
+ if(samsungPolicyObserved&&(process.env.BS_DEVICE!=='Samsung Galaxy S25'||(!natural90&&Number(process.env.PICKER_LONG_DWELL_MS)!==20000)))throw new Error('Samsung Optimized observation requires Samsung Galaxy S25 and scheduled 20 s or admitted natural 90 s');
  let policyAttempted=false,policyModule,samsungPolicyState;
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
