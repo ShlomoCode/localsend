@@ -1,0 +1,46 @@
+name: Issue 3441 official macOS receiver readiness
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue3441-owned-diagnostics
+  cancel-in-progress: false
+jobs:
+  receiver-readiness:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install cloud capture and media tools
+        run: brew install ffmpeg
+      - name: Install unchanged official release using normal external preferences
+        run: bash support/diagnostics/3441/setup.sh
+      - name: Native GUI, accessibility, recording and signature readiness
+        run: |
+          node --check support/diagnostics/3441/receiver.mjs
+          node support/diagnostics/3441/receiver.mjs
+      - name: Verify unchanged installed signature after execution
+        if: always()
+        run: |
+          mkdir -p evidence/issue3441
+          codesign --verify --deep --strict --verbose=2 /Applications/LocalSend.app 2> evidence/issue3441/codesign-after.txt
+          test ! -e /Applications/LocalSend.app/Contents/MacOS/settings.json
+      - name: Stop only the owned release receiver
+        if: always()
+        run: |
+          cleanup_status=0
+          node support/diagnostics/3441/cleanup.mjs || cleanup_status=$?
+          pkill -f '^/Applications/LocalSend.app/Contents/MacOS/' || true
+          rm -rf "$RUNNER_TEMP/issue3441"
+          exit "$cleanup_status"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue3441-macos-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/issue3441/
+          if-no-files-found: warn
