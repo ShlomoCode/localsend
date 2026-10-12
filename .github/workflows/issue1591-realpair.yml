@@ -18,7 +18,7 @@ on:
       comparison:
         description: Additional cases after MKV OFF, or bounded fresh-process TCP_NODELAY comparison
         type: choice
-        options: [none, mp4-off, gallery-on, nodelay-first-mkv-off]
+        options: [none, mp4-off, gallery-on, mkv-gallery-pair, nodelay-first-mkv-off]
         default: none
       fixture_run_id:
         description: Optional previous fork run ID to reuse the exact fixture bytes

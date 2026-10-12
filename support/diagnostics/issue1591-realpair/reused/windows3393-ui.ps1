@@ -1,7 +1,60 @@
-param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[int]$ExpectedPid=0,[long]$ExpectedWindow=0)
+param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[int]$ExpectedPid=0,[long]$ExpectedWindow=0,[string]$ExpectedFilename='',[switch]$AllowInfo)
 $ErrorActionPreference='Stop'
 function Write-DiagnosticPhase([string]$phase){
  @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase}|ConvertTo-Json -Compress|Add-Content "evidence/$Label-phases.jsonl"
+}
+if(-not $global:Issue1591SendingUIAPrewarmed){
+ $global:Issue1591SendingUIAPrewarmed=$true
+ try{
+  Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
+  if(-not ('SendingUIA' -as [type])){Add-Type -ReferencedAssemblies @([System.Windows.Automation.AutomationElement].Assembly.Location,[System.Windows.Automation.ControlType].Assembly.Location,[System.Windows.Rect].Assembly.Location) @'
+using System;using System.Collections.Generic;using System.Threading;using System.Windows.Automation;
+public static class SendingUIA {
+ public sealed class Node {public string Name;public int Pid;public bool Enabled;public bool Offscreen;public bool Invokable;public double X,Y,Width,Height;}
+ public sealed class Result {public string Status="unavailable";public string Reason;public bool Attempted;public Node[] Before=new Node[0];public Node[] Fresh=new Node[0];public Node[] After=new Node[0];}
+ static List<AutomationElement> Elements(AutomationElement root) {
+  var rows=new List<AutomationElement>();var queue=new Queue<Tuple<AutomationElement,int>>();queue.Enqueue(Tuple.Create(root,0));
+  while(queue.Count>0&&rows.Count<256) {var row=queue.Dequeue();rows.Add(row.Item1);if(row.Item2>=12)continue;
+   for(var child=TreeWalker.ControlViewWalker.GetFirstChild(row.Item1);child!=null&&queue.Count+rows.Count<256;child=TreeWalker.ControlViewWalker.GetNextSibling(child))queue.Enqueue(Tuple.Create(child,row.Item2+1));}
+  return rows;
+ }
+ static Node[] Describe(List<AutomationElement> elements) {
+  var rows=new List<Node>();foreach(var element in elements){var c=element.Current;var b=c.BoundingRectangle;object pattern;
+   rows.Add(new Node{Name=c.Name,Pid=c.ProcessId,Enabled=c.IsEnabled,Offscreen=c.IsOffscreen,Invokable=element.TryGetCurrentPattern(InvokePattern.Pattern,out pattern),X=b.X,Y=b.Y,Width=b.Width,Height=b.Height});}return rows.ToArray();
+ }
+ static bool Visible(Node n,int pid){return n.Pid==pid&&n.Enabled&&!n.Offscreen&&n.Width>0&&n.Height>0;}
+ static int Candidate(Node[] rows,int pid,string filename) {
+  bool title=false,footer=false;var files=new List<Node>();var errors=new List<Node>();
+  foreach(var n in rows)if(Visible(n,pid)){title|=n.Name=="Sending files";if(n.Name!=null&&n.Name.Contains(filename))files.Add(n);footer|=n.Name=="Finished with error";if(n.Name=="Error")errors.Add(n);}
+  if(!title||!footer||files.Count!=1||errors.Count!=1)return -1;
+  var error=errors[0];var file=files[0];if(error.Y<file.Y+file.Height||error.Y-(file.Y+file.Height)>30||Math.Abs(error.X-file.X)>10)return -1;
+  int selected=-1;
+  for(int i=0;i<rows.Length;i++){var n=rows[i];if(Visible(n,pid)&&n.Invokable&&String.IsNullOrEmpty(n.Name)&&n.Width<=50&&n.Height<=50&&n.X>=error.X+error.Width&&n.X-(error.X+error.Width)<=30&&n.Y<error.Y+error.Height&&n.Y+n.Height>error.Y){if(selected!=-1)return -1;selected=i;}}
+  return selected;
+ }
+ public static Result Observe(long hwnd,int pid,string filename,bool allowInfo) {
+  var result=new Result();int inputState=0;var clock=System.Diagnostics.Stopwatch.StartNew();var thread=new Thread(()=>{try{
+   var root=AutomationElement.FromHandle(new IntPtr(hwnd));if(root.Current.ProcessId!=pid)throw new InvalidOperationException("UIA root ownership differs");
+   result.Before=Describe(Elements(root));var candidate=Candidate(result.Before,pid,filename);
+   bool title=false,file=false,finished=false,error=false;foreach(var n in result.Before)if(Visible(n,pid)){title|=n.Name=="Sending files";file|=n.Name!=null&&n.Name.Contains(filename);finished|=n.Name=="Finished";error|=n.Name=="Finished with error";}
+   result.Status=title&&file&&finished?"finished-observed":title&&file&&error?"transfer-error-observed":"text-unavailable-or-pending";
+   if(!allowInfo){result.Reason="Read-only early observation; no input permitted";return;}
+   if(candidate<0){result.Reason="No unique source-qualified transfer Error info InvokePattern; no input sent";return;}
+   var fresh=Elements(root);result.Fresh=Describe(fresh);var current=Candidate(result.Fresh,pid,filename);
+   if(current<0)throw new InvalidOperationException("Fresh Error info candidate absent or ambiguous");
+   var a=result.Before[candidate];var b=result.Fresh[current];if(a.X!=b.X||a.Y!=b.Y||a.Width!=b.Width||a.Height!=b.Height)throw new InvalidOperationException("Qualified UIA bounds changed");
+   object pattern;if(!fresh[current].TryGetCurrentPattern(InvokePattern.Pattern,out pattern))throw new InvalidOperationException("Fresh InvokePattern absent");
+   if(clock.ElapsedMilliseconds>=1300||Interlocked.CompareExchange(ref inputState,1,0)!=0)throw new InvalidOperationException("Observation deadline reached before input; no input sent");
+   result.Attempted=true;result.Status="invocation-indeterminate";((InvokePattern)pattern).Invoke();result.Status="info-invoked-awaiting-original-after-image";
+   result.After=Describe(Elements(root));
+  }catch(Exception e){result.Reason=e.GetType().Name+": "+e.Message;}});thread.IsBackground=true;thread.SetApartmentState(ApartmentState.MTA);thread.Start();
+  if(!thread.Join(1500)){Interlocked.CompareExchange(ref inputState,2,0);return new Result{Status="UIA-deadline-indeterminate",Reason="UIA provider exceeded 1500ms; one request only, no replacement",Attempted=Volatile.Read(ref inputState)==1,Before=result.Before,Fresh=result.Fresh};}return result;
+ }
+}
+'@}
+  $global:Issue1591SendingUIAAvailable=$true
+ }catch{$global:Issue1591SendingUIAAvailable=$false;$global:Issue1591SendingUIAReason=$_.Exception.Message}
+ @{utc=[DateTime]::UtcNow.ToString('o');available=$global:Issue1591SendingUIAAvailable;reason=$global:Issue1591SendingUIAReason;authority='Assembly/type loading only; actual Flutter provider is not established'}|ConvertTo-Json|Set-Content 'evidence/sending-uia-prewarm.json'
 }
 Write-DiagnosticPhase 'before-drawing-assembly'
 Add-Type -AssemblyName System.Drawing
@@ -193,7 +246,29 @@ function Capture-FavoritesError{
  }
  if($receipt.status -ne 'after-image-retained-for-readable-dialog-review'){throw "Favorites ErrorDialog evidence unavailable: $($receipt.reason)"}
 }
+function Capture-SendingOutcome{
+ $prefix="evidence/$Label";$hwnd=[IntPtr]$ExpectedWindow
+ $receipt=@{utc=[DateTime]::UtcNow.ToString('o');action='sending-outcome';expectedPid=$ExpectedPid;expectedWindow=$ExpectedWindow;filename=$ExpectedFilename;allowInfo=[bool]$AllowInfo;attempted=$false;status='evidence-unavailable';uiaLimitMs=1500}
+ try{
+  if($ExpectedPid -le 0 -or $ExpectedWindow -le 0 -or -not $ExpectedFilename){throw 'Owned sender identity/file absent'}
+  $owned=Assert-OwnedFavoritesWindow $hwnd ([uint32]$ExpectedPid)
+  $receipt.executablePath=$owned.executablePath;$receipt.beforeRect=Capture-OwnedWindow $hwnd "$prefix-before.png";$receipt.beforeUtc=[DateTime]::UtcNow.ToString('o')
+  $receipt.beforeSha256=(Get-FileHash -Algorithm SHA256 "$prefix-before.png").Hash.ToLowerInvariant()
+  if($global:Issue1591SendingUIAAvailable){$observed=[SendingUIA]::Observe($ExpectedWindow,$ExpectedPid,$ExpectedFilename,[bool]$AllowInfo);$receipt.uia=$observed;$receipt.attempted=$observed.Attempted;$receipt.status=$observed.Status}
+  else{$receipt.status='UIA-unavailable';$receipt.reason=$global:Issue1591SendingUIAReason}
+ }catch{$receipt.reason=$_.Exception.Message}finally{
+  try{
+   $afterOwned=Assert-OwnedFavoritesWindow $hwnd ([uint32]$ExpectedPid)
+   $receipt.afterRect=Capture-OwnedWindow $hwnd "$prefix-after.png";$receipt.afterUtc=[DateTime]::UtcNow.ToString('o');$receipt.afterTree=$afterOwned.children
+   $receipt.afterSha256=(Get-FileHash -Algorithm SHA256 "$prefix-after.png").Hash.ToLowerInvariant()
+  }catch{$receipt.afterCaptureError=$_.Exception.Message}
+  $receipt|ConvertTo-Json -Depth 12|Set-Content "$prefix-receipt.json"
+ }
+ # Opaque UIA does not suppress the original pixels or claim a sender result.
+ if($receipt.status -eq 'evidence-unavailable' -or $receipt.afterCaptureError){throw 'Owned sender outcome pixels unavailable'}
+}
 if($Action -eq 'favorites-error'){Capture-FavoritesError;return}
+if($Action -eq 'sending-outcome'){Capture-SendingOutcome;return}
 Write-DiagnosticPhase 'before-find-window'
 $window=[W3393]::FindWindow('FLUTTER_RUNNER_WIN32_WINDOW','LocalSend')
 if($window -eq [IntPtr]::Zero){throw 'No LocalSend window'}

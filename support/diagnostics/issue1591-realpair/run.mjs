@@ -36,6 +36,7 @@ let session, local, r, failure, stage = 'configuration', previousFinished = fals
 let monitoredWindow, healthMonitor;
 let helperStartAttempted = false;
 let windowsUI, windowsReady, windowsSeq = 0;
+let windowsUIAmbiguous = false;
 const windowsRequests = new Map();
 const healthMaxAgeMs = 5000;
 const results = [], cleanup = [], backgroundWindows = [];
@@ -194,7 +195,7 @@ async function captureTransportErrorSnapshot(failedStage) {
     save(label + '-controller-receipt.json', receipt);
   }
 }
-async function elements(using, value) { return wd('POST', prefix() + '/elements', {using, value}); }
+async function elements(using, value, timeoutMs = 30000) { return wd('POST', prefix() + '/elements', {using, value}, timeoutMs); }
 async function unique(using, value, timeout = 10000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -210,16 +211,17 @@ async function click(label, timeout) {
   await wd('POST', prefix() + '/element/' + eid(element) + '/click', {});
 }
 async function activate(bundleId) { await wd('POST', prefix() + '/appium/device/activate_app', {appId:bundleId}); }
-async function powershell(script, args = []) {
+async function powershell(script, args = [], {timeoutMs = 30000} = {}) {
   if (script === 'windows3393-ui.ps1' && windowsReady) {
+    if (windowsUIAmbiguous) throw new Error('Owned Windows observer RPC is indeterminate; no subsequent native request allowed');
     const value = name => {const index=args.indexOf(name);return index < 0 ? undefined : args[index + 1];};
     const id = ++windowsSeq;
     return new Promise((ok, reject) => {
-      const timer = setTimeout(() => {windowsRequests.delete(id);reject(new Error('Prewarmed Windows UI deadline exceeded'));}, 30000);
+      const timer = setTimeout(() => {windowsRequests.delete(id);windowsUIAmbiguous = true;reject(new Error('Prewarmed Windows UI deadline exceeded'));}, timeoutMs);
       windowsRequests.set(id, {ok, reject, timer});
       windowsUI.stdin.write(JSON.stringify({id,action:value('-Action'),x:Number(value('-X') || 0),y:Number(value('-Y') || 0),label:value('-Label'),
         foreground:args.includes('-RequireForeground'),sequence:args.includes('-UseControlSequence'),
-        expectedPid:Number(value('-ExpectedPid') || 0),expectedWindow:Number(value('-ExpectedWindow') || 0)}) + '\n');
+        expectedPid:Number(value('-ExpectedPid') || 0),expectedWindow:Number(value('-ExpectedWindow') || 0),expectedFilename:value('-ExpectedFilename') || '',allowInfo:args.includes('-AllowInfo')}) + '\n');
     });
   }
   const started = Date.now();
@@ -228,8 +230,41 @@ async function powershell(script, args = []) {
     save(`windows-${started}.txt`, output.stdout + output.stderr);
   } catch (error) { save(`windows-${started}-error.txt`, [error.message, error.stdout, error.stderr].join('\n')); throw error; }
 }
+const senderOutcomeRequests = new Set();
+async function observeSenderOutcome(label, filename, window, {allowInfo = false, trigger} = {}) {
+  if (senderOutcomeRequests.has(label)) throw new Error('Sender outcome observer already dispatched; no replacement allowed');
+  senderOutcomeRequests.add(label);
+  const receipt = {utc:new Date().toISOString(),label,filename,timeoutMs:5000,status:'dispatch-indeterminate',senderVerified:false,
+    trigger,allowInfo,
+    authority:'Owned original before/after Windows pixels and any actual UIA result; opaque provider requires parent visual review'};
+  let nativeDispatched = false;
+  try {
+    const baseline = JSON.parse(readFileSync('evidence/windows-ui-prewarmed-action.json','utf8').replace(/^\uFEFF/,''));
+    receipt.appPid = baseline.appPid; receipt.window = baseline.window;
+    if (!windowsReady || windowsUI?.exitCode !== null || !Number.isInteger(baseline.appPid) || baseline.appPid <= 0 || !Number.isInteger(baseline.window) || baseline.window <= 0) throw new Error('Owned sender identity/RPC unavailable');
+    nativeDispatched = true;
+    await powershell('windows3393-ui.ps1',['-Action','sending-outcome','-Label',label,'-ExpectedPid',String(baseline.appPid),'-ExpectedWindow',String(baseline.window),'-ExpectedFilename',filename,...(allowInfo ? ['-AllowInfo'] : [])],{timeoutMs:5000});
+    const native = JSON.parse(readFileSync('evidence/' + label + '-receipt.json','utf8').replace(/^\uFEFF/,''));
+    if (native.action !== 'sending-outcome' || native.expectedPid !== baseline.appPid || native.expectedWindow !== baseline.window || native.filename !== filename || !Number.isFinite(Date.parse(native.utc)) || Date.parse(native.utc) < Date.parse(receipt.utc)) throw new Error('Sender outcome native receipt identity differs');
+    receipt.native = native; receipt.status = native.status;
+    if (native.attempted === true && ['UIA-deadline-indeterminate','invocation-indeterminate'].includes(native.status)) {
+      windowsUIAmbiguous = true;
+      receipt.ambiguity = 'Native info invocation may still complete; no subsequent native request or second arm is admitted';
+    }
+  } catch (error) {
+    receipt.error = redact(error);
+    if (allowInfo && nativeDispatched) {
+      windowsUIAmbiguous = true;
+      receipt.ambiguity = 'Terminal native request lacks a qualified completion receipt; possible input is not replaced';
+    }
+  }
+  finally {receipt.completedUtc = new Date().toISOString();receipt.health = r?.health();save(label + '-controller-receipt.json',receipt);window.senderOutcome = receipt;}
+  if (windowsUIAmbiguous) throw new Error('Sender observer completion or input is indeterminate; pair stopped without a replacement or second arm');
+  return receipt;
+}
 async function prepareWindowsUI() {
   windowsUI = spawn('pwsh',['-NoProfile','-File',root + '/windows-ui-server.ps1']);
+  windowsUIAmbiguous = false;
   const pendingReady = new Promise((ok, reject) => {
     const timer = setTimeout(() => reject(new Error('Windows native helper did not prewarm')), 60000);
     const stop = error => {clearTimeout(timer);reject(error);for(const pending of windowsRequests.values()){clearTimeout(pending.timer);pending.reject(error);}windowsRequests.clear();};
@@ -442,7 +477,7 @@ async function configureProxy(label) {
   await checkpoint(window, 'after-app-switch', {awaitBackground:true}); monitorHealth(window);
   return window;
 }
-async function transfer({label, extension, desired, verifyDocuments}) {
+async function transfer({label, extension, desired, verifyDocuments, galleryOracle = false}) {
   const filename = `issue1591-${process.env.GITHUB_RUN_ID}-${label}.${extension}`;
   const fixtureIndex = JSON.parse(readFileSync('evidence/fixture-index.json', 'utf8').replace(/^\uFEFF/, ''));
   const sourceFilename = fixtureIndex[extension];
@@ -470,19 +505,39 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   await unique('accessibility id', 'Accept', 12000);
   await checkpoint(window, 'before-Accept', {requirePeer:true,minimumObservedBudgetSeconds:15});
   window.acceptInvokedUtc = new Date().toISOString(); await click('Accept', 1000);
-  window.acceptReturnedUtc = new Date().toISOString(); await checkpoint(window, 'after-Accept', {requirePeer:true});
+  window.acceptReturnedUtc = new Date().toISOString();
+  // Observe the actual sender before a receiver wait can exhaust the finite budget.
+  // This is one bounded request; an ambiguous RPC never gets a replacement.
+  if (process.env.COMPARISON === 'mkv-gallery-pair') {
+    await observeSenderOutcome(label + '-sender-early', filename, window,{trigger:'Immediately after actual receiver Accept RPC return; upload completion is not assumed'});
+    await checkpoint(window, 'after-early-sender-observation', {requirePeer:true});
+  }
+  await checkpoint(window, 'after-Accept', {requirePeer:true});
   await capture(label + '-accepted');
   stage = label + '-receiver-save';
-  const deadline = Date.now() + 30000;
+  const galleryPair = process.env.COMPARISON === 'mkv-gallery-pair';
+  const deadline = Date.now() + (galleryPair ? 10000 : 30000);
+  let terminalSenderObserved = false;
   while (Date.now() < deadline) {
     if (window.healthFault) throw new Error('Transport infrastructure while waiting for save: ' + window.healthFault.issue);
-    const xml = await wd('GET', prefix() + '/source'); save(label + '-latest.xml', xml);
+    const xml = await wd('GET', prefix() + '/source',undefined,galleryPair?3000:30000); save(label + '-latest.xml', xml);
+    const receiverDone = (await elements('accessibility id', 'Done',galleryPair?2000:30000)).length === 1;
+    const receiverError = /(?:name|label|value)="[^"\n]*(?:HTTP(?: status)?[: ]+500|Internal Server Error)[^"\n]*"/i.test(xml);
+    if (process.env.COMPARISON === 'mkv-gallery-pair' && !terminalSenderObserved &&
+        (receiverDone || receiverError || Date.now() - Date.parse(window.acceptReturnedUtc) >= 5000)) {
+      terminalSenderObserved = true;
+      // Only the terminal observation may invoke info. A timed-out early read
+      // cannot send input, and a terminal timeout never receives a replacement.
+      await observeSenderOutcome(label + '-sender-terminal',filename,window,{allowInfo:true,
+        trigger:receiverDone?'receiver-Done-observed':receiverError?'receiver-error-observed':'five-second-post-Accept-boundary-not-completion-proof'});
+      await checkpoint(window,'after-terminal-sender-observation',{requirePeer:true});
+    }
     // Only consent to a prompt that explicitly requests adding photos. Never
     // request read/write library access or dismiss a broader permission prompt.
     if (/Allow Full Access|Select Photos|access your photo library/i.test(xml)) throw new Error('Broader Photos access prompt is outside the add-only scenario');
     if (/add(?: to)? (?:your )?photos/i.test(xml) && (await elements('accessibility id', 'Allow Access')).length === 1) await click('Allow Access');
-    if ((await elements('accessibility id', 'Done')).length === 1) break;
-    if (/(?:name|label|value)="[^"\n]*(?:HTTP(?: status)?[: ]+500|Internal Server Error)[^"\n]*"/i.test(xml)) {
+    if (receiverDone) break;
+    if (receiverError) {
       await checkpoint(window, 'observed-error-health', {requirePeer:true});
       await capture(label + '-reported-error');
       results.push({case:label, stage, source:identity, outcome:'observed-500', transport:r.status()});
@@ -502,11 +557,22 @@ async function transfer({label, extension, desired, verifyDocuments}) {
   const result = {case:label, source:identity, gallery:desired, outcome:'receiver-completed-sender-review-required',
     senderVerified:false, transport:r.status(), byteExact:false, evidenceAdmission:'Requires parent raw sender image/PID review and original device logs before both-endpoint success'};
   results.push(result);
-  if (verifyDocuments) {
+  const photosObserved = galleryOracle && /(?:name|label)="Saved in Photos"/.test(completeSource);
+  result.photosLabelObserved = photosObserved;
+  if (verifyDocuments && !photosObserved) {
     stage = label + '-saved-file-verification';
     const path = `@${appId}:documents/${filename}`;
     await checkpoint(window, 'before-documents-pull', {requirePeer:true});
-    const encoded = await wd('POST', prefix() + '/appium/device/pull_file', {path});
+    let encoded;
+    try {encoded = await wd('POST', prefix() + '/appium/device/pull_file', {path});}
+    catch (error) {
+      if (galleryOracle) {
+        Object.assign(result,{path,outcome:'save-destination-oracle-unavailable',verificationLimit:'No Saved in Photos label and Documents pull failed. This does not establish a save defect or absence from Photos.',pullError:redact(error)});
+        save('scenario-results.json',{results,backgroundWindows});
+        throw new Error('Gallery destination verification blocked; inspect original receiver/sender UI and device log');
+      }
+      throw error;
+    }
     await checkpoint(window, 'after-documents-pull', {requirePeer:true});
     const saved = Buffer.from(encoded, 'base64');
     writeFileSync('evidence/' + label + '-saved.' + extension, saved);
@@ -514,7 +580,9 @@ async function transfer({label, extension, desired, verifyDocuments}) {
     Object.assign(result, {path, savedBytes:saved.length, savedSha256:hash, byteExact:hash === identity.sha256 && saved.length === identity.bytes});
     if (!result.byteExact) throw new Error('Exact saved-file hash or size differs from real sender fixture');
   } else {
-    result.verificationLimit = 'Gallery completion is UI evidence only. Documents pull cannot establish Photos library bytes; no read/write Photos authorization was granted.';
+    result.verificationLimit = galleryOracle ?
+      'Gallery completion and Saved in Photos label are UI evidence only. Documents pull cannot establish Photos library bytes; no read/write Photos authorization was granted.' :
+      'Gallery completion is UI evidence only. Documents pull cannot establish Photos library bytes; no read/write Photos authorization was granted.';
   }
   save('scenario-results.json', {results, backgroundWindows});
   await checkpoint(window, 'verified-case-end', {requirePeer:true});
@@ -744,6 +812,7 @@ $receipt.stopped=$true;$receipt|ConvertTo-Json -Compress
     await transfer({label:'mkv-gallery-off-control',extension:'mkv',desired:false,verifyDocuments:true});
   }
   if (process.env.COMPARISON === 'mp4-off') await transfer({label:'mp4-gallery-off',extension:'mp4',desired:false,verifyDocuments:true});
+  if (process.env.COMPARISON === 'mkv-gallery-pair') await transfer({label:'mkv-gallery-on-direct',extension:'mkv',desired:true,verifyDocuments:true,galleryOracle:true});
   if (process.env.COMPARISON === 'gallery-on') {
     await transfer({label:'mp4-gallery-on-control',extension:'mp4',desired:true,verifyDocuments:false});
     await transfer({label:'mkv-gallery-on',extension:'mkv',desired:true,verifyDocuments:true});
