@@ -17,6 +17,7 @@ import 'package:localsend_app/util/native/cross_file_converters.dart';
 import 'package:localsend_app/util/native/pick_directory_path.dart';
 import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/ui/asset_picker_translated_text_delegate.dart';
+import 'package:localsend_app/widget/dialogs/error_dialog.dart';
 import 'package:localsend_app/widget/dialogs/loading_dialog.dart';
 import 'package:localsend_app/widget/dialogs/message_input_dialog.dart';
 import 'package:localsend_app/widget/dialogs/no_permission_dialog.dart';
@@ -144,14 +145,16 @@ class PickFileAction extends AsyncGlobalAction {
 }
 
 Future<void> _pickFiles(BuildContext context, Ref ref) async {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  DialogRoute<void>? loadingDialog;
   if (checkPlatform([TargetPlatform.android])) {
     // On android, the files are copied to the cache which takes some time.
-    // ignore: unawaited_futures
-    showDialog(
+    loadingDialog = DialogRoute<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const LoadingDialog(),
     );
+    unawaited(navigator.push(loadingDialog));
   }
   try {
     if (defaultTargetPlatform == TargetPlatform.android) {
@@ -178,18 +181,25 @@ Future<void> _pickFiles(BuildContext context, Ref ref) async {
           );
     }
   } catch (e) {
+    if (loadingDialog?.isActive ?? false) {
+      navigator.removeRoute(loadingDialog!);
+    }
     if (e is PlatformException && e.code == 'CANCELED') {
       // User canceled the file picker
       _logger.info('User canceled file picker');
       return;
     }
 
-    // ignore: use_build_context_synchronously
-    await showDialog(context: context, builder: (_) => const NoPermissionDialog());
     _logger.warning('Failed to pick files', e);
+    if (!context.mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => e is PlatformException && e.code == 'PERMISSION_DENIED' ? const NoPermissionDialog() : ErrorDialog(error: e.toString()),
+    );
   } finally {
-    // ignore: use_build_context_synchronously
-    Routerino.context.popUntilRoot(); // remove loading dialog
+    if (loadingDialog?.isActive ?? false) {
+      navigator.removeRoute(loadingDialog!);
+    }
   }
 }
 
@@ -206,12 +216,13 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
     return;
   }
 
-  // ignore: unawaited_futures
-  showDialog(
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final loadingDialog = DialogRoute<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => const LoadingDialog(),
   );
+  unawaited(navigator.push(loadingDialog));
   await sleepAsync(200); // Wait for the dialog to be shown
   try {
     if (defaultTargetPlatform == TargetPlatform.android && (ref.read(deviceInfoProvider).androidSdkInt ?? 0) >= android_channel.contentUriMinSdk) {
@@ -227,6 +238,9 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
       }
     }
   } catch (e) {
+    if (loadingDialog.isActive) {
+      navigator.removeRoute(loadingDialog); // remove loading dialog before showing an error
+    }
     if (e is PlatformException && e.code == 'CANCELED') {
       // User canceled the file picker
       _logger.info('User canceled file picker');
@@ -234,11 +248,15 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
     }
 
     _logger.warning('Failed to pick directory', e);
-    // ignore: use_build_context_synchronously
-    await showDialog(context: context, builder: (_) => const NoPermissionDialog());
+    if (!context.mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => e is PlatformException && e.code == 'PERMISSION_DENIED' ? const NoPermissionDialog() : ErrorDialog(error: e.toString()),
+    );
   } finally {
-    // ignore: use_build_context_synchronously
-    Routerino.context.popUntilRoot(); // remove loading dialog
+    if (loadingDialog.isActive) {
+      navigator.removeRoute(loadingDialog); // remove loading dialog after a successful or canceled selection
+    }
   }
 }
 
