@@ -90,7 +90,7 @@ try{
  if($senderScript.Contains('"') -or $windows.Contains('"')){throw 'Sender launch paths must not contain embedded double quotes.'}
  # Start-Process joins ArgumentList entries. Its documented single-string
  # form needs explicit double quotes around these complete Windows paths.
- $senderArguments='-NoProfile -File "'+$senderScript+'" -OutputDirectory "'+$windows+'" -TimeoutSeconds 1800 -ReceiverName WSL1461'
+ $senderArguments='-NoProfile -STA -File "'+$senderScript+'" -OutputDirectory "'+$windows+'" -TimeoutSeconds 1800 -ReceiverName WSL1461'
  $sender=Start-Process pwsh -ArgumentList $senderArguments -PassThru -RedirectStandardOutput (Join-Path $evidence 'sender.stdout.txt') -RedirectStandardError (Join-Path $evidence 'sender.stderr.txt')
  WaitFile (Join-Path $windows 'ready.json') 360 -SenderReady
  $ready=Get-Content (Join-Path $windows 'ready.json') -Raw|ConvertFrom-Json

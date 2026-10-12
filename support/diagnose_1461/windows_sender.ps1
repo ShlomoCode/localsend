@@ -226,6 +226,28 @@ function LabelBounds($s,[string]$label){
  if($uia.Count -eq 1){return @{x=$uia[0].x;y=$uia[0].y;width=$uia[0].width;height=$uia[0].height;method='UIA bounds'}}
  $wanted=$label.Split(' ');$words=@($s.ocr.words);$found=@()
  for($i=0;$i -le $words.Count-$wanted.Count;$i++){$ok=$true;for($j=0;$j -lt $wanted.Count;$j++){if($words[$i+$j].text -cne $wanted[$j] -or [Math]::Abs($words[$i+$j].y-$words[$i].y) -gt $words[$i].height){$ok=$false;break}};if($ok){$group=@($words[$i..($i+$wanted.Count-1)]);$left=($group.x|Measure-Object -Minimum).Minimum;$top=($group.y|Measure-Object -Minimum).Minimum;$right=($group|ForEach-Object{$_.x+$_.width}|Measure-Object -Maximum).Maximum;$bottom=($group|ForEach-Object{$_.y+$_.height}|Measure-Object -Maximum).Maximum;$found+=@{x=$s.window.Left+$left;y=$s.window.Top+$top;width=$right-$left;height=$bottom-$top;method='Native OCR word bounds'}}}
+ if($found.Count -eq 0 -and $label -notmatch '\s'){
+  # Native OCR can split one word (E16: Po + rt). Reconstruct only exact
+  # characters in consecutive left-to-right tokens on the same tight baseline.
+  for($i=0;$i -lt $words.Count;$i++){
+   $text='';$parts=@();$previous=$null
+   for($j=$i;$j -lt $words.Count -and $j-$i -lt $label.Length;$j++){
+    $word=$words[$j];if(-not $word.text -or $word.width -le 0 -or $word.height -le 0){break}
+    if($previous){
+     $smallHeight=[Math]::Min($previous.height,$word.height);$gap=$word.x-($previous.x+$previous.width)
+     if($gap -lt 0 -or $gap -gt [Math]::Max(2,$smallHeight*0.35) -or [Math]::Abs(($word.y+$word.height)-($previous.y+$previous.height)) -gt [Math]::Max(2,$smallHeight*0.2) -or [Math]::Abs($word.height-$previous.height) -gt [Math]::Max(2,$smallHeight*0.2)){break}
+    }
+    $text+=$word.text;$parts+=@($word)
+    if(-not $label.StartsWith($text,[StringComparison]::Ordinal)){break}
+    if($parts.Count -gt 1 -and $text -ceq $label){
+     $left=$parts[0].x;$top=($parts.y|Measure-Object -Minimum).Minimum;$right=$word.x+$word.width;$bottom=($parts|ForEach-Object {$_.y+$_.height}|Measure-Object -Maximum).Maximum
+     $found+=@{x=$s.window.Left+$left;y=$s.window.Top+$top;width=$right-$left;height=$bottom-$top;method='Exact native OCR adjacent fragments';fragments=$parts};break
+    }
+    $previous=$word
+   }
+  }
+  if($found.Count -gt 0){Json (Join-Path $OutputDirectory ('label-fragments-'+$sequence+'-'+($label -replace '[^a-zA-Z0-9-]','-')+'.json')) @{label=$label;screenshot=$s.screenshot;window=$s.window;candidates=$found;contract='Exact concatenation only; consecutive tokens, nonnegative tight gap, matching baseline and height; no spelling substitution'} }
+ }
  if($label -eq 'Done'){
   # v1.14.0 ProgressPage puts its actionable Done beside Advanced in the
   # bottom card; a separate file-row status also says Done. Observe both labels
@@ -275,6 +297,21 @@ function Favorites {
   if(-not (FreshPixels $observed $tooltip)){continue}
   [SenderInput]::Click($x,$y);$report.actions+=@{name='Favorites tooltip hover target';x=$x;y=$y;tooltip=$tooltip;evidence=$observed.screenshot};Start-Sleep -Milliseconds 500;return
  };throw 'No observed Favorites tooltip within bounded toolbar hover search.'
+}
+function FavoriteFieldReadback([string]$expected,[string]$field){
+ if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'Favorite clipboard readback requires an explicitly STA sender controller; infrastructure admission failed.'}
+ Focus;$before=Window;$marker='localsend1461-readback-'+[Guid]::NewGuid().ToString('N')
+ [Windows.Forms.Clipboard]::SetText($marker)
+ if([Windows.Forms.Clipboard]::GetText() -cne $marker){throw 'Fresh clipboard marker was not established; favorite readback withheld.'}
+ [Windows.Forms.SendKeys]::SendWait('^a^c')
+ $copyDeadline=[DateTime]::UtcNow.AddMilliseconds((Remaining 2000));$actual=$marker
+ do{$actual=[Windows.Forms.Clipboard]::GetText();if($actual -cne $marker){break};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $copyDeadline)
+ $copyObservedUtc=[DateTime]::UtcNow;$withinDeadline=$copyObservedUtc -lt $copyDeadline
+ $after=Window
+ $observation=@{utc=$copyObservedUtc.ToString('o');field=$field;expected=$expected;actual=$actual;marker=$marker;markerReplaced=$actual -cne $marker;withinCopyDeadline=$withinDeadline;processId=$app.Id;before=$before;after=$after;foreground=[ReceiverNative]::GetForegroundWindow().ToInt64();method='One ordinary Ctrl+A/Ctrl+C on the source-defined focused field; fresh clipboard marker prevents stale acceptance'}
+ $report.actions+=@{name='favorite focused-field readback';observation=$observation};Persist
+ if(-not $withinDeadline -or $actual -ceq $marker -or $actual -cne $expected -or $before.Hwnd -ne $after.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw "Actual focused favorite field readback failed: $field"}
+ return $observation
 }
 function Fixture([string]$key){if($key -notin @('control','failed')){throw 'fixture must be control or failed.'};return $report.fixtures[$key]}
 function Handles([string]$label,$fixture){
@@ -459,13 +496,37 @@ function Execute($c){
   'click' { if(-not $c.label){throw 'click needs exact label.'};Click $c.label;return Snapshot ('after-'+$c.id) }
   'add-favorite' {
    Click 'Send';Favorites;Click 'Add';Focus;$s=Snapshot 'favorite-add-dialog'
-   [void](LabelBounds $s 'Add to favorites');[void](LabelBounds $s 'IP Address');[void](LabelBounds $s 'Port')
+   foreach($label in @('Add to favorites','IP Address','Port','Confirm')){$bounds=LabelBounds $s $label;if(-not(FreshPixels $s $bounds)){throw "Favorite dialog label changed before typing: $label"}}
    # 1.14.0 FavoriteEditDialog autofocuses IP. Tab order is IP -> Port.
    # Retain the dialog and typed input; no profile injection or protocol registration replaces the UI.
-   [System.Windows.Forms.SendKeys]::SendWait('^a'+$receiverHost+'{TAB}^a'+$receiverPort)
+   [System.Windows.Forms.SendKeys]::SendWait('^a'+$receiverHost)
+   $ipReadback=FavoriteFieldReadback $receiverHost 'IP Address'
+   [System.Windows.Forms.SendKeys]::SendWait('{TAB}^a'+$receiverPort)
+   $portReadback=FavoriteFieldReadback ([string]$receiverPort) 'Port'
+   [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
    $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='favorite IP autofocus and source-defined Tab to Port';ip=$receiverHost;port=$receiverPort;evidence=$s.screenshot}
-   Click 'Confirm';Start-Sleep -Milliseconds 1200
-   return Snapshot 'favorite-confirmed'
+   $typed=Snapshot 'favorite-typed-values';[void](LabelBounds $typed 'Add to favorites')
+   $ipLabel=LabelBounds $typed 'IP Address';$portLabel=LabelBounds $typed 'Port';$confirm=LabelBounds $typed 'Confirm'
+   foreach($bounds in @($ipLabel,$portLabel,$confirm)){if(-not(FreshPixels $typed $bounds)){throw 'Favorite field labels or Confirm changed before confirmation.'}}
+   $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='favorite actual typed endpoint readback';ip=$ipReadback;port=$portReadback;confirm=$confirm;evidence=$typed.screenshot};Persist
+   Click 'Confirm'
+   $confirmDeadline=[DateTime]::UtcNow.AddMilliseconds((Remaining 15000));$favoriteObserved=$false;$confirmed=$null;$lastConfirmationSnapshot=$null
+   while([DateTime]::UtcNow -lt $confirmDeadline){
+    $observed=Snapshot 'favorite-confirmation-observation';$lastConfirmationSnapshot=$observed.screenshot
+    if([DateTime]::UtcNow -ge $confirmDeadline){break}
+    try{
+     [void](LabelBounds $observed 'Favorites');[void](LabelBounds $observed ('('+$receiverHost+')'))
+     if($ReceiverName){[void](LabelBounds $observed $ReceiverName)}
+    }catch{
+     if($_.Exception.Message -notlike 'Label not unique in live UI:*'){throw}
+     Start-Sleep -Milliseconds 100;continue
+    }
+    if([DateTime]::UtcNow -ge $confirmDeadline){break}
+    $confirmed=$observed;$favoriteObserved=$true;break
+   }
+   $report['favoriteConfirmObservation']=@{finishedUtc=[DateTime]::UtcNow.ToString('o');deadlineUtc=$confirmDeadline.ToString('o');actualFavoriteObserved=$favoriteObserved;lastScreenshot=$lastConfirmationSnapshot;ip=$receiverHost;receiverName=$ReceiverName;confirmInputs=1;productCredit=$false};Persist
+   if(-not $favoriteObserved){throw 'Favorite confirmation observation deadline expired without the exact actual favorite; infrastructure admission failed.'}
+   Click 'Cancel';$sendTab=Snapshot 'favorite-returned-send';[void](LabelBounds $sendTab 'Nearby devices');[void](LabelBounds $sendTab 'File');return $sendTab
   }
   'select' {
    if($c.fixture -eq 'failed' -and (-not $recorder -or $recorder.HasExited)){throw 'Start a real continuous recorder before selecting the failed fixture.'}
