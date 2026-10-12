@@ -132,9 +132,18 @@ def select(role, path, folder, stage):
     key(role, 'ctrl+l')
     command(role, 'xdotool', 'type', '--clearmodifiers', '--delay', '2', str(path))
     event('type', role=role, text=str(path), purpose='native chooser location')
-    # The original retained File chooser did not accept the typed path on Return.
-    # Use its observed native Open for both chooser modes and require actual app selection.
-    click(role, locate(role, 'Open', stage+'-picker-open', bottom=True), 'Open selected folder' if folder else 'Open selected file')
+    # Native File accepts observed Open. Native Folder leaves Open disabled until the location entry is submitted.
+    # Return may itself select the directory: inspect the actual window before any further chooser input.
+    chooser_open=True
+    if folder:
+        key(role,'Return');time.sleep(1)
+        capture(role,stage+'-folder-location-submitted')
+        window=command(role,'xdotool','getactivewindow').strip()
+        name=command(role,'xdotool','getwindowname',window).strip()
+        if name=='LocalSend': chooser_open=False
+        elif name!='Choose Directory': raise RuntimeError('Unexpected window after native folder location: '+name)
+    if chooser_open:
+        click(role, locate(role, 'Open', stage+'-picker-open', bottom=True), 'Open selected folder' if folder else 'Open selected file')
     locate(role, 'Edit', stage+'-selection-accepted', timeout=30)
     selected_window=command(role,'xdotool','getactivewindow').strip()
     if command(role,'xdotool','getwindowname',selected_window).strip()!='LocalSend':
