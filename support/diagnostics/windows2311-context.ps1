@@ -2,7 +2,47 @@ param([string]$Case='on', [switch]$CompletePrevious, [string]$FixtureSource='', 
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Windows.Forms,System.Drawing
 $ui="$PSScriptRoot/windows3393-ui.ps1"
-if($CompletePrevious){& $ui -Action click -X 318 -Y 423 -Label "windows-$Case-done"}
+$control=Get-Content evidence/windows-control-send-action.json -Raw|ConvertFrom-Json
+$senderPid=[uint32]$control.appPid;$senderHwnd=[long]$control.window
+if(!$senderPid -or !$senderHwnd){throw 'Known-working control sender identity is missing'}
+function SaveSenderBoundary([string]$phase){
+ $processes=@(Get-CimInstance Win32_Process -Filter "Name = 'localsend_app.exe'"|Select-Object ProcessId,ParentProcessId,ExecutablePath,CreationDate)
+ $listeners=@(Get-NetTCPConnection -LocalPort 53317 -State Listen -ErrorAction SilentlyContinue|Select-Object LocalAddress,LocalPort,OwningProcess)
+ $windows=@(Get-Process localsend_app -ErrorAction SilentlyContinue|Select-Object Id,MainWindowHandle,MainWindowTitle,StartTime)
+ @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase;expectedPid=$senderPid;expectedHwnd=$senderHwnd;processes=$processes;windows=$windows;listeners=$listeners}|ConvertTo-Json -Depth 6|Set-Content "evidence/context-$Case-$phase-sender-boundary.json"
+ foreach($app in $windows){if($app.MainWindowHandle){& $ui -Action snapshot -ExpectedPid $app.Id -ExpectedHwnd $app.MainWindowHandle -Label "windows-$Case-$phase-pid-$($app.Id)"}}
+ if($phase -eq 'before-context'){$script:beforeSenderPids=@($processes.ProcessId)}
+ elseif(@($processes|Where-Object {$_.ProcessId -notin $script:beforeSenderPids}).Count){throw 'Native SendTo left a new LocalSend process; sender handoff is unproven, no recipient input sent'}
+ if(!$listeners.Count -or @($listeners|Where-Object {$_.OwningProcess -ne $senderPid}).Count){throw 'Port 53317 is not exclusively owned by the known-working sender; no recipient input sent'}
+ & $ui -Action snapshot -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -Label "windows-$Case-$phase-original"
+}
+function SaveSemanticObservation([string]$phase){
+ $semanticPath=Join-Path $PWD "evidence/context-$Case-$phase-semantics.json"
+ $escapedPath=$semanticPath.Replace("'","''")
+ $probe=@'
+Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+try {
+ $root=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]__SENDER_HWND__)
+ $elements=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+ $rows=@($elements|ForEach-Object {try{@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;enabled=$_.Current.IsEnabled;offscreen=$_.Current.IsOffscreen}}catch{}})
+ @{available=($rows.Count -gt 0);readinessClaim=$false;elements=$rows}|ConvertTo-Json -Depth 5|Set-Content '__SEMANTIC_PATH__'
+}catch{@{available=$false;readinessClaim=$false;error=$_.Exception.Message}|ConvertTo-Json|Set-Content '__SEMANTIC_PATH__'}
+'@
+ $probe=$probe.Replace('__SENDER_HWND__',[string]$senderHwnd).Replace('__SEMANTIC_PATH__',$escapedPath)
+ # Probe in a bounded separate CLR process: historical Flutter exposed only a pane.
+ $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+ $child=Start-Process pwsh -ArgumentList '-NoProfile','-EncodedCommand',$encoded -PassThru -RedirectStandardOutput "evidence/context-$Case-$phase-semantics.stdout.txt" -RedirectStandardError "evidence/context-$Case-$phase-semantics.stderr.txt"
+ if(!$child.WaitForExit(5000)){
+  # Only stop our diagnostic probe, never any LocalSend process.
+  $child.Kill();[void]$child.WaitForExit(1000)
+  @{available=$false;readinessClaim=$false;reason='Bounded UIAutomation probe unavailable'}|ConvertTo-Json|Set-Content $semanticPath
+ }
+ if(!(Test-Path $semanticPath)){@{available=$false;readinessClaim=$false;reason='UIAutomation probe produced no result'}|ConvertTo-Json|Set-Content $semanticPath}
+ $observed=Get-Content $semanticPath -Raw|ConvertFrom-Json
+ if(@($observed.elements|Where-Object {$_.name -match 'SocketException|Failed to create server socket|errno = 10048'}).Count){throw 'Sender SocketException observed; no recipient input sent'}
+}
+SaveSenderBoundary 'before-context'
+if($CompletePrevious){& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 318 -Y 423 -Label "windows-$Case-done"}
 $report=Get-Content evidence/release-ui-report.json -Raw|ConvertFrom-Json
 $exe=$report.executable.path
 if($FixtureExtension -notin @('png','jpg','mp4')){throw 'Unsupported diagnostic fixture extension'}
@@ -139,6 +179,11 @@ $entry=WaitMenuItem 'LocalSend' 'send-to'
 if($entry.Count -ne 1){throw 'LocalSend was not listed in actual Send to submenu'}
 ClickNativeMenu $entry[0] 'localsend'
 Start-Sleep 2
-& $ui -Action snapshot -Label "windows-$Case-image-selected"
-& $ui -Action click -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseControlSequence
-& $ui -Action click -X 145 -Y 225 -Label "windows-$Case-send" -RequireForeground -UseControlSequence
+SaveSenderBoundary 'after-send-to'
+& $ui -Action snapshot -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -Label "windows-$Case-image-selected"
+SaveSemanticObservation 'before-favorites'
+SaveSenderBoundary 'before-favorites'
+& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseControlSequence
+SaveSemanticObservation 'before-send'
+SaveSenderBoundary 'before-send'
+& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 145 -Y 225 -Label "windows-$Case-send" -RequireForeground -UseControlSequence

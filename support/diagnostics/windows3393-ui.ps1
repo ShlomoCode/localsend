@@ -1,4 +1,4 @@
-param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence)
+param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[uint32]$ExpectedPid=0,[long]$ExpectedHwnd=0)
 $ErrorActionPreference='Stop'
 function Write-DiagnosticPhase([string]$phase){
  @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase}|ConvertTo-Json -Compress|Add-Content "evidence/$Label-phases.jsonl"
@@ -51,8 +51,12 @@ public static class W3393 {
 }
 '@
 Write-DiagnosticPhase 'before-find-window'
-$window=[W3393]::FindWindow('FLUTTER_RUNNER_WIN32_WINDOW','LocalSend')
+$window=if($ExpectedHwnd){[IntPtr]$ExpectedHwnd}else{[W3393]::FindWindow('FLUTTER_RUNNER_WIN32_WINDOW','LocalSend')}
 if($window -eq [IntPtr]::Zero){throw 'No LocalSend window'}
+$identityPid=0u;[void][W3393]::GetWindowThreadProcessId($window,[ref]$identityPid)
+$identityClass=[System.Text.StringBuilder]::new(256);[void][W3393]::GetClassName($window,$identityClass,256)
+$identityTitle=[System.Text.StringBuilder]::new(512);[void][W3393]::GetWindowText($window,$identityTitle,512)
+if(($ExpectedPid -and $identityPid -ne $ExpectedPid) -or $identityClass.ToString() -ne 'FLUTTER_RUNNER_WIN32_WINDOW' -or $identityTitle.ToString() -ne 'LocalSend'){throw 'Expected original LocalSend window identity differs; no input sent'}
 Write-DiagnosticPhase 'before-child-enumeration'
 [W3393]::Children($window)|ConvertTo-Json -Depth 5|Set-Content "evidence/$Label-hwnd-tree.json"
 Write-DiagnosticPhase 'after-child-enumeration'
