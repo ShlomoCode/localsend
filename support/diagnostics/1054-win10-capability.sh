@@ -7,6 +7,7 @@ mkdir -p "$OUT"
 exec > >(tee "$OUT/preparation.log") 2>&1
 trap 'result=$?; if [[ -n "${ISO:-}" ]]; then rm -f "$ISO"; fi; exit "$result"' EXIT
 stage() { printf '%s\t%s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/stages.tsv"; }
+PREPARATION_STARTED=$SECONDS
 stage 'host-measurement'
 sw_vers > "$OUT/sw-vers.txt"
 uname -a > "$OUT/uname.txt"
@@ -162,15 +163,37 @@ URL='https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4
 command -v curl > "$OUT/curl-command-path.txt"
 curl --version > "$OUT/curl-version.txt"
 curl --help all > "$OUT/curl-help-all.txt"
-if ! grep -q -- '--retry-all-errors' "$OUT/curl-help-all.txt"; then
-  stage 'blocked-curl-version retry-all-errors unsupported; no silent fallback or tool upgrade'
+if ! grep -q -- '--continue-at' "$OUT/curl-help-all.txt"; then
+  stage 'blocked-curl-version continue-at unsupported; no silent fallback or tool upgrade'
   exit 1
 fi
-# A receive reset (curl 56) is not retried by --retry alone. This GET restarts
-# its output file on retry; final size/hash checks remain required. The retry
-# restart budget is 240s plus at most one already-started 600s attempt.
-curl --fail --location --retry-all-errors --retry 2 --retry-max-time 240 --max-time 600 \
-  --dump-header "$OUT/iso-headers.txt" "$URL" --output "$ISO"
+# Resume the same official GET after a progressing transient failure. Separate
+# invocations read the retained file length through curl's supported -C - API.
+# Reserve 120s of the existing 840s prelaunch limit for verification/seed setup.
+ISO_DOWNLOAD_DEADLINE=$((PREPARATION_STARTED + 720))
+ISO_COMPLETE=0
+for ISO_ATTEMPT in 1 2 3; do
+  ISO_REMAINING=$((ISO_DOWNLOAD_DEADLINE - SECONDS))
+  [[ "$ISO_REMAINING" -gt 0 ]] || { stage 'blocked-iso-download shared preparation budget exhausted'; exit 1; }
+  ISO_BEFORE=0
+  if [[ -f "$ISO" ]]; then ISO_BEFORE="$(stat -f '%z' "$ISO")"; fi
+  stage "iso-attempt=$ISO_ATTEMPT resume_bytes=$ISO_BEFORE remaining_seconds=$ISO_REMAINING"
+  ISO_RESULT=0
+  curl --fail --location --continue-at - --retry 0 --max-time "$ISO_REMAINING" \
+    --dump-header "$OUT/iso-attempt-$ISO_ATTEMPT-headers.txt" \
+    --write-out '%{json}\n' "$URL" --output "$ISO" > "$OUT/iso-attempt-$ISO_ATTEMPT-transfer.json" || ISO_RESULT=$?
+  ISO_AFTER=0
+  if [[ -f "$ISO" ]]; then ISO_AFTER="$(stat -f '%z' "$ISO")"; fi
+  stage "iso-attempt=$ISO_ATTEMPT exit=$ISO_RESULT before_bytes=$ISO_BEFORE after_bytes=$ISO_AFTER"
+  if [[ "$ISO_RESULT" -eq 0 ]]; then ISO_COMPLETE=1; break; fi
+  # Refuse unsupported ranges, HTTP errors, no progress, or an oversized file.
+  case "$ISO_RESULT" in
+    18|28|52|55|56) ;;
+    *) exit "$ISO_RESULT" ;;
+  esac
+  [[ "$ISO_AFTER" -gt "$ISO_BEFORE" && "$ISO_AFTER" -lt 5550497792 ]] || exit "$ISO_RESULT"
+done
+[[ "$ISO_COMPLETE" -eq 1 ]] || { stage 'blocked-iso-download bounded resume attempts exhausted'; exit 1; }
 printf '%s  %s\n' 'ef7312733a9f5d7d51cfa04ac497671995674ca5e1058d5164d6028f0938d668' "$ISO" > "$OUT/iso.expected.sha256"
 shasum -a 256 -c "$OUT/iso.expected.sha256" | tee "$OUT/iso-verification.txt"
 stat -f '%z' "$ISO" > "$OUT/iso-size.txt"

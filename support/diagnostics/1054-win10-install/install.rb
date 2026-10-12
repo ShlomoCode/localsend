@@ -35,6 +35,9 @@ def frame(path)
     client = GuestVNC.new
     begin; client.screenshot(path); ensure; client.close; end
   end
+  convert_frame(path)
+end
+def convert_frame(path)
   png = path.sub(/\.bmp$/, '.png')
   converter = Process.spawn('sips', '-s', 'format', 'png', path, '--out', png, out: File::NULL)
   begin
@@ -167,7 +170,7 @@ begin
       client.close
     end
   end
-  raise 'PNG conversion failed' unless system('sips', '-s', 'format', 'png', File.join(frames, 'run-dialog.bmp'), '--out', File.join(frames, 'run-dialog.png'), out: File::NULL)
+  convert_frame(File.join(frames, 'run-dialog.bmp'))
   File.write(File.join(out, 'gui-stage.json'), JSON.pretty_generate(stage: 'official-window-and-vnc-captured', record: ready,
     limitation: 'Inspect frames. Native window handle alone does not establish correct rendering, completed onboarding, or transfer.'))
   # A parent-owned same-job script may continue the actual-app pair while this VM
