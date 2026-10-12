@@ -16,10 +16,16 @@ set -x
 case_deadline=0
 launch_pid=''
 launch_ticks=''
+default_path=$HOME/.config/autostart
+default_backup=$OUT/default-autostart-original
+default_original=''
+default_generated=''
+default_restore_pending=0
 finish() {
-  local result=$? current_ticks cleanup_deadline
+  local result=$? current_ticks cleanup_deadline restore_result=0
+  trap '' TERM INT
   set +e
-  printf 'probe_exit=%s\n' "$result" > "$OUT/result.txt"
+  printf 'probe_exit_before_cleanup=%s\n' "$result" > "$OUT/result.txt"
   if [ -n "$launch_pid" ] && [ -e "/proc/$launch_pid/stat" ]; then
     current_ticks=$(awk '{sub(/^.*\) /,"");print $20}' "/proc/$launch_pid/stat")
     if [[ -n $launch_ticks && $current_ticks = "$launch_ticks" ]]; then
@@ -37,6 +43,17 @@ finish() {
       printf 'owned_launch_shutdown=unqualified pid=%s; no signal or wait\n' "$launch_pid" >> "$OUT/result.txt"
     fi
   fi
+  if [[ $default_restore_pending = 1 ]]; then
+    case_deadline=$((SECONDS+15))
+    restore_default || restore_result=$?
+    printf 'exit_restore_result=%s\n' "$restore_result" >> "$OUT/result.txt"
+    if [[ $restore_result != 0 ]]; then
+      [[ $result != 0 ]] || result=1
+      rm -f -- "$OUT/conclusion.txt"
+    fi
+  fi
+  printf 'probe_exit=%s\n' "$result" >> "$OUT/result.txt"
+  exit "$result"
 }
 trap finish EXIT
 trap 'exit 143' TERM
@@ -46,6 +63,37 @@ run() {
   [[ $left -gt 0 ]] || return 124
   [[ $left -le 5 ]] || left=5
   timeout --foreground -s KILL "$left" "$@"
+}
+inventory_default() {
+  local path=$1 label=$2
+  run bash -c 'cd "$1" && find . -xdev -printf "%P\0%y\0%D:%i\0%m\0%U:%G\0%s\0%T@\0%l\0"' _ "$path" > "$OUT/$label-inventory.nul" || return
+  run bash -c 'cd "$1" && find . -xdev -type f -exec sha256sum -z -- {} +' _ "$path" > "$OUT/$label-files-sha256.nul" || return
+}
+restore_default() {
+  # Never replace an arrival or delete unknown contents. rmdir itself requires
+  # emptiness; a type/inode mismatch leaves original backup and current path.
+  run stat -c 'path=%n type=%F device=%d inode=%i' "$default_path" "$default_backup" > "$OUT/restore-path-states.txt" 2>&1 || true
+  printf 'original=%s generated=%s backup=%s\n' "$default_original" "$default_generated" "$default_backup" >> "$OUT/restore-path-states.txt"
+  if [[ -e $default_path || -L $default_path ]]; then
+    [[ -n $default_generated && ! -L $default_path && -d $default_path ]] || return 1
+    [[ $(run stat -c '%d:%i' "$default_path") = "$default_generated" ]] || return 1
+    run rmdir -- "$default_path" || return
+  fi
+  if [[ $default_original != absent ]]; then
+    [[ -d $default_backup && ! -L $default_backup ]] || return 1
+    [[ $(run stat -c '%d:%i' "$default_backup") = "$default_original" ]] || return 1
+    inventory_default "$default_backup" backup-before-restore || return
+    run cmp "$OUT/original-inventory.nul" "$OUT/backup-before-restore-inventory.nul" || return
+    run cmp "$OUT/original-files-sha256.nul" "$OUT/backup-before-restore-files-sha256.nul" || return
+    run mv -T --no-clobber -- "$default_backup" "$default_path" || return
+    [[ ! -e $default_backup && ! -L $default_backup && -d $default_path && ! -L $default_path ]] || return 1
+    [[ $(run stat -c '%d:%i' "$default_path") = "$default_original" ]] || return 1
+    inventory_default "$default_path" restored || return
+    run cmp "$OUT/original-inventory.nul" "$OUT/restored-inventory.nul" || return
+    run cmp "$OUT/original-files-sha256.nul" "$OUT/restored-files-sha256.nul" || return
+  fi
+  default_restore_pending=0
+  printf 'restoration=complete original=%s generated=%s\n' "$default_original" "$default_generated" >> "$OUT/restore-path-states.txt"
 }
 no_instance() {
   local rows
@@ -221,6 +269,13 @@ probe_case() {
   wait_stage before
   qualify_shell
   host_snapshot before
+  if [[ $label = default-absent ]]; then
+    [[ -d $default_path && ! -L $default_path ]]
+    default_generated=$(run stat -c '%d:%i' "$default_path")
+    printf '%s\n' "$default_generated" > "$OUT/generated-directory-identity.txt"
+  elif [[ $label = default-existing ]]; then
+    [[ $(run stat -c '%d:%i' "$default_path") = "$default_generated" ]]
+  fi
   wait_stage after
   host_snapshot after
   before_state=$(run awk '/^before-status=/ {print $1}' "$case_out/sandbox.log")
@@ -243,7 +298,13 @@ probe_case() {
   if [[ $kind != revoked ]]; then
     # Only names absent before this case and authored by this script are removed.
     printf '[Desktop Entry]\nType=Application\nName=Issue1927 mapping only\nExec=/usr/bin/true\n' > "$case_out/owned-desktop.expected"
+    printf 'issue1927 diagnostic owned marker after\n' > "$case_out/owned-marker.expected"
+    [[ -f $config/autostart/localsend_app.desktop && ! -L $config/autostart/localsend_app.desktop ]]
+    [[ -f $config/autostart/$marker && ! -L $config/autostart/$marker ]]
     run cmp "$case_out/owned-desktop.expected" "$config/autostart/localsend_app.desktop"
+    run cmp "$case_out/owned-marker.expected" "$config/autostart/$marker"
+    run grep -qx "after-entry-identity=$(run stat -c '%d:%i' "$config/autostart/localsend_app.desktop")" "$case_out/sandbox.log"
+    run grep -qx "after-marker-identity=$(run stat -c '%d:%i' "$config/autostart/$marker")" "$case_out/sandbox.log"
     run rm -- "$config/autostart/localsend_app.desktop" "$config/autostart/$marker"
   fi
 }
@@ -253,10 +314,28 @@ no_instance
 run flatpak override --user --show "$APP" > "$OUT/existing-overrides.txt"
 run flatpak info --user --show-permissions "$APP" > "$OUT/installed-permissions.txt"
 run sha256sum "$PREDICATE" > "$OUT/predicate-sha256.txt"
-# These two default cases require a fresh Mint user's absent autostart directory.
-# Keep every unrelated config file. The :create mount creates this directory.
+# Preserve the original directory intact before making the default absent case.
+# Same-device rename keeps unknown Mint contents and their exact inode identities.
+run test ! -e "$default_backup"
+run test ! -L "$default_backup"
+if [[ -e $default_path || -L $default_path ]]; then
+  [[ -d $default_path && ! -L $default_path ]]
+  default_original=$(run stat -c '%d:%i' "$default_path")
+  [[ $(run stat -c '%d' "$default_path") = $(run stat -c '%d' "$OUT") ]]
+  inventory_default "$default_path" original
+  default_restore_pending=1
+  run mv -T --no-clobber -- "$default_path" "$default_backup"
+  [[ ! -e $default_path && ! -L $default_path && -d $default_backup && ! -L $default_backup ]]
+  [[ $(run stat -c '%d:%i' "$default_backup") = "$default_original" ]]
+else
+  default_original=absent
+  default_restore_pending=1
+fi
+printf 'original=%s backup=%s\n' "$default_original" "$default_backup" > "$OUT/original-directory-identity.txt"
 probe_case default-absent absent normal "$HOME/.config"
 probe_case default-existing existing normal "$HOME/.config"
+case_deadline=$((SECONDS+20))
+restore_default
 mkdir "$OUT/nondefault-absent-config" "$OUT/nondefault-existing-config"
 mkdir "$OUT/nondefault-existing-config/autostart"
 probe_case nondefault-absent absent normal "$OUT/nondefault-absent-config"
