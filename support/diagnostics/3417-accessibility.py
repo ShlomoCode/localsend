@@ -23,8 +23,12 @@ def walk(node, ancestors=()):
         state = node.getState()
         item = {"name": node.name, "role": role, "path": path,
                 "ready": all(state.contains(value) for value in ready_states),
+                "states": {"showing": state.contains(pyatspi.STATE_SHOWING),
+                           "visible": state.contains(pyatspi.STATE_VISIBLE),
+                           "enabled": state.contains(pyatspi.STATE_ENABLED),
+                           "sensitive": state.contains(pyatspi.STATE_SENSITIVE)},
                 "selected": state.contains(pyatspi.STATE_SELECTED),
-                "actions": [], "bounds": None}
+                "actions": [], "bounds": None, "window_bounds": None}
         try:
             action = node.queryAction()
             item["actions"] = [action.getName(i) for i in range(action.nActions)]
@@ -32,6 +36,12 @@ def walk(node, ancestors=()):
             pass
         try:
             item["bounds"] = list(node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS))
+            # Query extra local geometry only for the exact chooser anchors.
+            if (("org.gnome.Nautilus", "application") in path
+                    and ("Open File", "dialog") in path
+                    and (role == "dialog" or role == "label" and node.name in
+                         ("Open File", "Cancel", "Choose an app to open 3417-control.txt", "Always use for this file type"))):
+                item["window_bounds"] = list(node.queryComponent().getExtents(pyatspi.WINDOW_COORDS))
         except Exception:
             pass
         visited.append((node, item))
@@ -103,7 +113,11 @@ def qualified(item):
     native = any(name in ("nautilus", "org.gnome.nautilus", "files") for name in applications)
     dialogs = [name for name, role in item["path"] if role == "dialog"]
     chooser = "Open File" in dialogs
-    if not native or not item["ready"]:
+    # GTK4's supported AT-SPI state collection does not emit ENABLED.
+    # Preserve the original aggregate while checking its actual native flags.
+    required = ("showing", "visible") if mode in ("bounds", "dialog") else ("showing", "visible", "sensitive")
+    gtk_ready = all(item["states"][key] for key in required)
+    if not native or not (item["ready"] if mode == "menu" else gtk_ready):
         return False
     if mode == "menu":
         return item["role"] in ("menu item", "push button") and any(
@@ -116,8 +130,14 @@ if mode == "bounds":
     dialogs = [item for _, item in visited if item["role"] == "dialog"
                and item["name"] == "Open File" and qualified(item)]
     if len(dialogs) == 1 and dialogs[0]["bounds"] is not None:
-        print(json.dumps(dialogs[0]["bounds"]))
-        sys.exit(0)
+        anchors = [item for _, item in visited if qualified(item)
+                   and item["role"] == "label" and item["name"] in
+                   ("Open File", "Cancel", "Choose an app to open 3417-control.txt")]
+        footers = [item for _, item in visited if qualified(item)
+                   and item["role"] == "label" and item["name"] == "Always use for this file type"]
+        if len(anchors) == 3 and len({item["name"] for item in anchors}) == 3 and len(footers) == 1:
+            print(json.dumps({"dialog": dialogs[0], "anchors": anchors, "footer": footers[0]}))
+            sys.exit(0)
 elif mode == "button":
     buttons = [item for _, item in matches if item["role"] == "push button"]
     if len(buttons) == 1:
@@ -125,18 +145,24 @@ elif mode == "button":
         print("QUALIFIED_NAUTILUS_OPEN_BUTTON_READY")
         sys.exit(0)
 elif mode == "dialog":
-    if any(qualified(item) for _, item in visited):
+    dialogs = [item for _, item in visited if item["role"] == "dialog"
+               and item["name"] == "Open File" and qualified(item)]
+    if len(dialogs) == 1:
+        print(json.dumps(dialogs[0]))
         print("QUALIFIED_NAUTILUS_CHOOSER_PRESENT")
         sys.exit(0)
 else:
     # Focus alone never counts as activation. Record the named toolkit action
     # and native ancestry before invoking the application's actual control.
-    for node, item in matches:
-        for index, name in enumerate(item["actions"]):
-            if name.lower() not in ("click", "activate", "select", "press"):
-                continue
-            print(json.dumps({"target": item, "action": name}), flush=True)
-            if node.queryAction().doAction(index):
+    buttons = [(node, item) for node, item in matches if item["role"] == "push button"]
+    if len(buttons) == 1:
+        node, item = buttons[0]
+        action = node.queryAction()
+        fresh = [action.getName(i) for i in range(action.nActions)]
+        if fresh.count("click") == 1:
+            index = fresh.index("click")
+            print(json.dumps({"target": item, "fresh_actions": fresh, "action_index": index}), flush=True)
+            if action.doAction(index):
                 print("QUALIFIED_ACCESSIBILITY_ACTION_PASS", flush=True)
                 sys.exit(0)
 print(json.dumps([item for _, item in visited], indent=2))

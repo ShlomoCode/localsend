@@ -31,7 +31,10 @@ visual_row() {
   local label=$1 mode=$2 geometry
   capture "$label"
   [[ "$(identify -format '%wx%h' "evidence/vm/$label.png")" == 1280x800 ]]
-  guest timeout 20 python3 /home/probe/3417-accessibility.py bounds > "evidence/vm/$label-bounds.json"
+  guest timeout 20 python3 /home/probe/3417-accessibility.py bounds > "evidence/vm/$label-native-geometry.json"
+  timeout 15 tesseract "evidence/vm/$label.png" "evidence/vm/$label-anchor-ocr" --psm 11 tsv > "evidence/vm/$label-anchor-ocr.log" 2>&1
+  node support/diagnostics/3417-visual.cjs chooser-region "evidence/vm/$label-native-geometry.json" \
+    "evidence/vm/$label-anchor-ocr.tsv" "evidence/vm/$label-region-receipt.json" > "evidence/vm/$label-bounds.json"
   geometry=$(node support/diagnostics/3417-visual.cjs crop "evidence/vm/$label-bounds.json")
   convert "evidence/vm/$label.png" -crop "$geometry" +repage "evidence/vm/$label-dialog.png"
   timeout 15 tesseract "evidence/vm/$label-dialog.png" "evidence/vm/$label-ocr" --psm 6 tsv > "evidence/vm/$label-ocr.log" 2>&1
