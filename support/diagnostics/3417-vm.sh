@@ -268,7 +268,9 @@ cat /home/probe/3417*.log /home/probe/3417-portal-calls.txt 2>/dev/null
 flatpak ps --columns=all
 auditctl -s
 auditctl -l
-ausearch -k localsend3417 --raw
+audit_status=0
+ausearch --input-logs -k localsend3417 --raw || audit_status=$?
+printf 'AUSEARCH_EXIT=%s\n' "$audit_status"
 GUEST
     timeout 20 "$vm/ssh" 'env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus flatpak documents' > "$evidence/probe-flatpak-documents.txt" 2>&1 && documents_status=0 || documents_status=$?
     printf 'FLATPAK_DOCUMENTS_EXIT=%s\n' "$documents_status" > "$evidence/probe-flatpak-documents-status.txt"

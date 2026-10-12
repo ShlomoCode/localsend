@@ -48,7 +48,7 @@ click_row() {
   sleep 1
 }
 identity() {
-  timeout 25 "$vm/ssh" 'sudo bash -s' > "evidence/vm/$1-live-identity.txt" <<'GUEST'
+  timeout 25 "$vm/ssh" 'sudo bash -s' > "evidence/vm/$1-live-identity.txt" 2>&1 <<'GUEST'
 date -u
 flatpak ps --columns=instance,pid,application,runtime
 for pid in $(pgrep -x localsend || true); do
@@ -63,7 +63,14 @@ for pid in $(pgrep -x localsend || true); do
   runuser -u probe -- find "/proc/$pid/root/run/user/1000/doc" -maxdepth 5 -type f -name '3417-control.txt' -exec sha256sum {} \; 2>&1 || true
 done
 sudo auditctl -s
-sudo ausearch -k localsend3417 --raw
+# bash -s receives this script on stdin. Select audit logs explicitly rather
+# than letting ausearch search the exhausted script input.
+audit_status=0
+sudo ausearch --input-logs -k localsend3417 --raw || audit_status=$?
+printf 'AUSEARCH_EXIT=%s\n' "$audit_status"
+# Status 1 includes no matches and minor errors. Retain it as ambiguous
+# supplementary evidence rather than certifying audit-read success.
+[[ "$audit_status" -le 1 ]] || exit "$audit_status"
 GUEST
   guest flatpak documents > "evidence/vm/$1-probe-documents.txt" 2>&1
 }
