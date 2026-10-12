@@ -1,4 +1,5 @@
 name: Diagnose 2897 macOS Finder handover
+# Picker scope and recorder health qualification episode; unchanged product scenario.
 on:
   workflow_dispatch:
   push:

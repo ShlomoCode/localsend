@@ -36,6 +36,12 @@ func visible(_ element: AXUIElement) -> Bool {
     if (attr(element, "AXEnabled") as? Bool) == false { return false }
     return true
 }
+func hasBounds(_ element: AXUIElement) -> Bool {
+    guard let value = attr(element, "AXSize") else { return false }
+    var size = CGSize.zero
+    return CFGetTypeID(value as AnyObject) == AXValueGetTypeID() &&
+        AXValueGetValue(value as! AXValue, .cgSize, &size) && size.width > 0 && size.height > 0
+}
 func emit(_ value: Any) throws {
     let data = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
     print(String(data: data, encoding: .utf8)!)
@@ -121,6 +127,106 @@ if mode == "active" {
     exit(0)
 }
 let rows = tree(root)
+if mode.hasPrefix("picker-") {
+    guard app.isActive else { fail("Native picker owner is not frontmost", 28) }
+    let panels = rows.map { $0.0 }.filter {
+        (attr($0, "AXRole") as? String) == "AXSheet" && (attr($0, "AXIdentifier") as? String) == "open-panel" && hasBounds($0)
+    }
+    if mode == "picker-closed" {
+        guard panels.isEmpty else { fail("Native file picker remains open", 28) }
+        try emit(["nativeOpenPanelClosed": true]); exit(0)
+    }
+    guard panels.count == 1 else { fail("Expected one native open-panel sheet", 28) }
+    let panel = panels[0]
+    let panelRows = tree(panel).map { $0.0 }
+    if mode == "picker-ready" {
+        try emit(["nativeOpenPanel": true, "role": "AXSheet", "identifier": "open-panel"]); exit(0)
+    }
+    if mode == "picker-go" {
+        let raised = AXUIElementPerformAction(panel, kAXRaiseAction as CFString)
+        guard raised == .success else { fail("Could not raise the native picker sheet", 28) }
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: 5, keyDown: true)!
+        down.flags = [.maskCommand, .maskShift]; down.post(tap: .cghidEventTap)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: 5, keyDown: false)!
+        up.flags = [.maskCommand, .maskShift]; up.post(tap: .cghidEventTap)
+        try emit(["nativeSheetRaiseResult": raised.rawValue, "requestedShortcut": "Command-Shift-G",
+            "verification": "Next operation must observe the native Go to Folder editor"]); exit(0)
+    }
+    if ["picker-editor", "picker-path", "picker-confirm"].contains(mode) {
+        // Require native Go to Folder context before touching an editable field.
+        let contexts = panelRows.filter { element in
+            ["AXSheet", "AXDialog", "AXPopover"].contains(attr(element, "AXRole") as? String ?? "") &&
+                tree(element).flatMap { labels($0.0) }.map(normalized).contains {
+                    ["Go to the folder:", "Go to Folder", "Go to folder:"].contains($0)
+                }
+        }
+        var editors: [AXUIElement] = []
+        for context in contexts {
+            for (element, _) in tree(context) {
+                guard ["AXTextField", "AXComboBox"].contains(attr(element, "AXRole") as? String ?? ""),
+                      (attr(element, "AXIdentifier") as? String) != "Search", visible(element), hasBounds(element) else { continue }
+                var settable = DarwinBoolean(false)
+                guard AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success,
+                      settable.boolValue, !editors.contains(where: { CFEqual($0, element) }) else { continue }
+                editors.append(element)
+            }
+        }
+        guard editors.count == 1 else { fail("Expected one editable native Go to Folder field in verified context", 29) }
+        let editor = editors[0]
+        if mode == "picker-editor" {
+            try emit(["nativeGoToFolderEditor": true, "role": attr(editor, "AXRole") as? String ?? "",
+                "identifier": attr(editor, "AXIdentifier") as? String ?? "", "value": attr(editor, "AXValue") as? String ?? ""]); exit(0)
+        }
+        guard args.count == 4, args[3].hasPrefix("/") else { fail("Native picker operation requires an absolute fixture path", 29) }
+        let expected = args[3]
+        if mode == "picker-path" {
+            let result = AXUIElementSetAttributeValue(editor, kAXValueAttribute as CFString, expected as CFString)
+            let readback = attr(editor, "AXValue") as? String ?? ""
+            try emit(["setResult": result.rawValue, "expectedPath": expected, "readback": readback])
+            guard result == .success, readback == expected else { fail("Native path editor write/readback failed", 29) }
+            exit(0)
+        }
+        guard (attr(editor, "AXValue") as? String) == expected else { fail("Go to Folder path changed before confirm", 29) }
+        let goButtons = panelRows.filter {
+            (attr($0, "AXRole") as? String) == "AXButton" && labels($0).contains("Go") && visible($0) && hasBounds($0) && actions($0).contains("AXPress")
+        }
+        let target: AXUIElement
+        let action: String
+        if goButtons.count == 1 { target = goButtons[0]; action = "AXPress" }
+        else if goButtons.isEmpty, actions(editor).contains("AXConfirm") { target = editor; action = "AXConfirm" }
+        else { fail("No unique native Go to Folder confirmation control", 29) }
+        let result = AXUIElementPerformAction(target, action as CFString)
+        try emit(["expectedPath": expected, "confirmationAction": action, "result": result.rawValue])
+        guard result == .success else { fail("Native path confirmation failed", 29) }
+        exit(0)
+    }
+    if ["picker-selected", "picker-open"].contains(mode) {
+        guard args.count == 4 else { fail("Expected the fixture filename", 30) }
+        let filename = args[3]
+        var selected: [AXUIElement] = []
+        for element in panelRows {
+            if (attr(element, "AXSelected") as? Bool) == true { selected.append(element) }
+            selected += attr(element, "AXSelectedChildren") as? [AXUIElement] ?? []
+        }
+        let named = selected.filter { tree($0).flatMap { labels($0.0) }.contains(filename) }
+        let open = panelRows.filter {
+            (attr($0, "AXRole") as? String) == "AXButton" && (attr($0, "AXIdentifier") as? String) == "OKButton" &&
+                labels($0).contains("Open") && (attr($0, "AXEnabled") as? Bool) == true && hasBounds($0) && actions($0).contains("AXPress")
+        }
+        guard !named.isEmpty, open.count == 1 else { fail("Named native fixture selection or enabled open-panel OKButton unavailable", 30) }
+        try emit(["selectedFixture": filename, "selectedNativeRoles": named.map { attr($0, "AXRole") as? String ?? "" },
+            "selectedNativeURLs": named.compactMap { attr($0, "AXURL").map { String(describing: $0) } },
+            "nativeOpenRole": "AXButton", "nativeOpenIdentifier": "OKButton", "nativeOpenEnabled": true])
+        if mode == "picker-open" {
+            let result = AXUIElementPerformAction(open[0], kAXPressAction as CFString)
+            guard result == .success else { fail("Native open-panel OKButton press failed", 30) }
+            print("Pressed enabled native picker OKButton for selected fixture: \(filename)")
+        }
+        exit(0)
+    }
+    fail("Unknown picker operation", 28)
+}
 if mode == "count-absent" {
     let counts = rows.filter { visible($0.0) }.flatMap { labels($0.0) }.flatMap { $0.components(separatedBy: .newlines) }
         .filter { $0.range(of: "^Files:\\s*[0-9]+$", options: .regularExpression) != nil }
@@ -131,7 +237,7 @@ if mode == "count-absent" {
 if mode == "dump" {
     let elements: [[String: Any]] = rows.map { element, depth in
         var row: [String: Any] = ["depth": depth, "actions": actions(element)]
-        for name in ["AXRole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXEnabled", "AXHidden", "AXSelected", "AXPosition", "AXSize"] {
+        for name in ["AXRole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXEnabled", "AXHidden", "AXSelected", "AXFocused", "AXURL", "AXPosition", "AXSize"] {
             if let value = attr(element, name) { row[name] = String(describing: value) }
         }
         return row
@@ -177,6 +283,7 @@ let action = mode == "menu" ? "AXShowMenu" : "AXPress"
 guard ["menu", "press"].contains(mode) else { fail("Unknown operation") }
 let matches = rows.map { $0.0 }.filter { element in
     guard visible(element), actions(element).contains(action) else { return false }
+    if args[1] != "com.apple.finder", mode == "press", (attr(element, "AXRole") as? String) == "AXMenuItem" { return false }
     if label == "LocalSend" && (attr(element, "AXRole") as? String) == "AXMenuItem" {
         return labels(element).contains {
             ["LocalSend", "LocalSend.app", "LocalSend (1.18.2)", "LocalSend.app (1.18.2)"].contains($0)

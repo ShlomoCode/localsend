@@ -11,6 +11,7 @@ ax="$scratch/ax"
 bundle=""
 executable=""
 recorder=""
+video_case=""
 video_start=0
 logger=""
 installed=false
@@ -64,13 +65,16 @@ cleanup() {
       printf '\n'
     fi
   fi
-  if [[ -n $recorder ]]; then
-    kill -INT "$recorder" 2>/dev/null || true
-    stop_owned "$recorder"
-  fi
-  if [[ -n $logger ]]; then kill "$logger" 2>/dev/null || true; stop_owned "$logger"; fi
   if [[ -x $ax && -n $bundle ]]; then run final-ax 10 "$ax" "$bundle" dump || true; fi
   run final-screen 10 screencapture -x "$out/final.png" || true
+  if [[ -n $recorder ]]; then
+    # Preserve the original failure status, but finalize and inspect its continuous
+    # recording after the failure snapshot instead of killing it before that snapshot.
+    if ! end_video "$video_case"; then
+      printf 'Failure-path recording finalization failed; inspect retained video status and stderr.\n'
+    fi
+  fi
+  if [[ -n $logger ]]; then kill "$logger" 2>/dev/null || true; stop_owned "$logger"; fi
   if [[ $installed == true ]]; then
     run signature-after 20 codesign --verify --deep --strict --verbose=2 "$app" || true
     run app-info-after 10 shasum -a 256 "$app/Contents/Info.plist" || true
@@ -99,6 +103,16 @@ wait_label() {
   while (( SECONDS - start < 20 )); do
     attempt=$((attempt + 1))
     if run "$stage-wait-$label-$attempt" 5 "$ax" "$bundle" contains "$label"; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+wait_picker() {
+  local mode=$1 label=$2 start=$SECONDS attempt=0
+  shift 2
+  while (( SECONDS - start < 20 )); do
+    attempt=$((attempt + 1))
+    if run "$label-$attempt" 5 "$ax" "$bundle" "$mode" "$@"; then return 0; fi
     sleep 1
   done
   return 1
@@ -140,25 +154,47 @@ ready_app() {
   wait_label Send
 }
 video() {
+  local start=$SECONDS
   # Keep the original continuous capture through the case result, with a native hard cap.
   video_start=$SECONDS
+  video_case=$1
   printf "event\tscript_seconds\tutc\nrecord_start\t%s\t%s\n" "$SECONDS" "$(date -u +%FT%TZ)" > "$out/$1-timeline.tsv"
-  screencapture -v -V 240 "$out/$1.mov" > "$out/$1-video.stdout.txt" 2> "$out/$1-video.stderr.txt" &
+  # Bash background commands can inherit ignored SIGINT. Reset it before exec,
+  # so the unchanged native capture command can finalize on the later SIGINT.
+  /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die $!;' /usr/sbin/screencapture -v -V 240 "$out/$1.mov" > "$out/$1-video.stdout.txt" 2> "$out/$1-video.stderr.txt" &
   recorder=$!
   sleep 2
   kill -0 "$recorder"
+  while [[ ! -s $out/$1.mov ]]; do
+    if ! kill -0 "$recorder" 2>/dev/null || (( SECONDS - start >= 12 )); then
+      printf 'alive_or_movie_health_failed=true\nmovie_bytes=%s\n' "$(stat -f %z "$out/$1.mov" 2>/dev/null || printf 0)" > "$out/$1-video-health.txt"
+      return 1
+    fi
+    sleep 1
+  done
+  printf 'recorder_pid=%s\nmovie_bytes=%s\n' "$recorder" "$(stat -f %z "$out/$1.mov")" > "$out/$1-video-health.txt"
   printf "action_start\t%s\t%s\n" "$SECONDS" "$(date -u +%FT%TZ)" >> "$out/$1-timeline.tsv"
 }
 end_video() {
   local code=0 final=$SECONDS stop_start
   # The final UI snapshot must occur while the original recording is still live.
   # If an operation exceeds the recording budget, retain partial evidence as infrastructure failure.
-  kill -0 "$recorder"
+  if ! kill -0 "$recorder" 2>/dev/null; then
+    wait "$recorder" || code=$?
+    printf '%s\n' "$code" > "$out/$1-video.exit-code.txt"
+    recorder=""
+    return 1
+  fi
   printf "final_snapshot\t%s\t%s\n" "$final" "$(date -u +%FT%TZ)" >> "$out/$1-timeline.tsv"
   # Retain a short tail, then let native screencapture finalize the movie on SIGINT.
   sleep 3
-  kill -0 "$recorder"
-  kill -INT "$recorder"
+  if ! kill -0 "$recorder" 2>/dev/null; then
+    wait "$recorder" || code=$?
+    printf '%s\n' "$code" > "$out/$1-video.exit-code.txt"
+    recorder=""
+    return 1
+  fi
+  kill -INT "$recorder" || return 1
   stop_start=$SECONDS
   while kill -0 "$recorder" 2>/dev/null; do
     if (( SECONDS - stop_start >= 15 )); then
@@ -173,7 +209,7 @@ end_video() {
   wait "$recorder" || code=$?
   recorder=""
   printf "%s\n" "$code" > "$out/$1-video.exit-code.txt"
-  [[ ( $code == 0 || $code == 130 ) && -s $out/$1.mov ]]
+  [[ ( $code == 0 || $code == 130 ) && -s $out/$1.mov ]] || return 1
   run "$1-video-metadata" 30 "$scratch/media" "$out/$1.mov" "$((final - video_start))"
 }
 empty_selection() {
@@ -261,15 +297,18 @@ snapshot control-start "$bundle"
 video control
 run control-send 10 "$ax" "$bundle" press Send
 run control-file 10 "$ax" "$bundle" press File
-sleep 1
+wait_picker picker-ready control-native-picker-ready
 snapshot control-picker "$bundle"
-run control-go 10 "$ax" "$bundle" key go
-sleep 1
-run control-path 10 "$ax" "$bundle" key "$fixture_dir/2897-control.txt"
-run control-go-return 10 "$ax" "$bundle" key return
-sleep 1
+run control-go 10 "$ax" "$bundle" picker-go
+wait_picker picker-editor control-native-go-editor
+snapshot control-go-editor "$bundle"
+run control-path 10 "$ax" "$bundle" picker-path "$fixture_dir/2897-control.txt"
+snapshot control-go-path-readback "$bundle"
+run control-go-confirm 10 "$ax" "$bundle" picker-confirm "$fixture_dir/2897-control.txt"
+wait_picker picker-selected control-native-fixture-selected 2897-control.txt
 snapshot control-picker-selected "$bundle"
-run control-open 10 "$ax" "$bundle" press Open
+run control-open 10 "$ax" "$bundle" picker-open 2897-control.txt
+wait_picker picker-closed control-native-picker-closed
 wait_label 'Files: 1'
 named_selection control 2897-control.txt
 snapshot control-staged "$bundle"
