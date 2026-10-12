@@ -114,7 +114,16 @@ for variant in baseline candidate; do
     "$build_tools/aapt" dump badging "$apk" > "$destination/apk-package.txt"
     "$build_tools/apksigner" verify --print-certs "$apk" > "$destination/apk-signing.txt"
     cert_sha256=$(sha256sum "$evidence/signing-public-cert.der" | cut -d ' ' -f 1)
-    grep -F "Signer #1 certificate SHA-256 digest: $cert_sha256" "$destination/apk-signing.txt"
+    # Preserve raw output and accept only the two exact signer label formats.
+    sed -nE 's/^(V2 Signer:|Signer #[1-9][0-9]*) certificate SHA-256 digest: ([[:xdigit:]]{64})$/\2/p' \
+      "$destination/apk-signing.txt" | tr 'A-F' 'a-f' > "$destination/apk-signer-sha256.txt"
+    test -s "$destination/apk-signer-sha256.txt"
+    # Reject unparsed extra certificate lines, including malformed digest labels.
+    test "$(wc -l < "$destination/apk-signer-sha256.txt")" -eq \
+      "$(grep -c 'certificate SHA-256 digest:' "$destination/apk-signing.txt")"
+    while IFS= read -r signer_sha256; do
+      test "$signer_sha256" = "$cert_sha256"
+    done < "$destination/apk-signer-sha256.txt"
   )
 done
 cmp "$evidence/baseline/Cargo.lock" "$evidence/candidate/Cargo.lock"
