@@ -2248,6 +2248,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "localsend-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "libc",
+ "localsend",
+ "pem 4.0.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

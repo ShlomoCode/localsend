@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "cli",
     "packages/core",
+    "packages/daemon",
     "packages/localsend_isolates/rust",
     "server",
 ]
