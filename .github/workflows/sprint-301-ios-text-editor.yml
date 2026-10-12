@@ -19,11 +19,33 @@ jobs:
       BS_SPRINT_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BS_SPRINT_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       EVIDENCE_DIR: evidence301
+      COORDINATOR_ADMISSION_JSON: ${{ vars.ISSUE301_ADMISSION }}
     steps:
+      - name: Set actual job deadline before preparation
+        shell: bash
+        run: |
+          printf 'ISSUE301_JOB_DEADLINE_UTC=%s\n' "$(date -u -d '+20 minutes' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install normal packaged recording tools within 150 seconds
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          mkdir -p evidence301
+          setup_started_ns=$(date +%s%N)
+          setup_status=0
+          sudo timeout --signal=TERM --kill-after=5s 140s bash -euc '
+            apt-get update
+            apt-get install -y --no-install-recommends ffmpeg
+            ffmpeg -version
+            ffprobe -version
+          ' > evidence301/recording-tools-install.log 2>&1 || setup_status=$?
+          setup_elapsed_ms=$(( ($(date +%s%N) - setup_started_ns) / 1000000 ))
+          printf '{"elapsedMs":%s,"exitStatus":%s,"maximumMs":150000,"commandDeadlineSeconds":140,"terminationGraceSeconds":5,"receiptReserveSeconds":5}\n' "$setup_elapsed_ms" "$setup_status" > evidence301/recording-tools-setup.json
+          test "$setup_elapsed_ms" -le 150000
+          exit "$setup_status"
       - name: Freeze diagnostic source
         shell: bash
         run: |

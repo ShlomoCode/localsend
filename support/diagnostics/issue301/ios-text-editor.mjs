@@ -173,6 +173,20 @@ async function retainVideo(video, id, cleanupDeadline) {
     throw error;
   }
 }
+function qualifyAdmission() {
+  const admission = JSON.parse(process.env.COORDINATOR_ADMISSION_JSON || 'null');
+  const now = Date.now(), admitted = Date.parse(admission?.admittedAt), expires = Date.parse(admission?.expiresAt);
+  const jobDeadline = Date.parse(process.env.ISSUE301_JOB_DEADLINE_UTC);
+  const requiredRemainingMs = 720000 + 65000;
+  if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REPOSITORY !== 'ShlomoCode/localsend' ||
+      admission?.issue !== 301 || admission.stage !== 'issue301-round2-native-first-line-edit' || admission.sourceHead !== process.env.GITHUB_SHA ||
+      admission.rootSelected !== true || admission.maxJobs !== 1 || admission.maxSessions !== 1 || admission.runAttempt !== '1' || process.env.GITHUB_RUN_ATTEMPT !== '1' ||
+      typeof admission.reservationId !== 'string' || !admission.reservationId.trim() || admission.unknownManualHolds !== 2 ||
+      !Number.isInteger(admission.totalPotentialBefore301) || admission.totalPotentialBefore301 < 2 || admission.totalPotentialBefore301 + 1 > 5 ||
+      !Number.isFinite(admitted) || admitted > now || now - admitted > 300000 || !Number.isFinite(expires) || expires - now < requiredRemainingMs ||
+      !Number.isFinite(jobDeadline) || jobDeadline - now < requiredRemainingMs) throw new Error('Fresh exact admission or remaining lease/job budget unavailable before device intent');
+  return admission;
+}
 async function cleanup() {
   const cleanupDeadline = Date.now() + 55000;
   const cleanupRequest = (url, method = 'GET', body, ms = 8000) => {
@@ -233,9 +247,9 @@ if (process.argv.includes('--cleanup')) {
   }
 } else {
   await save('identity.json', identity);
-  await save('intent.json', { name: ownName, at: new Date().toISOString(), maximumSessions: 1, deviceDeadlineSeconds: 720 });
   let failure;
   try {
+    await save('coordinator-admission-input.json', qualifyAdmission());
     const apps = await request(`${api}/recent_apps?limit=100`);
     const selected = apps.filter(a => a.app_url === app);
     if (selected.length !== 1 || selected[0].app_version !== identity.version || selected[0].app_name !== 'localsend-c1ce-unsigned-device.ipa') throw new Error('Fixed app metadata mismatch');
@@ -243,7 +257,15 @@ if (process.argv.includes('--cleanup')) {
     const inventory = await request(`${api}/devices.json`);
     if (!inventory.some(d => d.device === 'iPhone 16' && d.os === 'ios' && d.os_version === '18')) throw new Error('Selected device unavailable in inventory');
     await save('selected-device.json', { device: 'iPhone 16', os: 'ios', os_version: '18' });
+    const admission = qualifyAdmission();
+    const plan = await request(`${api}/plan.json`);
+    await save('provider-capacity-before-intent.json', { at: new Date().toISOString(), plan });
+    const running = plan.parallel_sessions_running, queued = plan.queued_sessions, capacity = plan.parallel_sessions_max_allowed;
+    if (![running, queued, capacity].every(n => Number.isInteger(n) && n >= 0) || running + queued + admission.totalPotentialBefore301 + 1 > 5 || running + queued + 1 > capacity) throw new Error('Fresh provider capacity not available before device intent');
+    qualifyAdmission();
     deadline = Date.now() + 720000;
+    await save('intent.json', { name: ownName, at: new Date().toISOString(), maximumSessions: 1, deviceDeadlineSeconds: 720, reservationId: admission.reservationId });
+    qualifyAdmission();
     const created = await request(`${hub}/session`, 'POST', { capabilities: { alwaysMatch: {
       platformName: 'iOS', 'appium:automationName': 'XCUITest', 'appium:deviceName': 'iPhone 16', 'appium:platformVersion': '18',
       'appium:app': app, 'appium:newCommandTimeout': 45,
