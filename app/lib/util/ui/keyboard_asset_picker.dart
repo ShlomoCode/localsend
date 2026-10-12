@@ -77,10 +77,12 @@ class _KeyboardAssetTileState extends State<_KeyboardAssetTile> {
     return FocusableActionDetector(
       onFocusChange: (focused) => setState(() => _focused = focused),
       actions: {
-        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
-          widget.onActivate();
-          return null;
-        }),
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) {
+            widget.onActivate();
+            return null;
+          },
+        ),
       },
       child: Stack(
         fit: StackFit.expand,
@@ -93,7 +95,9 @@ class _KeyboardAssetTileState extends State<_KeyboardAssetTile> {
                   decoration: BoxDecoration(border: Border.all(color: colors.primary, width: 3)),
                   child: Padding(
                     padding: const EdgeInsets.all(3),
-                    child: DecoratedBox(decoration: BoxDecoration(border: Border.all(color: colors.onPrimary))),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(border: Border.all(color: colors.onPrimary)),
+                    ),
                   ),
                 ),
               ),
