@@ -10,7 +10,9 @@ const deadline=Number(env.ISSUE1864_OBSERVATION_DEADLINE);
 const check=()=>{if(!Number.isFinite(deadline) || Date.now()>=deadline) throw new Error('Independent recording observation deadline reached');};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const log=data=>fs.appendFileSync(`${out}/input-timings.jsonl`,JSON.stringify({time:Date.now(),...data})+'\n');
-const adb=(...args)=>{check();const result=execFileSync('adb',args,{encoding:'utf8',timeout:Math.min(30000,Math.max(1,deadline-Date.now()))});check();return result;};
+const remaining=until=>{check();const ms=Math.min(deadline,until)-Date.now();if(ms<=0) throw new Error('Observation readiness budget exhausted');return ms;};
+const adbUntil=(until,...args)=>{const result=execFileSync('adb',args,{encoding:'utf8',timeout:Math.min(30000,remaining(until))});remaining(until);return result;};
+const adb=(...args)=>adbUntil(deadline,...args);
 const nodes=xml=>[...xml.matchAll(/<[\w.$-]+\s+([^>]+)>?/g)].map(m=>Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(a=>[a[1],a[2].replaceAll('&#10;','\n').replaceAll('&amp;','&')])));
 const labels=xml=>nodes(xml).map(n=>n['content-desc'] || n.text || '').join('\n');
 const bounds=n=>[...n.bounds.matchAll(/\d+/g)].map(m=>Number(m[0]));
@@ -38,17 +40,17 @@ async function snapshot(name,until=deadline) {
   fs.writeFileSync(`${out}/${name}-input.txt`,execFileSync('adb',['shell','dumpsys','input'],{encoding:'utf8',timeout:remaining()}));
   log({type:'snapshot',name});remaining();return source.value;
 }
-async function mouse(x,y,label) {
-  check();
+async function mouse(x,y,label,until=deadline) {
+  remaining(until);
   const matches=[...fs.readFileSync(env.ISSUE1864_APPIUM_LOG,'utf8').matchAll(/http:\/\/127\.0\.0\.1:8200\/session\/([a-f\d-]+)\/source/g)];
   const id=matches.at(-1)?.[1];if(!id) throw new Error('Current native input session absent');
   const body={actions:[{type:'pointer',id:'production-mouse',parameters:{pointerType:'mouse'},actions:[{type:'pointerMove',duration:0,origin:'viewport',x,y},{type:'pointerDown',button:0},{type:'pause',duration:100},{type:'pointerUp',button:0}]}]};
-  const response=await fetch(`http://127.0.0.1:8200/session/${id}/actions`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.min(15000,deadline-Date.now()))});
+  const response=await fetch(`http://127.0.0.1:8200/session/${id}/actions`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.min(15000,remaining(until)))});
   const result=await response.json();log({type:'mouse',x,y,label,backend:'w3c-native',nativeSession:id,request:body,status:response.status,response:result});
-  try {fs.writeFileSync(`${out}/native-mouse-events.txt`,adb('logcat','-d','-v','threadtime','appium:I','*:S'));}
+  try {fs.writeFileSync(`${out}/native-mouse-events.txt`,adbUntil(until,'logcat','-d','-v','threadtime','appium:I','*:S'));}
   catch(error) {fs.appendFileSync(`${out}/native-mouse-events-errors.jsonl`,JSON.stringify({time:Date.now(),label,message:error.message,status:error.status,stderr:error.stderr?.toString(),boundary:'Optional event probe failed after persistent native input receipt; no replay. SOURCE_MOUSE request/backend still mandatory; actual event evidence limitation retained.'})+'\n');}
   if(!response.ok || result.value?.error) throw new Error('Native SOURCE_MOUSE executor rejected input');
-  await pause(900);check();
+  await pause(Math.min(900,remaining(until)));remaining(until);
 }
 async function tapLabel(pattern,name,{system=false}={}) {
   const xml=await snapshot(`${name}-before`);
@@ -56,7 +58,63 @@ async function tapLabel(pattern,name,{system=false}={}) {
   if(candidates.length!==1) throw new Error(`Visible label ${pattern} ambiguous/absent (${candidates.length}); inspect ${name}-before`);
   const b=bounds(candidates[0]);await mouse(Math.round((b[0]+b[2])/2),Math.round((b[1]+b[3])/2),String(pattern));
 }
-async function key(code) {check();log({type:'dpad',key:code});adb('shell','input','dpad','keyevent',String(code));await pause(650);check();}
+async function key(code,until=deadline) {remaining(until);log({type:'dpad',key:code});adbUntil(until,'shell','input','dpad','keyevent',String(code));await pause(Math.min(650,remaining(until)));remaining(until);}
+function nativeSettingsState(name,xml,{appDetails=false}={}) {
+  const window=fs.readFileSync(`${out}/${name}-window.txt`,'utf8'),input=fs.readFileSync(`${out}/${name}-input.txt`,'utf8');
+  const focus=input.split('  FocusedWindows:')[1]?.split('  FocusRequests:')[0] ?? '';
+  const block=window.split(/(?=  Window #\d+ Window\{)/).find(b=>{
+    const header=b.split('\n')[0];
+    return /^  Window #\d+ Window\{/.test(header) && !header.includes('EXITING') &&
+      (appDetails ? header.includes('com.android.tv.settings/com.android.tv.settings.device.apps.AppManagementActivity') : /com\.android\.tv\.settings\/|permissioncontroller\//.test(header)) &&
+      b.includes('isVisible=true') && b.includes('Surface: shown=true') && b.includes('mDrawState=HAS_DRAWN') &&
+      focus.includes(`name='${b.match(/Window\{(\S+) u\d+ ([^}]+)/)?.slice(1).join(' ')}`);
+  });
+  const identity=block?.match(/Window\{(\S+) u\d+ ([^}]+)/),packageName=identity?.[2].split('/')[0];
+  const hierarchy=nodes(xml).find(n=>n.class==='hierarchy'),width=Number(hierarchy?.width),height=Number(hierarchy?.height);
+  const visible=nodes(xml).filter(n=>{
+    if(!packageName || n.package!==packageName || n.displayed!=='true' || n.enabled!=='true' || !n.bounds) return false;
+    const b=bounds(n);return b.length===4 && b[0]>=0 && b[1]>=0 && b[2]>b[0] && b[3]>b[1] && b[2]<=width && b[3]<=height;
+  });
+  const named=visible.filter(n=>n.text || n['content-desc']);
+  // Android TV often focuses a row container whose title is a child node.
+  const rows=visible.filter(n=>(n.focused==='true' || n.selected==='true') && n.focusable==='true').map(n=>{
+    const b=bounds(n),children=named.filter(child=>{const c=bounds(child);return c[0]>=b[0] && c[1]>=b[1] && c[2]<=b[2] && c[3]<=b[3];});
+    const title=children.find(c=>/(^|:)id\/title$/.test(c['resource-id'] ?? '')) ?? children[0];
+    return {bounds:n.bounds,id:n['resource-id'],class:n.class,title:title?.text || title?.['content-desc'] || '',labels:children.map(c=>c.text || c['content-desc'])};
+  }).filter(row=>row.labels.length);
+  // Summary changes such as Calculating -> size do not prove navigation.
+  const signature=JSON.stringify({focusedRows:rows.map(row=>[row.id,row.class,row.title,row.bounds]),rowPositions:visible.filter(n=>n.focusable==='true').map(n=>[n['resource-id'],n.class,n.bounds])});
+  return {identity:identity?.slice(1).join(' ') ?? '',visible,named,rows,signature};
+}
+async function settingsLabel(pattern,name,{navigate=false,until}={}) {
+  remaining(until);const waitUntil=Math.min(until,Date.now()+(navigate ? 40000 : 20000)),started=Date.now();
+  let previous='',stable=0,bootstrap=false,moves=0,pending='';
+  for(let poll=0;Date.now()<waitUntil;poll++) {
+    const pollName=`${name}-poll-${poll}`,xml=await snapshot(pollName,waitUntil),state=nativeSettingsState(pollName,xml,{appDetails:navigate});
+    stable=state.identity && state.identity===previous ? stable+1 : state.identity ? 1 : 0;previous=state.identity;
+    const candidates=state.named.filter(n=>pattern.test(n.text || n['content-desc'] || ''));
+    log({type:'settings-readiness',name,poll,identity:state.identity,stable,rows:state.rows,moves,pendingProgress:!!pending,waitUntil,routeUntil:until});
+    if(candidates.length>1) throw new Error(`Visible Settings label ${pattern} ambiguous (${candidates.length}); inspect ${pollName}`);
+    if(candidates.length===1 && stable>=2) {
+      const b=bounds(candidates[0]);log({type:'settings-target',name,semantic:candidates[0],snapshot:pollName});
+      await mouse(Math.round((b[0]+b[2])/2),Math.round((b[1]+b[3])/2),String(pattern),waitUntil);return;
+    }
+    if(navigate && stable>=2) {
+      if(pending && state.rows.length && state.signature!==pending) pending='';
+      const canMove=state.rows.length && !pending;
+      // After bounded semantic readiness, one ordinary Down can establish
+      // remote focus. If no named focused row appears, observe and fail.
+      const canBootstrap=!bootstrap && !moves && !state.rows.length && Date.now()-started>=5000;
+      if(canMove || canBootstrap) {
+        if(moves>=12) throw new Error('Exact Permissions label absent after 12 observed Settings navigation steps');
+        bootstrap=true;pending=state.signature;moves++;log({type:'settings-navigation',name,moves,bootstrap:canBootstrap,beforeSnapshot:pollName,rows:state.rows});
+        await key(20,waitUntil);continue;
+      }
+    }
+    await pause(Math.min(500,remaining(waitUntil)));remaining(waitUntil);
+  }
+  throw new Error(`Exact visible Settings label ${pattern} absent within bounded readiness/navigation; inspect ${name}-poll snapshots`);
+}
 async function sequence() {for(const code of [20,20,22,23]) await key(code);}
 async function ready() {
   let previous='',stable=0;
@@ -129,6 +187,7 @@ let result={apk:env.ISSUE1864_APK,phase,max999:'source-only; saturation not exer
 try {
   const created=await request('',{capabilities:{alwaysMatch:{platformName:'Android','appium:automationName':'UiAutomator2','appium:deviceName':'emulator-5554','appium:appPackage':pkg,'appium:appActivity':'.MainActivity','appium:noReset':true,'appium:autoGrantPermissions':false,'appium:settings[waitForIdleTimeout]':0}}});
   fs.writeFileSync(`${out}/appium-session.json`,JSON.stringify(created,null,2));session=created.value?.sessionId;if(!session) throw new Error('No observation session');
+  fs.writeFileSync(`${out}/appium-settings.json`,JSON.stringify(await request(`/${session}/settings`),null,2));
   adb('shell','setprop','log.tag.appium','INFO');await ready();fixtureHashes('before');
   if(phase==='permission-denial-grant') {
     const permissionBefore=adb('shell','dumpsys','package',pkg);fs.writeFileSync(`${out}/permissions-before.txt`,permissionBefore);if(/READ_MEDIA_(IMAGES|VIDEO): granted=true/.test(permissionBefore)) throw new Error('Initial permission control was pregranted');
@@ -167,9 +226,11 @@ try {
     if(assets(denied).length || nodes(denied).some(n=>n.package!==pkg && /^(Don.t allow|Deny)$/i.test(n.text || n['content-desc'] || ''))) throw new Error('Denied route exposes fixture assets or bounded prompt count exhausted');
     if(!/^\d+$/.test(adb('shell','pidof',pkg).trim())) throw new Error('App process did not survive genuine permission denial');
     result.controls.denial={responses,appLabels:labels(denied),pickerVisible:assets(denied).length>0};
-    adb('shell','am','start','-a','android.settings.APPLICATION_DETAILS_SETTINGS','-d',`package:${pkg}`);await pause(1500);
-    await tapLabel(/^Permissions$/,'os-app-permissions',{system:true});await tapLabel(/^Photos and videos$/i,'os-media-permission',{system:true});
-    await tapLabel(/^Allow(?: all(?: photos and videos)?)?$/i,'os-permission-grant',{system:true});
+    const settingsUntil=Math.min(deadline,Date.now()+60000);
+    adbUntil(settingsUntil,'shell','am','start','-a','android.settings.APPLICATION_DETAILS_SETTINGS','-d',`package:${pkg}`);
+    await settingsLabel(/^Permissions$/,'os-app-permissions',{navigate:true,until:settingsUntil});
+    await settingsLabel(/^Photos and videos$/i,'os-media-permission',{until:settingsUntil});
+    await settingsLabel(/^Allow(?: all(?: photos and videos)?)?$/i,'os-permission-grant',{until:settingsUntil});
     const grantedPermissions=adb('shell','dumpsys','package',pkg);fs.writeFileSync(`${out}/permissions-granted.txt`,grantedPermissions);if(!/READ_MEDIA_IMAGES: granted=true/.test(grantedPermissions) || !/READ_MEDIA_VIDEO: granted=true/.test(grantedPermissions)) throw new Error('Actual OS grant did not enable images and videos');await snapshot('permission-granted-os-state');
     adb('shell','am','force-stop',pkg);adb('shell','am','start','-n',`${pkg}/.MainActivity`);await ready();
     const opened=await entry('permission-granted-route');initial(opened);await indicator(opened);requireCount(await snapshot('permission-granted-select'),1);await key(4);
