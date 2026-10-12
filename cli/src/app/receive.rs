@@ -265,7 +265,15 @@ impl App {
             return;
         };
 
-        let path = util::unique_path(&self.storage.destination, &file.file_name);
+        let path = match util::unique_path(&self.storage.destination, &file.file_name) {
+            Ok(path) => path,
+            Err(err) => {
+                // Dropping the responder rejects this file's HTTP request.
+                drop(target_tx);
+                self.receive_file_result(session_id, file_id, Err(err.to_string()));
+                return;
+            }
+        };
 
         let progress = Arc::new(AtomicU64::new(0));
         session

@@ -30,11 +30,7 @@ void main() {
   });
 
   Future<String> digest(String fileName) async {
-    final (path, _, _) = await digestFilePathAndPrepareDirectory(
-      parentDirectory: destination.path,
-      fileName: fileName,
-      createdDirectories: {},
-    );
+    final (path, _, _) = await digestFilePathAndPrepareDirectory(parentDirectory: destination.path, fileName: fileName, createdDirectories: {});
     return path;
   }
 
@@ -56,11 +52,9 @@ void main() {
     test('rejects ${jsonish(fileName)}', () async {
       await expectLater(digest(fileName), throwsA('Path traversal detected'));
 
-      expect(
-        Directory(tempDir.path).listSync().map((e) => p.basename(e.path)),
-        ['downloads'],
-        reason: 'nothing may be created next to the destination',
-      );
+      expect(Directory(tempDir.path).listSync().map((e) => p.basename(e.path)), [
+        'downloads',
+      ], reason: 'nothing may be created next to the destination');
     });
   }
 
@@ -69,10 +63,7 @@ void main() {
   });
 
   test('keeps the directories of a folder transfer', () async {
-    expect(
-      await digest('outer/inner/file.txt'),
-      p.join(destination.path, 'outer', 'inner', 'file.txt'),
-    );
+    expect(await digest('outer/inner/file.txt'), p.join(destination.path, 'outer', 'inner', 'file.txt'));
   });
 
   /// `.` addresses the directory it sits in, so it is dropped rather than
@@ -91,10 +82,7 @@ void main() {
   /// Only the base name used to be sanitized, so a directory could carry
   /// characters the file system rejects.
   test('sanitizes the directory components too', () async {
-    expect(
-      await digest('sub\u0000dir/file.txt'),
-      p.join(destination.path, 'sub_dir', 'file.txt'),
-    );
+    expect(await digest('sub\u0000dir/file.txt'), p.join(destination.path, 'sub_dir', 'file.txt'));
   });
 }
 
@@ -104,7 +92,12 @@ String jsonish(String value) => value.isEmpty ? '<empty>' : value.replaceAll('\u
 /// real one lives in the Rust library, which is not loaded in unit tests.
 class _MockRustLibApi implements RustLibApi {
   @override
-  String crateApiFilenameSanitizeFileName({required String name}) {
+  String crateApiFilenameSanitizeFileNameForDirectory({
+    required String name,
+    required String directory,
+    int? counter,
+    required bool conservative,
+  }) {
     var result = name.split('').map((c) {
       final code = c.codeUnitAt(0);
       final isControl = code < 0x20 || code == 0x7f;

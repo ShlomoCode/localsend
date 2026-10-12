@@ -6,9 +6,13 @@
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:localsend_isolates/rust/frb_generated.dart';
 
-/// Rewrites `name` into a file name that is legal on the current platform,
-/// replacing illegal characters with `_`.
+/// Applies the shared filename policy with the current platform's default limit.
 String sanitizeFileName({required String name}) => RustLib.instance.api.crateApiFilenameSanitizeFileName(name: name);
+
+/// Sanitizes a received name using its parent directory's component and path
+/// limits. Opaque storage providers use the conservative default limit.
+String sanitizeFileNameForDirectory({required String name, required String directory, int? counter, required bool conservative}) =>
+    RustLib.instance.api.crateApiFilenameSanitizeFileNameForDirectory(name: name, directory: directory, counter: counter, conservative: conservative);
 
 /// Whether `name` is a legal file name on the current platform, i.e. whether
 /// [sanitize_file_name] would leave it untouched.
