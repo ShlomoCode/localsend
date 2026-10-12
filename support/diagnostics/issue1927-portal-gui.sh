@@ -15,8 +15,10 @@ start_portal_monitor() {
 }
 start_portal_monitor initial
 launch_settings() {
-  local label=$1 pid
-  flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
+  local label=$1 existing_visible_phase=${2:-} pid
+  if [ -z "$existing_visible_phase" ]; then
+    flatpak run --user org.localsend.localsend_app > "$OUT/$label-app.log" 2>&1 &
+  fi
   wid=''
   for i in $(seq 1 30); do
     wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1 || true)
@@ -28,6 +30,10 @@ launch_settings() {
   wait_rendered_application "$label"
   pid=$(qualified_app_pid "$label")
   wid=$(qualified_visible_window "$label" "$pid")
+  if [ -n "$existing_visible_phase" ]; then
+    cmp "$OUT/$existing_visible_phase-process-identity.txt" "$OUT/$label-process-identity.txt"
+    test "$wid" = "$(cat "$OUT/$existing_visible_phase-window.txt")"
+  fi
   stabilize_window initialized
   xdotool mousemove --window "$wid" 105 211 click 1
   sleep 2
@@ -83,7 +89,7 @@ start_portal_monitor visible-login
 pid=$(qualified_app_pid visible-login)
 printf '%s\n' "$pid" > "$OUT/visible-login-pid.txt"
 qualified_visible_window visible-login "$pid" > "$OUT/visible-login-window.txt"
-launch_settings visible-login-settings
+launch_settings visible-login-settings visible-login
 click_recorded hidden 'Start hidden' OFF ON host-flatpak-hidden
 grep -q -- '--hidden' "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 flatpak kill org.localsend.localsend_app
@@ -111,7 +117,7 @@ start_portal_monitor visible-again-login
 pid=$(qualified_app_pid visible-again-login)
 printf '%s\n' "$pid" > "$OUT/visible-again-login-pid.txt"
 qualified_visible_window visible-again-login "$pid" > "$OUT/visible-again-login-window.txt"
-launch_settings disable-before
+launch_settings disable-before visible-again-login
 click_recorded disable 'Autostart after login' ON OFF host-absent
 test ! -e "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
 xdotool windowactivate "$wid" key alt+F4
