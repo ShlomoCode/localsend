@@ -32,7 +32,11 @@ visual_row() {
   capture "$label"
   [[ "$(identify -format '%wx%h' "evidence/vm/$label.png")" == 1280x800 ]]
   guest timeout 20 python3 /home/probe/3417-accessibility.py bounds > "evidence/vm/$label-native-geometry.json"
-  timeout 15 tesseract "evidence/vm/$label.png" "evidence/vm/$label-anchor-ocr" --psm 11 tsv > "evidence/vm/$label-anchor-ocr.log" 2>&1
+  # Retain the original color capture and its derived contrast-normalized input.
+  # Original V11's exact fixture text scored 69.31; this same-pixel derivation
+  # scored 79.36 while preserving the exact match and confidence threshold.
+  convert "evidence/vm/$label.png" -colorspace Gray -contrast-stretch 2%x2% "evidence/vm/$label-anchor-gray.png"
+  timeout 15 tesseract "evidence/vm/$label-anchor-gray.png" "evidence/vm/$label-anchor-ocr" --psm 11 tsv > "evidence/vm/$label-anchor-ocr.log" 2>&1
   node support/diagnostics/3417-visual.cjs chooser-region "evidence/vm/$label-native-geometry.json" \
     "evidence/vm/$label-anchor-ocr.tsv" "evidence/vm/$label-region-receipt.json" > "evidence/vm/$label-bounds.json"
   geometry=$(node support/diagnostics/3417-visual.cjs crop "evidence/vm/$label-bounds.json")
