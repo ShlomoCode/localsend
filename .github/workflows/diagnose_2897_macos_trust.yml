@@ -1,0 +1,35 @@
+name: Diagnose 2897 macOS trust qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/bug-2897-finder-diagnostic]
+    paths:
+      - .github/workflows/diagnose_2897_macos_trust.yml
+permissions:
+  contents: read
+concurrency:
+  group: issue-2897-macos-finder
+  cancel-in-progress: false
+jobs:
+  trust:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Observe official artifact trust without launch
+        shell: bash
+        run: bash support/diagnostics/2897/trust.sh
+      - name: Archive raw trust observations
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence/issue2897-trust
+          tar -czf evidence/issue2897-trust.tar.gz -C evidence issue2897-trust
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2897-macos-trust-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/issue2897-trust.tar.gz
+          if-no-files-found: error
+          retention-days: 14
