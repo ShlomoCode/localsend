@@ -24,6 +24,53 @@ grep -E '^rustc 1\.97\.1 ' "$evidence/rust.txt"
 java -version 2> "$evidence/java.txt"
 grep -E 'version "17\.' "$evidence/java.txt"
 
+verify_candidate_source() {
+  printf '%s  %s\n' \
+    023e7d532e2e24685bc30615811b034924f6e33dc2df3196baa525ec5b014cef app/lib/util/native/file_picker.dart \
+    9e6530f929986d7b10be48726ecb9c5a0d4d4aa48dc32e60836bb339dbda2d6d app/lib/util/ui/keyboard_asset_picker.dart \
+    | tee "$1" | sha256sum -c -
+}
+
+# Reject candidate source/format/analysis failures before compiling either APK.
+for variant in candidate baseline; do
+  if [ "$variant" = baseline ]; then source_commit=$base; else source_commit=$candidate; fi
+  checkout="$RUNNER_TEMP/issue1864-production-$variant"
+  destination="$evidence/$variant"
+  mkdir -p "$destination"
+  git worktree add --detach "$checkout" "$source_commit"
+  (
+    cd "$checkout"
+    test -z "$(git status --porcelain)"
+    git rev-parse HEAD > "$destination/head.txt"
+    git ls-tree -r HEAD > "$destination/source-tree.txt"
+    if git grep -n -E 'ISSUE1864|diagnostic_asset_picker|diagnostic_picker_focus_trace' HEAD -- app/lib > "$destination/forbidden-app-source.txt"; then
+      echo 'Diagnostic source is forbidden in a production checkout' >&2
+      exit 1
+    fi
+    cp pubspec.lock "$destination/pubspec-input.lock"
+    cp Cargo.lock "$destination/Cargo-input.lock"
+    if [ "$variant" = candidate ]; then
+      verify_candidate_source "$destination/reviewed-source-sha256.txt"
+    else
+      sha256sum app/lib/util/native/file_picker.dart > "$destination/reviewed-source-sha256.txt"
+    fi
+    cd app
+    flutter pub get 2>&1 | tee "$destination/pub-get.log"
+    cp ../pubspec.lock "$destination/pubspec.lock"
+    git -C .. diff --binary -- pubspec.lock > "$destination/pub-lock-resolution.patch"
+    files=(lib/util/native/file_picker.dart)
+    if [ "$variant" = candidate ]; then files+=(lib/util/ui/keyboard_asset_picker.dart); fi
+    dart format --output=none --set-exit-if-changed "${files[@]}" 2>&1 | tee "$destination/format.log"
+    flutter analyze "${files[@]}" 2>&1 | tee "$destination/analyze.log"
+    git -C .. diff --binary -- . ':!pubspec.lock' > "$destination/preflight-source.patch"
+    test ! -s "$destination/preflight-source.patch"
+    test -z "$(git -C .. ls-files --others --exclude-standard)"
+  )
+done
+cmp "$evidence/baseline/pubspec-input.lock" "$evidence/candidate/pubspec-input.lock"
+cmp "$evidence/baseline/pubspec.lock" "$evidence/candidate/pubspec.lock"
+cmp "$evidence/baseline/Cargo-input.lock" "$evidence/candidate/Cargo-input.lock"
+
 # Use the existing release signing configuration with shared ephemeral inputs.
 # Private material stays outside evidence-cloud and is removed on every exit.
 umask 077
@@ -50,30 +97,17 @@ sha256sum "$signing_store" | cut -d ' ' -f 1 > "$evidence/signing-keystore-sha25
 printf '%s\n' 'Shared ephemeral test release key; private JKS and passwords excluded from artifacts; Gradle release signingConfig unchanged.' > "$evidence/signing-contract.txt"
 
 for variant in baseline candidate; do
-  if [ "$variant" = baseline ]; then source_commit=$base; else source_commit=$candidate; fi
   checkout="$RUNNER_TEMP/issue1864-production-$variant"
   destination="$evidence/$variant"
-  mkdir -p "$destination"
-  git worktree add --detach "$checkout" "$source_commit"
   (
     cd "$checkout"
-    test -z "$(git status --porcelain)"
-    git rev-parse HEAD > "$destination/head.txt"
-    git ls-tree -r HEAD > "$destination/source-tree.txt"
-    if git grep -n -E 'ISSUE1864|diagnostic_asset_picker|diagnostic_picker_focus_trace' HEAD -- app/lib > "$destination/forbidden-app-source.txt"; then
-      echo 'Diagnostic source is forbidden in a production checkout' >&2
-      exit 1
-    fi
-    cp pubspec.lock "$destination/pubspec-input.lock"
-    cp Cargo.lock "$destination/Cargo-input.lock"
     if [ "$variant" = candidate ]; then
-      printf '%s  %s\n' \
-        023e7d532e2e24685bc30615811b034924f6e33dc2df3196baa525ec5b014cef app/lib/util/native/file_picker.dart \
-        7e91be6855ba0fd3a495b7afb2a4c881a43e595addccc878d59776599f6d4f7c app/lib/util/ui/keyboard_asset_picker.dart \
-        | tee "$destination/reviewed-source-sha256.txt" | sha256sum -c -
-    else
-      sha256sum app/lib/util/native/file_picker.dart > "$destination/reviewed-source-sha256.txt"
+      verify_candidate_source "$destination/pre-build-reviewed-source-sha256.txt"
     fi
+    cmp "$destination/pubspec.lock" pubspec.lock
+    cmp "$destination/Cargo-input.lock" Cargo.lock
+    git diff --binary -- . ':!pubspec.lock' > "$destination/pre-build-source.patch"
+    test ! -s "$destination/pre-build-source.patch"
     # This ignored input is supported by the unchanged Gradle release block.
     if git ls-files --error-unmatch app/android/key.properties >/dev/null 2>&1; then
       echo 'Release key.properties must never be tracked' >&2
@@ -83,21 +117,43 @@ for variant in baseline candidate; do
     printf 'storeFile=%s\nkeyAlias=issue1864-production-test\nstorePassword=%s\nkeyPassword=%s\n' \
       "$signing_store" "$ISSUE1864_SIGNING_PASSWORD" "$ISSUE1864_SIGNING_PASSWORD" > app/android/key.properties
     sha256sum app/android/key.properties | cut -d ' ' -f 1 > "$destination/signing-properties-sha256.txt"
-    cd app
-    flutter pub get 2>&1 | tee "$destination/pub-get.log"
-    cp ../pubspec.lock "$destination/pubspec.lock"
-    git -C .. diff --binary -- pubspec.lock > "$destination/pub-lock-resolution.patch"
-    files=(lib/util/native/file_picker.dart)
-    if [ "$variant" = candidate ]; then files+=(lib/util/ui/keyboard_asset_picker.dart); fi
-    dart format --output=none --set-exit-if-changed "${files[@]}" 2>&1 | tee "$destination/format.log"
-    flutter analyze "${files[@]}" 2>&1 | tee "$destination/analyze.log"
     if [ "$variant" = candidate ]; then
-      cmp "$evidence/baseline/pubspec-input.lock" "$destination/pubspec-input.lock"
-      cmp "$evidence/baseline/pubspec.lock" "$destination/pubspec.lock"
-      cmp "$evidence/baseline/Cargo-input.lock" "$destination/Cargo-input.lock"
       cmp "$evidence/baseline/signing-properties-sha256.txt" "$destination/signing-properties-sha256.txt"
     fi
+    cd app
+    set +e
     timeout --kill-after=60s 1800s flutter build apk --release --target-platform android-arm64 2>&1 | tee "$destination/build.log"
+    build_pipeline_status=("${PIPESTATUS[@]}")
+    set -e
+    pipeline_status=0
+    for status in "${build_pipeline_status[@]}"; do
+      if [ "$status" -ne 0 ]; then pipeline_status=$status; fi
+    done
+    if ! printf 'build_exit=%s\nlog_exit=%s\npipeline_exit=%s\n' \
+      "${build_pipeline_status[0]}" "${build_pipeline_status[1]}" "$pipeline_status" > "$destination/build-status.txt"; then
+      if [ "$pipeline_status" -eq 0 ]; then exit 1; fi
+    fi
+    runner="$checkout/app/build/rust_lib_localsend_app/build/build_tool"
+    if [ "$pipeline_status" -ne 0 ]; then
+      # Collection is best effort and must never replace the original failure.
+      for filename in pubspec.yaml pubspec.lock; do
+        if [ -f "$runner/$filename" ] && [ ! -L "$runner/$filename" ]; then
+          if cp "$runner/$filename" "$destination/cargokit-runner-$filename"; then
+            printf '%s=copied\n' "$filename" >> "$destination/failed-runner-collection.txt" || true
+          else
+            printf '%s=copy-failed\n' "$filename" >> "$destination/failed-runner-collection.txt" || true
+          fi
+        else
+          printf '%s=missing-or-nonregular-or-symlink\n' "$filename" >> "$destination/failed-runner-collection.txt" || true
+        fi
+      done
+      exit "$pipeline_status"
+    fi
+    test -f "$runner/pubspec.yaml" && test ! -L "$runner/pubspec.yaml"
+    test -f "$runner/pubspec.lock" && test ! -L "$runner/pubspec.lock"
+    cp "$runner/pubspec.yaml" "$destination/cargokit-runner-pubspec.yaml"
+    cp "$runner/pubspec.lock" "$destination/cargokit-runner-pubspec.lock"
+    node "$root/support/tests/issue1864-cargokit-lock.mjs" "$checkout" "$destination" "$variant"
     cp ../Cargo.lock "$destination/Cargo.lock"
     cmp "$destination/Cargo-input.lock" "$destination/Cargo.lock"
     cmp "$destination/pubspec.lock" ../pubspec.lock
@@ -126,6 +182,7 @@ for variant in baseline candidate; do
     done < "$destination/apk-signer-sha256.txt"
   )
 done
+cmp "$evidence/baseline/cargokit-runner-normalized.lock" "$evidence/candidate/cargokit-runner-normalized.lock"
 cmp "$evidence/baseline/Cargo.lock" "$evidence/candidate/Cargo.lock"
 cmp "$evidence/baseline/apk-libraries.txt" "$evidence/candidate/apk-libraries.txt"
 cmp "$evidence/baseline/apk-package.txt" "$evidence/candidate/apk-package.txt"
