@@ -548,10 +548,36 @@ try {
   # Official1.14 SharedPreferencesPortable reads flutter-prefixed settings.json
   # from the executable working directory. Explicit ordinary observation
   # settings preserve English terminal UI and normal Quit, with encryption off.
-  $settingsPath=Join-Path $exe.DirectoryName 'settings.json';if(Test-Path -LiteralPath $settingsPath){throw 'Official archive already contains a portable preferences file; no overwrite permitted.'}
+  $settingsPath=Join-Path $exe.DirectoryName 'settings.json'
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $zip=[IO.Compression.ZipFile]::OpenRead($archive)
+  try{
+   $members=@($zip.Entries|Where-Object {$_.FullName -ceq 'settings.json'})
+   if($members.Count -ne 1){throw 'Pinned release must contain exactly one root settings.json member.'}
+   $memberStream=$members[0].Open();$memberBytes=[IO.MemoryStream]::new()
+   try{$memberStream.CopyTo($memberBytes);$shippedBytes=$memberBytes.ToArray()}finally{$memberStream.Dispose();$memberBytes.Dispose()}
+  }finally{$zip.Dispose()}
+  $originalSettings=Join-Path $OutputDirectory 'shipped-settings.json'
+  if(Test-Path -LiteralPath $originalSettings){throw 'Shipped settings evidence already exists; no overwrite permitted.'}
+  [IO.File]::WriteAllBytes($originalSettings,$shippedBytes)
+  $shippedHash=(Get-FileHash -LiteralPath $originalSettings -Algorithm SHA256).Hash.ToLowerInvariant()
+  $extractedBytes=[IO.File]::ReadAllBytes($settingsPath)
+  $extractedHash=(Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $settingsMatch=[Convert]::ToBase64String($shippedBytes) -ceq [Convert]::ToBase64String($extractedBytes)
+  $report['shippedPortablePreferences']=@{archiveMember='settings.json';originalPath=$originalSettings;bytes=$shippedBytes.Length;sha256=$shippedHash;base64=[Convert]::ToBase64String($shippedBytes);extractedPath=$settingsPath;extractedBytes=$extractedBytes.Length;extractedSha256=$extractedHash;archiveExtractedBytesMatch=$settingsMatch}
+  Persist
+  if(-not $settingsMatch -or $shippedBytes.Length -ne 2 -or $shippedBytes[0] -ne 13 -or $shippedBytes[1] -ne 10 -or $shippedHash -cne '7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6'){throw 'Only the independently observed exact shipped CRLF settings placeholder may be initialized; unexpected settings remain untouched.'}
   $initialPreferences=@{'flutter.ls_version'=1;'flutter.ls_port'=$receptionPort;'flutter.ls_locale'='en';'flutter.ls_minimize_to_tray'=$false;'flutter.ls_auto_finish'=$false;'flutter.ls_https'=$false}
   Json $settingsPath $initialPreferences
-  $report['portablePreferences']=@{path=$settingsPath;port=$receptionPort;initialSettings=$initialPreferences;sha256BeforeAppStart=(Get-FileHash $settingsPath -Algorithm SHA256).Hash;scope='Supported1.14 port/English/normalQuit/terminalUI/encryption-off preferences; no app binary or selected-file injection.'}
+  $report['portablePreferences']=@{path=$settingsPath;port=$receptionPort;initialSettings=$initialPreferences;sha256BeforeAppStart=(Get-FileHash $settingsPath -Algorithm SHA256).Hash;scope='Supported1.14 initialization of exact retained shipped CRLF placeholder: port/English/normalQuit/terminalUI/encryption-off; no app binary or selected-file injection.'}
+  $seedReadback=Get-Content -LiteralPath $settingsPath -Raw|ConvertFrom-Json
+  if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($settingsPath)) -ine $exe.DirectoryName -or @($seedReadback.PSObject.Properties).Count -ne $initialPreferences.Count){throw 'Portable seed path or exact preference key set differs before launch.'}
+  foreach($key in $initialPreferences.Keys){
+   $value=$seedReadback.$key;$expected=$initialPreferences[$key]
+   $typeMatches=if($expected -is [bool]){$value -is [bool]}elseif($expected -is [string]){$value -is [string]}else{$value -is [int] -or $value -is [long]}
+   if(-not $typeMatches -or $value -cne $expected){throw "Portable seed value or JSON type differs before launch: $key"}
+  }
+  $report.portablePreferences['seedReadbackVerified']=$true;Persist
  }
  $sysZip=Join-Path $OutputDirectory 'Handle.zip';Invoke-WebRequest 'https://download.sysinternals.com/files/Handle.zip' -OutFile $sysZip -TimeoutSec 120
  Expand-Archive -LiteralPath $sysZip -DestinationPath (Join-Path $OutputDirectory 'sysinternals')
@@ -573,6 +599,25 @@ try {
  $until=[DateTime]::UtcNow.AddSeconds(60);$windows=@()
  do{Start-Sleep -Milliseconds 500;$app.Refresh();if($app.HasExited){throw 'Official sender exited at startup.'};$windows=@([ReceiverNative]::All()|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Width -gt 300})}until($windows.Count -gt 0 -or [DateTime]::UtcNow -ge $until)
  if($windows.Count -ne 1){throw 'Single sender window unavailable.'};$appHwnd=[IntPtr]::new($windows[0].Hwnd);Focus;$initial=Snapshot 'ready'
+ if($report.portablePreferences){
+  # postInit starts the server after HomePage initialization. Observe its
+  # listener within the existing startup deadline, preserving process identity.
+  $startupListeners=@();$listenerAccepted=$false
+  while([DateTime]::UtcNow -lt $until){
+   $app.Refresh();if($app.HasExited -or $app.StartTime.ToUniversalTime().Ticks -ne $appStartedTicks){throw 'Original sender process unavailable during startup listener observation.'}
+   if([DateTime]::UtcNow -ge $until){break}
+   $startupListeners=@(Get-NetTCPConnection -ErrorAction Stop|Where-Object {$_.OwningProcess -eq $app.Id -and $_.State -eq 'Listen' -and $_.LocalPort -eq $receptionPort}|Select-Object LocalAddress,LocalPort,State,OwningProcess)
+   if([DateTime]::UtcNow -ge $until){break}
+   if($startupListeners.Count -gt 0){$listenerAccepted=$true;break};Start-Sleep -Milliseconds 100
+  }
+  $report['startupListenerObservation']=@{deadlineUtc=$until.ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');acceptedWithinDeadline=$listenerAccepted;lastObservedSockets=$startupListeners;productCredit=$false};Persist
+  if(-not $listenerAccepted){throw 'Infrastructure startup reception listener deadline expired; late or missing listener is not readiness evidence.'}
+  $actualPreferences=Get-Content -LiteralPath $settingsPath -Raw|ConvertFrom-Json
+  $report['startupPreferences']=@{observedUtc=[DateTime]::UtcNow.ToString('o');path=$settingsPath;sha256=(Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash;alias=$actualPreferences.'flutter.ls_alias';port=$actualPreferences.'flutter.ls_port';locale=$actualPreferences.'flutter.ls_locale';https=$actualPreferences.'flutter.ls_https';minimizeToTray=$actualPreferences.'flutter.ls_minimize_to_tray';autoFinish=$actualPreferences.'flutter.ls_auto_finish';processId=$app.Id;window=$windows[0];listeningSockets=$startupListeners}
+  Persist
+  foreach($key in $initialPreferences.Keys){if($actualPreferences.$key -cne $initialPreferences[$key]){throw "Actual startup preference differs from supported initialization: $key"}}
+  if([string]::IsNullOrWhiteSpace($report.startupPreferences.alias) -or $report.startupPreferences.listeningSockets.Count -eq 0){throw 'Actual generated sender alias and app-owned reception listener are required at startup.'}
+ }
  $report.status='ready';Persist
  Json $readyPath @{ready=$true;utc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;fixtures=$report.fixtures;commands=$commands;results=$results;status=$statusPath;initial=$initial.screenshot;interface='commands/<id>.json -> results/<id>.json; successful command status passed; one pending command at a time'}
  $seen=@{}

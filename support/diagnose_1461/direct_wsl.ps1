@@ -37,9 +37,21 @@ function Command($Fields,[int]$Seconds=60){
  }while([DateTime]::UtcNow -lt $until)
  throw "Sender command deadline: $id; not a native network failure."
 }
-function WaitFile([string]$Path,[int]$Seconds){
+function WaitFile([string]$Path,[int]$Seconds,[switch]$SenderReady){
  $until=[DateTime]::UtcNow.AddSeconds($Seconds)
- do{if(Test-Path $Path){return};Start-Sleep -Milliseconds 100}while([DateTime]::UtcNow -lt $until)
+ do{
+  if($SenderReady){
+   $senderStatusPath=Join-Path $windows 'status.json';$senderStatus=$null
+   if(Test-Path -LiteralPath $senderStatusPath){$senderStatus=Get-Content -LiteralPath $senderStatusPath -Raw|ConvertFrom-Json}
+   $sender.Refresh()
+   if($senderStatus.status -eq 'failed' -or $sender.HasExited){
+    Json (Join-Path $evidence 'sender-readiness-failure.json') @{observedUtc=[DateTime]::UtcNow.ToString('o');reason='Sender failed or exited before readiness admission';senderControllerExited=$sender.HasExited;exitCode=$(if($sender.HasExited){$sender.ExitCode}else{$null});statusPath=$senderStatusPath;senderStatus=$senderStatus;readyPresent=(Test-Path -LiteralPath $Path);productCredit=$false}
+    throw "Sender startup infrastructure failure; inspect sender-readiness-failure.json and windows/status.json. $($senderStatus.errors -join ' ')"
+   }
+  }
+  if(Test-Path $Path){return};Start-Sleep -Milliseconds 100
+ }while([DateTime]::UtcNow -lt $until)
+ if($SenderReady){Json (Join-Path $evidence 'sender-readiness-failure.json') @{observedUtc=[DateTime]::UtcNow.ToString('o');reason='Sender readiness deadline expired';seconds=$Seconds;statusPath=$senderStatusPath;senderStatus=$senderStatus;productCredit=$false}}
  throw "Infrastructure receipt missing: $Path"
 }
 function WorkingProbe([string]$Fixture,[string]$Phase,[int]$Seconds=240){
@@ -80,7 +92,7 @@ try{
  # form needs explicit double quotes around these complete Windows paths.
  $senderArguments='-NoProfile -File "'+$senderScript+'" -OutputDirectory "'+$windows+'" -TimeoutSeconds 1800 -ReceiverName WSL1461'
  $sender=Start-Process pwsh -ArgumentList $senderArguments -PassThru -RedirectStandardOutput (Join-Path $evidence 'sender.stdout.txt') -RedirectStandardError (Join-Path $evidence 'sender.stderr.txt')
- WaitFile (Join-Path $windows 'ready.json') 360
+ WaitFile (Join-Path $windows 'ready.json') 360 -SenderReady
  $ready=Get-Content (Join-Path $windows 'ready.json') -Raw|ConvertFrom-Json
  Json (Join-Path $evidence 'topology-plan.json') @{scope='Windows Server 2025 -> official Linux 1.14 WSL2 NAT; peer TCP diagnostic only; not reported Android or Windows11 equivalence';guestIp=$guestIp;port=41631;failedBytes=$ready.fixtures.failed.bytes;nativeHoldSeconds=300;restoreGuardianSeconds=360;release='1.14.0'}
  Command @{action='record-start'}|Out-Null
