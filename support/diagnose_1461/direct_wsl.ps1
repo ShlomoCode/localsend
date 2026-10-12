@@ -6,14 +6,18 @@ $evidence=Join-Path $root 'evidence/issue1461'
 $windows=Join-Path $evidence 'windows'
 [void][IO.Directory]::CreateDirectory($evidence)
 function Json($path,$value){$value|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $path -Encoding utf8}
-function Wsl([string[]]$Arguments,[int]$Seconds=30){
+function Wsl([string[]]$Arguments,[int]$Seconds=30,[string]$ReceiptPath=''){
  $info=[Diagnostics.ProcessStartInfo]::new('wsl.exe');$info.UseShellExecute=$false
  $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
- foreach($arg in @('-d','Ubuntu-24.04','-u','root','--')+$Arguments){[void]$info.ArgumentList.Add($arg)}
+ $actualArguments=@('-d','Ubuntu-24.04','-u','root','--exec')+$Arguments
+ foreach($arg in $actualArguments){[void]$info.ArgumentList.Add($arg)}
+ $receipt=@{executable='wsl.exe';arguments=$actualArguments;startedUtc=[DateTime]::UtcNow.ToString('o');status='starting';stdout=$null;stderr=$null;exitCode=$null}
+ if($ReceiptPath){Json $ReceiptPath $receipt}
  $p=[Diagnostics.Process]::new();$p.StartInfo=$info;[void]$p.Start()
  $stdout=$p.StandardOutput.ReadToEndAsync();$stderr=$p.StandardError.ReadToEndAsync()
- if(-not $p.WaitForExit($Seconds*1000)){ $p.Kill();throw 'Out-of-band WSL command deadline; infrastructure failure.' }
+ if(-not $p.WaitForExit($Seconds*1000)){ $p.Kill();if($ReceiptPath){$receipt.status='deadline-exceeded';$receipt['finishedUtc']=[DateTime]::UtcNow.ToString('o');Json $ReceiptPath $receipt};throw 'Out-of-band WSL command deadline; infrastructure failure.' }
  $text=$stdout.GetAwaiter().GetResult();$errorText=$stderr.GetAwaiter().GetResult()
+ if($ReceiptPath){$receipt.status='exited';$receipt.stdout=$text;$receipt.stderr=$errorText;$receipt.exitCode=$p.ExitCode;$receipt['finishedUtc']=[DateTime]::UtcNow.ToString('o');Json $ReceiptPath $receipt}
  if($p.ExitCode -ne 0){throw "WSL command failed: $($Arguments -join ' '); $text $errorText"}
  return $text.Trim()
 }
@@ -51,18 +55,31 @@ function WorkingProbe([string]$Fixture,[string]$Phase,[int]$Seconds=240){
 $sender=$null;$down=$false;$native=$null
 try{
  Guest @('prepare','9a823f990eab24d33c0d3c27698a15812f08a266f342462ed4755afa52d703ca') 900|Set-Content (Join-Path $evidence 'guest-prepare-output.txt')
- $guestIp=Wsl @('bash','-c','ip -4 -o addr show dev eth0 scope global | awk ''{split($4,a,"/");print a[1]}''')
- if($guestIp -notmatch '^172\.[0-9]+\.[0-9]+\.[0-9]+$'){throw 'Expected exactly one WSL NAT guest IPv4.'}
+ $ipOutput=Wsl @('ip','-j','-4','address','show','dev','eth0','scope','global') 30 (Join-Path $evidence 'guest-ip-command.json')
+ $ipInterfaces=@($ipOutput|ConvertFrom-Json)
+ if($ipInterfaces.Count -ne 1 -or $ipInterfaces[0].ifname -cne 'eth0'){throw 'Actual IP JSON must identify exactly one eth0 interface.'}
+ $globalAddresses=@($ipInterfaces[0].addr_info|Where-Object {$_.family -ceq 'inet' -and $_.scope -ceq 'global'})
+ if($globalAddresses.Count -ne 1){throw 'Actual eth0 must have exactly one global IPv4 address.'}
+ $guestIp=[string]$globalAddresses[0].local;$parsedGuestIp=$null
+ if(-not [Net.IPAddress]::TryParse($guestIp,[ref]$parsedGuestIp) -or $parsedGuestIp.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsedGuestIp.ToString() -cne $guestIp -or $parsedGuestIp.GetAddressBytes()[0] -ne 172 -or $parsedGuestIp.GetAddressBytes()[1] -lt 16 -or $parsedGuestIp.GetAddressBytes()[1] -gt 31){throw 'Expected one canonical actual WSL NAT guest IPv4 in 172.16.0.0/12.'}
  $env:RECEIVER_HOST=$guestIp;$env:RECEIVER_PORT='41631';$env:FAILED_FIXTURE_BYTES='4294967296'
  $fixtureBytes=[long]$env:FAILED_FIXTURE_BYTES
  $sourceDrive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($windows))
  $guestBackingDrive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($env:USERPROFILE))
  $sharedDrive=$sourceDrive.Name -eq $guestBackingDrive.Name
  $backingRequired=if($sharedDrive){3*$fixtureBytes+1073741824}else{$fixtureBytes+1073741824}
- $guestFree=[long](Wsl @('bash','-c','df --output=avail -B1 /home/tester | tail -n 1'))
+ $dfOutput=Wsl @('df','--output=avail','-B1','/home/tester') 30 (Join-Path $evidence 'guest-storage-command.json')
+ $dfLines=@($dfOutput -split '\r?\n'|Where-Object {$_.Trim().Length -gt 0})
+ $guestFree=[long]0
+ if($dfLines.Count -ne 2 -or $dfLines[0] -match '[0-9]' -or $dfLines[1] -notmatch '^\s*[0-9]+\s*$' -or -not [long]::TryParse($dfLines[1].Trim(),[ref]$guestFree) -or $guestFree -lt 0){throw 'Actual df output must contain one header and one valid nonnegative Int64 free-byte number.'}
  Json (Join-Path $evidence 'storage-admission.json') @{sourceDrive=$sourceDrive.Name;sourceAvailable=$sourceDrive.AvailableFreeSpace;wslBackingDrive=$guestBackingDrive.Name;backingAvailable=$guestBackingDrive.AvailableFreeSpace;backingRequired=$backingRequired;guestAvailable=$guestFree;scope='Source, ordinary probe backup, received bytes and recorder reserve; WSL backing assumed on default user profile drive'}
  if($guestBackingDrive.AvailableFreeSpace -lt $backingRequired -or $guestFree -lt ($fixtureBytes+1073741824)){throw 'Measured storage cannot preserve the source, backup and guest receive; infrastructure admission failed.'}
- $sender=Start-Process pwsh -ArgumentList @('-NoProfile','-File',"$PSScriptRoot/windows_sender.ps1",'-OutputDirectory',$windows,'-TimeoutSeconds','1800','-ReceiverName','WSL1461') -PassThru -RedirectStandardOutput (Join-Path $evidence 'sender.stdout.txt') -RedirectStandardError (Join-Path $evidence 'sender.stderr.txt')
+ $senderScript=Join-Path $PSScriptRoot 'windows_sender.ps1'
+ if($senderScript.Contains('"') -or $windows.Contains('"')){throw 'Sender launch paths must not contain embedded double quotes.'}
+ # Start-Process joins ArgumentList entries. Its documented single-string
+ # form needs explicit double quotes around these complete Windows paths.
+ $senderArguments='-NoProfile -File "'+$senderScript+'" -OutputDirectory "'+$windows+'" -TimeoutSeconds 1800 -ReceiverName WSL1461'
+ $sender=Start-Process pwsh -ArgumentList $senderArguments -PassThru -RedirectStandardOutput (Join-Path $evidence 'sender.stdout.txt') -RedirectStandardError (Join-Path $evidence 'sender.stderr.txt')
  WaitFile (Join-Path $windows 'ready.json') 360
  $ready=Get-Content (Join-Path $windows 'ready.json') -Raw|ConvertFrom-Json
  Json (Join-Path $evidence 'topology-plan.json') @{scope='Windows Server 2025 -> official Linux 1.14 WSL2 NAT; peer TCP diagnostic only; not reported Android or Windows11 equivalence';guestIp=$guestIp;port=41631;failedBytes=$ready.fixtures.failed.bytes;nativeHoldSeconds=300;restoreGuardianSeconds=360;release='1.14.0'}
