@@ -6,6 +6,9 @@ Start-Transcript (Join-Path $Evidence worker-transcript.txt)
 $script:Stage = "desktop"
 $script:Status = "ENV_BLOCK"
 $script:OwnedInstallation = $false
+$script:PrimaryStatus = "NOT_REACHED"
+$script:ShareStatus = "NOT_QUALIFIED"
+$script:ShareError = $null
 function Check-Budget {
     if ([DateTime]::UtcNow -ge $Deadline) { throw "ENV_BLOCK: task deadline reached" }
     $bytes = (Get-ChildItem $Evidence -File -Recurse | Measure-Object Length -Sum).Sum
@@ -72,21 +75,39 @@ try {
     $language = Find-Ui @("English")
     if ($language) { Click-Ui (Wait-Ui @("OK")) }
     $end = [DateTime]::UtcNow.AddSeconds(100)
-    $selectedDesktop = $false; $clickedFinish = $false
+    $selectedDesktop = $false; $clickedFinish = $false; $tasksCaptured = $false; $wizardCaptureCount = 0
     do {
         Check-Budget
         $mode = Find-Ui @("Install for all users (recommended)")
         if ($mode) { Save-Desktop installer-default-mode; Click-Ui $mode }
         $task = Find-Ui @("Create a desktop shortcut")
+        if (-not $tasksCaptured) {
+            # A missed exact Name is not proof that the provider omits the checkbox.
+            # Retain the real Tasks page even if the optional checkbox cannot be located.
+            $tasksPage = Find-Ui @("Select Additional Tasks", "Additional Tasks", "Which additional tasks should be performed?")
+            if ($task -or $tasksPage) { Save-Desktop installer-tasks; Save-Tree installer-tasks; $tasksCaptured = $true }
+        }
         if ($task) {
-            $toggle = $task.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-            if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) { Click-Ui $task }
-            $selectedDesktop = $true
+            $toggle = $null
+            if ($task.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) {
+                Write-Event desktopCheckbox @{ Name = $task.Current.Name; AutomationId = $task.Current.AutomationId; Before = "$($toggle.Current.ToggleState)"; Bounds = "$($task.Current.BoundingRectangle)" }
+                if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) { $toggle.Toggle() }
+                $selectedDesktop = $toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
+                Write-Event desktopCheckboxSelection @{ Proven = $selectedDesktop; After = "$($toggle.Current.ToggleState)"; Action = "supported TogglePattern" }
+                Save-Desktop installer-tasks-after-selection
+            } else { Write-Event desktopCheckboxSelection @{ Proven = $false; Reason = "Located exact checkbox but TogglePattern unavailable" } }
         }
         $finish = Find-Ui @("Finish")
         if ($finish) { Save-Desktop installer-finish; Click-Ui $finish; $clickedFinish = $true; break }
         $button = Find-Ui @("Next >", "Next", "Install", "OK")
-        if ($button) { Click-Ui $button }
+        if ($button) {
+            if ($wizardCaptureCount -lt 12) {
+                Save-Desktop "installer-page-$wizardCaptureCount-before-next"
+                Save-Tree "installer-page-$wizardCaptureCount-before-next"
+                $wizardCaptureCount++
+            }
+            Click-Ui $button
+        }
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $end)
     Stop-Clip
@@ -97,7 +118,10 @@ try {
         # Preserve raw installed bytes even when a later environment gate fails.
         Save-InstalledInventory $installDir
     }
-    if (-not $selectedDesktop -or -not $clickedFinish) { throw "ENV_BLOCK: ordinary wizard/desktop shortcut/first-launch path incomplete" }
+    $desktopLinks = @("$env:PUBLIC\Desktop\LocalSend.lnk", "$env:USERPROFILE\Desktop\LocalSend.lnk" | Where-Object { Test-Path $_ })
+    $desktopAvailable = $selectedDesktop -and $desktopLinks.Count -eq 1
+    Write-Event desktopShortcutAvailability @{ WizardSelectionProven = $selectedDesktop; TasksPageCaptured = $tasksCaptured; ExistingLinks = $desktopLinks; DesktopCaseAvailable = $desktopAvailable; Reason = $(if ($desktopAvailable) { "Normal wizard selection and one installed shortcut proven" } else { "Optional shortcut selection/link not proven; primary Start Menu cycle proceeds" }) }
+    if (-not $clickedFinish) { throw "ENV_BLOCK: ordinary wizard Finish/first-launch path incomplete" }
     $first = Wait-App
     if (-not $first) { throw "ENV_BLOCK: first ordinary launch unavailable" }
     Save-Desktop first-launch
@@ -111,10 +135,11 @@ try {
     $actualExe = Join-Path $installDir localsend_app.exe
     [xml]$sidecar = Get-Content "$actualExe.manifest" -Raw
     [xml]$helper = Get-Content (Join-Path $Evidence installed/helper-AppxManifest.xml) -Raw
-    [xml]$embedded = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Join-Path $Evidence installed/embedded-RT_MANIFEST.bin)))
+    # Get-Content's BOM-aware reader leaves the retained original resource bytes untouched.
+    [xml]$embedded = Get-Content (Join-Path $Evidence installed/embedded-RT_MANIFEST.bin) -Raw
     $identity = $helper.Package.Identity
-    $msixNode = $sidecar.SelectSingleNode("//*[local-name()=msix]")
-    if (-not $msixNode) { $msixNode = $embedded.SelectSingleNode("//*[local-name()=msix]") }
+    $msixNode = $sidecar.SelectSingleNode("//*[local-name()='msix']")
+    if (-not $msixNode) { $msixNode = $embedded.SelectSingleNode("//*[local-name()='msix']") }
     Write-Event identity @{ Sidecar = $sidecar.OuterXml; Embedded = $embedded.OuterXml; HelperPublisher = $identity.Publisher; RegisteredPublisher = $package[0].Publisher }
     if (-not $msixNode -or $msixNode.publisher -ne $identity.Publisher -or $package[0].Publisher -ne $identity.Publisher -or
         $msixNode.packageName -ne $identity.Name -or $msixNode.applicationId -ne $helper.Package.Applications.Application.Id -or
@@ -124,19 +149,32 @@ try {
     if ($about) { Click-Ui $about; Save-Desktop app-about; Save-Tree app-about; Send-Keys "{ESC}" }
     else { Write-Event appVersionLimit @{ AboutAccessible = $false; Build64Verified = $false; Receipt = "Installed EXE file/product version retained; +64 app-level version unverified" } }
     $script:Stage = "share-qualification"
-    Initialize-NativePicker
     try {
         $null = [Windows.ApplicationModel.DataTransfer.DataTransferManager,Windows.ApplicationModel.DataTransfer,ContentType=WindowsRuntime]
         $supported = [Windows.ApplicationModel.DataTransfer.DataTransferManager]::IsSupported()
         Write-Event DataTransferManager @{ IsSupported = $supported }
         if (-not $supported) { throw "DataTransferManager.IsSupported returned false" }
-    } catch { throw "ENV_BLOCK: Share API qualification failed: $_" }
-    Quit-App
+        $script:ShareStatus = "API_SUPPORTED"
+    } catch {
+        $script:ShareStatus = "ENV_BLOCK"
+        $script:ShareError = "Share API qualification failed: $_"
+        Write-Event shareQualification @{ Status = $script:ShareStatus; Error = $script:ShareError; PrimaryContinues = $true; ProductVerdict = "NONE" }
+    }
+    $script:Stage = "first-actual-quit"
+    # One continuous first Start Menu episode includes the mandatory original Quit.
+    Start-Clip start-menu-1
+    Quit-App -Required -ExpectedPid $first.Id
     $script:Stage = "native-relaunch"
     foreach ($method in @("start-menu", "desktop-shortcut")) {
+        if ($method -eq "desktop-shortcut" -and -not $desktopAvailable) {
+            Write-Event relaunchSkipped @{ Method = $method; Reason = "Optional ordinary wizard desktop shortcut was not proven selected and created"; ProductVerdict = "NONE" }
+            continue
+        }
         foreach ($attempt in 1..2) {
             Assert-CleanLaunch
-            Start-Clip "$method-$attempt"
+            if ($method -eq "start-menu" -and $attempt -eq 1) {
+                if (-not $script:Recorder -or $script:Recorder.HasExited) { throw "ENV_BLOCK: first primary episode recording ended before Start Menu input" }
+            } else { Start-Clip "$method-$attempt" }
             if ($method -eq "start-menu") {
                 Send-Keys "^{ESC}"
                 Send-Keys "LocalSend"
@@ -144,7 +182,7 @@ try {
                 Save-Desktop "$method-$attempt-before"
                 Click-Ui $entry
             } else {
-                $desktopFolder = if (Test-Path "$env:PUBLIC\Desktop\LocalSend.lnk") { "$env:PUBLIC\Desktop" } else { "$env:USERPROFILE\Desktop" }
+                $desktopFolder = Split-Path $desktopLinks[0]
                 Start-Process explorer.exe -ArgumentList "`"$desktopFolder`""
                 $window = Wait-Ui @("Desktop", "Desktop - File Explorer")
                 Focus-Window $window
@@ -155,13 +193,15 @@ try {
             Save-Tree "$method-$attempt-result"
             Write-Event relaunch @{ Method = $method; Attempt = $attempt; Opened = [bool]$app; Pid = $(if ($app) { $app.Id } else { $null }) }
             Save-PackageInventory "$method-$attempt" | Out-Null
+            if ($app) { Quit-App -Required -ExpectedPid $app.Id } else { Send-Keys "{ESC}" }
             Stop-Clip
-            if ($app) { Quit-App } else { Send-Keys "{ESC}" }
         }
+        if ($method -eq "start-menu") { $script:PrimaryStatus = "OBSERVATIONS_RETAINED"; Write-Event primaryRelaunch @{ Status = $script:PrimaryStatus; Attempts = 2; ProductVerdict = "NONE" } }
     }
     $script:Stage = "powershell-controls"
     foreach ($method in @("Start-Process", "direct-ampersand")) {
         Assert-CleanLaunch
+        $app = $null
         Start-Clip $method
         try {
             if ($method -eq "Start-Process") { Start-Process -FilePath $actualExe -PassThru | Format-List * | Out-File (Join-Path $Evidence StartProcess-original.txt) }
@@ -179,8 +219,8 @@ try {
         }
         Save-Desktop "$method-result"
         Save-PackageInventory $method | Out-Null
+        if ($app) { Quit-App -Required -ExpectedPid $app.Id } else { Quit-App }
         Stop-Clip
-        Quit-App
     }
     $script:Stage = "official-portable-control"
     $portable = Join-Path $env:USERPROFILE Issue3456Portable
@@ -203,11 +243,15 @@ try {
         if (-not $app) { throw "ENV_BLOCK: ordinary portable working control unavailable" }
         Save-Desktop "portable-$attempt"
         Write-Event portableControl @{ Attempt = $attempt; Pid = $app.Id; Exe = $portableExe; SeparateProfile = (Join-Path $portableRoot settings.json) }
+        Quit-App -Required -ExpectedPid $app.Id
         Stop-Clip
-        Quit-App
     }
     Copy-Item (Join-Path $portableRoot settings.json) (Join-Path $Evidence portable-settings-final.json)
+    if ($script:ShareStatus -ne "API_SUPPORTED") {
+        throw "ENV_BLOCK: Share scope unqualified after primary/direct/portable observations: $script:ShareError"
+    }
     $script:Stage = "actual-explorer-share"
+    Initialize-NativePicker
     $script:ExpectedExe = $actualExe
     Assert-CleanLaunch
     $fixtureDir = Join-Path $env:USERPROFILE Issue3456Fixture
@@ -225,17 +269,19 @@ try {
     Save-Desktop share-delivered
     Save-Tree share-delivered
     Write-Event actualExplorerShare @{ Fixture = $fixture; AppPid = $shared.Id; DeliveredFilename = "share-3456.txt"; OtherTargetControl = "not exercised; LocalSend delivery is the end-to-end control" }
+    $script:ShareStatus = "DELIVERY_OBSERVED"
+    Quit-App -Required -ExpectedPid $shared.Id
     Stop-Clip
-    Quit-App
     $script:Status = "SCREENING_COMPLETE"
 } catch {
     $script:Failure = "$_"
+    if ($script:Stage -eq "actual-explorer-share") { $script:ShareStatus = "ENV_BLOCK"; $script:ShareError = $script:Failure }
     $_ | Format-List * -Force | Out-File (Join-Path $Evidence original-error.txt)
     $_.Exception | Format-List * -Force | Out-File (Join-Path $Evidence original-exception.txt)
     try { Save-Desktop failure; Save-Tree failure } catch { "$_" | Set-Content (Join-Path $Evidence capture-failure.txt) }
 } finally {
     try { Stop-Clip } catch { "$_" | Set-Content (Join-Path $Evidence recording-stop-error.txt) }
-    [ordered]@{ Status = $script:Status; Stage = $script:Stage; Error = $script:Failure; EnvironmentDelta = "Native Windows Server 2022 x64; reporter Windows 10 Pro 19045 x64"; ProductVerdict = "NONE; raw screening observations require evidence review"; OwnedInstallation = $script:OwnedInstallation } |
+    [ordered]@{ Status = $script:Status; Stage = $script:Stage; Error = $script:Failure; PrimaryStatus = $script:PrimaryStatus; ShareStatus = $script:ShareStatus; ShareError = $script:ShareError; EnvironmentDelta = "Native Windows Server 2022 x64; reporter Windows 10 Pro 19045 x64"; ProductVerdict = "NONE; raw screening observations require evidence review"; OwnedInstallation = $script:OwnedInstallation } |
         ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Evidence result.json)
     Stop-Transcript
 }
