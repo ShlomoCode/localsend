@@ -18,6 +18,7 @@ const auth = `Basic ${Buffer.from(`${user}:${key}`).toString('base64')}`;
 const hub = 'https://hub-cloud.browserstack.com/wd/hub';
 const api = 'https://api-cloud.browserstack.com/app-automate';
 const app = 'bs://4750eafebb15101bf6a61e9d8fc6632a43b20735';
+const catalogOS = '18', requestedOS = '18', expectedOS = '18.6';
 const identity = { app, source: 'c1ce322fb3acf08e44f329b8b7208b8b0d91e244', version: '1.18.2', ipaSha256: 'abe84652465ce8add78f25a50e5c3bcceeac87d4e4f084c53d73d0b21cc06c27', buildRun: '38135768528', artifactId: '11701275665', resigning: 'normal BrowserStack resigning' };
 const ownName = `issue301-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
 const save = (name, obj) => writeFile(path.join(out, name), JSON.stringify(obj, null, 2), { mode: 0o600 });
@@ -179,7 +180,7 @@ function qualifyAdmission() {
   const jobDeadline = Date.parse(process.env.ISSUE301_JOB_DEADLINE_UTC);
   const requiredRemainingMs = 720000 + 65000;
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REPOSITORY !== 'ShlomoCode/localsend' ||
-      admission?.issue !== 301 || admission.stage !== 'issue301-round2-native-first-line-edit' || admission.sourceHead !== process.env.GITHUB_SHA ||
+      admission?.issue !== 301 || admission.stage !== 'issue301-round3-ios18_6-native-first-line-edit' || admission.sourceHead !== process.env.GITHUB_SHA ||
       admission.rootSelected !== true || admission.maxJobs !== 1 || admission.maxSessions !== 1 || admission.runAttempt !== '1' || process.env.GITHUB_RUN_ATTEMPT !== '1' ||
       typeof admission.reservationId !== 'string' || !admission.reservationId.trim() || admission.unknownManualHolds !== 2 ||
       !Number.isInteger(admission.totalPotentialBefore301) || admission.totalPotentialBefore301 < 2 || admission.totalPotentialBefore301 + 1 > 5 ||
@@ -255,8 +256,9 @@ if (process.argv.includes('--cleanup')) {
     if (selected.length !== 1 || selected[0].app_version !== identity.version || selected[0].app_name !== 'localsend-c1ce-unsigned-device.ipa') throw new Error('Fixed app metadata mismatch');
     await save('selected-app.private.json', selected[0]);
     const inventory = await request(`${api}/devices.json`);
-    if (!inventory.some(d => d.device === 'iPhone 16' && d.os === 'ios' && d.os_version === '18')) throw new Error('Selected device unavailable in inventory');
-    await save('selected-device.json', { device: 'iPhone 16', os: 'ios', os_version: '18' });
+    if (!inventory.some(d => d.device === 'iPhone 16' && d.os === 'ios' && d.os_version === catalogOS)) throw new Error('Selected device unavailable in inventory');
+    await save('selected-device.json', { device: 'iPhone 16', os: 'ios', catalogOS, requestedPlatformVersion: requestedOS, requiredActualOS: expectedOS,
+      selectionContract: 'Catalog and desired capability select major 18; exact actual minor 18.6 is required before startup capture or input' });
     const admission = qualifyAdmission();
     const plan = await request(`${api}/plan.json`);
     await save('provider-capacity-before-intent.json', { at: new Date().toISOString(), plan });
@@ -267,7 +269,7 @@ if (process.argv.includes('--cleanup')) {
     await save('intent.json', { name: ownName, at: new Date().toISOString(), maximumSessions: 1, deviceDeadlineSeconds: 720, reservationId: admission.reservationId });
     qualifyAdmission();
     const created = await request(`${hub}/session`, 'POST', { capabilities: { alwaysMatch: {
-      platformName: 'iOS', 'appium:automationName': 'XCUITest', 'appium:deviceName': 'iPhone 16', 'appium:platformVersion': '18',
+      platformName: 'iOS', 'appium:automationName': 'XCUITest', 'appium:deviceName': 'iPhone 16', 'appium:platformVersion': requestedOS,
       'appium:app': app, 'appium:newCommandTimeout': 45,
       'bstack:options': { userName: user, accessKey: key, appiumVersion: '1.21.0', projectName: 'LocalSend sprint diagnostics', buildName: ownName, sessionName: ownName, idleTimeout: 45, video: true, debug: true },
     }, firstMatch: [{}] } }, 90000);
@@ -278,7 +280,10 @@ if (process.argv.includes('--cleanup')) {
     await save('session.private.json', { id: sid, name: ownName, capabilities: safeCaps, deadline: new Date(deadline).toISOString() });
     const provider = await request(`${api}/sessions/${sid}.json`);
     await save('provider-environment.private.json', provider);
-    if (provider.automation_session?.name !== ownName || provider.automation_session?.device !== 'iPhone 16' || provider.automation_session?.os_version !== '18.5') throw new Error('Exact owned iPhone16/iOS18.5 environment not confirmed');
+    await save('environment-version-binding.json', { catalogOS, requestedPlatformVersion: requestedOS, requiredActualOS: expectedOS,
+      actualDevice: provider.automation_session?.device ?? null, actualOS: provider.automation_session?.os_version ?? null,
+      actualCapabilities: safeCaps, exactMinorSelectionClaimed: false });
+    if (provider.automation_session?.name !== ownName || provider.automation_session?.device !== 'iPhone 16' || provider.automation_session?.os_version !== expectedOS) throw new Error(`Exact owned iPhone16/iOS${expectedOS} environment not confirmed`);
     await save('automation-pin.json', { requestedAppiumVersion: '1.21.0', nativeRoutes: 'existing W3C routes only' });
     let source = await capture('startup');
     if (/XCUIElementTypeAlert\b/.test(source)) {
