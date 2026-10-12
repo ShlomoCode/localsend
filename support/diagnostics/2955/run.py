@@ -349,7 +349,7 @@ def native_window_geometry(window):
     return values, raw
 
 
-def native_dark_components(screenshot, dimensions, region, threshold):
+def native_pixel_components(screenshot, dimensions, region, threshold, bright=False):
     width, height = dimensions
     raw = control_cmd('ffmpeg', '-v', 'error', '-i', str(screenshot), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1', timeout=5, binary=True)
     if len(raw) != width*height*3:
@@ -357,17 +357,20 @@ def native_dark_components(screenshot, dimensions, region, threshold):
     x0, y0, x1, y1 = region
     if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
         raise RuntimeError('Native pixel observation region is outside the original screen')
-    dark = {(x, y) for y in range(y0, y1) for x in range(x0, x1) if max(raw[(y*width+x)*3:(y*width+x)*3+3]) < threshold}
+    if bright:
+        remaining_pixels = {(x, y) for y in range(y0, y1) for x in range(x0, x1) if min(raw[(y*width+x)*3:(y*width+x)*3+3]) > threshold}
+    else:
+        remaining_pixels = {(x, y) for y in range(y0, y1) for x in range(x0, x1) if max(raw[(y*width+x)*3:(y*width+x)*3+3]) < threshold}
     components = []
-    while dark:
-        seed = dark.pop()
+    while remaining_pixels:
+        seed = remaining_pixels.pop()
         component = [seed]
         pending = [seed]
         while pending:
             x, y = pending.pop()
             for neighbor in ((x-1,y), (x+1,y), (x,y-1), (x,y+1)):
-                if neighbor in dark:
-                    dark.remove(neighbor)
+                if neighbor in remaining_pixels:
+                    remaining_pixels.remove(neighbor)
                     component.append(neighbor)
                     pending.append(neighbor)
         xs, ys = zip(*component)
@@ -410,6 +413,8 @@ def rendered_sender_label(label, tooltip_context=None):
     ocr_psm = '11'
     tooltip_bubble = None
     tooltip_crop = None
+    tooltip_text = None
+    tooltip_text_crop = None
     ocr_image = OUT / (prefix + '-ocr3x.png')
     ocr_filter = 'format=gray,lut=y=if(lt(val\\,180)\\,0\\,255),scale=iw*3:ih*3'
     if tooltip_context is not None:
@@ -417,7 +422,7 @@ def rendered_sender_label(label, tooltip_context=None):
         _, row_top, _, row_height = server_row['bounds']
         region = [x+width//2, max(y, int(row_top-8*row_height)), x+width, min(y+height, int(row_top+8*row_height))]
         candidates = []
-        for component in native_dark_components(screenshot, screenshot_dimensions, region, 140):
+        for component in native_pixel_components(screenshot, screenshot_dimensions, region, 140):
             bx, by, bw, bh = component['bounds']
             if 20 <= bw <= 200 and 15 <= bh <= 50 and bx <= center[0] < bx+bw and not by <= center[1] < by+bh and component['pixels'] >= bw*bh//2:
                 candidates.append(component)
@@ -428,10 +433,30 @@ def rendered_sender_label(label, tooltip_context=None):
         bx, by, bw, bh = tooltip_bubble['bounds']
         tooltip_crop = OUT / (prefix + '-tooltip-bubble.png')
         control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', f'crop={bw}:{bh}:{bx}:{by}', '-frames:v', '1', str(tooltip_crop), timeout=5)
-        ocr_origin = [bx, by]
+        letters = []
+        bright_components = native_pixel_components(screenshot, screenshot_dimensions, [bx,by,bx+bw,by+bh], 180, bright=True)
+        for component in bright_components:
+            lx, ly, lw, lh = component['bounds']
+            if bx < lx and by < ly and lx+lw < bx+bw and ly+lh < by+bh and component['pixels'] >= 3 and lh >= 3:
+                letters.append(component)
+        log('native-tooltip-text-components', {'screenshot': screenshot.name, 'bubble': tooltip_bubble, 'foreground_threshold': 180, 'boundary_touching_excluded': True, 'all_components': bright_components, 'letters': letters})
+        if not 1 <= len(letters) <= 12:
+            raise RuntimeError('Actual Tooltip text components are absent or ambiguous')
+        tx = min(letter['bounds'][0] for letter in letters)
+        ty = min(letter['bounds'][1] for letter in letters)
+        right = max(letter['bounds'][0]+letter['bounds'][2] for letter in letters)
+        bottom = max(letter['bounds'][1]+letter['bounds'][3] for letter in letters)
+        if not (8 <= right-tx <= 100 and 4 <= bottom-ty <= 20):
+            raise RuntimeError('Actual Tooltip text does not form the selected single line')
+        cx, cy = max(bx, tx-2), max(by, ty-2)
+        cw, ch = min(bx+bw, right+2)-cx, min(by+bh, bottom+2)-cy
+        tooltip_text = {'bounds': [tx,ty,right-tx,bottom-ty], 'letters': letters, 'crop_bounds': [cx,cy,cw,ch], 'native_margin': 2}
+        tooltip_text_crop = OUT / (prefix + '-tooltip-text.png')
+        control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', f'crop={cw}:{ch}:{cx}:{cy}', '-frames:v', '1', str(tooltip_text_crop), timeout=5)
+        ocr_origin = [cx, cy]
         ocr_padding = 4
         ocr_psm = '7'
-        ocr_filter = f'crop={bw}:{bh}:{bx}:{by},format=gray,lut=y=if(lt(val\\,180)\\,0\\,255),negate,pad=iw+8:ih+8:4:4:white,scale=iw*3:ih*3'
+        ocr_filter = f'crop={cw}:{ch}:{cx}:{cy},format=gray,lut=y=if(lt(val\\,180)\\,0\\,255),negate,pad=iw+8:ih+8:4:4:white,scale=iw*3:ih*3'
     control_cmd('ffmpeg', '-y', '-v', 'error', '-i', str(screenshot), '-vf', ocr_filter, '-frames:v', '1', str(ocr_image), timeout=10)
     raw = control_cmd('tesseract', str(ocr_image), 'stdout', '--psm', ocr_psm, 'tsv', timeout=15)
     (OUT / (prefix + '.tsv')).write_text(raw)
@@ -442,10 +467,10 @@ def rendered_sender_label(label, tooltip_context=None):
         left, top, w, h = (int(row[key])/ocr_scale for key in ('left', 'top', 'width', 'height'))
         left += ocr_origin[0]-ocr_padding
         top += ocr_origin[1]-ocr_padding
-        sx, sy, sw, sh = tooltip_bubble['bounds'] if tooltip_bubble else geometry
+        sx, sy, sw, sh = tooltip_text['crop_bounds'] if tooltip_text else geometry
         if w > 0 and h > 0 and sx <= left and sy <= top and left+w <= sx+sw and top+h <= sy+sh:
             matches.append({'label': label, 'bounds': [left, top, w, h], 'confidence': float(row['conf'])})
-    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': geometry, 'absolute_geometry': absolute_geometry, 'xdotool_geometry': raw_geometry, 'coordinate_system': 'X11 root pixels from original full-screen image', 'screenshot_dimensions': screenshot_dimensions, 'image_probe': image_probe, 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter, 'ocr_origin': ocr_origin, 'ocr_padding': ocr_padding, 'ocr_psm': ocr_psm, 'tooltip_bubble': tooltip_bubble, 'tooltip_crop': tooltip_crop.name if tooltip_crop else None}
+    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': geometry, 'absolute_geometry': absolute_geometry, 'xdotool_geometry': raw_geometry, 'coordinate_system': 'X11 root pixels from original full-screen image', 'screenshot_dimensions': screenshot_dimensions, 'image_probe': image_probe, 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter, 'ocr_origin': ocr_origin, 'ocr_padding': ocr_padding, 'ocr_psm': ocr_psm, 'tooltip_bubble': tooltip_bubble, 'tooltip_crop': tooltip_crop.name if tooltip_crop else None, 'tooltip_text': tooltip_text, 'tooltip_text_crop': tooltip_text_crop.name if tooltip_text_crop else None}
     write(prefix + '.json', observation)
     if len(matches) > 1:
         raise RuntimeError('Ambiguous rendered sender label')
@@ -507,7 +532,7 @@ def rendered_server_glyphs(observation, row):
     x0, x1 = wx+ww//2, wx+ww
     y0, y1 = max(wy, int(top-2*row_height)), min(wy+wh, int(top+3*row_height))
     glyphs = []
-    for component in native_dark_components(OUT / observation['screenshot'], observation['screenshot_dimensions'], [x0,y0,x1,y1], 100):
+    for component in native_pixel_components(OUT / observation['screenshot'], observation['screenshot_dimensions'], [x0,y0,x1,y1], 100):
         _, _, gw, gh = component['bounds']
         if 8 <= gw <= 30 and 8 <= gh <= 30 and component['pixels'] >= 16:
             glyphs.append(component)
