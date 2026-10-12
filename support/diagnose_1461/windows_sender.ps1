@@ -185,6 +185,53 @@ public static class SenderInput {
 '@
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class SenderObservedWindow {
+ public long Hwnd; public uint Pid,ThreadId; public string ClassName;
+}
+public class SenderGuiObservation {
+ public uint AppThreadId,AppPid,ControllerThreadId,FocusThreadId,Flags;
+ public int Size,Win32Error,CaretLeft,CaretTop,CaretRight,CaretBottom;
+ public bool Success; public string Error,CaretCoordinates="client coordinates of caret HWND; no OS caret does not exclude a Flutter-rendered caret";
+ public long AppLayout,ControllerLayout,FocusLayout;
+ public uint ControlScan,AScan,CScan;
+ public SenderObservedWindow Foreground,Active,Focus,Capture,MenuOwner,MoveSize,Caret;
+}
+public static class SenderObservationNative {
+ [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left,Top,Right,Bottom; }
+ [StructLayout(LayoutKind.Sequential)] private struct GUITHREADINFO {
+  public uint Size,Flags; public IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret; public RECT CaretRect;
+ }
+ [DllImport("user32.dll",SetLastError=true)] private static extern bool GetGUIThreadInfo(uint threadId,ref GUITHREADINFO info);
+ [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd,StringBuilder text,int size);
+ [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint threadId);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern uint MapVirtualKeyEx(uint code,uint mapType,IntPtr layout);
+ [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+ [DllImport("kernel32.dll")] private static extern void SetLastError(uint error);
+ private static SenderObservedWindow Describe(IntPtr hwnd) {
+  var result=new SenderObservedWindow {Hwnd=hwnd.ToInt64()};
+  if(hwnd!=IntPtr.Zero){uint pid;result.ThreadId=GetWindowThreadProcessId(hwnd,out pid);result.Pid=pid;var name=new StringBuilder(256);GetClassName(hwnd,name,name.Capacity);result.ClassName=name.ToString();}
+  return result;
+ }
+ public static SenderGuiObservation Read(IntPtr app) {
+  uint pid;uint thread=GetWindowThreadProcessId(app,out pid);
+  var result=new SenderGuiObservation {AppThreadId=thread,AppPid=pid,ControllerThreadId=GetCurrentThreadId(),Size=Marshal.SizeOf(typeof(GUITHREADINFO)),Foreground=Describe(GetForegroundWindow())};
+  result.ControllerLayout=GetKeyboardLayout(result.ControllerThreadId).ToInt64();
+  if(thread==0){result.Error="App window thread unavailable; GUI-thread/layout queries withheld. Win32Error is not observed for this local rejection.";return result;}
+  result.AppLayout=GetKeyboardLayout(thread).ToInt64();
+  // MAPVK_VK_TO_VSC_EX is a read-only layout query, not dispatched-message evidence.
+  var layout=new IntPtr(result.AppLayout);result.ControlScan=MapVirtualKeyEx(0x11,4,layout);result.AScan=MapVirtualKeyEx(0x41,4,layout);result.CScan=MapVirtualKeyEx(0x43,4,layout);
+  var info=new GUITHREADINFO {Size=(uint)result.Size};SetLastError(0);result.Success=GetGUIThreadInfo(thread,ref info);result.Win32Error=Marshal.GetLastWin32Error();
+  if(result.Success){result.Flags=info.Flags;result.Active=Describe(info.Active);result.Focus=Describe(info.Focus);result.Capture=Describe(info.Capture);result.MenuOwner=Describe(info.MenuOwner);result.MoveSize=Describe(info.MoveSize);result.Caret=Describe(info.Caret);result.CaretLeft=info.CaretRect.Left;result.CaretTop=info.CaretRect.Top;result.CaretRight=info.CaretRect.Right;result.CaretBottom=info.CaretRect.Bottom;result.FocusThreadId=result.Focus.ThreadId;if(result.FocusThreadId!=0)result.FocusLayout=GetKeyboardLayout(result.FocusThreadId).ToInt64();}
+  return result;
+ }
+}
+'@
 $ocrWorker=Join-Path $OutputDirectory 'ocr-worker.ps1'
 [IO.File]::WriteAllText($ocrWorker,@'
 param([string]$Image,[string]$Result,[string]$DeadlineUtc)
@@ -247,6 +294,32 @@ function Window([IntPtr]$hwnd=$appHwnd){
  $w=@([ReceiverNative]::All()|Where-Object{$_.Hwnd -eq $hwnd.ToInt64() -and $_.Pid -eq $app.Id -and $_.Visible});if($w.Count -ne 1 -or $w[0].Width -lt 100){throw 'Owned visible window unavailable.'};return $w[0]
 }
 function Focus([IntPtr]$hwnd=$appHwnd){[void][ReceiverNative]::Activate($hwnd);Start-Sleep -Milliseconds 200;if([ReceiverNative]::GetForegroundWindow() -ne $hwnd){throw 'Owned window is not foreground; input withheld.'}}
+function InputObservation([string]$label,[bool]$rawFrame=$false){
+ # Read-only receipts: no activation, worker, OCR, UIA, extra input or polling.
+ try{
+ $script:sequence++;$name=('{0:D4}-{1}' -f $script:sequence,($label -replace '[^a-zA-Z0-9-]','-'))
+ $receipt=[ordered]@{startedUtc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;expectedProcessStartedTicks=$appStartedTicks;rawFrameRequested=$rawFrame;before=$null;after=$null;beforeNative=$null;afterNative=$null;captureOwnershipQualified=$false;errors=@();inputConfiguration=@{mode='VK';control=0x11;targets=@(0x41,0x43);scan=0;downFlags=0;upFlags=2;events='Control down, target down, target up, Control up';scope='Configured INPUT only; not OS-dispatched scan metadata'}}
+ try{$receipt['before']=Window;$receipt['beforeProcessStartedTicks']=$app.StartTime.ToUniversalTime().Ticks;$receipt['beforeNative']=[SenderObservationNative]::Read($appHwnd)}catch{$receipt.errors+=$_.Exception.Message}
+ if($rawFrame -and $receipt.before){
+  $bitmap=$null;$g=$null
+  try{$w=$receipt.before;$bitmap=[Drawing.Bitmap]::new($w.Width,$w.Height);$g=[Drawing.Graphics]::FromImage($bitmap);$g.CopyFromScreen($w.Left,$w.Top,0,0,$bitmap.Size);$path=Join-Path $OutputDirectory ($name+'.png');$bitmap.Save($path,[Drawing.Imaging.ImageFormat]::Png);$receipt['screenshot']=$path;$receipt['capturedUtc']=[DateTime]::UtcNow.ToString('o')}catch{$receipt.errors+=$_.Exception.Message}finally{if($g){$g.Dispose()};if($bitmap){$bitmap.Dispose()}}
+ }
+ try{$receipt['after']=Window;$receipt['afterNative']=[SenderObservationNative]::Read($appHwnd);$receipt['processStartedTicks']=$app.StartTime.ToUniversalTime().Ticks}catch{$receipt.errors+=$_.Exception.Message}
+ if($receipt.Contains('screenshot') -and $receipt.before -and $receipt.after -and $receipt.beforeNative -and $receipt.afterNative){
+  $b=$receipt.before;$a=$receipt.after
+  $receipt.captureOwnershipQualified=$b.Hwnd -eq $a.Hwnd -and $b.Left -eq $a.Left -and $b.Top -eq $a.Top -and $b.Width -eq $a.Width -and $b.Height -eq $a.Height -and $receipt.beforeNative.AppPid -eq $app.Id -and $receipt.afterNative.AppPid -eq $app.Id -and $receipt.beforeNative.Foreground.Hwnd -eq $appHwnd.ToInt64() -and $receipt.afterNative.Foreground.Hwnd -eq $appHwnd.ToInt64() -and $receipt.beforeProcessStartedTicks -eq $appStartedTicks -and $receipt.processStartedTicks -eq $appStartedTicks
+ }
+ try{
+  if(-not $script:inputObservationRuntime){
+  $assembly=[Windows.Forms.SendKeys].Assembly;$location=$assembly.Location
+  $script:inputObservationRuntime=@{observedUtc=[DateTime]::UtcNow.ToString('o');powershell=$PSVersionTable.PSVersion.ToString();framework=[Runtime.InteropServices.RuntimeInformation]::FrameworkDescription;clr=[Environment]::Version.ToString();apartment=[Threading.Thread]::CurrentThread.GetApartmentState().ToString();winFormsAssembly=$assembly.FullName;winFormsLocation=$location;winFormsSha256=if($location -and [IO.File]::Exists($location)){(Get-FileHash -LiteralPath $location -Algorithm SHA256).Hash}else{$null}}
+  }
+  $receipt['runtime']=$script:inputObservationRuntime
+ }catch{$receipt.errors+=$_.Exception.Message}
+ $receipt['endedUtc']=[DateTime]::UtcNow.ToString('o');$report.actions+=@{name='read-only input observation';label=$label;receipt=$receipt}
+ try{Json (Join-Path $OutputDirectory ($name+'.json')) $receipt;Persist}catch{$receipt.errors+=$_.Exception.Message}
+ }catch{$report.actions+=@{name='read-only input observation error';label=$label;error=$_.Exception.Message}}
+}
 function Snapshot([string]$label,[IntPtr]$hwnd=$appHwnd){
  $script:sequence++;$name=('{0:D4}-{1}' -f $script:sequence,($label -replace '[^a-zA-Z0-9-]','-'));$w=Window $hwnd
  $bitmap=[Drawing.Bitmap]::new($w.Width,$w.Height)
@@ -348,7 +421,7 @@ function ControlShortcut([string]$key){
 }
 function FavoriteFieldReadback([string]$expected,[string]$field){
  if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'Favorite clipboard readback requires an explicitly STA sender controller; infrastructure admission failed.'}
- Focus;$before=Window;$marker='localsend1461-readback-'+[Guid]::NewGuid().ToString('N')
+ Focus;InputObservation ('favorite-'+$field+'-after-existing-focus');$before=Window;$marker='localsend1461-readback-'+[Guid]::NewGuid().ToString('N')
  [Windows.Forms.Clipboard]::SetText($marker)
  if([Windows.Forms.Clipboard]::GetText() -cne $marker){throw 'Fresh clipboard marker was not established; favorite readback withheld.'}
  ControlShortcut 'A'
@@ -360,7 +433,7 @@ function FavoriteFieldReadback([string]$expected,[string]$field){
  $after=Window
  $observation=@{utc=$copyObservedUtc.ToString('o');field=$field;expected=$expected;actual=$actual;marker=$marker;markerReplaced=$actual -cne $marker;withinCopyDeadline=$withinDeadline;processId=$app.Id;before=$before;after=$after;foreground=[ReceiverNative]::GetForegroundWindow().ToInt64();method='Explicit native VK_CONTROL+VK_A Select All then VK_CONTROL+VK_C Copy on the source-defined focused field; fresh clipboard marker prevents stale acceptance'}
  $report.actions+=@{name='favorite focused-field readback';observation=$observation};Persist
- if(-not $withinDeadline -or $actual -ceq $marker -or $actual -cne $expected -or $before.Hwnd -ne $after.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw "Actual focused favorite field readback failed: $field"}
+ if(-not $withinDeadline -or $actual -ceq $marker -or $actual -cne $expected -or $before.Hwnd -ne $after.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){try{InputObservation ('favorite-'+$field+'-failed-readback') $true}catch{$report.actions+=@{name='failed-readback observation error';error=$_.Exception.Message}};throw "Actual focused favorite field readback failed: $field"}
  return $observation
 }
 function Fixture([string]$key){if($key -notin @('control','failed')){throw 'fixture must be control or failed.'};return $report.fixtures[$key]}
@@ -551,6 +624,7 @@ function Execute($c){
    # 1.14.0 FavoriteEditDialog autofocuses IP. Tab order is IP -> Port.
    # Retain the dialog and typed input; no profile injection or protocol registration replaces the UI.
    ControlShortcut 'A';[System.Windows.Forms.SendKeys]::SendWait($receiverHost)
+   InputObservation 'favorite-ip-after-literal-typing' $true
    $ipReadback=FavoriteFieldReadback $receiverHost 'IP Address'
    [System.Windows.Forms.SendKeys]::SendWait('{TAB}');ControlShortcut 'A';[System.Windows.Forms.SendKeys]::SendWait([string]$receiverPort)
    $portReadback=FavoriteFieldReadback ([string]$receiverPort) 'Port'
