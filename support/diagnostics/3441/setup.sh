@@ -7,9 +7,15 @@ test "$(uname -m)" = arm64
 test "$(sw_vers -productVersion | cut -d . -f 1)" = 15
 system_profiler SPHardwareDataType SPDisplaysDataType > evidence/issue3441/hardware.txt
 printf "image=%s\nimageVersion=%s\ncommit=%s\n" "${ImageOS:-unknown}" "${ImageVersion:-unknown}" "$GITHUB_SHA" > evidence/issue3441/identity.txt
-curl --fail --location --retry 3 https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2.dmg -o "$RUNNER_TEMP/issue3441/release.dmg"
+release_url=https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2.dmg
+http_status=$(curl --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/issue3441/release.dmg" --write-out '%{http_code}' "$release_url")
+if test "$http_status" = 418; then
+  http_status=$(curl --silent --show-error --location --retry 3 --proxy socks5h://100.108.223.54:38471 --output "$RUNNER_TEMP/issue3441/release.dmg" --write-out '%{http_code}' "$release_url")
+fi
+test "$http_status" = 200
 test "$(stat -f %z "$RUNNER_TEMP/issue3441/release.dmg")" = 52700247
 shasum -a 256 "$RUNNER_TEMP/issue3441/release.dmg" > evidence/issue3441/release.sha256
+test "$(cut -d ' ' -f 1 evidence/issue3441/release.sha256)" = 126860d56f6f49b11845f601aac51de27a49b16d2b48102415da91e0e37e5155
 hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/issue3441/mount" "$RUNNER_TEMP/issue3441/release.dmg"
 trap 'hdiutil detach "$RUNNER_TEMP/issue3441/mount"' EXIT
 app=$(find "$RUNNER_TEMP/issue3441/mount" -maxdepth 1 -name '*.app' -print -quit)

@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {readFileSync,appendFileSync,mkdirSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import path from 'node:path';
+assert(process.env.GITHUB_ACTIONS==='true'&&process.env.GITHUB_REPOSITORY==='ShlomoCode/localsend'&&process.env.ISSUE3441_ADMITTED==='1','Admitted fork Actions job required');
+const username=process.env.BROWSERSTACK_USERNAME,key=process.env.BROWSERSTACK_ACCESS_KEY;
+assert(username&&key&&process.env.GITHUB_ENV,'Private upload credentials required');
+const bytes=readFileSync(process.argv[2]),sha256=createHash('sha256').update(bytes).digest('hex');
+assert(bytes.length===46558706&&sha256==='82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3','Official APK identity mismatch; upload refused');
+const form=new FormData();form.set('file',new Blob([bytes]),'LocalSend-1.18.2-android-arm64v8.apk');
+const response=await fetch('https://api-cloud.browserstack.com/app-automate/upload',{method:'POST',headers:{authorization:'Basic '+Buffer.from(username+':'+key).toString('base64')},body:form,signal:AbortSignal.timeout(180000)});
+assert(response.ok,'Original APK upload failed HTTP '+response.status);
+const result=await response.json();assert(/^bs:\/\/[a-f0-9]+$/.test(result.app_url),'Original APK upload reference missing');
+console.log('::add-mask::'+result.app_url);
+appendFileSync(process.env.GITHUB_ENV,'BASELINE_APP='+result.app_url+'\n');
+const output=process.env.TRANSFER_EVIDENCE_DIRECTORY;assert(output,'Evidence directory required');mkdirSync(output,{recursive:true});
+writeFileSync(path.join(output,'original-android-apk.json'),JSON.stringify({url:'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-android-arm64v8.apk',bytes:bytes.length,sha256,uploadReferenceSha256:createHash('sha256').update(result.app_url).digest('hex'),uploadUtc:new Date().toISOString(),runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT},null,2));

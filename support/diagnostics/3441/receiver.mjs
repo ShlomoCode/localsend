@@ -106,18 +106,23 @@ export async function startCase(name){
  active={name,expected,before,capture,accepted:false,acceptFailure:null};
  active.poll=setInterval(()=>{
    if(active.accepted||active.acceptFailure)return;
-   try{const tree=JSON.parse(execFileSync(ax,[bundle],{encoding:"utf8"}));const buttons=tree.elements.filter(e=>e.AXRole==="AXButton"&&(e.AXTitle==="Accept"||e.AXDescription==="Accept"||e.AXValue==="Accept"));
+   try{const tree=JSON.parse(execFileSync(ax,[bundle],{encoding:"utf8",timeout:10000,maxBuffer:4*1024*1024}));const buttons=tree.elements.filter(e=>e.AXRole==="AXButton"&&e.AXEnabled==="1"&&(e.AXTitle==="Accept"||e.AXDescription==="Accept"||e.AXValue==="Accept"));
      if(buttons.length===1){snapshot(name+"-approval");press("Accept");active.accepted=true;}
    }catch(e){active.acceptFailure=e.message;log("approval-harness-error",{message:e.message});}
  },1000);
 }
 export async function finishCase(){
  if(!active)throw Error("No active case");const c=active;clearInterval(c.poll);
- snapshot(c.name+"-after");await c.capture.stop();
+ snapshot(c.name+"-after");
  const after=inventory();const beforeNames=new Set(c.before.map(f=>f.name));const added=after.filter(f=>!beforeNames.has(f.name));
  const files=c.expected.map(row=>{const dot=row.name.lastIndexOf(".");const base=row.name.slice(0,dot),ext=row.name.slice(dot);const candidates=added.filter(f=>f.name===row.name||(f.name.startsWith(base+" (")&&f.name.endsWith(")"+ext)));const matched=candidates.find(f=>f.bytes===row.bytes&&f.sha256===row.sha256);return {...row,actual:matched??null,candidates,match:Boolean(matched)};});
- const result={case:c.name,actualUIAccept:c.accepted,acceptFailure:c.acceptFailure,files,inventory:after,beforeInventory:c.before,passed:c.accepted&&!c.acceptFailure&&files.every(f=>f.match)};
- writeFileSync(root+"/"+c.name+"-result.json",JSON.stringify(result,null,2));active=null;log("case-finish",{name:c.name,passed:result.passed});return result;
+ const result={case:c.name,actualUIAccept:c.accepted,acceptFailure:c.acceptFailure,files,inventory:after,beforeInventory:c.before,recordingStatus:"pending stop and decode",passed:false};
+ const save=()=>writeFileSync(root+"/"+c.name+"-result.json",JSON.stringify(result,null,2));
+ // Saved bytes survive interrupted video finalization; pending/failed capture cannot pass a control.
+ save();
+ try{await c.capture.stop();result.recordingStatus="stopped and decoded";result.passed=c.accepted&&!c.acceptFailure&&files.every(f=>f.match);}
+ catch(error){result.recordingStatus="infrastructure failure";result.recordingError=error.message;save();active=null;log("case-evidence-failure",{name:c.name,error:error.message});throw error;}
+ save();active=null;log("case-finish",{name:c.name,passed:result.passed});return result;
 }
 export async function stopRelay(){
  if(active){

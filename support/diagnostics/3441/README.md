@@ -7,7 +7,7 @@ The readiness workflow installs the official LocalSend 1.18.2 DMG unchanged and 
 - Runner: `macos-15`, documented ARM64 image. The setup requires `uname -m = arm64` and macOS major version 15, and retains the actual image version and hardware model.
 - Reported receiver: M1 with macOS 12.7.6. The cloud OS differs, and the actual hosted hardware model must be read from the retained `hardware.txt`; ARM64 does not establish an M1 match.
 - Readiness: one job, 20-minute hard limit, no BrowserStack sessions, no secrets or tunnel.
-- Proposed later transfer: one job, 45-minute limit and one coordinator-reserved Samsung Android 13 session. The transfer scaffold has no dispatchable workflow yet.
+- Integrated transfer: one `macos-15` job, 45-minute hard limit and one coordinator-reserved Samsung S23 Android 13 session. Its first step records the hard deadline before checkout or preparation; the controller refuses allocation with less than 20 minutes left and reserves the final 10 minutes for cleanup and artifacts.
 - Cleanup stops only `/Applications/LocalSend.app/Contents/MacOS/*` and removes the owned temporary directory. The VM is ephemeral. Evidence remains in the Actions artifact.
 
 ## Installation and profile
@@ -35,6 +35,16 @@ The separate native Android helper listens on `127.0.0.1:53318` and relays opaqu
 Start each case before the native sender presses Send. The receiver captures the actual approval screen and presses the single exact `Accept` button. `finishCase()` retains the full destination filename/byte/hash inventory, including the original batch and retry duplicates such as `(2)`, and compares each new saved file with its source. It never removes initial files before retry. Sender completion alone is insufficient; require the receiver evidence and inspect any zero-byte files.
 
 `fixtures.mjs` generates 207 distinct filenames and a separate one-file control, decodes every generated JPEG/MP4, and emits an ordered `manifest.json` with `files` and `cases`. Retry uses the same first 73 source names and exact source bytes, totaling 85,600,000 bytes. That decimal count approximates the screenshot's rounded 85.6 MB. Generated test imagery and legal JPEG COM / MP4 free-box padding differ from the original camera files and do not establish their original contents or sizes.
+
+The transfer workflow is fork-only. Its push trigger matches only `codex/diagnose-3441-transfer` and requires `[issue3441-transfer-admitted]` in the head commit message. Dispatch defaults to no admission. Freeze and source review precede the coordinator's admitted push. The readiness workflow's earlier branch does not match this branch.
+
+The final ten minutes are shared: native scenarios stop at minute 35, controller teardown and provider evidence end by minute 37, independent Android/tunnel cleanup has two minutes, combined signature/capture/app cleanup one minute, and GitHub artifact upload five minutes. `run-transfer.mjs` enforces the absolute minute-37 boundary independently of the controller, retains its exit/time record, and bounds TERM-to-KILL to one second. Interrupted media retention is an infrastructure limit and does not establish an app failure.
+
+The receiver DMG is pinned to 52,700,247 bytes and SHA-256 `126860d56f6f49b11845f601aac51de27a49b16d2b48102415da91e0e37e5155`, recovered from the reviewed readiness run `38207190519`. The unchanged Android ARM64 APK is pinned to 46,558,706 bytes and SHA-256 `82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3`; upload is refused until both match. Evidence binds each private provider app reference through SHA-256 without retaining the reference.
+
+BrowserStack's documented macOS Local download is Intel, so the ARM64 runner uses Apple's supported Rosetta installation. The ZIP is pinned to SHA-256 `bb293eeeeec062f97b380a0de077a2e5aea48b288b4bb654f8274ee6483b2d4d` and its x86_64 binary to `9091089b71864a5f840ba26eb15e141be184676cf2c9f0d821c53cb4cd42d8fb`. Cloud evidence records the binary architecture/version and Android SDK35 tool architecture/version. A changed vendor download fails closed; no guessed ARM URL is used. [BrowserStack release documentation](https://www.browserstack.com/docs/local-testing/releases-and-downloads/release-notes/binary-v8-9) and the [runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md) describe these tools.
+
+The opaque relay's 90-second progress/idle timer and 15-minute peer lifetime remain transport limits. A reset or timeout at this layer is an infrastructure event unless actual native app terminal screens and receiver inventories independently establish the reported behavior. Synthetic media, cloud macOS15, S23 model, Rosetta tunnel tooling and the reverse route remain disclosed differences from the original report.
 
 ## Transport provenance
 
