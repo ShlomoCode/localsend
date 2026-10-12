@@ -128,6 +128,283 @@ function Get-Features {
         @{ name = $_; state = [string]$feature.State }
     })
 }
+function Save-NativeVolumeSnapshot {
+    # Bound this evidence-only stage, including collection and publication, to
+    # the existing guest clock. A separate process bounds storage/CIM cmdlets.
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $value = @{ schemaVersion = 1; status = 'UNAVAILABLE'; systemDrive = $null; windowsDirectory = $null; systemDirectory = $null;
+        partition = $null; partitions = @(); bitLockerStatus = @{ exitCode = $null; timedOut = $false; filteredFields = @{}; status = 'UNAVAILABLE' };
+        reason = 'native_snapshot_incomplete' }
+    $process = $null
+    $workerStarted = $false
+    $candidateValid = $false
+    $request = $null
+    $worker = @'
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+$value = @{ schemaVersion = 1; status = 'UNAVAILABLE'; systemDrive = $null; windowsDirectory = $null; systemDirectory = $null;
+    partition = $null; partitions = @(); bitLockerStatus = @{ exitCode = $null; timedOut = $false; filteredFields = @{}; status = 'UNAVAILABLE'; cleanupConfirmed = $true };
+    reason = 'native_volume_query_failed' }
+function Limit-Field($Text) {
+    $textValue = [string]$Text
+    if ($textValue.Length -gt 256) { return $textValue.Substring(0, 256) }
+    return $textValue
+}
+function Partition-Fields($Partition) {
+    return @{ diskNumber = [int]$Partition.DiskNumber; partitionNumber = [int]$Partition.PartitionNumber;
+        guid = Limit-Field $Partition.Guid; gptType = Limit-Field $Partition.GptType;
+        offsetBytes = ([uint64]$Partition.Offset).ToString([Globalization.CultureInfo]::InvariantCulture);
+        sizeBytes = ([uint64]$Partition.Size).ToString([Globalization.CultureInfo]::InvariantCulture);
+        driveLetter = Limit-Field $Partition.DriveLetter; isBoot = [bool]$Partition.IsBoot; isSystem = [bool]$Partition.IsSystem }
+}
+try {
+    $systems = @(Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 4)
+    if ($systems.Count -ne 1) { throw 'invalid_native_os_identity' }
+    $os = $systems[0]
+    $value.systemDrive = Limit-Field $os.SystemDrive
+    $value.windowsDirectory = Limit-Field $os.WindowsDirectory
+    $value.systemDirectory = Limit-Field $os.SystemDirectory
+    if ($value.systemDrive -notmatch '^[A-Za-z]:$' -or
+        $value.windowsDirectory -notmatch '^[A-Za-z]:\\Windows\\?$' -or
+        $value.windowsDirectory.Substring(0, 2) -ine $value.systemDrive -or
+        $value.systemDirectory -notmatch '^[A-Za-z]:\\Windows\\System32\\?$' -or
+        $value.systemDirectory.Substring(0, 2) -ine $value.systemDrive) { throw 'invalid_native_system_drive' }
+    $target = @(Get-Partition -DriveLetter $value.systemDrive.Substring(0, 1))
+    if ($target.Count -ne 1 -or $target[0].DiskNumber -ne 0) { throw 'ambiguous_or_unowned_system_partition' }
+    $value.partition = Partition-Fields $target[0]
+    $guidPattern = '^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$'
+    if ($value.partition.partitionNumber -lt 1 -or $value.partition.guid -notmatch $guidPattern -or
+        $value.partition.gptType -notmatch $guidPattern -or
+        $value.partition.guid.StartsWith('{') -ne $value.partition.guid.EndsWith('}') -or
+        $value.partition.gptType.StartsWith('{') -ne $value.partition.gptType.EndsWith('}') -or
+        [uint64]$value.partition.sizeBytes -eq 0) { throw 'native_gpt_identity_unavailable' }
+    $partitions = @(Get-Partition -DiskNumber 0)
+    if ($partitions.Count -lt 1 -or $partitions.Count -gt 8) { throw 'native_partition_inventory_outside_bounds' }
+    $numbers = @{}
+    foreach ($partition in $partitions) {
+        if ($partition.DiskNumber -ne 0 -or $partition.PartitionNumber -lt 1 -or $numbers.ContainsKey([int]$partition.PartitionNumber)) {
+            throw 'invalid_native_partition_inventory'
+        }
+        $numbers[[int]$partition.PartitionNumber] = $true
+        $entry = Partition-Fields $partition
+        $entry.volume = @{ status = 'UNAVAILABLE'; reason = 'associated_volume_unavailable' }
+        try {
+            $volumes = @(Get-Volume -Partition $partition)
+            if ($volumes.Count -eq 1) {
+                $volume = $volumes[0]
+                $entry.volume = @{ status = 'AVAILABLE'; driveLetter = Limit-Field $volume.DriveLetter;
+                    fileSystemType = Limit-Field $volume.FileSystemType; fileSystemLabel = Limit-Field $volume.FileSystemLabel;
+                    sizeBytes = ([uint64]$volume.Size).ToString([Globalization.CultureInfo]::InvariantCulture);
+                    healthStatus = Limit-Field $volume.HealthStatus;
+                    operationalStatus = Limit-Field ($volume.OperationalStatus -join ',') }
+            }
+        } catch { }
+        $value.partitions += $entry
+    }
+    $matches = @($value.partitions | Where-Object { $_.partitionNumber -eq $value.partition.partitionNumber -and
+        $_.guid -ieq $value.partition.guid -and $_.gptType -ieq $value.partition.gptType -and
+        $_.offsetBytes -ceq $value.partition.offsetBytes -and $_.sizeBytes -ceq $value.partition.sizeBytes })
+    if ($matches.Count -ne 1) { throw 'native_target_inventory_mismatch' }
+    # The raw manage-bde output stays private. Retain only these English status
+    # fields; Identification and Key protectors are never copied into evidence.
+    $native = $null
+    $nativeStarted = $false
+    $nativeClock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = "$env:SystemRoot\System32\manage-bde.exe"
+        $start.Arguments = '-status ' + $value.systemDrive
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $native = New-Object Diagnostics.Process
+        $native.StartInfo = $start
+        $nativeStarted = $native.Start()
+        if (-not $nativeStarted) { throw 'bitlocker_status_start_failed' }
+        $stdoutTask = $native.StandardOutput.ReadToEndAsync()
+        $stderrTask = $native.StandardError.ReadToEndAsync()
+        $value.bitLockerStatus.timedOut = -not $native.WaitForExit([Math]::Max(0, 9500 - [int]$nativeClock.ElapsedMilliseconds))
+        if (-not $value.bitLockerStatus.timedOut) {
+            $value.bitLockerStatus.exitCode = $native.ExitCode
+            if (-not $stdoutTask.Wait(100) -or -not $stderrTask.Wait(100)) { throw 'bitlocker_status_pipes_unavailable' }
+            $names = @{ 'Size' = 'size'; 'BitLocker Version' = 'bitLockerVersion'; 'Conversion Status' = 'conversionStatus';
+                'Percentage Encrypted' = 'percentageEncrypted'; 'Encryption Method' = 'encryptionMethod';
+                'Protection Status' = 'protectionStatus'; 'Lock Status' = 'lockStatus' }
+            foreach ($line in ($stdoutTask.Result -split '\r?\n')) {
+                if ($line -match '^\s*(Size|BitLocker Version|Conversion Status|Percentage Encrypted|Encryption Method|Protection Status|Lock Status)\s*:\s*(.*?)\s*$') {
+                    $key = $names[$Matches[1]]
+                    if ($value.bitLockerStatus.filteredFields.ContainsKey($key)) { throw 'duplicate_bitlocker_status_field' }
+                    $value.bitLockerStatus.filteredFields[$key] = Limit-Field $Matches[2]
+                }
+            }
+            $filteredJson = $value.bitLockerStatus.filteredFields | ConvertTo-Json -Compress
+            if ([Text.Encoding]::UTF8.GetByteCount($filteredJson) -gt 4096) { throw 'bitlocker_status_output_outside_bounds' }
+            if ($value.bitLockerStatus.exitCode -eq 0 -and $value.bitLockerStatus.filteredFields.Count -eq 7) {
+                $value.bitLockerStatus.status = 'AVAILABLE'
+            }
+        }
+    } catch {
+        $value.bitLockerStatus.status = 'UNAVAILABLE'
+        $value.bitLockerStatus.filteredFields = @{}
+    } finally {
+        if ($null -ne $native) {
+            if ($nativeStarted) {
+                $value.bitLockerStatus.cleanupConfirmed = $false
+                try {
+                    if (-not $native.HasExited) { $native.Kill() }
+                    $remaining = [Math]::Max(0, 10000 - [int]$nativeClock.ElapsedMilliseconds)
+                    $value.bitLockerStatus.cleanupConfirmed = $native.WaitForExit($remaining)
+                    if ($value.bitLockerStatus.cleanupConfirmed) { $value.bitLockerStatus.exitCode = $native.ExitCode }
+                } catch { }
+            }
+            try { $native.Dispose() } catch { }
+        }
+    }
+    if ($value.bitLockerStatus.cleanupConfirmed) {
+        $value.status = 'AVAILABLE'
+        $value.Remove('reason')
+    } else {
+        $value.status = 'UNAVAILABLE'
+        $value.reason = 'bitlocker_process_cleanup_unconfirmed'
+    }
+} catch {
+    $value.status = 'UNAVAILABLE'
+    # Fixed reasons avoid retaining arbitrary CIM errors or process output.
+    $value.reason = 'native_volume_identity_or_inventory_unavailable'
+}
+[Console]::Out.WriteLine(($value | ConvertTo-Json -Depth 8 -Compress))
+'@
+    function Wait-SnapshotAsync($Operation) {
+        $remaining = 19000 - [int]$clock.ElapsedMilliseconds
+        if ($remaining -le 0 -or -not $Operation.AsyncWaitHandle.WaitOne($remaining)) { throw 'Native snapshot publication deadline' }
+    }
+    try {
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $start.Arguments = '-NoProfile -NonInteractive -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($worker))
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.StandardOutputEncoding = $utf8
+        $process = New-Object Diagnostics.Process
+        $process.StartInfo = $start
+        $workerStarted = $process.Start()
+        if (-not $workerStarted) { throw 'Native snapshot worker unavailable' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $remaining = [Math]::Max(0, 14500 - [int]$clock.ElapsedMilliseconds)
+        if (-not $process.WaitForExit($remaining)) {
+            $value.reason = 'native_snapshot_timed_out'
+        } elseif ($process.ExitCode -eq 0) {
+            $stdoutReady = $stdoutTask.Wait([Math]::Max(0, 14500 - [int]$clock.ElapsedMilliseconds))
+            $stderrReady = $stderrTask.Wait([Math]::Max(0, 14500 - [int]$clock.ElapsedMilliseconds))
+            if ($stdoutReady -and $stderrReady -and $utf8.GetByteCount($stdoutTask.Result) -le 16384) {
+                $candidate = $stdoutTask.Result | ConvertFrom-Json
+                if ($candidate.schemaVersion -eq 1 -and $candidate.status -in @('AVAILABLE', 'UNAVAILABLE')) {
+                    $value = @{}
+                    foreach ($property in $candidate.PSObject.Properties) { $value[$property.Name] = $property.Value }
+                    $candidateValid = $true
+                }
+            }
+        }
+    } catch { } finally {
+        $cleanupConfirmed = -not $workerStarted
+        if ($null -ne $process -and $workerStarted) {
+            $killer = $null
+            $killerStarted = $false
+            try {
+                if ($process.HasExited) {
+                    # A parsed worker result records its own manage-bde cleanup.
+                    $cleanupConfirmed = $candidateValid -and $value.bitLockerStatus.cleanupConfirmed
+                } else {
+                    # Every exception path stops this exact worker and its tree.
+                    # Collection, taskkill and reap waits share the same clock.
+                    $killStart = New-Object Diagnostics.ProcessStartInfo
+                    $killStart.FileName = "$env:SystemRoot\System32\taskkill.exe"
+                    $killStart.Arguments = '/PID ' + $process.Id + ' /T /F'
+                    $killStart.UseShellExecute = $false
+                    $killStart.CreateNoWindow = $true
+                    $killStart.RedirectStandardOutput = $true
+                    $killStart.RedirectStandardError = $true
+                    $killer = New-Object Diagnostics.Process
+                    $killer.StartInfo = $killStart
+                    $killerStarted = $killer.Start()
+                    if ($killerStarted) {
+                        $null = $killer.StandardOutput.ReadToEndAsync()
+                        $null = $killer.StandardError.ReadToEndAsync()
+                        $remaining = [Math]::Max(0, [Math]::Min(1000, 16000 - [int]$clock.ElapsedMilliseconds))
+                        if ($killer.WaitForExit($remaining) -and $killer.ExitCode -eq 0) {
+                            $remaining = [Math]::Max(0, 16000 - [int]$clock.ElapsedMilliseconds)
+                            $cleanupConfirmed = $process.WaitForExit($remaining)
+                        }
+                    }
+                }
+            } catch { } finally {
+                # Process handles still identify only our own started processes.
+                try {
+                    if (-not $process.HasExited) {
+                        $process.Kill()
+                        $null = $process.WaitForExit([Math]::Max(0, 16000 - [int]$clock.ElapsedMilliseconds))
+                    }
+                } catch { }
+                if ($null -ne $killer) {
+                    try {
+                        if ($killerStarted -and -not $killer.HasExited) {
+                            $killer.Kill()
+                            $null = $killer.WaitForExit([Math]::Max(0, 16000 - [int]$clock.ElapsedMilliseconds))
+                        }
+                    } catch { $cleanupConfirmed = $false }
+                    try { $killer.Dispose() } catch { }
+                }
+            }
+        }
+        if ($null -ne $process) { try { $process.Dispose() } catch { } }
+        $value.cleanupConfirmed = [bool]$cleanupConfirmed
+        if (-not $cleanupConfirmed) {
+            $value.status = 'UNAVAILABLE'
+            $value.reason = 'native_process_cleanup_unconfirmed'
+        }
+    }
+    try {
+        $safe = Protect-Text ($value | ConvertTo-Json -Depth 8 -Compress)
+        if ($utf8.GetByteCount($safe) -gt 16384) {
+            $safe = '{"schemaVersion":1,"status":"UNAVAILABLE","systemDrive":null,"windowsDirectory":null,"systemDirectory":null,"partition":null,"partitions":[],"bitLockerStatus":{"exitCode":null,"timedOut":false,"filteredFields":{},"status":"UNAVAILABLE"},"reason":"native_snapshot_exceeded_output_bound"}'
+        }
+        # Save local evidence before attempting the existing artifact bridge.
+        [IO.File]::WriteAllText((Join-Path $root 'windows-volume-identity.json'), $safe, $utf8)
+        if ($clock.ElapsedMilliseconds -ge 19000) { return }
+        $request = [Net.HttpWebRequest]::Create($config.bridgeUrl + '/artifact/windows-volume-identity.json')
+        $request.Proxy = $null
+        $request.Method = 'POST'
+        $request.Headers['Authorization'] = 'Bearer ' + $config.bearerToken
+        $request.ContentType = 'application/octet-stream'
+        $request.Timeout = [Math]::Max(1, 19000 - [int]$clock.ElapsedMilliseconds)
+        $request.ReadWriteTimeout = $request.Timeout
+        $bytes = $utf8.GetBytes($safe)
+        $request.ContentLength = $bytes.Length
+        $operation = $request.BeginGetRequestStream($null, $null)
+        Wait-SnapshotAsync $operation
+        $stream = $request.EndGetRequestStream($operation)
+        try {
+            $operation = $stream.BeginWrite($bytes, 0, $bytes.Length, $null, $null)
+            Wait-SnapshotAsync $operation
+            $stream.EndWrite($operation)
+        } catch {
+            # Abort unfinished writes before stream disposal can flush them.
+            $request.Abort()
+            throw
+        } finally { $stream.Dispose() }
+        $operation = $request.BeginGetResponse($null, $null)
+        Wait-SnapshotAsync $operation
+        $response = $request.EndGetResponse($operation)
+        try { if ([int]$response.StatusCode -ne 200) { throw 'Native snapshot artifact rejected' } } finally { $response.Dispose() }
+    } catch {
+        # The original WSL scenario continues if metadata or publication fails.
+    } finally { if ($null -ne $request) { $request.Abort() } }
+}
 function Read-Capabilities([string]$Label, [switch]$RequireVirtualization) {
     $path = Join-Path $root 'cpuid.exe'
     if (-not (Test-Path -LiteralPath $path)) { $path = Download-Payload 'cpuid.exe' $config.cpuidSha256 }
@@ -267,6 +544,7 @@ try {
             featureStates = $before; cpuidExecutableSha256 = $ordinary.cpuidExecutableSha256; cpuid = $ordinary.cpuid;
             windows = $windows; secureBoot = $secureBoot; tpmReady = $tpm.TpmReady }
         Send-Json 'ordinary-reboot-control.json' $control
+        try { Save-NativeVolumeSnapshot } catch { }
         $stage = 'enable_supported_wsl_features'
         foreach ($name in $featureNames) {
             $command = "`$ErrorActionPreference='Stop'; Enable-WindowsOptionalFeature -Online -FeatureName '$name' -All -NoRestart | ConvertTo-Json -Compress"

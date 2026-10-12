@@ -15,7 +15,7 @@ const allowedArtifacts = new Set(['windows-identity.json', 'firmware.json', 'fea
   'cpuid-initial.json', 'cpuid-ordinary.json', 'cpuid-features_reboot_pending.json', 'cpuid-msi_reboot_pending.json',
   'bcd-initial.json', 'bcd-ordinary.json', 'bcd-features_reboot_pending.json', 'bcd-msi_reboot_pending.json',
   'capability-initial.json', 'capability-ordinary.json', 'capability-features_reboot_pending.json', 'capability-msi_reboot_pending.json',
-  'ordinary-reboot-control.json', 'feature-ordinary.json', 'feature-pending.json', 'bcd-enable-auto.json', 'bcd-enable-bootlog.json',
+  'ordinary-reboot-control.json', 'windows-volume-identity.json', 'feature-ordinary.json', 'feature-pending.json', 'bcd-enable-auto.json', 'bcd-enable-bootlog.json',
   'enable-VirtualMachinePlatform.json', 'enable-Microsoft-Windows-Subsystem-Linux.json']);
 const payloads = new Map([['/payload/wsl.msi', 'wsl.msi'], ['/payload/ubuntu.wsl', 'ubuntu.wsl'], ['/payload/cpuid.exe', 'cpuid.exe']]);
 const logPath = path.join(evidenceDir, 'bridge.jsonl');

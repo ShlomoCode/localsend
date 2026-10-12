@@ -52,7 +52,7 @@ try {
       return { bytes: buffer.subarray(0, read), size, truncated: size > maximum };
     } finally { fs.closeSync(fd); }
   };
-  const manifestFile = bounded('manifest.json', 65536);
+  const manifestFile = bounded('manifest.json', 16384);
   const manifest = manifestFile && !manifestFile.truncated ? JSON.parse(manifestFile.bytes.toString('utf8')) : null;
   const names = ['SrtTrail.txt', 'CBS.log', 'dism.log', 'ntbtlog.txt'];
   const entries = [];
@@ -81,10 +81,13 @@ try {
   status.logs = entries;
   status.worker = manifest;
   status.status = entries.some(entry => entry.status === 'COLLECTED') ? 'PARTIAL_EVIDENCE' : 'UNAVAILABLE';
-  publish('status.json', redact(JSON.stringify(status, null, 2)));
+  const statusText = redact(JSON.stringify(status));
+  if (Buffer.byteLength(statusText) > 16384) throw new Error('published metadata exceeded 16 KiB');
+  publish('status.json', statusText);
 } catch {
-  status.reason = 'Worker evidence or exact-secret redaction unavailable; no raw text published';
-  publish('status.json', JSON.stringify(status, null, 2));
+  publish('status.json', JSON.stringify({ status: 'UNAVAILABLE', workerExitCode: Number(exitCode), readOnly: true,
+    diskRetained: false, dumpBytesRetained: false, wslCapabilityInferred: false,
+    reason: 'Worker metadata, exact-secret redaction, or bounded publication unavailable; no raw text published' }));
 }
 JS
   publication_status=$?
@@ -103,13 +106,72 @@ export LIBGUESTFS_BACKEND_SETTINGS=force_kvm
 export LIBGUESTFS_CACHEDIR="$work_dir/guestfs-cache"
 export LIBGUESTFS_TMPDIR="$work_dir/guestfs-tmp"
 mkdir -p "$LIBGUESTFS_CACHEDIR" "$LIBGUESTFS_TMPDIR"
-node - "$work_dir" "$raw_dir" <<'JS'
+node - "$work_dir" "$raw_dir" "$evidence_dir" <<'JS'
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const [work, raw] = process.argv.slice(2);
-const manifest = { status: 'UNAVAILABLE', partition: null, selection: 'unique_NTFS_partition_on_owned_sda', logs: [] };
+const [work, raw, evidence] = process.argv.slice(2);
+const manifest = { status: 'UNAVAILABLE', partition: null, selection: 'native_GPT_guid_geometry_type_match', logs: [] };
+function saveManifest() {
+  const text = JSON.stringify(manifest);
+  if (Buffer.byteLength(text) > 16384) throw new Error('offline metadata exceeded 16 KiB');
+  fs.writeFileSync(path.join(raw, 'manifest.json'), text);
+}
+function guid(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.startsWith('{') && value.endsWith('}') ? value.slice(1, -1) : value;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalized)
+    ? normalized.toLowerCase() : null;
+}
+function decimal(value) {
+  return typeof value === 'string' && /^(0|[1-9]\d{0,19})$/.test(value) ? value : null;
+}
+function nativeTarget() {
+  const filename = path.join(evidence, 'windows-volume-identity.json');
+  const fd = fs.openSync(filename, 'r');
+  let snapshot;
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size < 1 || size > 16384) throw new Error('native snapshot size outside bounds');
+    const bytes = Buffer.alloc(size);
+    if (fs.readSync(fd, bytes, 0, size, 0) !== size) throw new Error('incomplete native snapshot read');
+    snapshot = JSON.parse(bytes.toString('utf8'));
+  } finally { fs.closeSync(fd); }
+  const target = snapshot.partition;
+  if (snapshot.schemaVersion !== 1 || snapshot.status !== 'AVAILABLE' || !target || target.diskNumber !== 0 ||
+      !Array.isArray(snapshot.partitions) || snapshot.partitions.length < 1 || snapshot.partitions.length > 8 ||
+      !snapshot.bitLockerStatus || typeof snapshot.bitLockerStatus !== 'object' || Array.isArray(snapshot.bitLockerStatus) ||
+      !Number.isInteger(target.partitionNumber) || target.partitionNumber < 1 || target.partitionNumber > 128 ||
+      !guid(target.guid) || !guid(target.gptType) || !decimal(target.offsetBytes) || !decimal(target.sizeBytes) ||
+      BigInt(target.sizeBytes) === 0n || !/^[A-Z]:$/i.test(snapshot.systemDrive || '') ||
+      typeof snapshot.windowsDirectory !== 'string' || typeof snapshot.systemDirectory !== 'string' ||
+      snapshot.windowsDirectory.toLowerCase() !== `${snapshot.systemDrive}\\Windows`.toLowerCase() ||
+      snapshot.systemDirectory.toLowerCase() !== `${snapshot.systemDrive}\\Windows\\System32`.toLowerCase()) {
+    throw new Error('native Windows volume snapshot unavailable or incomplete');
+  }
+  return { systemDrive: snapshot.systemDrive, windowsDirectory: snapshot.windowsDirectory,
+    systemDirectory: snapshot.systemDirectory, partition: { diskNumber: 0, partitionNumber: target.partitionNumber,
+      guid: guid(target.guid), gptType: guid(target.gptType), offsetBytes: target.offsetBytes, sizeBytes: target.sizeBytes },
+    measurementPhase: 'before_features', bitLockerStateInferred: false };
+}
+function partitionTable(text, devices) {
+  if (text.length > 4096) throw new Error('partition table exceeded bounds');
+  const pattern = /\[(\d+)\] = \{\n  part_num: (\d+)\n  part_start: (\d+)\n  part_end: (\d+)\n  part_size: (\d+)\n\}/g;
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length !== devices.length || text.replace(pattern, '').trim()) throw new Error('unexpected partition table format');
+  const entries = matches.map((entry, index) => {
+    const number = Number(entry[2]);
+    const [offsetBytes, endBytes, sizeBytes] = entry.slice(3, 6);
+    if (Number(entry[1]) !== index || !Number.isInteger(number) || number < 1 || number > 128 ||
+        !decimal(offsetBytes) || !decimal(endBytes) || !decimal(sizeBytes) || BigInt(sizeBytes) === 0n ||
+        BigInt(endBytes) < BigInt(offsetBytes) || BigInt(endBytes) - BigInt(offsetBytes) + 1n !== BigInt(sizeBytes) ||
+        !devices.includes(`/dev/sda${number}`)) throw new Error('inconsistent partition geometry');
+    return { device: `/dev/sda${number}`, partitionNumber: number, offsetBytes, endBytes, sizeBytes };
+  });
+  if (new Set(entries.map(entry => entry.device)).size !== entries.length) throw new Error('duplicate partition geometry');
+  return entries;
+}
 const driver = fs.openSync(path.join(raw, 'driver.txt'), 'w');
 let diagnosticBytes = 0;
 function diagnostic(value) {
@@ -147,40 +209,87 @@ function command(text, tolerateMissing = false) {
   });
 }
 const quote = value => JSON.stringify(value);
+async function directoryPresence(requested) {
+  const original = await command(`is-dir ${quote(requested)} followsymlinks:false`, true);
+  const entry = { requested, originalIsDirectory: original === 'true' ? true : original === 'false' ? false : null };
+  const resolvedText = await command(`case-sensitive-path ${quote(requested)}`, true);
+  const resolved = resolvedText.startsWith('/') ? resolvedText : '/' + resolvedText;
+  if (resolved.toLowerCase() === requested.toLowerCase()) {
+    entry.resolved = resolved;
+    const exists = await command(`is-dir ${quote(resolved)} followsymlinks:false`, true);
+    entry.resolvedIsDirectory = exists === 'true' ? true : exists === 'false' ? false : null;
+  } else entry.resolution = 'UNAVAILABLE_OR_UNEXPECTED';
+  return entry;
+}
 (async () => {
   try {
+    manifest.native = nativeTarget();
+    saveManifest();
     // Keep direct-backend QEMU and its recovery helper in our timeout group.
     await command('set-pgroup false');
     await command('run');
-    manifest.filesystems = await command('list-filesystems');
-    // Retain the observed inventory even when selection is refused or mounting fails.
-    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
-    const inventory = manifest.filesystems.split('\n').filter(line => line.length > 0);
-    if (manifest.filesystems.length > 8192 || inventory.length === 0 || inventory.length > 128) {
-      throw new Error('owned partition inventory exceeded bounds or is empty');
+    const inventory = await command('list-partitions');
+    if (inventory.length > 4096) throw new Error('owned partition inventory exceeded bounds');
+    manifest.partitionDevices = inventory.split('\n');
+    saveManifest();
+    const devices = manifest.partitionDevices;
+    if (devices.length < 1 || devices.length > 8 || devices.some(device => !/^\/dev\/sda[1-9]\d{0,2}$/.test(device)) ||
+        new Set(devices).size !== devices.length) throw new Error('unexpected, duplicate, or excessive owned partitions');
+    manifest.partitionTable = await command('part-list /dev/sda');
+    saveManifest();
+    manifest.partitions = partitionTable(manifest.partitionTable, devices);
+    for (const entry of manifest.partitions) {
+      const probe = async text => {
+        const value = await command(text, true);
+        if (value.length > 256) throw new Error('partition metadata field exceeded bounds');
+        return value;
+      };
+      entry.vfsType = await probe(`vfs-type ${entry.device}`);
+      entry.label = await probe(`vfs-label ${entry.device}`);
+      entry.labelState = entry.label ? 'REPORTED' : 'EMPTY_OR_UNAVAILABLE';
+      entry.guid = await probe(`part-get-gpt-guid /dev/sda ${entry.partitionNumber}`);
+      entry.gptType = await probe(`part-get-gpt-type /dev/sda ${entry.partitionNumber}`);
+      saveManifest();
     }
-    const partitions = inventory.map(line => line.match(/^(\/dev\/sda[1-9]\d*):\s+([a-zA-Z0-9_-]+)$/));
-    if (partitions.some(entry => entry === null) || new Set(partitions.map(entry => entry[1])).size !== partitions.length) {
-      throw new Error('unexpected or duplicate device in owned partition inventory');
+    if (manifest.partitions.some(entry => !guid(entry.guid) || !guid(entry.gptType))) {
+      throw new Error('owned GPT inventory identity unavailable');
     }
-    manifest.ntfsCandidates = partitions.filter(entry => entry[2] === 'ntfs').map(entry => entry[1]);
-    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
-    if (manifest.ntfsCandidates.length !== 1) throw new Error('expected exactly one NTFS partition on owned disk');
-    manifest.partition = manifest.ntfsCandidates[0];
-    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
+    const target = manifest.native.partition;
+    manifest.comparisons = manifest.partitions.map(entry => ({ device: entry.device,
+      guidMatches: guid(entry.guid) === target.guid, offsetMatches: entry.offsetBytes === target.offsetBytes,
+      sizeMatches: entry.sizeBytes === target.sizeBytes, gptTypeMatches: guid(entry.gptType) === target.gptType,
+      partitionNumberMatches: entry.partitionNumber === target.partitionNumber }));
+    saveManifest();
+    const matches = manifest.comparisons.filter(entry => entry.guidMatches && entry.offsetMatches && entry.sizeMatches && entry.gptTypeMatches);
+    if (matches.length !== 1) throw new Error('native Windows partition correspondence unavailable or ambiguous');
+    manifest.partition = matches[0].device;
+    saveManifest();
+    if (manifest.partitions.find(entry => entry.device === manifest.partition).vfsType !== 'ntfs') {
+      throw new Error('matched native Windows partition is not readable as NTFS');
+    }
     await command(`mount-ro ${manifest.partition} /`);
-    if (await command('is-dir /Windows') !== 'true') throw new Error('owned Windows directory unavailable');
+    manifest.mount = 'READ_ONLY_MOUNT_COMPLETED';
+    manifest.rootPresence = [];
+    for (const requested of ['/Windows', '/Users', '/Program Files', '/Recovery']) {
+      manifest.rootPresence.push(await directoryPresence(requested));
+      saveManifest();
+    }
+    const windows = manifest.rootPresence.find(entry => entry.requested === '/Windows');
+    if (windows.resolvedIsDirectory !== true) throw new Error('matched Windows directory unavailable');
+    manifest.windowsDirectory = windows.resolved;
+    manifest.system32Presence = await directoryPresence(windows.resolved + '/System32');
+    saveManifest();
     for (const [name, filename] of [
-      ['SrtTrail.txt', '/Windows/System32/LogFiles/Srt/SrtTrail.txt'],
-      ['CBS.log', '/Windows/Logs/CBS/CBS.log'],
-      ['dism.log', '/Windows/Logs/DISM/dism.log'],
-      ['ntbtlog.txt', '/Windows/ntbtlog.txt'],
+      ['SrtTrail.txt', `${windows.resolved}/System32/LogFiles/Srt/SrtTrail.txt`],
+      ['CBS.log', `${windows.resolved}/Logs/CBS/CBS.log`],
+      ['dism.log', `${windows.resolved}/Logs/DISM/dism.log`],
+      ['ntbtlog.txt', `${windows.resolved}/ntbtlog.txt`],
     ]) {
       const entry = { name, path: filename, status: 'UNAVAILABLE' };
       manifest.logs.push(entry);
       const resolvedText = await command(`case-sensitive-path ${quote(filename)}`, true);
-      if (!/^\/?Windows\//i.test(resolvedText)) continue;
       const resolved = resolvedText.startsWith('/') ? resolvedText : '/' + resolvedText;
+      if (resolved.toLowerCase() !== filename.toLowerCase()) continue;
       if (await command(`is-file ${quote(resolved)} followsymlinks:false`, true) !== 'true') continue;
       const sizeText = await command(`filesize ${quote(resolved)}`, true);
       if (!/^\d+$/.test(sizeText)) continue;
@@ -195,12 +304,15 @@ const quote = value => JSON.stringify(value);
       if (sample.length !== bytes) throw new Error('short bounded read');
       Object.assign(entry, { status: 'COLLECTED', originalBytes: size, offset, sampleBytes: bytes,
         truncated: offset > 0, sampleSha256: crypto.createHash('sha256').update(sample).digest('hex') });
-      fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
+      saveManifest();
     }
     manifest.status = 'COLLECTION_FINISHED';
-  } catch (error) { diagnostic(`recovery unavailable: ${error.message}\n`); }
+  } catch (error) {
+    manifest.reason = String(error.message).slice(0, 256);
+    diagnostic(`recovery unavailable: ${manifest.reason}\n`);
+  }
   finally {
-    fs.writeFileSync(path.join(raw, 'manifest.json'), JSON.stringify(manifest));
+    try { saveManifest(); } catch { diagnostic('final metadata exceeded bounds; prior bounded metadata retained\n'); }
     if (!closed) guest.stdin.end('exit\n');
     // Appliance shutdown is covered by the enclosing owned process-group bound.
   }
