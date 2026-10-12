@@ -55,6 +55,8 @@ def receiver_display_metadata():
     """Retain each strict read; never infer health from partial text."""
     observations = {}
     values = {}
+    failure_probes = {}
+    replay_used = False
     for label, args in {'size': ['wm', 'size'], 'density': ['wm', 'density'], 'font_scale': ['settings', 'get', 'system', 'font_scale'], 'rotation': ['settings', 'get', 'system', 'user_rotation']}.items():
         command = ['adb', '-s', serial, 'shell', *args]
         started = time.monotonic()
@@ -72,6 +74,7 @@ def receiver_display_metadata():
                 observations[label] = {'command': command, 'returncode': None, 'stdout': native_output(primary.stdout), 'stderr': native_output(primary.stderr), 'started_at_unix': started_at, 'elapsed_seconds': time.monotonic()-started, 'error': 'TimeoutExpired'}
                 write('receiver-display-native.json', observations)
             probes = {}
+            failure_probes[label] = probes
             deadline = time.monotonic() + 15
             probe_env = {**os.environ, 'ADB_TRACE': 'transport,shell'}
             for name, probe in {
@@ -84,7 +87,7 @@ def receiver_display_metadata():
                 remaining = deadline-time.monotonic()
                 if remaining <= 0:
                     probes[name] = {'status': 'not attempted; discriminator deadline reached'}
-                    write('receiver-display-failure-probes.json', probes)
+                    write('receiver-display-failure-probes.json', failure_probes)
                     break
                 started = time.monotonic()
                 probe_started_at = time.time()
@@ -95,7 +98,38 @@ def receiver_display_metadata():
                     probes[name] = {'command': probe, 'returncode': None, 'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr), 'started_at_unix': probe_started_at, 'elapsed_seconds': time.monotonic()-started, 'error': 'TimeoutExpired'}
                 except Exception as error:
                     probes[name] = {'command': probe, 'error': repr(error), 'started_at_unix': probe_started_at, 'elapsed_seconds': time.monotonic()-started}
-                write('receiver-display-failure-probes.json', probes)
+                write('receiver-display-failure-probes.json', failure_probes)
+            devices = probes.get('devices', {})
+            state = probes.get('state', {})
+            confirmed_offline = devices.get('returncode') == 0 and re.search(r'^' + re.escape(serial) + r'\s+offline(?:\s|$)', devices.get('stdout', ''), re.MULTILINE) and state.get('returncode') == 1 and state.get('stdout') == '' and 'error: device offline' in state.get('stderr', '').splitlines()
+            if isinstance(primary, subprocess.CalledProcessError) and primary.returncode == 255 and confirmed_offline and not replay_used and deadline > time.monotonic():
+                replay_used = True
+                recovery = {'policy': 'one identical read replay after confirmed owned-device offline and fresh native readiness', 'started_at_unix': time.time()}
+                observations[label]['recovery'] = recovery
+                write('receiver-display-native.json', observations)
+                try:
+                    wait_native_adb('metadata-offline-recovery', ['get-state'], 'device', {'offline', 'unknown'}, min(3, deadline-time.monotonic()))
+                    recovery['readiness'] = 'strict exit0/device; raw observations in inputs.jsonl'
+                    remaining = deadline-time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError('Metadata recovery discriminator deadline reached')
+                    started = time.monotonic()
+                    replay_started_at = time.time()
+                    result = subprocess.run(command, capture_output=True, timeout=min(3, remaining))
+                    recovery['replay'] = {'command': command, 'returncode': result.returncode, 'stdout': native_output(result.stdout), 'stderr': native_output(result.stderr), 'started_at_unix': replay_started_at, 'elapsed_seconds': time.monotonic()-started}
+                    write('receiver-display-native.json', observations)
+                    if result.returncode:
+                        raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Metadata replay completed after discriminator deadline')
+                    values[label] = native_output(result.stdout)
+                    write('receiver-display.json', values)
+                    continue
+                except Exception as error:
+                    recovery['error'] = repr(error)
+                    if isinstance(error, subprocess.TimeoutExpired):
+                        recovery['timeout_output'] = {'stdout': native_output(error.stdout), 'stderr': native_output(error.stderr), 'command': error.cmd, 'timeout': error.timeout}
+                    write('receiver-display-native.json', observations)
             raise primary
 
 
