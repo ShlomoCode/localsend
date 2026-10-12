@@ -36,11 +36,7 @@ void main() {
       return scan.future;
     });
     var finished = false;
-    final publication = finalizeFileSaveTarget(
-      target: FileSaveTarget(path: file.path, fileDescriptor: null, displayPath: file.path),
-      androidSdkInt: 30,
-      saveToGallery: false,
-    ).then((_) => finished = true);
+    final publication = publishSavedFileAndroid(path: file.path).then((_) => finished = true);
 
     await tester.pump();
     expect(finished, isFalse);

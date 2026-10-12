@@ -113,17 +113,7 @@ Future<FileSaveTarget> reopenFileSaveTarget(FileSaveTarget target) async {
 }
 
 /// Publishes a completed Android file after its native writer has closed.
-/// SAF documents and gallery/cache targets manage their own publication.
-Future<void> finalizeFileSaveTarget({
-  required FileSaveTarget target,
-  required int? androidSdkInt,
-  required bool saveToGallery,
-}) async {
-  final path = target.path;
-  if (androidSdkInt == null || saveToGallery || path == null) {
-    return;
-  }
-
+Future<void> publishSavedFileAndroid({required String path}) async {
   try {
     if (!await android_channel.scanFileAndroid(path: path)) {
       _logger.warning('Android could not publish the completed file: $path');

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:localsend_isolates/constants.dart';
@@ -716,13 +717,11 @@ Future<void> _handleFileUpload({
       );
     } else {
       filePath = target.displayPath;
+      final path = target.path;
+      if (Platform.isAndroid && path != null) {
+        await publishSavedFileAndroid(path: path);
+      }
     }
-
-    await finalizeFileSaveTarget(
-      target: target,
-      androidSdkInt: config.androidSdkInt,
-      saveToGallery: shouldSaveToGallery,
-    );
 
     _logger.info('Saved ${dartFile.fileName}.');
     emit(
