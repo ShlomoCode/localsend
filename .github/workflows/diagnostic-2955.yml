@@ -1,0 +1,54 @@
+name: Diagnostic 2955 official Android 16 baseline
+on:
+  push:
+    branches:
+      - codex/diagnostic-2955
+    paths:
+      - .github/workflows/diagnostic-2955.yml
+      - support/diagnostics/2955/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: diagnostic-2955
+  cancel-in-progress: false
+jobs:
+  baseline:
+    if: github.repository == 'ShlomoCode/localsend' && github.ref == 'refs/heads/codex/diagnostic-2955' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      EVIDENCE: ${{ github.workspace }}/evidence-2955
+      DISPLAY: ':99'
+      GTK_MODULES: gail:atk-bridge
+      ACCESSIBILITY_ENABLED: '1'
+      NO_AT_BRIDGE: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native diagnostic tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool at-spi2-core python3-pyatspi libgtk-3-0 libayatana-appindicator3-1 ffmpeg scrot
+          sudo chmod a+rw /dev/kvm
+          mkdir -p "$EVIDENCE"
+          uname -a > "$EVIDENCE/runner-os.txt"
+          env | sort | grep -E '^(ANDROID_[A-Z_]+|RUNNER_[A-Z_]+|GITHUB_(RUN_ID|RUN_ATTEMPT|SHA|REPOSITORY))=' > "$EVIDENCE/job-identity.txt"
+      - name: Install stock Android 16 x86_64 system image
+        run: |
+          printf 'y\n%.0s' {1..20} | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > "$EVIDENCE/sdk-licenses.txt"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'emulator' 'platforms;android-36' 'build-tools;36.0.0' 'system-images;android-36;google_apis;x86_64'
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n receiver2955 -k 'system-images;android-36;google_apis;x86_64'
+      - name: Run finite real-app cases
+        timeout-minutes: 35
+        run: |
+          Xvfb :99 -screen 0 1600x1000x24 > "$EVIDENCE/xvfb.log" 2>&1 &
+          "$ANDROID_HOME/emulator/emulator" -avd receiver2955 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$EVIDENCE/emulator.log" 2>&1 &
+          timeout 1900s dbus-run-session -- /usr/bin/python3 support/diagnostics/2955/run.py
+      - name: Retain raw evidence even on infrastructure failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-2955-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence-2955
+          if-no-files-found: error
+          retention-days: 14
