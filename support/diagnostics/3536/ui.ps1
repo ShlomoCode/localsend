@@ -8,7 +8,7 @@ $interop = Join-Path $Evidence NativeUIA.dll
 if ($LASTEXITCODE -ne 0) { throw "ENV_BLOCK: native UIA import failed" }
 [Reflection.Assembly]::LoadFrom($interop) | Out-Null
 Add-Type -Path (Join-Path $PSScriptRoot controls.cs) -ReferencedAssemblies $interop
-function Write-Event($Name,$Data) { @{Utc=[DateTime]::UtcNow.ToString("o");Stage=$script:Stage;Name=$Name;Data=$Data} | ConvertTo-Json -Depth 12 -Compress | Add-Content (Join-Path $Evidence events.jsonl) }
+function Write-Event($Name,$Data) { @{Utc=[DateTime]::UtcNow.ToString("o");Stage=$script:Stage;Name=$Name;Data=$Data} | ConvertTo-Json -Depth 12 -Compress | Add-Content (Join-Path $Evidence events.jsonl) -Encoding UTF8 }
 function Check-Budget { if ([DateTime]::UtcNow -ge $Deadline) { throw "ENV_BLOCK: absolute scenario deadline" } }
 function Save-Desktop($Name) {
  $s=[System.Windows.Forms.SystemInformation]::VirtualScreen; $b=[System.Drawing.Bitmap]::new($s.Width,$s.Height);$g=[System.Drawing.Graphics]::FromImage($b)

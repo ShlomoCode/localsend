@@ -23,6 +23,22 @@ if(Test-Path $ownedPath){foreach($a in @(Get-Content $ownedPath -Raw -Encoding U
   $receipt.Status=if($receipt.OwnedAbsent){"OWNED_ABSENT"}else{"SURVIVING_OWNED_PROCESS"}
  }catch{$receipt.Errors+="$_"}finally{Save-Retention $receipt (Join-Path $Evidence "retention-cleanup-$($a.Id).json")}
 }}
+# Recover only exact phase workers if the outer supervisor interrupted their owner.
+foreach($recordFile in Get-ChildItem $Evidence -Filter "*-owned-process.json"){
+ Check-Retention;$r=Get-Content $recordFile.FullName -Raw -Encoding UTF8|ConvertFrom-Json
+ $receipt=@{Original=$r;Status="UNKNOWN";HandleAcquired=$false;WaitBoolean=$null;HasExited=$null;ExitCodeType=$null;ExitCodeValue=$null;Errors=@()}
+ try{
+  $p=Get-Process -Id $r.Pid -ErrorAction SilentlyContinue
+  if(-not $p){$receipt.Status="PID_ABSENT_AT_RETENTION"}
+  elseif($p.Path -eq $r.ActualPath -and $p.StartTime.ToUniversalTime().ToString("o") -eq $r.StartUtc){
+   $h=$p.Handle;$receipt.HandleAcquired=$h -ne [IntPtr]::Zero
+   if($receipt.HandleAcquired){$p.Kill();$receipt.WaitBoolean=$p.WaitForExit([int][Math]::Max(0,[Math]::Min(5000,($retentionDeadline-[DateTime]::UtcNow).TotalMilliseconds)))}
+   $receipt.HasExited=$p.HasExited
+   if($receipt.HasExited){$code=$p.ExitCode;if($null -ne $code){$receipt.ExitCodeType=$code.GetType().FullName;$receipt.ExitCodeValue=$code}}
+   if($receipt.HandleAcquired -and $receipt.WaitBoolean -eq $true -and $receipt.HasExited -eq $true -and $receipt.ExitCodeType -eq "System.Int32"){$receipt.Status="EXACT_PHASE_WORKER_EXIT_CONFIRMED"}
+  }else{$receipt.Status="IDENTITY_DIFFERENT_OR_UNAVAILABLE_NO_KILL"}
+ }catch{$receipt.Errors+="$_"}finally{Save-Retention $receipt (Join-Path $Evidence "$($recordFile.BaseName)-retention-cleanup.json")}
+}
 $finalizedClips=@()
 foreach($recordFile in Get-ChildItem $Evidence -Filter "recorder-*.json"){
  Check-Retention;$r=Get-Content $recordFile.FullName -Raw -Encoding UTF8|ConvertFrom-Json

@@ -119,7 +119,17 @@ try {
         if ($workerWait) { break }
         if ([DateTime]::UtcNow -ge $deadline) {
             Complete-ExitReceipt $worker $workerReceipt $workerWait
-            $worker.Kill()
+            $workerReceipt | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Evidence worker-timeout-before-kill.json) -Encoding UTF8
+            $cleanupErrors = @(); $postKillWait = $null
+            try {
+                if ($worker.Path -ne $workerReceipt.ActualPath -or $worker.StartTime.ToUniversalTime().ToString("o") -ne $workerReceipt.StartUtc) { throw "Exact worker cleanup identity changed" }
+                $worker.Kill(); $postKillWait = $worker.WaitForExit(5000)
+            } catch { $cleanupErrors += "$_" }
+            Complete-ExitReceipt $worker $workerReceipt $postKillWait
+            $liveWorker = Get-Process -Id $workerReceipt.Pid -ErrorAction SilentlyContinue
+            $cleanupStatus = if ($workerReceipt.WaitBoolean -eq $true -and $workerReceipt.HasExited -eq $true -and $workerReceipt.ExitCodeType -eq "System.Int32" -and -not $workerReceipt.ExitCodeIsNull) { "ORIGINAL_WORKER_EXIT_CONFIRMED" } else { "UNKNOWN" }
+            @{ Status = $cleanupStatus; HistoricalWorker1568 = "UNVERIFIED: this new observation does not establish historical cleanup"; Process = $workerReceipt; ObservedUtc = [DateTime]::UtcNow.ToString("o"); Errors = $cleanupErrors; FinalIdentity = if ($liveWorker) { $liveWorker | Select-Object Id,Path,StartTime } else { $null } } |
+                ConvertTo-Json -Depth 10 | Set-Content (Join-Path $Evidence worker-cleanup-final.json) -Encoding UTF8
             [ordered]@{ Status = "ENV_BLOCK"; Error = "19-minute absolute task budget exhausted; at least five minutes of cleanup/upload reserve retained"; ProductVerdict = "NONE" } |
                 ConvertTo-Json | Set-Content (Join-Path $Evidence supervisor-timeout.json)
             exit 2
