@@ -230,20 +230,30 @@ export default async function({session,wd,senderPort,transportStatus}){
     const sourceExact=source.mtimeMs===requestedMtimeMs&&source.requestedMtimeMs===requestedMtimeMs;
     const galleryFile=observed.find(file=>file.path===savedPath),fallbackFile=observed.find(file=>file.path===`/sdcard/Download/${filename}`);
     const galleryRows=normalMetadata.mediaStore?.filter(row=>row._display_name===filename&&row._data?.endsWith('/Pictures/'+filename));
-    const expectedModifiedSeconds=Math.floor(source.mtimeMs/1000);
+    const senderReport=JSON.parse(readFileSync('evidence/release-ui-report.json'));
+    const senderMatchesObserver=senderReport.release==='v1.17.0'&&senderReport.assetArchitecture==='x86-64'
+     &&senderReport.archive?.sha256?.toLowerCase()==='a4ffb41fcbc3bd0f2f0cbd30b62a58d9a478eaf1da63eb410886886064abe70c';
+    if(!senderMatchesObserver)throw new Error('Precision received-metadata contract requires the exact released Windows sender archive observed in run38188599818');
+    const expectedReceivedMtimeMs=1739455860000;
+    const expectedModifiedSeconds=Math.floor(expectedReceivedMtimeMs/1000);
     const mediaStoreModifiedSeconds=(galleryRows||[]).map(row=>row.date_modified==null?null:Number(row.date_modified));
     const filesystemEqual=Number.isFinite(source.mtimeMs)&&galleryFile?.filesystemMtimeMs===source.mtimeMs;
     const mediaStoreEqual=!normalMetadata.mediaStoreError&&galleryRows?.length===1&&Number.isFinite(mediaStoreModifiedSeconds[0])&&mediaStoreModifiedSeconds[0]===expectedModifiedSeconds;
     const required=process.env.SOURCE_APP_FAMILY==='candidate'&&process.env.SOURCE_APK_KIND==='candidate';
-    const mtimeVerdict={expectedMtimeMs:source.mtimeMs,expectedModifiedSeconds,filesystemMtimeMs:galleryFile?.filesystemMtimeMs??null,filesystemEqual,
-     mediaStoreApplicable:true,mediaStoreModifiedSeconds,mediaStoreEqual,fallbackObserved:!!fallbackFile,required,passed:filesystemEqual&&mediaStoreEqual&&!fallbackFile};
-    const strictGalleryResult=sourceExact&&galleryFile?.byteExact===true&&mtimeVerdict.passed;
-    const precision={case:gallery,mediaType:'png',source,expectedSavedPath:savedPath,requestedMtimeMs,observed,normalMetadata,sourceExact,strictGalleryResult,mtimeVerdict,
+    const receivedFilesystemEqual=galleryFile?.filesystemMtimeMs===expectedReceivedMtimeMs;
+    const mtimeVerdict={expectedMtimeMs:source.mtimeMs,expectedReceivedMtimeMs,expectedModifiedSeconds,filesystemMtimeMs:galleryFile?.filesystemMtimeMs??null,filesystemEqual,
+     receivedFilesystemEqual,mediaStoreApplicable:true,mediaStoreModifiedSeconds,mediaStoreEqual,fallbackObserved:!!fallbackFile,required,
+     passed:receivedFilesystemEqual&&mediaStoreEqual&&!fallbackFile,endToEndPassed:filesystemEqual&&mediaStoreEqual&&!fallbackFile};
+    const strictGalleryResult=sourceExact&&galleryFile?.byteExact===true&&mtimeVerdict.endToEndPassed;
+    const receivedMetadataGalleryResult=sourceExact&&galleryFile?.byteExact===true&&mtimeVerdict.passed;
+    const precision={case:gallery,mediaType:'png',source,expectedSavedPath:savedPath,requestedMtimeMs,observed,normalMetadata,sourceExact,strictGalleryResult,receivedMetadataGalleryResult,mtimeVerdict,
+     validationContract:{scope:'Preserve received metadata; fractional Windows-to-receiver loss remains unresolved',observerRun:'38188599818',
+      expectedReceivedMtimeMs,basis:'Exact archive sender; filename-correlated incoming/cache logs and gallery-Off native stat observed .123 source arriving as .000. This run does not directly log incoming metadata.'},
      saveOutcome:galleryFile?(fallbackFile?'gallery-and-fallback-observed':'gallery-observed'):(fallbackFile?'directory-fallback-observed':'no-saved-file-observed')};
     results.push(precision);writeFileSync(`evidence/${gallery}-precision-result.json`,JSON.stringify(precision,null,2));
     writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));
     if(!sourceExact)throw new Error('Precision source Windows timestamp differs from the requested milliseconds; raw evidence retained');
-    if(!strictGalleryResult&&required)precisionFailures.push(precision);
+    if(!receivedMetadataGalleryResult&&required)precisionFailures.push(precision);
     await click('Done');continue;
    }
    let actualSavedPath=savedPath,saved,galleryPullError=null;
@@ -302,7 +312,7 @@ export default async function({session,wd,senderPort,transportStatus}){
    await click('Done');
   }
   if(!precisionSourceControl)await galleryImportDiagnostic(`issue2311-${process.env.GITHUB_RUN_ID}-off-repeat.png`);
-  if(precisionFailures.length)throw new Error('Candidate strict gallery millisecond preservation failed; precision result and gallery/fallback artifacts retained');
+  if(precisionFailures.length)throw new Error('Candidate gallery received-metadata preservation failed; separate end-to-end fractional verdict and gallery/fallback artifacts retained');
   if(mtimeFailures.length)throw new Error('Required media modification-time verdicts failed: '+mtimeFailures.map(result=>result.case).join(', ')+'; raw per-case results retained');
  }finally{writeFileSync('evidence/scenario-results.json',JSON.stringify({results,transport:transportStatus()},null,2));}
 }

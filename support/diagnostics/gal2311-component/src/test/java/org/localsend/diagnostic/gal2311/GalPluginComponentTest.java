@@ -97,10 +97,10 @@ public class GalPluginComponentTest {
     }
 
     @Test public void duplicateNullCallbackDoesNotReplaceTheFirstSuccessfulResult()throws Exception{
-        Scanner.mode=Scanner.Mode.SUCCESS_THEN_NULL;File source=source(1739455860000L);Outcome outcome=start(source,true);await(outcome,10000);
+        Scanner.mode=Scanner.Mode.SUCCESS_THEN_NULL;File source=source(1739455860123L);Outcome outcome=start(source,true);await(outcome,10000);
         assertNull(outcome.error);assertEquals(1,outcome.successes.get());assertEquals(1,outcome.terminals.get());
         assertArrayEquals(hash(source),hash(provider.file(provider.lastInserted)));
-        assertEquals(1739455860000L,Files.getLastModifiedTime(provider.file(provider.lastInserted).toPath()).toMillis());assertUnrelatedIntact();
+        assertEquals(1739455860123L,Files.getLastModifiedTime(provider.file(provider.lastInserted).toPath()).toMillis());assertUnrelatedIntact();
     }
 
     @Test public void firstNullCallbackRemainsAFailureEvenIfFollowedBySuccess()throws Exception{
