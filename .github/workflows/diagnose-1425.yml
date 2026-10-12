@@ -1,6 +1,9 @@
 name: Diagnose Linux transfer cancellation 1425
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/bug-1425-r2-diagnostics]
+    paths: [support/diagnostics/1425-dispatch-once.txt]
 permissions:
   contents: read
 jobs:

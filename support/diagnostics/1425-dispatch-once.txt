@@ -1,0 +1,2 @@
+Register and start the single root-admitted original AppImage cancellation diagnostic.
+Subsequent source pushes do not match this one-time marker path.
