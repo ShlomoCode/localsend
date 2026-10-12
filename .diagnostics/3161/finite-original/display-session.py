@@ -330,7 +330,7 @@ def qualify():
     if metadata.get('Application', 'name') != 'org.localsend.localsend_app' or metadata.get('Instance', 'app-commit') != 'df68d5e6649a894643f4bff68711e52ad86c2f26c93470139f2ff1e2b38e4418' or metadata.get('Instance', 'runtime-commit') != 'd27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf':
         raise ValueError('Fresh namespace does not match original app/runtime commits')
     actual = {'process': process, 'flatpakInfo': info, 'instanceId': metadata.get('Instance', 'instance-id'),
-        'exeSHA256': digest, 'window': window}
+        'exeSHA256': digest, 'window': window, 'stageSize': image['stageSize']}
     if mode == 'app-check':
         before = json.loads(path.read_text())
         for field in ('pid', 'startTicks', 'exe'):

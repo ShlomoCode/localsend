@@ -49,10 +49,47 @@ zoom_state() {
 }
 locate() {
   local label=$1 name=$2
+  guest 12 "$name-geometry-before" '. /home/probe/session-env; timeout --kill-after=1s 10s python3 /home/probe/finite-source/display-session.py app-check /home/probe/evidence/finite-original' > "$target/$name-geometry-before.txt"
+  step 3 "$name-app-before-json" jq -s '[.[] | select(.event == "fresh-app-identity-checked") | .actual] | if length == 1 then .[0] else error("Missing unique actual app geometry") end' "$target/$name-geometry-before.txt" > "$target/$name-app-before.json"
+  step 3 "$name-host-geometry-before" xdotool getwindowgeometry --shell "$qemu_window" > "$target/$name-host-before.txt"
   capture "$name-acquire"
-  step 7 "$name-ocr" tesseract "$target/$name-acquire.png" "$target/$name-acquire" --psm 11 tsv > "$target/$name-ocr.log" 2>&1
-  # Unique exact visible label; TSV/image remain the acquisition evidence.
-  awk -F '\t' -v label="$label" 'NR>1 && $12==label && $11>=50 {n++; x=$7+$9/2; y=$8+$10/2} END {if(n!=1) exit 2; printf "%d %d\n",x,y}' "$target/$name-acquire.tsv" > "$target/$name-coordinate.txt"
+  step 3 "$name-image-size" identify -format '%w %h\n' "$target/$name-acquire.png" > "$target/$name-image-size.txt"
+  # X client geometry proposes only a bounded search region. This does not
+  # certify SDL backing framebuffer/stage centering or an unscaled viewport.
+  step 3 "$name-host-before-json" jq -Rn '[inputs | select(length > 0) | capture("^(?<key>WINDOW|X|Y|WIDTH|HEIGHT|SCREEN)=(?<value>-?[0-9]+)$") | {key, value:(.value|tonumber)}] | if length == 6 and (group_by(.key)|all(length==1)) then from_entries else error("Ambiguous host geometry") end' "$target/$name-host-before.txt" > "$target/$name-host-before.json"
+  step 3 "$name-search-region" jq -nr --arg window "$qemu_window" --slurpfile a "$target/$name-app-before.json" --slurpfile host "$target/$name-host-before.json" '
+    def integer: type == "number" and . == floor;
+    $a[0] as $a | $host[0] as $h | $a.window.frameStage as $observed |
+    if $a.stageSize != {width:800,height:600} or $observed.error != null then error("Stage/frame unavailable") else $observed.value end as $f |
+    if ([$f.x,$f.y,$f.width,$f.height,$h.X,$h.Y,$h.WIDTH,$h.HEIGHT] | all(integer)) and
+       $f.x >= 0 and $f.y >= 0 and $f.width > 0 and $f.height >= 80 and
+       $f.x+$f.width <= 800 and $f.y+$f.height <= 600 and
+       $h.WINDOW == ($window|tonumber) and $h.SCREEN == 0 and $h.WIDTH >= 800 and $h.HEIGHT >= 600 and
+       (($h.WIDTH-800)%2 == 0) and (($h.HEIGHT-600)%2 == 0)
+    then [($h.X+($h.WIDTH-800)/2+$f.x),($h.Y+($h.HEIGHT-600)/2+$f.y+$f.height-80),$f.width,80] | @tsv
+    else error("Search-region geometry rejected") end' > "$target/$name-region.txt"
+  printf 'ROI_ROLE=bounded-acquisition-search SDL_STAGE_TRANSFORM=unqualified POINTER_HIT=pending-observed-page\n' > "$target/$name-region-status.txt"
+  local cx cy cw ch imagew imageh
+  read -r cx cy cw ch < "$target/$name-region.txt"
+  read -r imagew imageh < "$target/$name-image-size.txt"
+  test "$imagew" = 1280 && test "$imageh" = 800
+  test "$cx" -ge 0 && test "$cy" -ge 0 && test "$((cx+cw))" -le "$imagew" && test "$((cy+ch))" -le "$imageh"
+  step 5 "$name-search-crop" convert "$target/$name-acquire.png" -crop "${cw}x${ch}+${cx}+${cy}" +repage "$target/$name-crop.png"
+  step 5 "$name-ocr-input" convert "$target/$name-crop.png" -resize 200% -colorspace Gray -threshold 75% "$target/$name-ocr-input.png"
+  step 7 "$name-ocr" tesseract "$target/$name-ocr-input.png" "$target/$name-acquire" --psm 11 tsv > "$target/$name-ocr.log" 2>&1
+  # Coordinates invert actual PNG crop pixels; they do not rely on the search
+  # projection being a proven guest-to-host transform or certify a product hit.
+  awk -F '\t' -v label="$label" -v cx="$cx" -v cy="$cy" 'NR>1 && $12==label && $11>=50 {n++; x=cx+($7+$9/2)/2; y=cy+($8+$10/2)/2} END {if(n!=1) exit 2; printf "%d %d\n",x,y}' "$target/$name-acquire.tsv" > "$target/$name-coordinate.txt"
+  guest 12 "$name-geometry-after" '. /home/probe/session-env; timeout --kill-after=1s 10s python3 /home/probe/finite-source/display-session.py app-check /home/probe/evidence/finite-original' > "$target/$name-geometry-after.txt"
+  step 3 "$name-app-after-json" jq -s '[.[] | select(.event == "fresh-app-identity-checked") | .actual] | if length == 1 then .[0] else error("Missing unique actual app geometry") end' "$target/$name-geometry-after.txt" > "$target/$name-app-after.json"
+  step 3 "$name-host-geometry-after" xdotool getwindowgeometry --shell "$qemu_window" > "$target/$name-host-after.txt"
+  step 3 "$name-host-bracket" cmp "$target/$name-host-before.txt" "$target/$name-host-after.txt"
+  step 3 "$name-app-bracket" jq -e --slurpfile b "$target/$name-app-before.json" '
+    .stageSize == $b[0].stageSize and .process.pid == $b[0].process.pid and .process.startTicks == $b[0].process.startTicks and
+    .instanceId == $b[0].instanceId and .exeSHA256 == $b[0].exeSHA256 and
+    .window.stableSequence == $b[0].window.stableSequence and .window.pid == $b[0].window.pid and
+    .window.frameStage == $b[0].window.frameStage and .window.compositorFocused == {value:true,error:null}
+  ' "$target/$name-app-after.json" > "$target/$name-bracket.json"
 }
 cleanup() {
   local status=$?
