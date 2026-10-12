@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 from gi.repository import Gio, GLib
@@ -292,27 +291,46 @@ def qualify():
     if len(focused) != 1:
         raise ValueError('Exactly one observed focused window required')
     window = focused[0]
-    process = start(window['pid']['value'])
     mode = sys.argv[1]
     path = OUT / ('editor-identity.json' if mode == 'editor' else 'app-identity.json')
     if mode == 'editor':
+        process = start(window['pid']['value'])
         if not process['exe'].endswith('/gnome-text-editor') or window['gtkApplicationId']['value'] != 'org.gnome.TextEditor':
             raise ValueError('Expected fresh focused GTK editor')
         receipt(path.name, {'process': process, 'window': window})
         return
-    candidates = subprocess.check_output(['pgrep', '-x', 'localsend_app'], timeout=2, text=True).split()
-    if candidates != [str(process['pid'])]:
-        raise ValueError('Focused app is not unique actual LocalSend process')
-    info = Path(f"/proc/{process['pid']}/root/.flatpak-info").read_text()
+    # Retain each raw identity observation before later qualification can fail.
+    # This is a compositor window/PID observation, not a process-name lookup.
+    prefix = f'{mode}-{os.getpid()}-identity-'
+    receipt(prefix + 'focused-window.json', window)
+    pid = window['pid']['value']
+    if window['pid']['error'] is not None or type(pid) is not int or pid <= 0:
+        raise ValueError('Focused host PID unavailable')
+    raw_stat = Path(f'/proc/{pid}/stat').read_text()
+    receipt(prefix + 'stat-before.json', {'pid': pid, 'stat': raw_stat})
+    process = start(pid)
+    receipt(prefix + 'process-before.json', process)
+    info = Path(f'/proc/{pid}/root/.flatpak-info').read_text()
+    receipt(prefix + 'flatpak-info.json', {'pid': pid, 'text': info})
+    digest = hashlib.sha256(Path(f'/proc/{pid}/exe').read_bytes()).hexdigest()
+    receipt(prefix + 'executable-hash.json', {'pid': pid, 'sha256': digest})
+    after = start(pid)
+    receipt(prefix + 'process-after.json', after)
+    app_windows = [w for w in image['windows']
+        if w['gtkApplicationId']['error'] is None and w['gtkApplicationId']['value'] == 'org.localsend.localsend_app']
+    if len(app_windows) != 1 or app_windows[0] != window:
+        raise ValueError('Expected exactly one compositor LocalSend window owning focus')
+    if window['compositorFocused']['error'] is not None or window['stableSequence']['error'] is not None or window['stableSequence']['value'] is None:
+        raise ValueError('Focused window identity unavailable')
+    initial_ticks = raw_stat.rsplit(') ', 1)[1].split()[19]
+    if initial_ticks != process['startTicks'] or after['startTicks'] != process['startTicks'] or after['exe'] != process['exe']:
+        raise ValueError('App changed during qualification')
     metadata = configparser.ConfigParser(interpolation=None)
     metadata.read_string(info)
     if metadata.get('Application', 'name') != 'org.localsend.localsend_app' or metadata.get('Instance', 'app-commit') != 'df68d5e6649a894643f4bff68711e52ad86c2f26c93470139f2ff1e2b38e4418' or metadata.get('Instance', 'runtime-commit') != 'd27f7a6a974e40b061070bec1be9e1b52a7a6872b271e6a45c2c34a48bf6fedf':
         raise ValueError('Fresh namespace does not match original app/runtime commits')
     actual = {'process': process, 'flatpakInfo': info, 'instanceId': metadata.get('Instance', 'instance-id'),
-        'exeSHA256': hashlib.sha256(Path(f"/proc/{process['pid']}/exe").read_bytes()).hexdigest(), 'window': window}
-    after = start(process['pid'])
-    if after['startTicks'] != process['startTicks'] or after['exe'] != process['exe']:
-        raise ValueError('App changed during qualification')
+        'exeSHA256': digest, 'window': window}
     if mode == 'app-check':
         before = json.loads(path.read_text())
         for field in ('pid', 'startTicks', 'exe'):
