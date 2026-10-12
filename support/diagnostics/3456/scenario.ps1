@@ -33,12 +33,14 @@ try {
     # Prove foreground and keyboard delivery on a fresh native window.
     $note = Start-Process notepad.exe -PassThru
     $noteWindow = Wait-Ui @("Untitled - Notepad")
+    if ($noteWindow.Current.ProcessId -ne $note.Id) { throw "ENV_BLOCK: Notepad control belongs to a different process" }
     Focus-Window $noteWindow
     Send-Keys "issue3456-input-ready"
     Save-Desktop input-ready
-    $edit = Wait-Ui @("Text Editor", "Text editor") $noteWindow
-    $text = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
-    if ($text -notlike "*issue3456-input-ready*") { throw "ENV_BLOCK: keyboard delivery control failed" }
+    # The retained Server2022 provider exposes the edit as Pane15 with its actual text as Name.
+    $edit = Wait-Ui @("issue3456-input-ready") $noteWindow
+    if ($edit.Current.AutomationId -ne "15" -or $edit.Current.ProcessId -ne $note.Id -or
+        $edit.Current.Name -ne "issue3456-input-ready") { throw "ENV_BLOCK: exact native Notepad keyboard delivery control failed" }
     $note.Kill()
     if (-not (Get-Command Add-AppxPackage).Parameters.ContainsKey("ExternalLocation")) { throw "ENV_BLOCK: sparse external-location API missing" }
     $script:Stage = "artifact-download"
