@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:localsend_app/config/theme.dart';
+import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/persistence/color_mode.dart';
 import 'package:localsend_app/pages/language_page.dart';
 import 'package:localsend_app/pages/tabs/settings_tab_vm.dart';
@@ -43,6 +44,7 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
   final LocalIpService _localIpService;
   final DeviceInfoResult _initialDeviceInfo;
   final bool _supportsDynamicColors;
+  bool _autoStartBusy = true;
 
   SettingsTabController({
     required SettingsService settingsService,
@@ -71,8 +73,10 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
       serverState: _serverService.state,
       deviceInfo: _initialDeviceInfo,
       colorModes: _supportsDynamicColors ? ColorMode.values : ColorMode.values.where((e) => e != ColorMode.system).toList(),
-      autoStart: false,
+      autoStart: null,
       autoStartLaunchHidden: false,
+      autoStartCanModify: false,
+      autoStartBusy: true,
       showInContextMenu: false,
       onChangeTheme: (context, theme) async {
         await _settingsService.setTheme(theme);
@@ -102,24 +106,19 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
         await context.push(() => const LanguagePage());
       },
       onToggleAutoStart: (context) async {
-        final bool success;
-        if (state.autoStart) {
-          success = await disableAutoStart();
-        } else {
-          success = await enableAutoStart(startHidden: state.autoStartLaunchHidden);
+        if (disposed || _autoStartBusy || !state.autoStartCanModify || state.autoStart == null) {
+          return;
         }
-
-        if (success) {
-          redux.dispatch(_SetAutoStartAction(!state.autoStart));
-        }
+        final enabled = !state.autoStart!;
+        final hidden = state.autoStartLaunchHidden;
+        await _changeAutoStart(context, enabled: enabled, hidden: hidden);
       },
       onToggleAutoStartLaunchHidden: (context) async {
-        if (state.autoStart) {
-          final success = await enableAutoStart(startHidden: !state.autoStartLaunchHidden);
-          if (success) {
-            redux.dispatch(_SetAutoStartLaunchHiddenAction(!state.autoStartLaunchHidden));
-          }
+        if (disposed || _autoStartBusy || !state.autoStartCanModify || state.autoStart != true) {
+          return;
         }
+        final hidden = !state.autoStartLaunchHidden;
+        await _changeAutoStart(context, enabled: true, hidden: hidden);
       },
       onToggleShowInContextMenu: (context) async {
         final bool success;
@@ -170,6 +169,42 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
   @override
   get initialAction => _SettingsTabInitAction();
 
+  Future<void> _changeAutoStart(BuildContext context, {required bool enabled, required bool hidden}) async {
+    // Hold the gate through the readback so rapid taps cannot overlap native writes.
+    _autoStartBusy = true;
+    redux.dispatch(_SetAutoStartBusyAction(true));
+    try {
+      try {
+        final success = enabled ? await enableAutoStart(startHidden: hidden) : await disableAutoStart();
+        if (!success && context.mounted) {
+          context.showSnackBar(t.general.error);
+        }
+      } catch (e) {
+        if (context.mounted) {
+          context.showSnackBar(e.toString());
+        }
+      }
+
+      // Read the effective state even after a failed write or revoked permission.
+      final snapshot = await getAutoStartSnapshot();
+      if (!disposed) {
+        redux.dispatch(_SetAutoStartSnapshotAction(snapshot));
+      }
+    } catch (e) {
+      if (!disposed) {
+        redux.dispatch(_SetAutoStartSnapshotAction(const AutoStartSnapshot(enabled: null, hidden: false, canModify: false)));
+      }
+      if (context.mounted) {
+        context.showSnackBar(e.toString());
+      }
+    } finally {
+      _autoStartBusy = false;
+      if (!disposed) {
+        redux.dispatch(_SetAutoStartBusyAction(false));
+      }
+    }
+  }
+
   @override
   void dispose() {
     state.aliasController.dispose();
@@ -185,12 +220,23 @@ class _SettingsTabInitAction extends AsyncReduxAction<SettingsTabController, Set
   @override
   Future<SettingsTabVm> reduce() async {
     dispatch(_SettingsTabWatchAction());
-    final autoStartEnabled = await isAutoStartEnabled();
-    final autoStartHidden = await isAutoStartHidden();
+    AutoStartSnapshot snapshot;
+    try {
+      snapshot = await getAutoStartSnapshot();
+    } catch (_) {
+      snapshot = const AutoStartSnapshot(enabled: null, hidden: false, canModify: false);
+    }
+    if (notifier.disposed) {
+      return state;
+    }
+    dispatch(_SetAutoStartSnapshotAction(snapshot));
+    notifier._autoStartBusy = false;
+    dispatch(_SetAutoStartBusyAction(false));
     final showInContextMenu = await isContextMenuEnabled();
+    if (notifier.disposed) {
+      return state;
+    }
     return state.copyWith(
-      autoStart: autoStartEnabled,
-      autoStartLaunchHidden: autoStartHidden,
       showInContextMenu: showInContextMenu,
     );
   }
@@ -218,25 +264,29 @@ class SetAdvancedAction extends ReduxAction<SettingsTabController, SettingsTabVm
   }
 }
 
-class _SetAutoStartAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
-  final bool enabled;
+class _SetAutoStartSnapshotAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
+  final AutoStartSnapshot snapshot;
 
-  _SetAutoStartAction(this.enabled);
+  _SetAutoStartSnapshotAction(this.snapshot);
 
   @override
   SettingsTabVm reduce() {
-    return state.copyWith(autoStart: enabled);
+    return state.copyWith(
+      autoStart: snapshot.enabled,
+      autoStartLaunchHidden: snapshot.hidden,
+      autoStartCanModify: snapshot.canModify,
+    );
   }
 }
 
-class _SetAutoStartLaunchHiddenAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
-  final bool enabled;
+class _SetAutoStartBusyAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
+  final bool busy;
 
-  _SetAutoStartLaunchHiddenAction(this.enabled);
+  _SetAutoStartBusyAction(this.busy);
 
   @override
   SettingsTabVm reduce() {
-    return state.copyWith(autoStartLaunchHidden: enabled);
+    return state.copyWith(autoStartBusy: busy);
   }
 }
 

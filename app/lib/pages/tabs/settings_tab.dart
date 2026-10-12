@@ -120,22 +120,33 @@ class SettingsTab extends StatelessWidget {
                     ),
                   ],
                   if (checkPlatformIsDesktop()) ...[
-                    _BooleanEntry(
-                      label: t.settingsTab.general.launchAtStartup,
-                      value: vm.autoStart,
-                      onChanged: (_) => vm.onToggleAutoStart(context),
-                    ),
+                    if (vm.autoStart == null)
+                      _SettingsEntry(
+                        label: t.settingsTab.general.launchAtStartup,
+                        child: Center(
+                          child: vm.autoStartBusy
+                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                              : Text(t.dialogs.notAvailableOnPlatform.title),
+                        ),
+                      )
+                    else
+                      _BooleanEntry(
+                        label: t.settingsTab.general.launchAtStartup,
+                        value: vm.autoStart!,
+                        description: vm.autoStartCanModify ? null : t.dialogs.notAvailableOnPlatform.title,
+                        onChanged: vm.autoStartBusy || !vm.autoStartCanModify ? null : (_) => vm.onToggleAutoStart(context),
+                      ),
                     Visibility(
-                      visible: vm.autoStart,
+                      visible: vm.autoStart == true,
                       maintainAnimation: true,
                       maintainState: true,
                       child: AnimatedOpacity(
-                        opacity: vm.autoStart ? 1.0 : 0.0,
+                        opacity: vm.autoStart == true ? 1.0 : 0.0,
                         duration: const Duration(milliseconds: 500),
                         child: _BooleanEntry(
                           label: t.settingsTab.general.launchMinimized,
                           value: vm.autoStartLaunchHidden,
-                          onChanged: (_) => vm.onToggleAutoStartLaunchHidden(context),
+                          onChanged: vm.autoStartBusy || !vm.autoStartCanModify ? null : (_) => vm.onToggleAutoStartLaunchHidden(context),
                         ),
                       ),
                     ),

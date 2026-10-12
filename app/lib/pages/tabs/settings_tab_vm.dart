@@ -21,8 +21,10 @@ class SettingsTabVm with SettingsTabVmMappable {
   final DeviceInfoResult deviceInfo;
   final List<ThemeMode> themeModes = ThemeMode.values;
   final List<ColorMode> colorModes;
-  final bool autoStart;
+  final bool? autoStart;
   final bool autoStartLaunchHidden;
+  final bool autoStartCanModify;
+  final bool autoStartBusy;
   final bool showInContextMenu;
   final void Function(BuildContext context, ThemeMode mode) onChangeTheme;
   final void Function(BuildContext context, ColorMode mode) onChangeColorMode;
@@ -48,6 +50,8 @@ class SettingsTabVm with SettingsTabVmMappable {
     required this.colorModes,
     required this.autoStart,
     required this.autoStartLaunchHidden,
+    required this.autoStartCanModify,
+    required this.autoStartBusy,
     required this.showInContextMenu,
     required this.onChangeTheme,
     required this.onChangeColorMode,

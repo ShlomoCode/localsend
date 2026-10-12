@@ -1,0 +1,846 @@
+diff --git a/app/lib/pages/tabs/settings_tab.dart b/app/lib/pages/tabs/settings_tab.dart
+index 28f5525ee..40d10c139 100644
+--- a/app/lib/pages/tabs/settings_tab.dart
++++ b/app/lib/pages/tabs/settings_tab.dart
+@@ -120,22 +120,33 @@ class SettingsTab extends StatelessWidget {
+                     ),
+                   ],
+                   if (checkPlatformIsDesktop()) ...[
+-                    _BooleanEntry(
+-                      label: t.settingsTab.general.launchAtStartup,
+-                      value: vm.autoStart,
+-                      onChanged: (_) => vm.onToggleAutoStart(context),
+-                    ),
++                    if (vm.autoStart == null)
++                      _SettingsEntry(
++                        label: t.settingsTab.general.launchAtStartup,
++                        child: Center(
++                          child: vm.autoStartBusy
++                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
++                              : Text(t.dialogs.notAvailableOnPlatform.title),
++                        ),
++                      )
++                    else
++                      _BooleanEntry(
++                        label: t.settingsTab.general.launchAtStartup,
++                        value: vm.autoStart!,
++                        description: vm.autoStartCanModify ? null : t.dialogs.notAvailableOnPlatform.title,
++                        onChanged: vm.autoStartBusy || !vm.autoStartCanModify ? null : (_) => vm.onToggleAutoStart(context),
++                      ),
+                     Visibility(
+-                      visible: vm.autoStart,
++                      visible: vm.autoStart == true,
+                       maintainAnimation: true,
+                       maintainState: true,
+                       child: AnimatedOpacity(
+-                        opacity: vm.autoStart ? 1.0 : 0.0,
++                        opacity: vm.autoStart == true ? 1.0 : 0.0,
+                         duration: const Duration(milliseconds: 500),
+                         child: _BooleanEntry(
+                           label: t.settingsTab.general.launchMinimized,
+                           value: vm.autoStartLaunchHidden,
+-                          onChanged: (_) => vm.onToggleAutoStartLaunchHidden(context),
++                          onChanged: vm.autoStartBusy || !vm.autoStartCanModify ? null : (_) => vm.onToggleAutoStartLaunchHidden(context),
+                         ),
+                       ),
+                     ),
+diff --git a/app/lib/pages/tabs/settings_tab_controller.dart b/app/lib/pages/tabs/settings_tab_controller.dart
+index 3e36f2429..9995cb25e 100644
+--- a/app/lib/pages/tabs/settings_tab_controller.dart
++++ b/app/lib/pages/tabs/settings_tab_controller.dart
+@@ -1,5 +1,6 @@
+ import 'package:flutter/material.dart';
+ import 'package:localsend_app/config/theme.dart';
++import 'package:localsend_app/gen/strings.g.dart';
+ import 'package:localsend_app/model/persistence/color_mode.dart';
+ import 'package:localsend_app/pages/language_page.dart';
+ import 'package:localsend_app/pages/tabs/settings_tab_vm.dart';
+@@ -43,6 +44,7 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
+   final LocalIpService _localIpService;
+   final DeviceInfoResult _initialDeviceInfo;
+   final bool _supportsDynamicColors;
++  bool _autoStartBusy = true;
+ 
+   SettingsTabController({
+     required SettingsService settingsService,
+@@ -71,8 +73,10 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
+       serverState: _serverService.state,
+       deviceInfo: _initialDeviceInfo,
+       colorModes: _supportsDynamicColors ? ColorMode.values : ColorMode.values.where((e) => e != ColorMode.system).toList(),
+-      autoStart: false,
++      autoStart: null,
+       autoStartLaunchHidden: false,
++      autoStartCanModify: false,
++      autoStartBusy: true,
+       showInContextMenu: false,
+       onChangeTheme: (context, theme) async {
+         await _settingsService.setTheme(theme);
+@@ -102,24 +106,19 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
+         await context.push(() => const LanguagePage());
+       },
+       onToggleAutoStart: (context) async {
+-        final bool success;
+-        if (state.autoStart) {
+-          success = await disableAutoStart();
+-        } else {
+-          success = await enableAutoStart(startHidden: state.autoStartLaunchHidden);
+-        }
+-
+-        if (success) {
+-          redux.dispatch(_SetAutoStartAction(!state.autoStart));
++        if (disposed || _autoStartBusy || !state.autoStartCanModify || state.autoStart == null) {
++          return;
+         }
++        final enabled = !state.autoStart!;
++        final hidden = state.autoStartLaunchHidden;
++        await _changeAutoStart(context, enabled: enabled, hidden: hidden);
+       },
+       onToggleAutoStartLaunchHidden: (context) async {
+-        if (state.autoStart) {
+-          final success = await enableAutoStart(startHidden: !state.autoStartLaunchHidden);
+-          if (success) {
+-            redux.dispatch(_SetAutoStartLaunchHiddenAction(!state.autoStartLaunchHidden));
+-          }
++        if (disposed || _autoStartBusy || !state.autoStartCanModify || state.autoStart != true) {
++          return;
+         }
++        final hidden = !state.autoStartLaunchHidden;
++        await _changeAutoStart(context, enabled: true, hidden: hidden);
+       },
+       onToggleShowInContextMenu: (context) async {
+         final bool success;
+@@ -170,6 +169,42 @@ class SettingsTabController extends ReduxNotifier<SettingsTabVm> {
+   @override
+   get initialAction => _SettingsTabInitAction();
+ 
++  Future<void> _changeAutoStart(BuildContext context, {required bool enabled, required bool hidden}) async {
++    // Hold the gate through the readback so rapid taps cannot overlap native writes.
++    _autoStartBusy = true;
++    redux.dispatch(_SetAutoStartBusyAction(true));
++    try {
++      try {
++        final success = enabled ? await enableAutoStart(startHidden: hidden) : await disableAutoStart();
++        if (!success && context.mounted) {
++          context.showSnackBar(t.general.error);
++        }
++      } catch (e) {
++        if (context.mounted) {
++          context.showSnackBar(e.toString());
++        }
++      }
++
++      // Read the effective state even after a failed write or revoked permission.
++      final snapshot = await getAutoStartSnapshot();
++      if (!disposed) {
++        redux.dispatch(_SetAutoStartSnapshotAction(snapshot));
++      }
++    } catch (e) {
++      if (!disposed) {
++        redux.dispatch(_SetAutoStartSnapshotAction(const AutoStartSnapshot(enabled: null, hidden: false, canModify: false)));
++      }
++      if (context.mounted) {
++        context.showSnackBar(e.toString());
++      }
++    } finally {
++      _autoStartBusy = false;
++      if (!disposed) {
++        redux.dispatch(_SetAutoStartBusyAction(false));
++      }
++    }
++  }
++
+   @override
+   void dispose() {
+     state.aliasController.dispose();
+@@ -185,12 +220,23 @@ class _SettingsTabInitAction extends AsyncReduxAction<SettingsTabController, Set
+   @override
+   Future<SettingsTabVm> reduce() async {
+     dispatch(_SettingsTabWatchAction());
+-    final autoStartEnabled = await isAutoStartEnabled();
+-    final autoStartHidden = await isAutoStartHidden();
++    AutoStartSnapshot snapshot;
++    try {
++      snapshot = await getAutoStartSnapshot();
++    } catch (_) {
++      snapshot = const AutoStartSnapshot(enabled: null, hidden: false, canModify: false);
++    }
++    if (notifier.disposed) {
++      return state;
++    }
++    dispatch(_SetAutoStartSnapshotAction(snapshot));
++    notifier._autoStartBusy = false;
++    dispatch(_SetAutoStartBusyAction(false));
+     final showInContextMenu = await isContextMenuEnabled();
++    if (notifier.disposed) {
++      return state;
++    }
+     return state.copyWith(
+-      autoStart: autoStartEnabled,
+-      autoStartLaunchHidden: autoStartHidden,
+       showInContextMenu: showInContextMenu,
+     );
+   }
+@@ -218,25 +264,29 @@ class SetAdvancedAction extends ReduxAction<SettingsTabController, SettingsTabVm
+   }
+ }
+ 
+-class _SetAutoStartAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
+-  final bool enabled;
++class _SetAutoStartSnapshotAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
++  final AutoStartSnapshot snapshot;
+ 
+-  _SetAutoStartAction(this.enabled);
++  _SetAutoStartSnapshotAction(this.snapshot);
+ 
+   @override
+   SettingsTabVm reduce() {
+-    return state.copyWith(autoStart: enabled);
++    return state.copyWith(
++      autoStart: snapshot.enabled,
++      autoStartLaunchHidden: snapshot.hidden,
++      autoStartCanModify: snapshot.canModify,
++    );
+   }
+ }
+ 
+-class _SetAutoStartLaunchHiddenAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
+-  final bool enabled;
++class _SetAutoStartBusyAction extends ReduxAction<SettingsTabController, SettingsTabVm> {
++  final bool busy;
+ 
+-  _SetAutoStartLaunchHiddenAction(this.enabled);
++  _SetAutoStartBusyAction(this.busy);
+ 
+   @override
+   SettingsTabVm reduce() {
+-    return state.copyWith(autoStartLaunchHidden: enabled);
++    return state.copyWith(autoStartBusy: busy);
+   }
+ }
+ 
+diff --git a/app/lib/pages/tabs/settings_tab_vm.dart b/app/lib/pages/tabs/settings_tab_vm.dart
+index 1ee735250..5d7abc0db 100644
+--- a/app/lib/pages/tabs/settings_tab_vm.dart
++++ b/app/lib/pages/tabs/settings_tab_vm.dart
+@@ -21,8 +21,10 @@ class SettingsTabVm with SettingsTabVmMappable {
+   final DeviceInfoResult deviceInfo;
+   final List<ThemeMode> themeModes = ThemeMode.values;
+   final List<ColorMode> colorModes;
+-  final bool autoStart;
++  final bool? autoStart;
+   final bool autoStartLaunchHidden;
++  final bool autoStartCanModify;
++  final bool autoStartBusy;
+   final bool showInContextMenu;
+   final void Function(BuildContext context, ThemeMode mode) onChangeTheme;
+   final void Function(BuildContext context, ColorMode mode) onChangeColorMode;
+@@ -48,6 +50,8 @@ class SettingsTabVm with SettingsTabVmMappable {
+     required this.colorModes,
+     required this.autoStart,
+     required this.autoStartLaunchHidden,
++    required this.autoStartCanModify,
++    required this.autoStartBusy,
+     required this.showInContextMenu,
+     required this.onChangeTheme,
+     required this.onChangeColorMode,
+diff --git a/app/lib/util/native/autostart_helper.dart b/app/lib/util/native/autostart_helper.dart
+index ddbf47d73..990226660 100644
+--- a/app/lib/util/native/autostart_helper.dart
++++ b/app/lib/util/native/autostart_helper.dart
+@@ -1,36 +1,34 @@
+ import 'dart:io';
+ 
+ import 'package:flutter/foundation.dart';
++import 'package:localsend_app/util/native/linux_autostart.dart';
+ import 'package:localsend_app/util/native/macos_channel.dart';
+ import 'package:logging/logging.dart';
+ import 'package:package_info_plus/package_info_plus.dart';
+ import 'package:win32_registry/win32_registry.dart';
+ 
+-const startHiddenFlag = '--hidden';
++export 'linux_autostart.dart' show AutoStartSnapshot;
+ 
++const startHiddenFlag = '--hidden';
+ final _logger = Logger('AutoStartHelper');
+ 
++Future<LinuxAutoStart> _linuxAutoStart() async {
++  final info = await PackageInfo.fromPlatform();
++  final runtime = File('/.flatpak-info');
++  return LinuxAutoStart.resolve(
++    environment: Platform.environment,
++    executable: Platform.resolvedExecutable,
++    packageName: info.packageName,
++    appName: info.appName,
++    flatpakInfo: runtime.existsSync() ? runtime.readAsStringSync() : null,
++  );
++}
++
+ Future<bool> enableAutoStart({required bool startHidden}) async {
+   try {
+-    final packageInfo = await PackageInfo.fromPlatform();
+     switch (defaultTargetPlatform) {
+       case TargetPlatform.linux:
+-        String contents =
+-            '''
+-[Desktop Entry]
+-Type=Application
+-Name=${packageInfo.appName}
+-Comment=${packageInfo.appName} startup script
+-Exec=${Platform.resolvedExecutable}${startHidden ? ' $startHiddenFlag' : ''}
+-StartupNotify=false
+-Terminal=false
+-''';
+-        final file = File(_getLinuxFilePath(packageInfo.packageName));
+-        if (!file.parent.existsSync()) {
+-          file.parent.createSync(recursive: true);
+-        }
+-        file.writeAsStringSync(contents);
+-        return true;
++        return (await _linuxAutoStart()).enable(hidden: startHidden);
+       case TargetPlatform.macOS:
+         await setLaunchAtLogin(true);
+         await setLaunchAtLoginMinimized(startHidden);
+@@ -47,18 +45,16 @@ Terminal=false
+         return false;
+     }
+   } catch (e) {
+-    _logger.warning('Could enable auto start', e);
++    _logger.warning('Could not enable auto start', e);
+     return false;
+   }
+ }
+ 
+ Future<bool> disableAutoStart() async {
+   try {
+-    final packageInfo = await PackageInfo.fromPlatform();
+     switch (defaultTargetPlatform) {
+       case TargetPlatform.linux:
+-        File(_getLinuxFilePath(packageInfo.packageName)).deleteSync();
+-        break;
++        return (await _linuxAutoStart()).disable();
+       case TargetPlatform.macOS:
+         await setLaunchAtLogin(false);
+         break;
+@@ -70,42 +66,36 @@ Future<bool> disableAutoStart() async {
+     }
+     return true;
+   } catch (e) {
+-    _logger.warning('Could disable auto start', e);
++    _logger.warning('Could not disable auto start', e);
+     return false;
+   }
+ }
+ 
+-Future<bool> isAutoStartEnabled() async {
+-  final packageInfo = await PackageInfo.fromPlatform();
+-  switch (defaultTargetPlatform) {
+-    case TargetPlatform.linux:
+-      return File(_getLinuxFilePath(packageInfo.packageName)).existsSync();
+-    case TargetPlatform.macOS:
+-      return await getLaunchAtLogin();
+-    case TargetPlatform.windows:
+-      return _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue)?.contains(Platform.resolvedExecutable) ?? false;
+-    default:
+-      return false;
++Future<AutoStartSnapshot> getAutoStartSnapshot() async {
++  try {
++    switch (defaultTargetPlatform) {
++      case TargetPlatform.linux:
++        return (await _linuxAutoStart()).snapshot();
++      case TargetPlatform.macOS:
++        return AutoStartSnapshot(enabled: await getLaunchAtLogin(), hidden: await getLaunchAtLoginMinimized(), canModify: true);
++      case TargetPlatform.windows:
++        final value = _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue);
++        return AutoStartSnapshot(
++          enabled: value?.contains(Platform.resolvedExecutable) ?? false,
++          hidden: value?.contains(startHiddenFlag) ?? false,
++          canModify: true,
++        );
++      default:
++        return const AutoStartSnapshot(enabled: false, hidden: false, canModify: false);
++    }
++  } catch (e) {
++    _logger.warning('Could not read auto start', e);
++    return const AutoStartSnapshot(enabled: null, hidden: false, canModify: false);
+   }
+ }
+ 
+-Future<bool> isAutoStartHidden() async {
+-  final packageInfo = await PackageInfo.fromPlatform();
+-  switch (defaultTargetPlatform) {
+-    case TargetPlatform.linux:
+-      final file = File(_getLinuxFilePath(packageInfo.packageName));
+-      if (!file.existsSync()) {
+-        return false;
+-      }
+-      return file.readAsStringSync().contains(startHiddenFlag);
+-    case TargetPlatform.macOS:
+-      return await getLaunchAtLoginMinimized();
+-    case TargetPlatform.windows:
+-      return _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue)?.contains(startHiddenFlag) ?? false;
+-    default:
+-      return false;
+-  }
+-}
++Future<bool> isAutoStartEnabled() async => (await getAutoStartSnapshot()).enabled ?? false;
++Future<bool> isAutoStartHidden() async => (await getAutoStartSnapshot()).hidden;
+ 
+ const _windowsRegistryKeyValue = 'LocalSend';
+ 
+@@ -116,7 +106,3 @@ RegistryKey _getWindowsRegistryKey() {
+     desiredAccessRights: AccessRights.allAccess,
+   );
+ }
+-
+-String _getLinuxFilePath(String appName) {
+-  return '${Platform.environment['HOME']}/.config/autostart/$appName.desktop';
+-}
+diff --git a/app/lib/util/native/linux_autostart.dart b/app/lib/util/native/linux_autostart.dart
+new file mode 100644
+index 000000000..99d737117
+--- /dev/null
++++ b/app/lib/util/native/linux_autostart.dart
+@@ -0,0 +1,266 @@
++import 'dart:io';
++
++import 'package:path/path.dart' as p;
++
++class AutoStartSnapshot {
++  final bool? enabled;
++  final bool hidden;
++  final bool canModify;
++
++  const AutoStartSnapshot({required this.enabled, required this.hidden, required this.canModify});
++}
++
++const _unavailable = AutoStartSnapshot(enabled: null, hidden: false, canModify: false);
++const _flatpakId = 'org.localsend.localsend_app';
++const _flatpakCommand = ['/usr/bin/flatpak', 'run', '--command=/app/localsend_app', _flatpakId];
++
++/// Owns only LocalSend's registration, not arbitrary desktop launch commands.
++class LinuxAutoStart {
++  final String? filePath;
++  final String appName;
++  final List<String> command;
++  final String legacyExecutable;
++  final bool flatpak;
++  final bool readable;
++  final bool writable;
++
++  const LinuxAutoStart._(this.filePath, this.appName, this.command, this.legacyExecutable, this.flatpak, this.readable, this.writable);
++
++  factory LinuxAutoStart.resolve({
++    required Map<String, String> environment,
++    required String executable,
++    required String packageName,
++    required String appName,
++    String? flatpakInfo,
++  }) {
++    bool absolute(String? value) => value != null && value.isNotEmpty && p.posix.isAbsolute(value) && !value.contains('\u0000');
++    final xdg = environment['XDG_CONFIG_HOME'];
++    final home = environment['HOME'];
++    final config = absolute(xdg) ? p.posix.normalize(xdg!) : (absolute(home) ? p.posix.join(home!, '.config') : null);
++    bool readable = config != null;
++    bool writable = readable;
++    if (flatpakInfo != null) {
++      final info = _parseGroups(flatpakInfo);
++      readable = false;
++      writable = false;
++      if (info?['Application']?['name'] == _flatpakId && config != null) {
++        final hostConfig = info?['Instance']?['host-config-dir'];
++        final sameConfig = absolute(hostConfig) && p.posix.normalize(hostConfig!) == config;
++        final scopes = info?['Context']?['filesystems']?.split(';') ?? <String>[];
++        bool denied = false;
++        final modes = <String>{};
++        for (final scope in scopes.where((value) => value.isNotEmpty)) {
++          final parts = scope.split(':');
++          if (parts.length > 2) continue;
++          final location = parts.first;
++          final mode = parts.length == 1 ? 'rw' : parts.last;
++          final revoked = location.startsWith('!');
++          final target = revoked ? location.substring(1) : location;
++          final exact = target == 'xdg-config/autostart';
++          final broad = sameConfig && (target == 'xdg-config' || target == 'host' || (target == 'home' && absolute(home) && p.posix.isWithin(home!, config)));
++          final autostart = p.posix.join(config, 'autostart');
++          final explicit = sameConfig && absolute(target) && (p.posix.normalize(target) == autostart || p.posix.isWithin(target, autostart));
++          if (!exact && !broad && !explicit) continue;
++          if (revoked || mode == 'none') {
++            denied = true;
++          } else if (mode == 'ro' || mode == 'rw' || mode == 'create') {
++            modes.add(mode == 'ro' ? 'ro' : 'rw');
++            readable = true;
++            writable = writable || mode != 'ro';
++          } else {
++            denied = true;
++          }
++        }
++        if (denied || modes.length > 1) readable = writable = false;
++      }
++    }
++    return LinuxAutoStart._(
++      config == null ? null : p.posix.join(config, 'autostart', '$packageName.desktop'),
++      appName,
++      flatpakInfo == null ? [executable] : _flatpakCommand,
++      flatpakInfo == null ? executable : '/app/localsend_app',
++      flatpakInfo != null,
++      readable,
++      writable,
++    );
++  }
++
++  AutoStartSnapshot snapshot() {
++    if (!readable || filePath == null) return _unavailable;
++    try {
++      final file = File(filePath!);
++      final directory = file.parent;
++      bool canModify = writable;
++      if (directory.existsSync()) {
++        // Listing fails for inaccessible mapped directories; search permission is also needed.
++        directory.listSync(followLinks: false);
++        final mode = directory.statSync().mode;
++        if ((mode & 0x49) == 0) return _unavailable;
++        // No write bits is a definite denial. ACLs and mounts may still deny a
++        // write-capable grant; the mutation's IO result remains authoritative.
++        canModify = canModify && (mode & 0x92) != 0;
++      } else if (flatpak) {
++        return _unavailable;
++      }
++      final type = FileSystemEntity.typeSync(file.path);
++      if (type == FileSystemEntityType.notFound) {
++        return AutoStartSnapshot(enabled: false, hidden: false, canModify: canModify);
++      }
++      if (type != FileSystemEntityType.file) return _unavailable;
++      final contents = file.readAsStringSync();
++      final entry = parseLinuxAutoStartEntry(contents, command) ?? _parseLegacyEntry(contents);
++      if (entry == null) return _unavailable;
++      return AutoStartSnapshot(enabled: entry.enabled, hidden: entry.hidden, canModify: canModify);
++    } on FileSystemException {
++      return _unavailable;
++    }
++  }
++
++  AutoStartSnapshot? _parseLegacyEntry(String contents) {
++    final entry = _parseGroups(contents)?['Desktop Entry'];
++    if (entry == null || entry['Type'] != 'Application' || entry['Name'] != appName ||
++        entry['Comment'] != '$appName startup script' || entry['StartupNotify'] != 'false' || entry['Terminal'] != 'false') {
++      return null;
++    }
++    for (final key in ['Hidden', 'X-GNOME-Autostart-enabled']) {
++      if (entry[key] != null && entry[key] != 'true' && entry[key] != 'false') return null;
++    }
++    final exec = entry['Exec'];
++    if (exec != legacyExecutable && exec != '$legacyExecutable --hidden') return null;
++    // The old writer's literal sandbox path or unquoted native path is not a
++    // valid selected registration. Keep it repairable by an explicit enable.
++    return AutoStartSnapshot(enabled: false, hidden: exec == '$legacyExecutable --hidden', canModify: true);
++  }
++
++  bool enable({required bool hidden}) {
++    if (!snapshot().canModify || filePath == null) return false;
++    File? temporary;
++    try {
++      final file = File(filePath!);
++      file.parent.createSync(recursive: true);
++      temporary = File('${file.path}.${pid}.${DateTime.now().microsecondsSinceEpoch}.tmp');
++      temporary.writeAsStringSync(serializeLinuxAutoStartEntry(appName, [...command, if (hidden) '--hidden']), flush: true);
++      temporary.renameSync(file.path);
++      return true;
++    } on FileSystemException {
++      return false;
++    } finally {
++      try {
++        if (temporary?.existsSync() ?? false) temporary!.deleteSync();
++      } on FileSystemException {
++        // A failed cleanup must not turn a denied write into an exception.
++      }
++    }
++  }
++
++  bool disable() {
++    if (!snapshot().canModify || filePath == null) return false;
++    try {
++      final file = File(filePath!);
++      if (file.existsSync()) file.deleteSync();
++      return true;
++    } on FileSystemException {
++      return false;
++    }
++  }
++}
++
++Map<String, Map<String, String>>? _parseGroups(String contents) {
++  final groups = <String, Map<String, String>>{};
++  Map<String, String>? group;
++  for (final raw in contents.split('\n')) {
++    final line = raw.trim();
++    if (line.isEmpty || line.startsWith('#')) continue;
++    if (line.startsWith('[') && line.endsWith(']')) {
++      final name = line.substring(1, line.length - 1);
++      if (groups.containsKey(name)) return null;
++      group = groups[name] = {};
++    } else {
++      final separator = line.indexOf('=');
++      if (separator <= 0 || group == null) return null;
++      final key = line.substring(0, separator).trim();
++      if (group.containsKey(key)) return null;
++      group[key] = line.substring(separator + 1);
++    }
++  }
++  return groups;
++}
++
++AutoStartSnapshot? parseLinuxAutoStartEntry(String contents, List<String> expectedCommand) {
++  final entry = _parseGroups(contents)?['Desktop Entry'];
++  if (entry == null || entry['Type'] != 'Application' || entry['Name']?.isNotEmpty != true) return null;
++  for (final key in ['Hidden', 'X-GNOME-Autostart-enabled']) {
++    final value = entry[key];
++    if (value != null && value != 'true' && value != 'false') return null;
++  }
++  final args = _parseExec(entry['Exec'] ?? '');
++  if (args == null || args.length < expectedCommand.length || args.length > expectedCommand.length + 1) return null;
++  for (var i = 0; i < expectedCommand.length; i++) {
++    if (args[i] != expectedCommand[i]) return null;
++  }
++  final hidden = args.length == expectedCommand.length + 1;
++  if (hidden && args.last != '--hidden') return null;
++  return AutoStartSnapshot(
++    enabled: entry['Hidden'] != 'true' && entry['X-GNOME-Autostart-enabled'] != 'false',
++    hidden: hidden,
++    canModify: true,
++  );
++}
++
++String serializeLinuxAutoStartEntry(String name, List<String> command) {
++  String value(String input) => input.replaceAll('\\', r'\\').replaceAll('\n', r'\n').replaceAll('\r', r'\r');
++  String token(String input) {
++    final escaped = input.replaceAll('%', '%%').replaceAll('\\', r'\\').replaceAll('"', r'\"').replaceAll(r'$', r'\$').replaceAll('`', r'\`');
++    return value('"$escaped"');
++  }
++  return '[Desktop Entry]\nType=Application\nName=${value(name)}\nExec=${command.map(token).join(' ')}\nStartupNotify=false\nTerminal=false\n';
++}
++
++List<String>? _parseExec(String value) {
++  // Desktop string escaping is processed before Exec quoting.
++  final decoded = StringBuffer();
++  for (var i = 0; i < value.length; i++) {
++    if (value[i] != '\\') {
++      decoded.write(value[i]);
++      continue;
++    }
++    if (++i == value.length) return null;
++    final escaped = value[i];
++    final replacement = {'s': ' ', 'n': '\n', 't': '\t', 'r': '\r', '\\': '\\'}[escaped];
++    if (replacement == null) return null;
++    decoded.write(replacement);
++  }
++  final input = decoded.toString();
++  final args = <String>[];
++  var token = StringBuffer();
++  bool quoted = false;
++  bool started = false;
++  for (var i = 0; i < input.length; i++) {
++    final char = input[i];
++    if (char == '"') {
++      quoted = !quoted;
++      started = true;
++    } else if (char == '\\') {
++      if (++i == input.length || !['"', '\\', r'$', '`'].contains(input[i])) return null;
++      token.write(input[i]);
++      started = true;
++    } else if (char == '%') {
++      if (++i == input.length || input[i] != '%') return null;
++      token.write('%');
++      started = true;
++    } else if (!quoted && (char == ' ' || char == '\t')) {
++      if (started) {
++        args.add(token.toString());
++        token = StringBuffer();
++        started = false;
++      }
++    } else {
++      if (char == '\n' || char == '\r' || (!quoted && "'<>~|&;\$*?#()`".contains(char))) return null;
++      token.write(char);
++      started = true;
++    }
++  }
++  if (quoted) return null;
++  if (started) args.add(token.toString());
++  return args.isEmpty ? null : args;
++}
+diff --git a/app/test/unit/util/native/linux_autostart_test.dart b/app/test/unit/util/native/linux_autostart_test.dart
+new file mode 100644
+index 000000000..48fa7e278
+--- /dev/null
++++ b/app/test/unit/util/native/linux_autostart_test.dart
+@@ -0,0 +1,171 @@
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:localsend_app/util/native/linux_autostart.dart';
++
++void main() {
++  const executable = '/opt/Local Send/quo"te\\percent%cash\$`/localsend';
++  test('desktop command round trips reserved characters and a separate hidden argument', () {
++    final contents = serializeLinuxAutoStartEntry('LocalSend', [executable, '--hidden']);
++    final state = parseLinuxAutoStartEntry(contents, [executable]);
++    expect(state?.enabled, true);
++    expect(state?.hidden, true);
++  });
++
++  test('desktop overrides disable registration without losing the launch argument', () {
++    final contents = serializeLinuxAutoStartEntry('LocalSend', ['/opt/localsend', '--hidden']);
++    for (final override in ['Hidden=true', 'X-GNOME-Autostart-enabled=false']) {
++      final state = parseLinuxAutoStartEntry('$contents$override\n', ['/opt/localsend']);
++      expect(state?.enabled, false);
++      expect(state?.hidden, true);
++    }
++  });
++
++  test('hidden text in executable or metadata is not a hidden argument', () {
++    final contents = serializeLinuxAutoStartEntry('LocalSend --hidden', ['/opt/--hidden/localsend']);
++    expect(parseLinuxAutoStartEntry(contents, ['/opt/--hidden/localsend'])?.hidden, false);
++    expect(parseLinuxAutoStartEntry('$contents' 'Exec=/other/app\n', ['/opt/--hidden/localsend']), null);
++  });
++
++  test('unknown field codes and malformed quoting are unavailable', () {
++    for (final exec in ['/opt/localsend %f', '"/opt/localsend', '/opt/localsend --hidden-extra']) {
++      expect(parseLinuxAutoStartEntry('[Desktop Entry]\nType=Application\nName=LocalSend\nExec=$exec\n', ['/opt/localsend']), null);
++    }
++  });
++
++  group('registration visibility and mutation', () {
++    late Directory root;
++    setUp(() => root = Directory.systemTemp.createTempSync('localsend-autostart-test-'));
++    tearDown(() => root.deleteSync(recursive: true));
++
++    LinuxAutoStart resolve({String? scope, Map<String, String>? environment, String? hostConfig}) => LinuxAutoStart.resolve(
++      environment: environment ?? {'HOME': root.path, 'XDG_CONFIG_HOME': '${root.path}/config'},
++      executable: '/opt/localsend',
++      packageName: 'localsend_app',
++      appName: 'LocalSend',
++      flatpakInfo: scope == null ? null : '[Application]\nname=org.localsend.localsend_app\n[Instance]\nhost-config-dir=${hostConfig ?? '${root.path}/host-config'}\n[Context]\nfilesystems=$scope;\n',
++    );
++
++    test('absolute XDG wins and invalid relative XDG falls back to HOME', () {
++      expect(resolve().filePath, '${root.path}/config/autostart/localsend_app.desktop');
++      expect(resolve(environment: {'HOME': root.path, 'XDG_CONFIG_HOME': 'relative'}).filePath, '${root.path}/.config/autostart/localsend_app.desktop');
++      expect(resolve(environment: {'HOME': 'relative'}).snapshot().enabled, null);
++    });
++
++    test('native absence can be enabled atomically and disable absence is idempotent', () {
++      final registration = resolve();
++      expect(registration.snapshot().enabled, false);
++      expect(registration.disable(), true);
++      expect(registration.enable(hidden: true), true);
++      expect(registration.snapshot().enabled, true);
++      expect(registration.snapshot().hidden, true);
++      expect(registration.disable(), true);
++      expect(registration.disable(), true);
++    });
++
++    test('revoked scope hides stale private entry and rejects mutation', () {
++      final registration = resolve(scope: 'xdg-download');
++      final file = File(registration.filePath!);
++      file.parent.createSync(recursive: true);
++      file.writeAsStringSync(serializeLinuxAutoStartEntry('LocalSend', ['/opt/localsend']));
++      expect(registration.snapshot().enabled, null);
++      expect(registration.enable(hidden: false), false);
++      expect(registration.disable(), false);
++      expect(file.existsSync(), true);
++    });
++
++    test('exact scope modes expose registration while read-only refuses mutation', () {
++      for (final mode in ['', ':create', ':rw', ':ro']) {
++        final registration = resolve(scope: 'xdg-config/autostart$mode');
++        Directory(File(registration.filePath!).parent.path).createSync(recursive: true);
++        expect(registration.snapshot().enabled, false);
++        expect(registration.snapshot().canModify, mode != ':ro');
++        if (mode == ':ro') {
++          final file = File(registration.filePath!);
++          final contents = serializeLinuxAutoStartEntry('LocalSend', ['/usr/bin/flatpak', 'run', '--command=/app/localsend_app', 'org.localsend.localsend_app']);
++          file.writeAsStringSync(contents);
++          expect(registration.snapshot().enabled, true);
++          expect(registration.enable(hidden: false), false);
++          expect(registration.disable(), false);
++          expect(file.readAsStringSync(), contents);
++        }
++      }
++    });
++
++    test('broad grants do not authenticate a private sandbox config directory', () {
++      for (final scope in ['xdg-config', 'home', 'host']) {
++        final registration = resolve(scope: scope);
++        File(registration.filePath!).parent.createSync(recursive: true);
++        expect(registration.snapshot().enabled, null);
++        final sameConfig = resolve(scope: scope, hostConfig: '${root.path}/config');
++        expect(sameConfig.snapshot().enabled, false);
++      }
++    });
++
++    test('conflicting scope modes are unavailable even with an exposed directory', () {
++      final registration = resolve(scope: 'xdg-config/autostart:ro;xdg-config/autostart:rw');
++      File(registration.filePath!).parent.createSync(recursive: true);
++      expect(registration.snapshot().enabled, null);
++      expect(registration.disable(), false);
++    });
++
++    test('Flatpak serializes the host launcher, not the sandbox executable', () {
++      final registration = resolve(scope: 'xdg-config/autostart:create');
++      File(registration.filePath!).parent.createSync(recursive: true);
++      expect(registration.enable(hidden: true), true);
++      final contents = File(registration.filePath!).readAsStringSync();
++      expect(parseLinuxAutoStartEntry(contents, ['/usr/bin/flatpak', 'run', '--command=/app/localsend_app', 'org.localsend.localsend_app'])?.hidden, true);
++      expect(parseLinuxAutoStartEntry(contents, ['/opt/localsend']), null);
++    });
++
++    test('the old literal writer remains repairable for native spaces and Flatpak', () {
++      for (final sandboxed in [false, true]) {
++        final executable = sandboxed ? '/app/localsend_app' : '/opt/Local Send/localsend';
++        final registration = LinuxAutoStart.resolve(
++          environment: {'HOME': root.path, 'XDG_CONFIG_HOME': '${root.path}/config'},
++          executable: executable,
++          packageName: 'localsend_app',
++          appName: 'LocalSend',
++          flatpakInfo: sandboxed ? '[Application]\nname=org.localsend.localsend_app\n[Context]\nfilesystems=xdg-config/autostart:create;\n' : null,
++        );
++        final file = File(registration.filePath!);
++        file.parent.createSync(recursive: true);
++        // Exact previous writer template, independent of the new serializer.
++        file.writeAsStringSync('''
++[Desktop Entry]
++Type=Application
++Name=LocalSend
++Comment=LocalSend startup script
++Exec=$executable --hidden
++StartupNotify=false
++Terminal=false
++''');
++        final old = registration.snapshot();
++        expect(old.enabled, false);
++        expect(old.hidden, true);
++        expect(old.canModify, true);
++        expect(registration.enable(hidden: old.hidden), true);
++        expect(registration.snapshot().enabled, true);
++        expect(registration.snapshot().hidden, true);
++      }
++    });
++
++    test('foreign commands cannot use legacy repair recognition', () {
++      final registration = resolve(scope: 'xdg-config/autostart:create');
++      final file = File(registration.filePath!);
++      file.parent.createSync(recursive: true);
++      file.writeAsStringSync('''
++[Desktop Entry]
++Type=Application
++Name=LocalSend
++Comment=LocalSend startup script
++Exec=/app/foreign --hidden
++StartupNotify=false
++Terminal=false
++''');
++      expect(registration.snapshot().enabled, null);
++      expect(registration.snapshot().canModify, false);
++      expect(registration.enable(hidden: true), false);
++    });
++  });
++}

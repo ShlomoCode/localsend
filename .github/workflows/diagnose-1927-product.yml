@@ -1,0 +1,91 @@
+name: Issue 1927 product acceptance
+on:
+  push:
+    branches: [codex/bug-1927-product]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: issue1927-product
+  cancel-in-progress: false
+jobs:
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Start the shared wall deadline
+        run: |
+          now=$(date +%s)
+          echo "ISSUE1927_WALL_START=$now" >> "$GITHUB_ENV"
+          echo "ISSUE1927_WALL_DEADLINE=$((now + 2700))" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        timeout-minutes: 1
+        with:
+          fetch-depth: 0
+      - name: Require checkout within its 30-second allocation
+        run: |
+          mkdir -p evidence/workflow
+          git rev-parse HEAD > evidence/workflow/diagnostic-head.txt
+          elapsed=$(($(date +%s) - ISSUE1927_WALL_START))
+          printf 'checkout_elapsed_seconds=%s\nplanned_total_seconds=2580\nwall_ceiling_seconds=2700\n' "$elapsed" > evidence/workflow/budget.txt
+          test "$elapsed" -le 30
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 1
+        with:
+          name: issue1927-source-38166504952
+          run-id: 38166504952
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence/immutable-source
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 1
+        with:
+          name: issue1927-packages-38167715193
+          run-id: 38167715193
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence/immutable-packages
+      - name: Build exact product source with normal generation and focused checks
+        run: |
+          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 150 - 30))
+          test "$limit" -gt 0
+          if [ "$limit" -gt 720 ]; then limit=720; fi
+          set +e
+          timeout --signal=TERM --kill-after=30 "$limit" bash support/diagnostics/issue1927-product-build.sh
+          status=$?
+          printf 'source_status=%s\nsource_execution_ceiling=%s\n' "$status" "$limit" > evidence/workflow/source-status.txt
+          exit "$status"
+      - name: Build unchanged source and candidate in the same normal create manifest
+        run: |
+          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 150 - 20))
+          test "$limit" -gt 0
+          if [ "$limit" -gt 240 ]; then limit=240; fi
+          set +e
+          timeout --signal=TERM --kill-after=20 "$limit" bash support/diagnostics/issue1927-product-package.sh
+          status=$?
+          printf 'package_status=%s\npackage_execution_ceiling=%s\n' "$status" "$limit" > evidence/workflow/package-status.txt
+          exit "$status"
+      - name: Replay the five product conditions in qualified Mint Cinnamon
+        run: |
+          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 150 - 70))
+          test "$limit" -gt 0
+          if [ "$limit" -gt 1200 ]; then limit=1200; fi
+          set +e
+          timeout --signal=TERM --kill-after=70 "$limit" bash support/diagnostics/issue1927-product-mint.sh
+          status=$?
+          printf 'mint_status=%s\nmint_execution_ceiling=%s\n' "$status" "$limit" > evidence/workflow/mint-status.txt
+          exit "$status"
+      - name: Preserve receipts after every outcome
+        if: always()
+        run: |
+          timeout --signal=TERM --kill-after=1 29 bash -c '
+            mkdir -p evidence/workflow
+            printf "preservation_utc=%s\nwall_elapsed_seconds=%s\n" "$(date -u +%FT%TZ)" "$(($(date +%s) - ISSUE1927_WALL_START))" > evidence/workflow/preservation.txt
+            sudo chown -R "$(id -u):$(id -g)" evidence
+            chmod -R a+rX evidence
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        timeout-minutes: 2
+        with:
+          name: issue1927-product-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error

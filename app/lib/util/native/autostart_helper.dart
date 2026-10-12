@@ -1,36 +1,34 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:localsend_app/util/native/linux_autostart.dart';
 import 'package:localsend_app/util/native/macos_channel.dart';
 import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:win32_registry/win32_registry.dart';
 
-const startHiddenFlag = '--hidden';
+export 'linux_autostart.dart' show AutoStartSnapshot;
 
+const startHiddenFlag = '--hidden';
 final _logger = Logger('AutoStartHelper');
+
+Future<LinuxAutoStart> _linuxAutoStart() async {
+  final info = await PackageInfo.fromPlatform();
+  final runtime = File('/.flatpak-info');
+  return LinuxAutoStart.resolve(
+    environment: Platform.environment,
+    executable: Platform.resolvedExecutable,
+    packageName: info.packageName,
+    appName: info.appName,
+    flatpakInfo: runtime.existsSync() ? runtime.readAsStringSync() : null,
+  );
+}
 
 Future<bool> enableAutoStart({required bool startHidden}) async {
   try {
-    final packageInfo = await PackageInfo.fromPlatform();
     switch (defaultTargetPlatform) {
       case TargetPlatform.linux:
-        String contents =
-            '''
-[Desktop Entry]
-Type=Application
-Name=${packageInfo.appName}
-Comment=${packageInfo.appName} startup script
-Exec=${Platform.resolvedExecutable}${startHidden ? ' $startHiddenFlag' : ''}
-StartupNotify=false
-Terminal=false
-''';
-        final file = File(_getLinuxFilePath(packageInfo.packageName));
-        if (!file.parent.existsSync()) {
-          file.parent.createSync(recursive: true);
-        }
-        file.writeAsStringSync(contents);
-        return true;
+        return (await _linuxAutoStart()).enable(hidden: startHidden);
       case TargetPlatform.macOS:
         await setLaunchAtLogin(true);
         await setLaunchAtLoginMinimized(startHidden);
@@ -47,18 +45,16 @@ Terminal=false
         return false;
     }
   } catch (e) {
-    _logger.warning('Could enable auto start', e);
+    _logger.warning('Could not enable auto start', e);
     return false;
   }
 }
 
 Future<bool> disableAutoStart() async {
   try {
-    final packageInfo = await PackageInfo.fromPlatform();
     switch (defaultTargetPlatform) {
       case TargetPlatform.linux:
-        File(_getLinuxFilePath(packageInfo.packageName)).deleteSync();
-        break;
+        return (await _linuxAutoStart()).disable();
       case TargetPlatform.macOS:
         await setLaunchAtLogin(false);
         break;
@@ -70,42 +66,36 @@ Future<bool> disableAutoStart() async {
     }
     return true;
   } catch (e) {
-    _logger.warning('Could disable auto start', e);
+    _logger.warning('Could not disable auto start', e);
     return false;
   }
 }
 
-Future<bool> isAutoStartEnabled() async {
-  final packageInfo = await PackageInfo.fromPlatform();
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.linux:
-      return File(_getLinuxFilePath(packageInfo.packageName)).existsSync();
-    case TargetPlatform.macOS:
-      return await getLaunchAtLogin();
-    case TargetPlatform.windows:
-      return _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue)?.contains(Platform.resolvedExecutable) ?? false;
-    default:
-      return false;
+Future<AutoStartSnapshot> getAutoStartSnapshot() async {
+  try {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.linux:
+        return (await _linuxAutoStart()).snapshot();
+      case TargetPlatform.macOS:
+        return AutoStartSnapshot(enabled: await getLaunchAtLogin(), hidden: await getLaunchAtLoginMinimized(), canModify: true);
+      case TargetPlatform.windows:
+        final value = _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue);
+        return AutoStartSnapshot(
+          enabled: value?.contains(Platform.resolvedExecutable) ?? false,
+          hidden: value?.contains(startHiddenFlag) ?? false,
+          canModify: true,
+        );
+      default:
+        return const AutoStartSnapshot(enabled: false, hidden: false, canModify: false);
+    }
+  } catch (e) {
+    _logger.warning('Could not read auto start', e);
+    return const AutoStartSnapshot(enabled: null, hidden: false, canModify: false);
   }
 }
 
-Future<bool> isAutoStartHidden() async {
-  final packageInfo = await PackageInfo.fromPlatform();
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.linux:
-      final file = File(_getLinuxFilePath(packageInfo.packageName));
-      if (!file.existsSync()) {
-        return false;
-      }
-      return file.readAsStringSync().contains(startHiddenFlag);
-    case TargetPlatform.macOS:
-      return await getLaunchAtLoginMinimized();
-    case TargetPlatform.windows:
-      return _getWindowsRegistryKey().getStringValue(_windowsRegistryKeyValue)?.contains(startHiddenFlag) ?? false;
-    default:
-      return false;
-  }
-}
+Future<bool> isAutoStartEnabled() async => (await getAutoStartSnapshot()).enabled ?? false;
+Future<bool> isAutoStartHidden() async => (await getAutoStartSnapshot()).hidden;
 
 const _windowsRegistryKeyValue = 'LocalSend';
 
@@ -115,8 +105,4 @@ RegistryKey _getWindowsRegistryKey() {
     path: r'Software\Microsoft\Windows\CurrentVersion\Run',
     desiredAccessRights: AccessRights.allAccess,
   );
-}
-
-String _getLinuxFilePath(String appName) {
-  return '${Platform.environment['HOME']}/.config/autostart/$appName.desktop';
 }
