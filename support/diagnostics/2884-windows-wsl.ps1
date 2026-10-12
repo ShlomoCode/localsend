@@ -16,7 +16,8 @@ $mutex = $null
 $hasMutex = $false
 $rebooting = $false
 $utf8 = New-Object System.Text.UTF8Encoding($false)
-$featureNames = @('Microsoft-Hyper-V-All', 'VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux')
+$featureNames = @('VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux')
+$observedFeatureNames = @('Microsoft-Hyper-V-All') + $featureNames
 $wslHash = '28b1a0d013640a2ac95898ea705fa186e5b4ff767a1c1b49257161bc106599c6'
 $ubuntuHash = 'bb415d824822c4b878125729af451a5d18fb13d1cf5cbed9a7393ad64ac6039e'
 $distro = 'Issue2884Ubuntu'
@@ -122,10 +123,36 @@ function Require-Exit($Result, [int[]]$Allowed = @(0)) {
     }
 }
 function Get-Features {
-    return @($featureNames | ForEach-Object {
+    return @($observedFeatureNames | ForEach-Object {
         $feature = Get-WindowsOptionalFeature -Online -FeatureName $_
         @{ name = $_; state = [string]$feature.State }
     })
+}
+function Read-Capabilities([string]$Label, [switch]$RequireVirtualization) {
+    $path = Join-Path $root 'cpuid.exe'
+    if (-not (Test-Path -LiteralPath $path)) { $path = Download-Payload 'cpuid.exe' $config.cpuidSha256 }
+    $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -cne $config.cpuidSha256) { throw 'Native CPUID helper hash mismatch' }
+    $native = Invoke-Native $path @() 10
+    Send-Json ('cpuid-' + $Label + '.json') $native
+    Require-Exit $native
+    $cpuid = $native.stdout | ConvertFrom-Json
+    if ($cpuid.schemaVersion -ne 1 -or -not $cpuid.cpuidAvailable -or $cpuid.cpuVendor -cne 'AuthenticAMD') { throw 'Native Windows CPUID identity is invalid' }
+    $computer = Get-CimInstance Win32_ComputerSystem
+    $os = Get-CimInstance Win32_OperatingSystem
+    $boot = Invoke-Native "$env:SystemRoot\System32\bcdedit.exe" @('/enum', '{current}') 30
+    Send-Json ('bcd-' + $Label + '.json') $boot
+    Require-Exit $boot
+    $value = @{ phase = $Label; utc = [DateTime]::UtcNow.ToString('o'); lastBootUtc = $os.LastBootUpTime.ToUniversalTime().ToString('o');
+        bootConfiguration = $boot; cpuid = $cpuid; cpuidExecutableSha256 = $actualHash;
+        hypervisorPresent = [bool]$computer.HypervisorPresent;
+        processors = @(Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, VirtualizationFirmwareEnabled, VMMonitorModeExtensions, SecondLevelAddressTranslationExtensions);
+        note = 'CPUID and HypervisorPresent are metadata; only actual WSL2 execution establishes Windows nested virtualization.' }
+    Send-Json ('capability-' + $Label + '.json') $value
+    # Retain BCD/CIM/raw CPU evidence before rejecting this CPUID-visible route.
+    # Masked bits do not establish that all Windows/WSL2 routes are unavailable.
+    if ($RequireVirtualization -and (-not $cpuid.flags.svm -or -not $cpuid.flags.npt)) { throw 'Selected pre-feature CPUID-visible SVM/NPT route was not qualified; actual WSL2 remains untested' }
+    return $value
 }
 function Download-Payload([string]$Name, [string]$ExpectedHash) {
     $path = Join-Path $root $Name
@@ -181,10 +208,11 @@ try {
         throw 'Invalid ephemeral bridge configuration'
     }
     if ($config.wslSha256 -cne $wslHash -or $config.ubuntuSha256 -cne $ubuntuHash) { throw 'Host payload pins do not match source pins' }
+    if ($config.cpuidSha256 -notmatch '^[a-f0-9]{64}$') { throw 'Native CPUID helper pin is missing' }
     $phase = 'initial'
     if (Test-Path -LiteralPath $phasePath) { $phase = (Get-Content -LiteralPath $phasePath -Raw | ConvertFrom-Json).phase }
     if ($phase -in @('complete', 'failed')) { return }
-    if ($phase -notin @('initial', 'features_reboot_pending', 'msi_reboot_pending')) { throw 'Unexpected phase; refusing a reboot loop' }
+    if ($phase -notin @('initial', 'ordinary_reboot_pending', 'features_reboot_pending', 'msi_reboot_pending')) { throw 'Unexpected phase; refusing a reboot loop' }
 
     $stage = 'windows_identity'
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -209,36 +237,59 @@ try {
     if (-not $secureBoot -or -not $tpm.TpmPresent -or -not $tpm.TpmReady -or $tpmSpec.SpecVersion -notmatch '(^|,\s*)2\.0(,|$)') { throw 'UEFI Secure Boot and ready TPM 2.0 are required' }
 
     if ($phase -eq 'initial') {
-        $stage = 'enable_windows_features'
-        Send-Json 'feature-before.json' (Get-Features)
+        $stage = 'pre_feature_capability'
+        $before = Get-Features
+        Send-Json 'feature-before.json' $before
+        $initial = Read-Capabilities 'initial' -RequireVirtualization
+        if (@($before | Where-Object { $_.state -ne 'Disabled' }).Count -ne 0) { throw 'Ordinary reboot control requires all observed virtualization features disabled' }
         $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument '-NoProfile -ExecutionPolicy Bypass -File C:\Issue2884\2884-windows-wsl.ps1'
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Highest
         $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Force | Out-Null
+        # Normal native boot logging applies to both the ordinary control and
+        # the feature boot. It changes no recovery or hardware requirements.
+        $bootLog = Invoke-Native "$env:SystemRoot\System32\bcdedit.exe" @('/set', '{current}', 'bootlog', 'Yes') 30
+        Send-Json 'bcd-enable-bootlog.json' $bootLog
+        Require-Exit $bootLog
+        $stage = 'ordinary_feature_free_reboot'
+        Restart-Proof 'ordinary_reboot_pending'
+        return
+    }
+    if ($phase -eq 'ordinary_reboot_pending') {
+        $stage = 'ordinary_reboot_control'
+        $before = Get-Features
+        Send-Json 'feature-ordinary.json' $before
+        $ordinary = Read-Capabilities 'ordinary' -RequireVirtualization
+        $initial = Get-Content -LiteralPath (Join-Path $root 'capability-initial.json') -Raw | ConvertFrom-Json
+        if (@($before | Where-Object { $_.state -ne 'Disabled' }).Count -ne 0 -or $ordinary.lastBootUtc -eq $initial.lastBootUtc) { throw 'Ordinary reboot did not establish a fresh feature-free boot' }
+        $control = @{ status = 'PASS'; stage = $stage; beforeBootUtc = $initial.lastBootUtc; afterBootUtc = $ordinary.lastBootUtc;
+            featureStates = $before; cpuidExecutableSha256 = $ordinary.cpuidExecutableSha256; cpuid = $ordinary.cpuid;
+            windows = $windows; secureBoot = $secureBoot; tpmReady = $tpm.TpmReady }
+        Send-Json 'ordinary-reboot-control.json' $control
+        $stage = 'enable_supported_wsl_features'
         foreach ($name in $featureNames) {
             $command = "`$ErrorActionPreference='Stop'; Enable-WindowsOptionalFeature -Online -FeatureName '$name' -All -NoRestart | ConvertTo-Json -Compress"
             $enabled = Invoke-Native "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @('-NoProfile', '-Command', $command) 300
+            Send-Json ('enable-' + $name + '.json') $enabled
             Require-Exit $enabled
         }
+        Send-Json 'feature-pending.json' (Get-Features)
         $bcd = Invoke-Native "$env:SystemRoot\System32\bcdedit.exe" @('/set', 'hypervisorlaunchtype', 'auto') 30
+        Send-Json 'bcd-enable-auto.json' $bcd
         Require-Exit $bcd
         Restart-Proof 'features_reboot_pending'
         return
     }
-    $stage = 'hyperv_after_reboot'
+    $stage = 'supported_features_after_reboot'
+    $capability = Read-Capabilities $phase
     $after = Get-Features
     Send-Json 'feature-after.json' $after
-    if (@($after | Where-Object { $_.state -ne 'Enabled' }).Count -ne 0) { throw 'Required Windows features are not enabled after reboot' }
+    if (@($after | Where-Object { $_.name -in $featureNames -and $_.state -ne 'Enabled' }).Count -ne 0 -or
+        @($after | Where-Object { $_.name -eq 'Microsoft-Hyper-V-All' -and $_.state -eq 'Disabled' }).Count -ne 1) { throw 'Supported WSL feature pair must be enabled without the full Hyper-V role' }
     $computer = Get-CimInstance Win32_ComputerSystem
-    $vmms = Get-Service -Name vmms
-    $hypervHost = @(Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_ComputerSystem | Where-Object Caption -eq 'Hosting Computer System')
-    $boot = Invoke-Native "$env:SystemRoot\System32\bcdedit.exe" @('/enum', '{current}') 30
-    Require-Exit $boot
-    $hyperv = @{ hypervisorPresent = [bool]$computer.HypervisorPresent; vmmsStatus = [string]$vmms.Status; hypervHostingSystems = $hypervHost.Count; bootConfiguration = $boot; processors = @(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, VirtualizationFirmwareEnabled, SecondLevelAddressTranslationExtensions); note = 'HypervisorPresent is supplementary; actual WSL2 execution is the decisive gate.' }
-    Send-Json 'hyperv.json' $hyperv
-    if (-not $computer.HypervisorPresent) { throw 'Windows reports no running hypervisor' }
-    if ($vmms.Status -ne 'Running' -or $hypervHost.Count -ne 1 -or $boot.stdout -notmatch '(?im)^hypervisorlaunchtype\s+Auto\s*$') { throw 'Native Hyper-V management and boot configuration are not ready' }
+    $boot = $capability.bootConfiguration
+    if ($boot.stdout -notmatch '(?im)^hypervisorlaunchtype\s+Auto\s*$') { throw 'Native boot configuration does not enable hypervisor launch' }
 
     if ($phase -eq 'features_reboot_pending') {
         $stage = 'install_pinned_wsl'
@@ -282,7 +333,7 @@ try {
     $ubuntuActualHash = (Get-FileHash -LiteralPath $ubuntu -Algorithm SHA256).Hash.ToLowerInvariant()
     $msiSignature = Get-AuthenticodeSignature -LiteralPath (Join-Path $root 'wsl.msi')
     if ($msiActualHash -cne $wslHash -or $ubuntuActualHash -cne $ubuntuHash -or $msiSignature.Status -ne 'Valid' -or $null -eq $msiSignature.SignerCertificate -or $msiSignature.SignerCertificate.Subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)') { throw 'Final payload hash/signature recheck failed' }
-    $proof = @{ stage = $stage; distribution = $distro; distributionVersion = 2; wslVersion = '3.0.1.0'; wslMsiSha256 = $msiActualHash; wslMsiSignatureStatus = [string]$msiSignature.Status; wslMsiSigner = $msiSignature.SignerCertificate.Subject; ubuntuPayloadSha256 = $ubuntuActualHash; windows = $windows; secureBoot = $secureBoot; tpmPresent = $tpm.TpmPresent; tpmReady = $tpm.TpmReady; tpmSpecVersion = $tpmSpec.SpecVersion; featureStates = $after; hypervisorPresent = [bool]$computer.HypervisorPresent; vmmsStatus = [string]$vmms.Status; hypervHostingSystems = $hypervHost.Count; exitCode = $execution.exitCode; timedOut = $execution.timedOut; marker = $marker; markerMatched = $markerFound; kernelMatched = $kernelFound; procVersionMatched = $procFound; ubuntuIdentityMatched = $ubuntuFound; linuxOutput = $linuxText }
+    $proof = @{ stage = $stage; distribution = $distro; distributionVersion = 2; wslVersion = '3.0.1.0'; wslMsiSha256 = $msiActualHash; wslMsiSignatureStatus = [string]$msiSignature.Status; wslMsiSigner = $msiSignature.SignerCertificate.Subject; ubuntuPayloadSha256 = $ubuntuActualHash; windows = $windows; secureBoot = $secureBoot; tpmPresent = $tpm.TpmPresent; tpmReady = $tpm.TpmReady; tpmSpecVersion = $tpmSpec.SpecVersion; featureStates = $after; hypervisorPresent = [bool]$computer.HypervisorPresent; cpuid = $capability.cpuid; cpuidExecutableSha256 = $capability.cpuidExecutableSha256; exitCode = $execution.exitCode; timedOut = $execution.timedOut; marker = $marker; markerMatched = $markerFound; kernelMatched = $kernelFound; procVersionMatched = $procFound; ubuntuIdentityMatched = $ubuntuFound; linuxOutput = $linuxText }
     Send-Json 'wsl-proof.json' $proof
     if (-not ($markerFound -and $kernelFound -and $procFound -and $ubuntuFound)) { throw 'Actual Linux output did not establish the marker, Microsoft WSL2 kernel and Ubuntu 24.04 identity' }
     Export-SetupLogs

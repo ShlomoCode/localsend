@@ -25,7 +25,9 @@ cleanup() {
   for owned_pid in "$bridge_pid" "$tpm_pid"; do
     if [ -n "$owned_pid" ]; then kill -KILL "$owned_pid" 2>/dev/null || true; wait "$owned_pid" 2>/dev/null || true; fi
   done
-  rm -rf -- "$work_dir"
+  # Read-only guestfs collection may create root-owned private appliance files.
+  # This exact directory was created by this driver; bound its final cleanup.
+  sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=2s 15s /bin/rm -rf -- "$work_dir" || true
 }
 trap cleanup EXIT
 date -u --iso-8601=seconds
@@ -37,7 +39,7 @@ lscpu
 ls -l /dev/kvm
 df -B1 "$work_dir"
 free -b
-sha256sum support/diagnostics/2884-windows-{host.sh,bridge.cjs,unattend.xml,wsl.ps1} .github/workflows/diagnose-2884-windows-wsl.yml > "$evidence/source-sha256.txt"
+sha256sum support/diagnostics/2884-windows-{host.sh,bridge.cjs,unattend.xml,wsl.ps1,cpuid.c,recovery.sh} .github/workflows/diagnose-2884-windows-wsl.yml > "$evidence/source-sha256.txt"
 stage=host_cpu_resource_gate
 cpu_vendor=$(awk -F: '/^vendor_id/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' /proc/cpuinfo)
 free_bytes=$(df -B1 --output=avail "$work_dir" | tail -n 1 | tr -d ' ')
@@ -51,7 +53,7 @@ for local_port in 8765 8766; do
 done
 stage=host_tool_install
 sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=5s 180s apt-get update
-sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=5s 180s env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf swtpm genisoimage p7zip-full wimtools xmlstarlet gettext-base ffmpeg
+sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=5s 180s env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf swtpm genisoimage p7zip-full wimtools xmlstarlet gettext-base ffmpeg gcc-mingw-w64-x86-64-win32 guestfish linux-image-generic
 qemu-system-x86_64 --version
 qemu-img --version
 swtpm --version
@@ -66,6 +68,12 @@ sha256sum "$firmware_code" "$firmware_vars" > "$evidence/firmware-source-sha256.
 cp /usr/share/qemu/firmware/40-edk2-x86_64-secure-enrolled.json "$evidence/firmware-definition.json"
 stage=official_media_download
 mkdir -p "$work_dir/payload"
+stage=native_cpuid_helper_build
+x86_64-w64-mingw32-gcc --version > "$evidence/cpuid-compiler.txt"
+timeout --signal=TERM --kill-after=5s 30s x86_64-w64-mingw32-gcc -std=c11 -O2 -Wall -Wextra -Werror support/diagnostics/2884-windows-cpuid.c -o "$work_dir/payload/cpuid.exe"
+sha256sum "$work_dir/payload/cpuid.exe" > "$evidence/cpuid-helper-sha256.txt"
+cpuid_sha=$(sha256sum "$work_dir/payload/cpuid.exe" | cut -d ' ' -f 1)
+stage=official_media_download
 iso_url=https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso
 wsl_url=https://github.com/microsoft/WSL/releases/download/3.0.1/wsl.3.0.1.0.x64.msi
 wsl_sha=28b1a0d013640a2ac95898ea705fa186e5b4ff767a1c1b49257161bc106599c6
@@ -92,11 +100,12 @@ export WIN_LOCAL_PASSWORD
 bridge_token=$(openssl rand -hex 32)
 mkdir -p "$work_dir/seed" "$work_dir/tpm"
 # Secrets are used only in the temporary seed/config, never artifacts or argv.
-WIN_BRIDGE_TOKEN="$bridge_token" WIN_WSL_SHA="$wsl_sha" WIN_UBUNTU_SHA="$ubuntu_sha" node - "$work_dir/config.json" <<'JS'
+WIN_BRIDGE_TOKEN="$bridge_token" WIN_WSL_SHA="$wsl_sha" WIN_UBUNTU_SHA="$ubuntu_sha" WIN_CPUID_SHA="$cpuid_sha" node - "$work_dir/config.json" <<'JS'
 const fs = require('node:fs');
 fs.writeFileSync(process.argv[2], JSON.stringify({ bridgeUrl: 'http://10.0.2.2:8765',
   bearerToken: process.env.WIN_BRIDGE_TOKEN, localPassword: process.env.WIN_LOCAL_PASSWORD,
-  wslSha256: process.env.WIN_WSL_SHA, ubuntuSha256: process.env.WIN_UBUNTU_SHA }));
+  wslSha256: process.env.WIN_WSL_SHA, ubuntuSha256: process.env.WIN_UBUNTU_SHA,
+  cpuidSha256: process.env.WIN_CPUID_SHA }));
 JS
 envsubst '${WIN_IMAGE_INDEX} ${WIN_LOCAL_PASSWORD}' < support/diagnostics/2884-windows-unattend.xml > "$work_dir/seed/autounattend.xml"
 cp "$work_dir/config.json" "$work_dir/seed/config.json"
@@ -119,7 +128,7 @@ test -f "$work_dir/bridge-ready"
 stage=normal_windows_setup_and_wsl2_guest
 printf 'QEMU=KVM_only,q35_SMM_on,host_AMD_CPU,4vCPU,8192MiB,64GiB_disk,Microsoft_enrolled_SecureBoot_OVMF,TPM2_swtpm,SATA_disk_and_DVD,e1000_userNAT_no_forwarding\n'
 set +e
-sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=10s 2700s /usr/bin/qemu-system-x86_64 \
+sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=10s 2400s /usr/bin/qemu-system-x86_64 \
   -accel kvm -machine q35,smm=on \
   -cpu host,hv-relaxed,hv-vapic,hv-spinlocks=0xfff,hv-vpindex,hv-runtime,hv-synic,hv-stimer,hv-stimer-direct,hv-time,hv-frequencies,hv-tlbflush,hv-ipi \
   -smp 4 -m 8192 -global driver=cfi.pflash01,property=secure,value=on \
@@ -135,13 +144,22 @@ sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=10s 2700s /usr/bin/qemu-s
 qemu_status=$?
 set -e
 printf '%s\n' "$qemu_status" > "$evidence/qemu-exit.txt"
+if [ -f "$evidence/recovery-observed.json" ] || [ "$qemu_status" -ne 0 ] || [ ! -f "$evidence/wsl-proof.json" ]; then
+  stage=bounded_readonly_boot_recovery
+  set +e
+  sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=5s 240s /bin/bash support/diagnostics/2884-windows-recovery.sh "$work_dir" "$evidence"
+  recovery_status=$?
+  set -e
+  printf '%s\n' "$recovery_status" > "$evidence/recovery-exit.txt"
+fi
 stage=actual_windows_wsl2_result_gate
 if [ "$qemu_status" -ne 0 ]; then exit "$qemu_status"; fi
+if [ -f "$evidence/recovery-observed.json" ]; then printf 'native_AutomaticRepair_observed_and_retained\n'; exit 2; fi
 node - "$evidence" <<'JS'
 const fs = require('node:fs');
 const path = require('node:path');
 const dir = process.argv[2];
-for (const name of ['result.json', 'windows-identity.json', 'firmware.json', 'hyperv.json', 'wsl-proof.json']) {
+for (const name of ['result.json', 'windows-identity.json', 'firmware.json', 'ordinary-reboot-control.json', 'capability-initial.json', 'capability-ordinary.json', 'wsl-proof.json']) {
   if (!fs.existsSync(path.join(dir, name))) throw new Error(`Missing exact Windows capability evidence: ${name}`);
 }
 const result = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
@@ -163,10 +181,22 @@ requireGate(proof.stage === 'actual_wsl2_execution' && proof.distribution === 'I
 requireGate(proof.wslMsiSha256 === '28b1a0d013640a2ac95898ea705fa186e5b4ff767a1c1b49257161bc106599c6' &&
   proof.ubuntuPayloadSha256 === 'bb415d824822c4b878125729af451a5d18fb13d1cf5cbed9a7393ad64ac6039e' &&
   proof.wslMsiSignatureStatus === 'Valid' && /(^|,\s*)O=Microsoft Corporation(,|$)/.test(proof.wslMsiSigner), 'official_payload_identity');
-const featureNames = ['Microsoft-Hyper-V-All', 'VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux'];
+const featureNames = ['VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux'];
 requireGate(Array.isArray(proof.featureStates) && proof.featureStates.length === 3 && featureNames.every((name) =>
-  proof.featureStates.filter((entry) => entry.name === name && entry.state === 'Enabled').length === 1), 'enabled_native_features');
-requireGate(proof.hypervisorPresent === true && proof.vmmsStatus === 'Running' && proof.hypervHostingSystems === 1, 'native_HyperV_metadata');
+  proof.featureStates.filter((entry) => entry.name === name && entry.state === 'Enabled').length === 1) &&
+  proof.featureStates.filter((entry) => entry.name === 'Microsoft-Hyper-V-All' && entry.state === 'Disabled').length === 1, 'supported_WSL_feature_pair_without_full_role');
+const cpuidHash = fs.readFileSync(path.join(dir, 'cpuid-helper-sha256.txt'), 'utf8').trim().split(/\s+/)[0];
+const initial = read('capability-initial.json');
+const ordinary = read('capability-ordinary.json');
+const control = read('ordinary-reboot-control.json');
+requireGate(/^[a-f0-9]{64}$/.test(cpuidHash) && [initial, ordinary, proof].every((entry) =>
+  entry.cpuidExecutableSha256 === cpuidHash && entry.cpuid.schemaVersion === 1 && entry.cpuid.cpuidAvailable === true &&
+  entry.cpuid.cpuVendor === 'AuthenticAMD' && Array.isArray(entry.cpuid.rawLeaves) && entry.cpuid.rawLeaves.length >= 4) &&
+  [initial, ordinary].every((entry) => entry.cpuid.flags.svm === true && entry.cpuid.flags.npt === true), 'pre_feature_native_Windows_CPUID_qualification');
+requireGate(control.status === 'PASS' && control.stage === 'ordinary_reboot_control' &&
+  control.beforeBootUtc === initial.lastBootUtc && control.afterBootUtc === ordinary.lastBootUtc &&
+  control.beforeBootUtc !== control.afterBootUtc && Array.isArray(control.featureStates) && control.featureStates.length === 3 &&
+  control.featureStates.every((entry) => entry.state === 'Disabled'), 'ordinary_feature_free_reboot');
 requireGate([proof, execution, version, list].every((entry) => entry.exitCode === 0 && entry.timedOut === false), 'actual_native_exit_statuses');
 requireGate(/^WSL version:\s*3\.0\.1\.0\s*$/m.test(version.stdout) &&
   /^\s*\*?\s*Issue2884Ubuntu\s+\S+\s+2\s*$/m.test(list.stdout), 'native_WSL_version_and_list');

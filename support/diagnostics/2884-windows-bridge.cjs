@@ -11,14 +11,23 @@ const config = JSON.parse(fs.readFileSync(path.join(workDir, 'config.json'), 'ut
 const expectedAuthorization = Buffer.from(`Bearer ${config.bearerToken}`);
 const allowedArtifacts = new Set(['windows-identity.json', 'firmware.json', 'feature-before.json',
   'feature-after.json', 'hyperv.json', 'wsl-version.txt', 'wsl-list.txt', 'wsl-command.txt',
-  'wsl-proof.json', 'setupact-redacted.txt', 'setuperr-redacted.txt', 'proof-error.json', 'phase.json']);
-const payloads = new Map([['/payload/wsl.msi', 'wsl.msi'], ['/payload/ubuntu.wsl', 'ubuntu.wsl']]);
+  'wsl-proof.json', 'setupact-redacted.txt', 'setuperr-redacted.txt', 'proof-error.json', 'phase.json',
+  'cpuid-initial.json', 'cpuid-ordinary.json', 'cpuid-features_reboot_pending.json', 'cpuid-msi_reboot_pending.json',
+  'bcd-initial.json', 'bcd-ordinary.json', 'bcd-features_reboot_pending.json', 'bcd-msi_reboot_pending.json',
+  'capability-initial.json', 'capability-ordinary.json', 'capability-features_reboot_pending.json', 'capability-msi_reboot_pending.json',
+  'ordinary-reboot-control.json', 'feature-ordinary.json', 'feature-pending.json', 'bcd-enable-auto.json', 'bcd-enable-bootlog.json',
+  'enable-VirtualMachinePlatform.json', 'enable-Microsoft-Windows-Subsystem-Linux.json']);
+const payloads = new Map([['/payload/wsl.msi', 'wsl.msi'], ['/payload/ubuntu.wsl', 'ubuntu.wsl'], ['/payload/cpuid.exe', 'cpuid.exe']]);
 const logPath = path.join(evidenceDir, 'bridge.jsonl');
 const log = (value) => fs.appendFileSync(logPath, `${JSON.stringify({ utc: new Date().toISOString(), ...value })}\n`);
 const redact = (text) => text.split(config.bearerToken).join('<REDACTED>').split(config.localPassword).join('<REDACTED>');
 let stopping = false;
 let screenshotBusy = false;
 let screenshotIndex = 0;
+let repairDetected = false;
+// The exact original 1280x800 native PPM was visually verified as Automatic
+// Repair in run 38205207093. A match is an observation, never a repair action.
+const automaticRepairPpmSha256 = '86e3a3cb9fe0883f3dd22946a78ce2bf4f58d9065f990ba1453f0ae195dfd74b';
 function authorized(request) {
   const provided = Buffer.from(request.headers.authorization || '');
   return provided.length === expectedAuthorization.length && crypto.timingSafeEqual(provided, expectedAuthorization);
@@ -118,6 +127,17 @@ async function screenshot() {
     const conversion = spawnSync('/usr/bin/ffmpeg', ['-v', 'error', '-y', '-i', ppm, path.join(evidenceDir, `${basename}.png`)], { timeout: 10000 });
     log({ kind: 'screenshot', ordinal, captureStartedUtc: started, captureFinishedUtc: new Date().toISOString(),
       qemuStatus: status, nativeFile: `${basename}.ppm`, pngCreated: conversion.status === 0 });
+    const captureHash = crypto.createHash('sha256').update(fs.readFileSync(ppm)).digest('hex');
+    if (!repairDetected && captureHash === automaticRepairPpmSha256) {
+      repairDetected = true;
+      const observation = { stage: 'native_AutomaticRepair_observed', utc: new Date().toISOString(),
+        nativeFile: `${basename}.ppm`, sha256: captureHash, qemuStatus: status,
+        response: 'Stop this owned VM for bounded read-only boot diagnostics; do not repair or resume.' };
+      fs.writeFileSync(path.join(evidenceDir, 'recovery-observed.json'), JSON.stringify(observation, null, 2));
+      log({ kind: 'AutomaticRepair-observed', ...observation });
+      try { await qmp('quit'); }
+      catch (error) { log({ kind: 'owned-QMP-quit-reply', detail: String(error) }); }
+    }
   } catch (error) { log({ kind: 'screenshot-error', ordinal, captureStartedUtc: started, detail: String(error) }); }
   finally { screenshotBusy = false; }
 }
