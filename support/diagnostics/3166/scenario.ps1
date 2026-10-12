@@ -71,7 +71,7 @@ try {
  if(Test-Path C:\s3166){throw 'ENV_BLOCK: pre-existing3166 profile root is unowned'};New-Item -ItemType Directory C:\s3166|Out-Null
  $script:Archive=Join-Path $Evidence LocalSend-1.18.2-windows-x86-64.zip;Invoke-WebRequest 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.zip' -UseBasicParsing -OutFile $script:Archive -TimeoutSec 90
  $hash=(Get-FileHash $script:Archive).Hash;Json @{Path=$script:Archive;Sha256=$hash} archive;if($hash -ne '737aab1829d901e1d798cddd1e5fdc06ba9dfcc9ea50cfe3805e047005d5e71a'){throw 'ENV_BLOCK: official ZIP identity mismatch'}
- $script:App=Launch-App app 53316 C:\s3166
+ $script:App=Launch-App app 53316 C:\s3166 (Join-Path $PSScriptRoot scenario.ps1)
  $script:Stage='tray-control';$oldShell=Shell;Desktop-Snapshot tray-working-control-before|Out-Null
  $icon=Find-Tray;if(-not $icon){throw 'ENV_BLOCK: named visible LocalSend tray icon unavailable'};Json $icon actual-control-tray
  # Native minimize is a user caption action, so actual tray activation must show the window.

@@ -44,13 +44,16 @@ function Complete-ExitReceipt($Process, $Receipt, $WaitBoolean) {
     } elseif ($WaitBoolean -eq $false -and $Receipt.HasExited -eq $false) { $Receipt.Status = "TIMED_OUT" }
     $Receipt | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Evidence "$($Receipt.Name)-process-exit.json")
 }
-function Invoke-PrelaunchPhase($Phase,$Context,$Tag,[int]$Seconds,[DateTime]$End){
+function Invoke-PrelaunchPhase($Phase,$Context,$Tag,[int]$Seconds,[DateTime]$End,[string]$ScenarioEntryPath){
  Check-Budget
  $remaining=[int][Math]::Floor(($End-[DateTime]::UtcNow).TotalMilliseconds)-5000
  if($remaining -le 0){throw "ENV_BLOCK: shared 120-second prelaunch budget exhausted"}
  $phaseEnd=[DateTime]::UtcNow.AddSeconds($Seconds);if($phaseEnd -gt $End.AddSeconds(-5)){$phaseEnd=$End.AddSeconds(-5)}
  $path=(Get-Command powershell.exe -ErrorAction Stop).Source
- $args="-NoProfile -MTA -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Evidence `"$Evidence`" -Deadline `"$($Deadline.ToString("o"))`" -PrelaunchPhase $Phase -PhaseContext `"$Context`" -PhaseTag $Tag"
+ if(-not $ScenarioEntryPath -or -not (Test-Path -LiteralPath $ScenarioEntryPath -PathType Leaf)){throw "ENV_BLOCK: explicit scenario phase entry path absent"}
+ $entry=[IO.Path]::GetFullPath($ScenarioEntryPath)
+ $args="-NoProfile -MTA -ExecutionPolicy Bypass -File `"$entry`" -Evidence `"$Evidence`" -Deadline `"$($Deadline.ToString("o"))`" -PrelaunchPhase $Phase -PhaseContext `"$Context`" -PhaseTag $Tag"
+ Json @{Phase=$Phase;Tag=$Tag;Executable=$path;EntryPath=$entry;EntrySha256=(Get-FileHash -LiteralPath $entry -Algorithm SHA256).Hash;FrozenHead=$env:GITHUB_SHA;ArgumentString=$args;ArgumentTokens=@("-NoProfile","-MTA","-ExecutionPolicy","Bypass","-File",$entry,"-Evidence",$Evidence,"-Deadline",$Deadline.ToString("o"),"-PrelaunchPhase",$Phase,"-PhaseContext",$Context,"-PhaseTag",$Tag);PreparedUtc=[DateTime]::UtcNow.ToString("o")} "$Tag-invocation"
  $p=Start-Process $path -ArgumentList $args -PassThru -RedirectStandardOutput (Join-Path $Evidence "$Tag-stdout-original.txt") -RedirectStandardError (Join-Path $Evidence "$Tag-stderr-original.txt")
  $receipt=New-ExitReceipt $p $Tag $path
  $receipt|ConvertTo-Json -Depth 8|Set-Content (Join-Path $Evidence "$Tag-owned-process.json") -Encoding UTF8
@@ -107,13 +110,13 @@ function Run-PrelaunchPhase{
  finally{$phaseReceipt.CompletedUtc=[DateTime]::UtcNow.ToString("o");$phaseReceipt|ConvertTo-Json -Depth 8|Set-Content $receiptPath -Encoding UTF8}
  exit 0
 }
-function Launch-App($Role,$Port,$Destination){
+function Launch-App($Role,$Port,$Destination,[string]$ScenarioEntryPath){
  $prelaunchDeadline=[DateTime]::UtcNow.AddSeconds(120);if($prelaunchDeadline -gt $Deadline){$prelaunchDeadline=$Deadline}
  $context=[ordered]@{Role=$Role;Port=$Port;Destination=$Destination;Directory="C:\s3166\$Role";Archive=$script:Archive;Owned=$script:Owned;Exe=$null;Profile=$null;Pe=$null;Hash=$null;Signature=$null}
  foreach($entry in @(@("absence",5),@("extract",45),@("discover",5),@("profile",10),@("pe",10),@("hash",10),@("signature",15),@("artifact",5))){
   $phase=$entry[0];$tag="$script:Stage-$Role-$phase";$contextPath=Join-Path $Evidence "$tag-context.json"
   $context|ConvertTo-Json -Depth 12|Set-Content $contextPath -Encoding UTF8
-  $output=Invoke-PrelaunchPhase $phase $contextPath $tag ([int]$entry[1]) $prelaunchDeadline
+  $output=Invoke-PrelaunchPhase $phase $contextPath $tag ([int]$entry[1]) $prelaunchDeadline $ScenarioEntryPath
   switch($phase){"discover"{$context.Exe=$output.Exe;$context.Profile=$output.Profile};"pe"{$context.Pe=$output};"hash"{$context.Hash=$output.Hash};"signature"{$context.Signature=$output}}
  }
  $exe=$context.Exe;$profile=$context.Profile
