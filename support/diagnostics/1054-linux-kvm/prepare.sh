@@ -43,7 +43,13 @@ for tool in qemu-system-x86_64 qemu-img ruby genisoimage ffmpeg ffprobe tesserac
 gcc --version > "$OUT/compiler-version.txt"
 ffmpeg -version > "$OUT/ffmpeg-version.txt"
 tesseract --version > "$OUT/tesseract-version.txt" 2>&1
-sha256sum /usr/share/seabios/bios-256k.bin /usr/share/qemu/vgabios-stdvga.bin > "$OUT/firmware-sha256.txt"
+# Receipt only: use the distro package's stdvga asset, without replacing the
+# default firmware or adding a QEMU override.
+dpkg-query -L seabios > "$OUT/firmware-package-files.txt"
+mapfile -t vga_paths < <(awk '/^\/usr\/share\/.*\/vgabios-stdvga\.bin$/ {print}' "$OUT/firmware-package-files.txt")
+[[ "${#vga_paths[@]}" == 1 && -r "${vga_paths[0]}" ]] || { stage missing_or_ambiguous_package_VGA_asset; exit 2; }
+dpkg-query -S /usr/share/seabios/bios-256k.bin "${vga_paths[0]}" > "$OUT/firmware-package-ownership.txt"
+sha256sum /usr/share/seabios/bios-256k.bin "${vga_paths[0]}" > "$OUT/firmware-sha256.txt"
 sha256sum "$HOST"/* "$BASE/Bootstrap.ps1" "$BASE/render-answer.rb" "$BASE/install.rb" "$BASE/qmp.rb" "$BASE/vnc.rb" > "$OUT/source-sha256.txt"
 stage fresh_KVM_API_VM_vCPU_admission
 bounded gcc -O2 -Wall -Wextra "$HOST/kvm-probe.c" -o "$PRIVATE/kvm-probe" > "$OUT/compiler.txt" 2>&1
