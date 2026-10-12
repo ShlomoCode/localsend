@@ -5,7 +5,7 @@ on:
     inputs:
       source_family:
         type: choice
-        options: [historical, current, candidate]
+        options: [historical, current, candidate, gal-component]
         default: historical
       build_tagged:
         type: boolean
@@ -96,3 +96,52 @@ jobs:
       candidate_ref: ${{ inputs.candidate_ref }}
       gal_ref: ${{ inputs.gal_ref }}
     secrets: inherit
+  gal_component:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && inputs.source_family == 'gal-component'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: diagnostics
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: c1ce322fb3acf08e44f329b8b7208b8b0d91e244
+          path: wrapper-source
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: ShlomoCode/gal
+          ref: 55dabd7b43927e5b0ad87cf0ab3dab06950ebe2f
+          path: gal-reviewed
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Check exact Gal millisecond input and existing failure cases
+        run: |
+          mkdir -p issue2311-component-evidence
+          curl --fail --location --silent --show-error https://services.gradle.org/distributions/gradle-8.13-bin.zip -o "$RUNNER_TEMP/gal2311-gradle.zip"
+          printf '%s\n' 20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78 > "$RUNNER_TEMP/gal2311-gradle.sha256"
+          printf '%s  %s\n' "$(cat "$RUNNER_TEMP/gal2311-gradle.sha256")" "$RUNNER_TEMP/gal2311-gradle.zip" | sha256sum --check --strict
+          cp "$RUNNER_TEMP/gal2311-gradle.sha256" issue2311-component-evidence/gradle-distribution.sha256
+          unzip -q "$RUNNER_TEMP/gal2311-gradle.zip" -d "$RUNNER_TEMP/gal2311-gradle"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' > issue2311-component-evidence/sdk-install.log 2>&1
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/aapt2"
+          cp diagnostics/support/diagnostics/gal2311-component/src/test/java/org/localsend/diagnostic/gal2311/GalPluginComponentTest.java issue2311-component-evidence/
+          cp wrapper-source/app/android/gradle/wrapper/gradle-wrapper.properties issue2311-component-evidence/
+          sha256sum issue2311-component-evidence/GalPluginComponentTest.java > issue2311-component-evidence/test-source.sha256
+          bash diagnostics/support/diagnostics/gal2311-component/run-cloud.sh \
+            "$GITHUB_WORKSPACE/gal-reviewed" 55dabd7b43927e5b0ad87cf0ab3dab06950ebe2f \
+            52d5f0db9c04259920e2821ee2a3bba50560a3ca2ec7488bfacfe978fbbaa300 \
+            "$RUNNER_TEMP/gal2311-gradle/gradle-8.13/bin/gradle" "$GITHUB_WORKSPACE/issue2311-component-evidence"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue2311-gal-component-${{ github.run_id }}-${{ github.run_attempt }}
+          path: issue2311-component-evidence/
+          if-no-files-found: error
+          retention-days: 30
