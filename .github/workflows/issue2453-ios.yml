@@ -104,8 +104,10 @@ jobs:
             const runId = process.env.COMPARISON_RUN_ID;
             if (!/^[0-9]+$/.test(runId)) throw new Error('Invalid comparison run ID');
             const {data: run} = await github.rest.actions.getWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: runId});
-            if (run.status !== 'completed' || run.conclusion !== 'success' || run.event !== 'workflow_dispatch' || run.path !== '.github/workflows/issue2453-ios.yml' || run.head_sha !== context.sha) {
-              throw new Error('Comparison must be a successful dispatch of the same workflow and harness commit');
+            // The separate arm adds evidence collection only; paired production input gates remain unchanged.
+            const baselineHarness = '20aec76d5f175130035ce3b5b752e3c763708228';
+            if (run.status !== 'completed' || run.conclusion !== 'success' || run.event !== 'workflow_dispatch' || run.path !== '.github/workflows/issue2453-ios.yml' || run.head_sha !== baselineHarness) {
+              throw new Error('Comparison must be a successful dispatch of the frozen default workflow harness');
             }
 
       - name: Download default arm lock and toolchain evidence
@@ -131,7 +133,7 @@ jobs:
           test "$(cat "$baseline/selected-sdk.txt")" = 3.29.0
           test "$(cat "$baseline/renderer.txt")" = impeller
           test "$(cat "$baseline/thread-mode.txt")" = default
-          test "$(cat "$baseline/harness-commit.txt")" = '${{ github.sha }}'
+          test "$(cat "$baseline/harness-commit.txt")" = 20aec76d5f175130035ce3b5b752e3c763708228
           test -s "$baseline/ipa.sha256"
           test -s "$baseline/final-bundle-info.plist"
           cp "$baseline/locks-after/pubspec.lock" app/pubspec.lock
@@ -290,6 +292,37 @@ jobs:
           plutil -p "$app/Info.plist" > "$out/runner-plist.txt"
           find "$app" -type f -exec shasum -a 256 {} \; > "$out/device-bundle.sha256"
           printf '%s\n' 'Rebuilt historical1.17 source; requested Flutter SDK and renderer recorded separately. Diagnostic SDK input and solver drift retained. Unsigned arm64, not the historical App Store binary. BrowserStack normal signing/admission remains to be verified.' > "$out/artifact-scope.txt"
+
+      - name: Preserve original App debug symbols with exact bundle UUID
+        if: inputs.thread_mode == 'separate'
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/evidence/symbols"
+          mkdir -p "$out"
+          binary=app/build/ios/iphoneos/Runner.app/Frameworks/App.framework/App
+          test -f "$binary"
+          xcrun dwarfdump --uuid "$binary" > "$out/app-binary-uuid.txt"
+          expected=$(awk '$1 == "UUID:" && $3 == "(arm64)" {print $2}' "$out/app-binary-uuid.txt")
+          [[ "$expected" =~ ^[0-9A-Fa-f-]{36}$ ]]
+          matches=0
+          while IFS= read -r -d '' candidate; do
+            dwarf="$candidate/Contents/Resources/DWARF/App"
+            test -f "$dwarf"
+            actual=$(xcrun dwarfdump --uuid "$dwarf" | awk '$1 == "UUID:" && $3 == "(arm64)" {print $2}')
+            if [[ "$actual" == "$expected" ]]; then
+              matches=$((matches + 1))
+              test "$matches" -eq 1
+              ditto "$candidate" "$out/App.framework.dSYM"
+              printf '%s\n' "$candidate" > "$out/original-dsym-path.txt"
+            fi
+          done < <(find app/.dart_tool/flutter_build -type d -name App.framework.dSYM -print0 -prune)
+          test "$matches" -eq 1
+          xcrun dwarfdump --uuid "$out/App.framework.dSYM" > "$out/app-dsym-uuid.txt"
+          retained=$(awk '$1 == "UUID:" && $3 == "(arm64)" {print $2}' "$out/app-dsym-uuid.txt")
+          test "$retained" = "$expected"
+          find "$out/App.framework.dSYM" -type f -exec shasum -a 256 {} \; > "$out/app-dsym.sha256"
 
       - name: Preserve source state on success or failure
         if: always()
