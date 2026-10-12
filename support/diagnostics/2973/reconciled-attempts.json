@@ -32,5 +32,14 @@
     "originalAppStateRestoration": "unverified-session-retired",
     "androidSettingsChanged": false,
     "resolution": "Actual switch, two real app selections, Add and Send Files 2 succeeded. Root accepted direct original rows/icons/count evidence. Harness wrongly required file-name semantics on icon-only Send. Session ended done; original temporary app selection restoration remains explicitly unverified. Next fresh session must prove empty initial selection before replay and restore through original Selection X."
+  },
+  {
+    "runId": "38207793269",
+    "headSha": "9a8706c84464a78fad94f03ced60a8b070ee8c8a",
+    "sessionId": "d1a960554df2285709d0c604861dc24862ce0f10",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "androidSettingsChanged": false,
+    "resolution": "Original Settings screenshot and native package node show inline Version: 1.17.0 (583) with LocalSend, rather than an About button. No native Android settings input occurred. Independent cleanup unresolved false and provider done. Focused correction uses this actual visible inline version identity and stops before an unobserved final swipe."
   }
 ]

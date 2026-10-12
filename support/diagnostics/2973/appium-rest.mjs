@@ -200,17 +200,18 @@ if (mode === 'create') {
       await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ scope: 'default-picker-control-only', originalSelectionAndSwitchRestorationVerified: true, androidSettingsChanged: false, aboutAndNativeSettingsObserved: false, enlargementProductFailureValidated: false }, null, 2));
     } else {
     await byLabel('Settings', 'send-after-apps');
-    let aboutFound = false;
+    let versionFound = false;
     for (let attempt = 0; attempt < 4; attempt++) {
       const settings = await capture(`app-settings-${attempt}`);
-      if (settings.nodes.some(node => node['content-desc'] === 'About' || node.text === 'About')) {
-        await byLabel('About', 'app-settings-before-about');
-        const about = await capture('about-original-version');
-        if (!about.source.includes('1.17.0')) throw new Error('About screen does not expose uploaded original version 1.17.0');
-        await back();
-        aboutFound = true;
+      const version = settings.nodes.filter(node => node.package === 'org.localsend.localsend_app' && node.displayed === 'true' &&
+        (node['content-desc'] === 'Version: 1.17.0 (583)' || node.text === 'Version: 1.17.0 (583)'));
+      if (version.length === 1 && settings.nodes.some(node => node.package === 'org.localsend.localsend_app' && node.displayed === 'true' &&
+        (node['content-desc'] === 'LocalSend' || node.text === 'LocalSend'))) {
+        await writeFile(resolve(evidence, 'original-visible-version.json'), JSON.stringify({ versionLabel: version[0], originalSettingsSnapshot: `observe-${serial - 1}-app-settings-${attempt}`, identityVerified: true }, null, 2));
+        versionFound = true;
         break;
       }
+      if (attempt === 3) break;
       const { value: rect } = await request('GET', prefix + '/window/rect');
       if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height)) throw new Error('Live bounds absent for Settings scroll');
       await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
@@ -218,7 +219,7 @@ if (mode === 'create') {
         { type: 'pointerMove', duration: 600, x: Math.floor(rect.width / 2), y: Math.floor(rect.height * 0.3) }, { type: 'pointerUp', button: 0 },
       ] }] });
     }
-    if (!aboutFound) throw new Error('About label not exposed after bounded native Settings observation');
+    if (!versionFound) throw new Error('Original visible version not exposed after bounded native Settings observation');
     // Real notification shade gestures use the live window dimensions, not stored coordinates.
     const { value: size } = await request('GET', prefix + '/window/rect');
     if (!Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) throw new Error('Live window dimensions unavailable');
