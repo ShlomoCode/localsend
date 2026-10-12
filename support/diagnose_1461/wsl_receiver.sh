@@ -211,24 +211,10 @@ printf 'wait-return-observed\t%s\tstatus=%s\t%s\n' "$(date -u --iso-8601=ns)" "$
 snapshot_status=0
 timeout --kill-after=1s 2s bash "$lifetime" "$evidence" snapshot receiver-after-wait-before-cleanup || snapshot_status=$?
 printf '%s\n' "$snapshot_status" > "$out/lifetime/receiver-after-wait-before-cleanup.exit" || true
-# Preserve original Xvfb while the bounded tracer records native events. This
-# delays cleanup only after the app has already exited; it is an observer
-# effect, not a receiver/session repair. Deadline failure preserves originals.
-for ((attempt=0; attempt<240; attempt++)); do
-  [[ ! -s "$out/lifetime/trace/completed.tsv" ]] || break
-  sleep 0.1
-done
-if [[ ! -s "$out/lifetime/trace/completed.tsv" ]]; then
-  printf 'trace completion unavailable; original display preserved\n' > "$out/lifetime/cleanup-held.txt"
-  exit "$status"
-fi
-snapshot_status=0
-timeout --kill-after=1s 4s bash "$lifetime" "$evidence" snapshot receiver-trace-completed-before-cleanup || snapshot_status=$?
-printf '%s\n' "$snapshot_status" > "$out/lifetime/receiver-trace-completed-before-cleanup.exit" || true
 settings_status=0; cp "$settings" "$out/settings-after.json" || settings_status=$?
 printf '%s\n' "$settings_status" > "$out/lifetime/settings-after-copy.exit" || true
 printf 'exited\t%s\t%s\n' "$(date -u --iso-8601=ns)" "$status" > "$out/app-exited.tsv"
-# Cleanup was delayed for tracing; reject PID reuse of the original WM/DBus.
+# Reject PID reuse of the original WM/DBus during native exit cleanup.
 for role in wm dbus; do
   read -r cleanup_pid cleanup_tick cleanup_exe < "$out/lifetime/$role.ref" || continue
   cleanup_raw=$(cat "/proc/$cleanup_pid/stat" 2>/dev/null) || continue

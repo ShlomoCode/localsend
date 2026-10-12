@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       receiver_lifetime_only:
-        description: Bounded original receiver delivered-signal/exit trace only; no sender or fixtures
+        description: Bounded untraced original receiver lifetime admission; no sender or fixtures
         type: boolean
         default: true
         required: true
@@ -55,7 +55,7 @@ jobs:
             & wsl -d Ubuntu-24.04 -u root -- bash -n "$linuxRoot/support/diagnose_1461/$name"
             if($LASTEXITCODE){throw 'Guest source syntax failed'}
           }
-      - name: Bounded original receiver native signal and exit trace
+      - name: Bounded untraced original receiver admission
         shell: pwsh
         env:
           RECEIVER_LIFETIME_ONLY: ${{ inputs.receiver_lifetime_only }}

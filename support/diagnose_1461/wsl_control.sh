@@ -9,6 +9,9 @@ set -Eeuo pipefail
 evidence=${1:?evidence}; action=${2:?action}; shift 2
 scripts=$(cd "$(dirname "$0")" && pwd)
 if [[ "$action" == prepare || "$action" == start ]]; then exec bash "$scripts/wsl_prepare.sh" "$evidence" "${1:?pinned DEB sha256}"; fi
+if [[ "$action" == receiver-admission ]]; then
+  exec timeout --kill-after=1s 15s bash "$0" "$evidence" receiver-admission-bounded
+fi
 if [[ "$action" == receiver-trace ]]; then
   exec timeout --kill-after=1s 15s bash "$0" "$evidence" receiver-trace-bounded
 fi
@@ -194,8 +197,10 @@ case "$action" in
     printf 'collected\t%s\tfailed=%s\n' "$(stamp)" "$result" > "$trace/collection-result.tsv"
     exit "$result"
     ;;
-  receiver-liveness-bounded)
-    root; label=${1:?label}; [[ "$label" =~ ^post-return-[12]$ ]]
+  receiver-liveness-bounded|receiver-admission-check|receiver-admission-bounded)
+    root
+    if [[ "$action" == receiver-admission-bounded ]]; then label=post-return-admission; else label=${1:?label}; fi
+    [[ "$label" =~ ^(post-return-[12]|prepare-before-normal-return|post-return-admission)$ ]]
     live="$evidence/receiver/lifetime/$label"; mkdir "$live"
     failure=0
     probe_capture() {
@@ -205,32 +210,94 @@ case "$action" in
       if (( result != 0 )); then printf '%s\texit=%s\n' "$name" "$result" >> "$live/failures.tsv"; failure=1; fi
       return 0
     }
-    probe_capture snapshot-before bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot "$label-before"
+    probe_capture snapshot-before timeout --kill-after=1s 2s bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot "$label-before"
+    raw=$(cat "$evidence/receiver/lifetime/receiver.registration.stat"); fields=${raw##*) }; read -r -a original_parent_parts <<< "$fields"
     original_live() {
       local name=$1 pid tick executable raw fields; local -a parts
       read -r pid tick executable < "$evidence/receiver/lifetime/$name.ref" || return 1
       raw=$(cat "/proc/$pid/stat") || return 1; fields=${raw##*) }; read -r -a parts <<< "$fields"
       [[ ${parts[19]} == "$tick" && ${parts[0]} != Z && ${parts[0]} != X && ${parts[0]} != x && $(readlink -f "/proc/$pid/exe") == "$executable" ]] || return 1
+      grep -Eq '^TracerPid:[[:space:]]+0$' "/proc/$pid/status" || return 1
+      if [[ "$name" == app ]]; then
+        [[ ${parts[2]} == "${original_parent_parts[2]}" && ${parts[3]} == "${original_parent_parts[3]}" ]] || return 1
+      else
+        [[ ${parts[2]} == "$pid" && ${parts[3]} == "$pid" && ${parts[4]} == 0 && ${parts[5]} == -1 ]] || return 1
+      fi
     }
-    for name in app xvfb; do
+    for name in app wm xvfb; do
       if original_live "$name"; then printf 'original-live\n' > "$live/$name.gate"; else printf '%s\toriginal-identity-or-state-failed\n' "$name" >> "$live/failures.tsv"; failure=1; fi
     done
     probe_capture listeners ss -ltnp
     if ! grep -E ':41631[[:space:]].*pid='"$APP_PID"',' "$live/listeners.txt" >/dev/null; then printf 'original-app-listener-missing\n' >> "$live/failures.tsv"; failure=1; fi
     # Xvfb was launched without an authorization file; query its original
     # display directly, avoiding another PAM/session launcher in the observer.
-    probe_capture window-pid env DISPLAY="$DISPLAY" xdotool getwindowpid "$WINDOW"
-    probe_capture visible-windows env DISPLAY="$DISPLAY" xdotool search --onlyvisible --pid "$APP_PID"
+    probe_capture window-pid timeout 1s env DISPLAY="$DISPLAY" xdotool getwindowpid "$WINDOW"
+    probe_capture visible-windows timeout 1s env DISPLAY="$DISPLAY" xdotool search --onlyvisible --pid "$APP_PID"
     if [[ $(cat "$live/window-pid.txt") != "$APP_PID" ]] || ! grep -Fxq "$WINDOW" "$live/visible-windows.txt"; then printf 'original-visible-owned-window-missing\n' >> "$live/failures.tsv"; failure=1; fi
-    # Recheck identities after socket/window observations to reject PID reuse.
-    for name in app xvfb; do
+    if [[ "$label" == post-return-admission ]]; then
+      # Existing native receiver control: activate its original owned window,
+      # then retain actual focus, geometry and rendered screen. This qualifies
+      # focus/display usability, not arbitrary application interaction.
+      probe_capture window-activate timeout 1s env DISPLAY="$DISPLAY" xdotool windowactivate --sync "$WINDOW"
+      probe_capture active-window timeout 1s env DISPLAY="$DISPLAY" xdotool getactivewindow
+      probe_capture control-geometry timeout 1s env DISPLAY="$DISPLAY" xdotool getwindowgeometry --shell "$WINDOW"
+      [[ $(cat "$live/active-window.txt") == "$WINDOW" ]] || { printf 'original-window-focus-missing\n' >> "$live/failures.tsv"; failure=1; }
+      probe_capture control-screen timeout 2s ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1280x900 -i "$DISPLAY" -frames:v 1 "$live/native-control.png"
+      read -r native_x native_y native_w native_h <<< "$(awk -F= '$1=="X"{x=$2} $1=="Y"{y=$2} $1=="WIDTH"{w=$2} $1=="HEIGHT"{h=$2} END{print x,y,w,h}' "$live/control-geometry.txt")"
+      if [[ "$native_x" =~ ^[0-9]+$ && "$native_y" =~ ^[0-9]+$ && "$native_w" =~ ^[0-9]+$ && "$native_h" =~ ^[0-9]+$ ]] &&
+         (( native_w >= 320 && native_h >= 320 && native_x+native_w <= 1280 && native_y+native_h <= 900 )); then
+        printf 'original_png\tx\ty\twidth\theight\tscale\n%s\t%s\t%s\t320\t320\t4\n' \
+          "$live/native-control.png" "$native_x" "$native_y" > "$live/native-navigation-transform.tsv"
+        probe_capture control-navigation-crop timeout 1s ffmpeg -nostdin -y -loglevel error -i "$live/native-control.png" \
+          -vf "crop=320:320:$native_x:$native_y,scale=iw*4:ih*4:flags=lanczos" -frames:v 1 "$live/native-navigation.png"
+        probe_capture control-navigation-ocr timeout 2s tesseract "$live/native-navigation.png" "$live/native-navigation" --psm 11 tsv txt
+        for word in LocalSend Receive; do
+          if ! awk -F '\t' -v word="$word" 'NR>1 && $1==5 && $11>=50 && $12==word {n++} END{exit n!=1}' "$live/native-navigation.tsv"; then
+            printf '%s\trendered-label-unqualified\n' "$word" >> "$live/failures.tsv"; failure=1
+          fi
+        done
+      else printf 'original-window-geometry-unqualified\n' >> "$live/failures.tsv"; failure=1; fi
+    fi
+    # Recheck all originals after the bounded native observations.
+    for name in app wm xvfb; do
       if ! original_live "$name"; then printf '%s\tfinal-original-identity-or-state-failed\n' "$name" >> "$live/failures.tsv"; failure=1; fi
     done
     # Primary result survives a failed secondary snapshot/write.
     printf 'observed\t%s\tfailed=%s\n' "$(stamp)" "$failure" > "$live/validation-result.tsv" || true
-    probe_capture snapshot-after bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot "$label-after"
+    probe_capture snapshot-after timeout --kill-after=1s 2s bash "$scripts/wsl_lifetime_snapshot.sh" "$evidence" snapshot "$label-after"
+    final="$evidence/receiver/lifetime/$label-after"
+    if [[ ! -s "$final/window-pid.txt" || ! -s "$final/visible-windows.txt" || ! -s "$final/listeners.txt" ]] ||
+       [[ $(cat "$final/window-pid.txt") != "$APP_PID" ]] || ! grep -Fxq "$WINDOW" "$final/visible-windows.txt" ||
+       ! grep -E ':41631[[:space:]].*pid='"$APP_PID"',' "$final/listeners.txt" >/dev/null; then
+      printf 'final-original-window-or-listener-unqualified\n' >> "$live/failures.tsv"; failure=1
+    fi
+    for receipt in window-pid.txt visible-windows.txt listeners.txt; do
+      if [[ ! -r "$final/$receipt.exit" || $(cat "$final/$receipt.exit") != 0 ]]; then failure=1; fi
+    done
+    for name in app wm xvfb; do
+      if ! original_live "$name"; then printf '%s\tafter-snapshot-original-or-native-detach-failed\n' "$name" >> "$live/failures.tsv"; failure=1; fi
+      for observed in "$label-before" "$label-after"; do
+        recorded="$evidence/receiver/lifetime/$observed"
+        for probe in before.stat after.stat exe status; do
+          if [[ ! -s "$recorded/$name.$probe" || ! -r "$recorded/$name.$probe.exit" || $(cat "$recorded/$name.$probe.exit") != 0 ]]; then failure=1; fi
+        done
+        if ! awk -F '\t' 'NR==2 && $7=="yes" && $3!="Z" && $3!="X" && $3!="x" {ok=1} END{exit !ok}' "$recorded/$name.identity.tsv" ||
+           ! grep -Eq '^TracerPid:[[:space:]]+0$' "$recorded/$name.status"; then failure=1; fi
+        if [[ -s "$recorded/$name.after.stat" ]]; then
+          raw=$(cat "$recorded/$name.after.stat"); fields=${raw##*) }; read -r -a recorded_parts <<< "$fields"
+          read -r recorded_pid recorded_tick recorded_executable < "$evidence/receiver/lifetime/$name.ref"
+          if [[ "$name" == app ]]; then
+            [[ ${recorded_parts[2]} == "${original_parent_parts[2]}" && ${recorded_parts[3]} == "${original_parent_parts[3]}" ]] || failure=1
+          else
+            [[ ${recorded_parts[2]} == "$recorded_pid" && ${recorded_parts[3]} == "$recorded_pid" && ${recorded_parts[4]} == 0 && ${recorded_parts[5]} == -1 ]] || failure=1
+          fi
+        fi
+      done
+    done
+    printf 'observed\t%s\tfailed=%s\n' "$(stamp)" "$failure" > "$live/final-validation-result.tsv" || true
     if (( failure )); then exit 1; fi
-    before="$evidence/receiver/lifetime/prepare-before-normal-return"; after="$evidence/receiver/lifetime/$label-after"
+    if [[ "$label" == prepare-before-normal-return ]]; then printf 'passed\t%s\t%s\n' "$(stamp)" "$APP_PID" > "$live/passed.tsv"; exit 0; fi
+    before="$evidence/receiver/lifetime/prepare-before-normal-return-after"; after="$evidence/receiver/lifetime/$label-after"
     if [[ ! -s "$before/boot-id.txt" || ! -s "$after/boot-id.txt" || ! -s "$before/pid1.stat" || ! -s "$after/pid1.stat" ]] ||
        [[ $(cat "$before/boot-id.txt") != $(cat "$after/boot-id.txt") ]]; then printf 'guest-boot-continuity-failed\n' >> "$live/failures.tsv"; exit 1; fi
     raw=$(cat "$before/pid1.stat"); fields=${raw##*) }; read -r -a before_parts <<< "$fields"

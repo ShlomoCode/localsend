@@ -117,12 +117,11 @@ supervisor=$!
 bash "$lifetime" "$evidence" register supervisor "$supervisor"
 for ((attempt=0; attempt<120; attempt++)); do
   if [[ -s "$evidence/receiver/ready.tsv" ]]; then
-    # Root attaches only after unchanged strict readiness. This adds ptrace
-    # stops and one live observer; it does not repair the original session.
-    timeout --kill-after=1s 5s bash "$lifetime" "$evidence" trace-attach original
-    snapshot_status=0
-    timeout --kill-after=1s 2s bash "$lifetime" "$evidence" snapshot prepare-before-normal-return || snapshot_status=$?
-    printf '%s\n' "$snapshot_status" > "$evidence/receiver/lifetime/prepare-before-normal-return.exit"
+    # Final untraced admission: no observer process exists across this return.
+    admission_status=0
+    timeout --kill-after=1s 5s bash "$scripts/wsl_control.sh" "$evidence" receiver-admission-check prepare-before-normal-return || admission_status=$?
+    printf '%s\n' "$admission_status" > "$evidence/receiver/lifetime/prepare-before-normal-return.exit"
+    (( admission_status == 0 )) || exit "$admission_status"
     date -u --iso-8601=ns > "$evidence/receiver/lifetime/prepare-normal-return-observed.utc"
     exit 0
   fi
