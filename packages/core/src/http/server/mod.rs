@@ -335,6 +335,10 @@ const ACCEPT_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(1
 /// OS-specific) produces them in an endless, immediate sequence.
 const ACCEPT_FAILURE_LIMIT: u32 = 100;
 
+/// A peer that opens TCP but never finishes TLS must not retain a socket and
+/// connection task indefinitely. This only covers the handshake, not transfers.
+const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Detects peers that vanished without closing their connections (e.g. left
 /// the network mid-transfer), which would otherwise count towards the
 /// connection limits forever.
@@ -492,13 +496,20 @@ async fn serve_connection(
 ) {
     let res = match tls_acceptor {
         Some(tls_acceptor) => {
-            let tls_stream = match tls_acceptor.accept(tcp_stream).await {
-                Ok(tls_stream) => tls_stream,
-                Err(err) => {
-                    tracing::warn!("TLS handshake error: {err:#}");
-                    return;
-                }
-            };
+            let tls_stream =
+                match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, tls_acceptor.accept(tcp_stream))
+                    .await
+                {
+                    Ok(Ok(tls_stream)) => tls_stream,
+                    Ok(Err(err)) => {
+                        tracing::warn!("TLS handshake error: {err:#}");
+                        return;
+                    }
+                    Err(_) => {
+                        tracing::warn!("TLS handshake timed out from {remote_addr}");
+                        return;
+                    }
+                };
 
             let client_info = {
                 let (_, server_connection) = tls_stream.get_ref();
