@@ -1,0 +1,48 @@
+name: Diagnose 2884 KVM capability
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-2884
+  cancel-in-progress: false
+jobs:
+  capability:
+    if: github.repository == 'ShlomoCode/localsend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect host and advertised nested KVM capability
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence/2884-kvm
+          {
+            date -u --iso-8601=seconds
+            uname -a
+            cat /etc/os-release
+            printf 'runner_os=%s runner_arch=%s runner_name=%s image_os=%s image_version=%s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$RUNNER_NAME" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+            printf 'repository=%s head=%s run=%s attempt=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            id
+            lscpu
+            ls -l /dev/kvm
+            for parameter in /sys/module/kvm_intel/parameters/nested /sys/module/kvm_intel/parameters/ept /sys/module/kvm_amd/parameters/nested; do
+              printf '\n%s\n' "$parameter"
+              if [ -r "$parameter" ]; then cat "$parameter"; else printf 'absent_or_unreadable\n'; fi
+            done
+          } > evidence/2884-kvm/host.txt 2>&1
+          sha256sum support/diagnostics/2884-kvm-capability.c > evidence/2884-kvm/source-sha256.txt
+          gcc --version > evidence/2884-kvm/compiler.txt 2>&1
+          if ! gcc -O2 -Wall -Wextra -Werror support/diagnostics/2884-kvm-capability.c -o /tmp/2884-kvm-capability 2> evidence/2884-kvm/compile.txt; then exit 1; fi
+          set +e
+          timeout --signal=TERM --kill-after=2s 15s /tmp/2884-kvm-capability > evidence/2884-kvm/kvm.txt 2>&1
+          probe_status=$?
+          printf '%s\n' "$probe_status" > evidence/2884-kvm/probe-exit.txt
+          exit "$probe_status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2884-kvm-capability-${{ github.run_id }}
+          path: evidence/2884-kvm
+          if-no-files-found: error
