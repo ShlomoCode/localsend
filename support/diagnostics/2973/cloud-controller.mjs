@@ -30,8 +30,8 @@ capabilities.capabilities.alwaysMatch['appium:app'] = process.env.APK_APP_URL;
 capabilities.capabilities.alwaysMatch['bstack:options'].buildName = buildName;
 capabilities.capabilities.alwaysMatch['bstack:options'].sessionName = `${buildName}-original`;
 if (!/^bs:\/\/[a-zA-Z0-9_-]+$/.test(process.env.APK_APP_URL ?? '')) throw new Error('A verified original APK upload identity is required');
-const planFile = process.env.PICKER_PLAN === 'preflight' ? 'preflight.json' : 'matrix.json';
-if (!['preflight', 'matrix'].includes(process.env.PICKER_PLAN)) throw new Error('Unknown reviewed plan');
+const planFile = process.env.PICKER_PLAN === 'preflight' ? 'preflight.json' : process.env.PICKER_PLAN === 'observation' ? 'observation.json' : 'matrix.json';
+if (!['preflight', 'observation', 'matrix'].includes(process.env.PICKER_PLAN)) throw new Error('Unknown reviewed plan');
 const plan = JSON.parse(await readFile(resolve(root, planFile), 'utf8'));
 if (JSON.stringify(plan).includes('REPLACE_')) throw new Error('Observed native controls and restoration values are not filled in; no session allocated');
 const matrix = process.env.PICKER_PLAN === 'matrix';
@@ -45,7 +45,7 @@ async function transport(mode, ...args) {
   await new Promise((resolvePromise, reject) => {
     const remaining = (cleaning ? cleanupDeadline : deadline) - Date.now();
     if (remaining <= 0) return reject(new Error('Controller phase deadline reached'));
-    const child = spawn(process.execPath, [resolve(root, 'appium-rest.mjs'), mode, evidence, ...args.map(String)], { stdio: 'inherit', timeout: Math.min(100000, remaining) });
+    const child = spawn(process.execPath, [resolve(root, 'appium-rest.mjs'), mode, evidence, ...args.map(String)], { stdio: 'inherit', timeout: Math.min(mode === 'observe' ? 300000 : 100000, remaining) });
     child.once('error', reject);
     child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`Transport ${mode} failed with code ${code}`)));
   });
@@ -152,6 +152,7 @@ try {
   const expected = capabilities.capabilities.alwaysMatch['bstack:options'];
   if (info.device !== expected.deviceName || String(info.os_version) !== expected.osVersion) throw new Error('Actual allocated model/OS differs from reviewed substitute');
   await transport('snapshot', '00-original-app-start');
+  if (process.env.PICKER_PLAN === 'observation') await transport('observe');
   for (const [index, step] of plan.steps.entries()) {
     if (Date.now() > deadline) throw new Error('Bounded cloud scenario deadline reached');
     if (!['tap', 'swipe', 'snapshot'].includes(step.mode)) throw new Error('Unsupported UI plan operation');
@@ -180,6 +181,13 @@ try {
     }
   }
   if (owned) {
+    if (process.env.PICKER_PLAN === 'observation') {
+      const state = JSON.parse(await readFile(resolve(evidence, 'observation-state.json'), 'utf8').catch(() => 'null'));
+      if (state?.mutationMayHaveOccurred || (state && !state.restorationVerified)) {
+        failure ??= new Error('Original app selection/switch restoration unverified after partial observation');
+        await writeFile(resolve(evidence, 'observation-restoration-unverified.json'), JSON.stringify({ state, productValidated: false, terminationDoesNotProveStateRestoration: true }, null, 2));
+      }
+    }
     if (settingChanged) {
       try {
         for (const step of plan.restore) {

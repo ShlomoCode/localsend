@@ -9,7 +9,7 @@ on:
       plan:
         description: Reviewed source-only plan (preflight or matrix)
         type: choice
-        options: [preflight, matrix]
+        options: [preflight, observation, matrix]
         default: preflight
 
 permissions:
