@@ -60,12 +60,59 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   const json=await response.json();appendFileSync(path.join(output,'android-commands.jsonl'),redact(JSON.stringify({utc:new Date(time).toISOString(),method,path:url,status:response.status,elapsedMs:Date.now()-time,body:url==='/session'?'[private capability references]':body}))+'\n');
   assert(response.ok&&!json.value?.error,'WebDriver HTTP '+response.status+' '+redact(json.value?.error||''));return json.value;
  }
- async function source(){assert(++sourceReads<=1200,'Hierarchy budget exhausted');return wd('GET',base()+'/source');}
- async function snap(name,xml){save(name+'.xml',xml||await source());assert(++screenshots<=90,'Screenshot budget exhausted');writeFileSync(path.join(output,name+'.png'),Buffer.from(await wd('GET',base()+'/screenshot'),'base64'));}
+ async function source(){assert(++sourceReads<=1800,'Hierarchy budget exhausted');return wd('GET',base()+'/source');}
+ async function snap(name,xml){save(name+'.xml',xml||await source());assert(++screenshots<=90,'Screenshot budget exhausted');const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');writeFileSync(path.join(output,name+'.png'),png);assert(png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Provider screenshot is not PNG');return {width:png.readUInt32BE(16),height:png.readUInt32BE(20)};}
  async function wait(predicate,timeout=30000){const end=Math.min(deadline,Date.now()+timeout);do{const xml=await source();if(predicate(xml))return xml;await sleep(Math.min(timeout>60000?3000:750,Math.max(0,end-Date.now())));}while(Date.now()<end);throw Error('Expected observable UI not reached');}
- async function tapNode(node,reason){const r=rect(node);assert(r.width>0&&r.height>0,'UI control must be visible');report.actions.push({utc:new Date().toISOString(),reason,label:label(node),rect:r});await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'finger3441',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,origin:'viewport',x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)},{type:'pointerDown',button:0},{type:'pause',duration:100},{type:'pointerUp',button:0}]}]});}
+ let activePackage,activationCount=0,touchCount=0;
+ function geometry(xml,viewport) {
+  const root=nodes(xml).find(n=>n.class==='hierarchy');
+  const width=Number(root?.width),height=Number(root?.height),rotation=Number(root?.rotation);
+  if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=width||rotation!==0||viewport.width!==width||viewport.height<height||viewport.width>=viewport.height)return null;
+  return {width,height,rotation,viewport};
+ }
+ const inBounds=(r,g)=>r.width>0&&r.height>0&&r.x>=0&&r.y>=0&&r.x+r.width<=g.width&&r.y+r.height<=g.height;
+ async function settledUi(expectedPackage,selector,timeout=20000) {
+  const end=Math.min(deadline,Date.now()+timeout);let previousKey,observed;
+  do {
+   const currentPackage=await wd('GET',base()+'/appium/device/current_package');
+   const orientation=await wd('GET',base()+'/orientation');
+   const viewport=await wd('GET',base()+'/window/rect');
+   const xml=await source(),g=geometry(xml,viewport);
+   const candidates=selector?nodes(xml).filter(selector):[];
+   const control=candidates.length===1?candidates[0]:null;
+   const valid=currentPackage===expectedPackage&&orientation==='PORTRAIT'&&g&&(!selector||control&&control.package===expectedPackage&&control.enabled!=='false'&&control.displayed!=='false'&&inBounds(rect(control),g));
+   const key=valid?JSON.stringify({currentPackage,orientation,g,bounds:control?.bounds,label:control?label(control):null}):null;
+   observed={xml,currentPackage,orientation,geometry:g,control,key};
+   if(key&&key===previousKey)return observed;
+   previousKey=key;await sleep(Math.min(500,Math.max(0,end-Date.now())));
+  }while(Date.now()<end);
+  if(observed)save('ui-settlement-failure.xml',observed.xml);
+  throw Error('Expected active package, portrait geometry and exact in-bounds control did not settle');
+ }
+ async function tapNode(node,reason,{expectedPackage=activePackage}={}) {
+  const selector=n=>label(n)===label(node)&&n.class===node.class&&(!node['resource-id']||n['resource-id']===node['resource-id'])&&Boolean(n.bounds);
+  let state=await settledUi(expectedPackage,selector);
+  const name='touch-'+String(++touchCount).padStart(4,'0')+'-before';save(name+'.xml',state.xml);
+  let preActionScreenshot,pixelGeometry;
+  if(!reason.startsWith('Select Media source ')) {
+   let matches=false;
+   for(let attempt=0;attempt<3;attempt++) {
+    const screenshotName=name+'-observation-'+attempt;pixelGeometry=await snap(screenshotName,state.xml);
+    const fresh=await settledUi(expectedPackage,selector);
+    // Keep the pictured exact control and the final coordinates in the same observed layout.
+    matches=fresh.key===state.key&&pixelGeometry.width===fresh.geometry.width&&pixelGeometry.height>=fresh.geometry.height&&pixelGeometry.width<pixelGeometry.height;
+    state=fresh;if(matches){preActionScreenshot=screenshotName+'.png';break;}
+   }
+   assert(matches,'Exact pre-touch screenshot and fresh portrait control did not agree');save(name+'-final.xml',state.xml);
+  }
+  const r=rect(state.control);assert(inBounds(r,state.geometry),'Exact touch control exceeds observed portrait bounds');
+  const x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);
+  assert(x>=0&&x<state.geometry.width&&y>=0&&y<state.geometry.height,'Exact touch center is outside the observed viewport');
+  report.actions.push({utc:new Date().toISOString(),reason,label:label(state.control),rect:r,geometry:state.geometry,currentPackage:state.currentPackage,orientation:state.orientation,preActionXml:name+(reason.startsWith('Select Media source ')?'.xml':'-final.xml'),preActionScreenshot,pixelGeometry});
+  await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'finger3441',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,origin:'viewport',x,y},{type:'pointerDown',button:0},{type:'pause',duration:100},{type:'pointerUp',button:0}]}]});
+ }
  async function click(exact){const xml=await source(),matches=nodes(xml).filter(n=>label(n)===exact&&n.enabled!=='false'&&n.bounds);assert(matches.length===1,'Expected one visible control: '+exact);await tapNode(matches[0],exact);}
- async function activate(appId){await wd('POST',base()+'/appium/device/activate_app',{appId});await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});}
+ async function activate(appId){await wd('POST',base()+'/appium/device/activate_app',{appId});await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});activePackage=appId;const state=await settledUi(appId);await snap('activation-'+String(++activationCount).padStart(2,'0')+'-settled',state.xml);}
  async function configureFavorite(){
   await click('Favorites');await click('Add');
   const all=await wd('POST',base()+'/elements',{using:'class name',value:'android.widget.EditText'});assert(all.length===3,'Favorite requires three observed fields');
@@ -87,7 +134,7 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   let xml=await source();
   for(let attempt=0;attempt<3;attempt++) {
    const permission=nodes(xml).find(n=>n['resource-id']?.match(/permission_allow_(foreground_only_)?button$/));
-   if(!permission)break;await snap(c.id+'-permission-'+attempt,xml);await tapNode(permission,'Allow normal media permission');xml=await source();
+   if(!permission)break;await snap(c.id+'-permission-'+attempt,xml);await tapNode(permission,'Allow normal media permission',{expectedPackage:permission.package});xml=await source();
   }
   xml=await wait(value=>nodes(value).some(n=>/change path/.test(label(n))));await snap(c.id+'-picker-open',xml);
   const pathControl=nodes(xml).filter(n=>/change path/.test(label(n)));assert(pathControl.length===1,'Picker path switch must be unambiguous');await tapNode(pathControl[0],'Open Media album selector');
@@ -108,7 +155,8 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
      const checked=await source();assert(nodes(checked).some(n=>label(n).includes(name)&&n.selected==='true'),'Media tap did not select source; inspect live picker');
      found=true;break;
     }
-    const root=nodes(xml).find(n=>n.class==='hierarchy');const width=Number(root?.width)||1080,height=Number(root?.height)||2340;
+    const swipeState=await settledUi(original),{width,height}=swipeState.geometry;
+    save(c.id+'-scroll-before-'+selected.length+'-'+scroll+'.xml',swipeState.xml);
     await wd('POST',base()+'/actions',{actions:[{type:'pointer',id:'finger3441',parameters:{pointerType:'touch'},actions:[{type:'pointerMove',duration:0,x:Math.round(width/2),y:Math.round(height*.72)},{type:'pointerDown',button:0},{type:'pointerMove',duration:500,x:Math.round(width/2),y:Math.round(height*.32)},{type:'pointerUp',button:0}]}]});
    }
    assert(found,'Expected Media source not exposed in observed album: '+name);
@@ -139,6 +187,7 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   const created=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:automationName':'UiAutomator2','appium:deviceName':'Samsung Galaxy S23','appium:platformVersion':'13.0','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],'appium:autoGrantPermissions':false,'appium:newCommandTimeout':300,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend bug sprint',buildName,sessionName:'issue3441 original Media207+retry73',debug:true,video:true,networkLogs:false}},firstMatch:[{}]}});
   session=created.sessionId;assert(session,'Owned session ID missing');ownership.session=session;persistOwnership();save('session.json',{session,buildName});
   stage('owned-session-created');
+  await activate(fixture);
   await click('Stage and verify all fixtures');
   const staged=await wait(xml=>{assert(!xml.includes('FIXTURE_FAILED'),'Native fixture staging failed');return xml.includes('FIXTURE_READY');},300000);
   const details=nodes(staged).filter(n=>label(n).startsWith('FIXTURE_READY\n'));assert(details.length===1,'Exactly one complete readback manifest must be observable');
@@ -154,8 +203,10 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   const relayReady=await wait(xml=>nodes(xml).some(n=>{
    const text=label(n),marker='HELPER_SERVICE_STATUS\n';if(!text.includes(marker))return false;
    observedRelay=JSON.parse(text.slice(text.indexOf(marker)+marker.length));
+   save('opaque-helper-last-status.json',observedRelay);
+   if(observedRelay.observationStatus==='failed'||observedRelay.observationStatus==='timed-out'||observedRelay.lastFailure&&!observedRelay.running)throw Error('Owned helper start failed; inspect its observed lifecycle/request status');
    return observedRelay.ready===true&&observedRelay.running===true&&observedRelay.servicePresent===true&&observedRelay.firstPullSucceeded===true&&observedRelay.listenerHost==='127.0.0.1'&&observedRelay.listenerPort===53318&&observedRelay.transport==='stream';
-  }));
+  }),45000);
   save('opaque-helper-service-ready.json',observedRelay);
   await snap('opaque-helper-ready',relayReady);await activate(original);await click('Send\nTab 2 of 3');
   for(const c of cases) {
