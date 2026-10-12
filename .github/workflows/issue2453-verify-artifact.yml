@@ -78,7 +78,9 @@ jobs:
             test "$(cat "$kind/renderer.txt")" = impeller
             test ! -s "$kind/source-status-before.txt"
           done
-          for file in flutter-machine.json flutter.txt cocoapods.txt xcode.txt runner.txt sdk-input.patch sdk-resolution-drift.json protected-inputs.json paired-source-diff.patch locks-after/pubspec.lock locks-after/Podfile.lock locks-after.sha256; do
+          cp baseline/flutter.txt evidence/baseline-flutter-console.txt
+          cp candidate/flutter.txt evidence/candidate-flutter-console.txt
+          for file in flutter-machine.json cocoapods.txt xcode.txt runner.txt sdk-input.patch sdk-resolution-drift.json protected-inputs.json paired-source-diff.patch locks-after/pubspec.lock locks-after/Podfile.lock locks-after.sha256; do
             cmp "baseline/$file" "candidate/$file"
             shasum -a 256 "baseline/$file" "candidate/$file" >> evidence/paired-input.sha256
           done
