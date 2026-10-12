@@ -129,21 +129,17 @@ def select(role, path, folder, stage):
     click(role, locate(role, 'Folder' if folder else 'File', stage+'-picker'), 'Folder' if folder else 'File')
     time.sleep(1)
     capture(role, stage+'-native-picker')
-    key(role, 'ctrl+l')
-    command(role, 'xdotool', 'type', '--clearmodifiers', '--delay', '2', str(path))
-    event('type', role=role, text=str(path), purpose='native chooser location')
-    # Native File accepts observed Open. Native Folder leaves Open disabled until the location entry is submitted.
-    # Return may itself select the directory: inspect the actual window before any further chooser input.
-    chooser_open=True
     if folder:
-        key(role,'Return');time.sleep(1)
-        capture(role,stage+'-folder-location-submitted')
-        window=command(role,'xdotool','getactivewindow').strip()
-        name=command(role,'xdotool','getwindowname',window).strip()
-        if name=='LocalSend': chooser_open=False
-        elif name!='Choose Directory': raise RuntimeError('Unexpected window after native folder location: '+name)
-    if chooser_open:
-        click(role, locate(role, 'Open', stage+'-picker-open', bottom=True), 'Open selected folder' if folder else 'Open selected file')
+        # The retained typed-folder chooser remained in Recent with disabled Open even after Return.
+        # Navigate its visible Home sidebar and select the actual fixture directory row instead.
+        if path.parent!=SENDER: raise RuntimeError('Folder fixture must be in actual sender home')
+        click(role,locate(role,'Home',stage+'-folder-home'),'Native chooser Home')
+        click(role,locate(role,path.name,stage+'-folder-row'),'Select actual folder row '+path.name)
+    else:
+        key(role, 'ctrl+l')
+        command(role, 'xdotool', 'type', '--clearmodifiers', '--delay', '2', str(path))
+        event('type', role=role, text=str(path), purpose='native chooser location')
+    click(role, locate(role, 'Open', stage+'-picker-open', bottom=True), 'Open selected folder' if folder else 'Open selected file')
     locate(role, 'Edit', stage+'-selection-accepted', timeout=30)
     selected_window=command(role,'xdotool','getactivewindow').strip()
     if command(role,'xdotool','getwindowname',selected_window).strip()!='LocalSend':
