@@ -51,7 +51,7 @@ function admission() {
   save('admission.json', record);
 }
 
-async function http(method, url, label, {body, multipart, native = false, cleanup = false, binary = false} = {}) {
+async function http(method, url, label, {body, multipart, native = false, cleanup = false} = {}) {
   const deadline = cleanup ? cleanupDeadline : scenarioDeadline;
   const allowance = native ? 300000 : 60000;
   if (Date.now() + allowance > deadline) throw new Error(`${label}: insufficient deadline allowance`);
@@ -79,11 +79,6 @@ async function http(method, url, label, {body, multipart, native = false, cleanu
       event({phase: 'http418-proxy-retry', label});
       reply = await exec('curl', ['--proxy', 'socks5h://100.108.223.54:38471', ...args], {timeout: Math.min(allowance + 1000, deadline - Date.now()), maxBuffer: 1024 * 1024});
       status = Number(reply.stdout);
-    }
-    if (binary && status >= 200 && status < 300) {
-      fs.renameSync(responseFile, path.join(out, `${label}.mp4`));
-      event({phase: 'end', label, status});
-      return;
     }
     const raw = fs.readFileSync(responseFile, 'utf8');
     save(`${label}.json`, raw);
@@ -255,6 +250,130 @@ async function sequence(arm) {
   return outcome;
 }
 
+// Evidence availability is independent of native-command settlement and release.
+// These GETs use fresh provider URLs without changing their signed query strings.
+const evidenceDeadline = started + 23 * 60 * 1000;
+const safeEvidenceText = value => scrub(value)
+  .replace(/^(set-cookie|authorization|proxy-authorization):.*$/gim, '$1: [REDACTED]')
+  .replace(/((?:password|token|signature|credential|authorization|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key|api[_-]?key)["']?\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\s<>&,]+)/gi, (_match, field, secret) => `${field}${/^["']/.test(secret) ? `${secret[0]}[REDACTED]${secret[0]}` : '[REDACTED]'}`);
+function safeEndpoint(url) {
+  try { const parsed = new URL(url); return `${parsed.protocol}//${parsed.host}${parsed.pathname}`; }
+  catch { return '[invalid endpoint]'; }
+}
+function logBodyValid(raw) {
+  const text = raw.trim();
+  if (!text || text.includes('\u0000') || /^(?:<\?xml|<!doctype|<html|<Error\b)/i.test(text)) return false;
+  if (/<Error\b|<(?:Code)>\s*(?:AccessDenied|NoSuchKey|RequestExpired)/i.test(text)) return false;
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try { const parsed = JSON.parse(text); if (!parsed || parsed.error || parsed.value?.error || parsed.state === 'error' || parsed.status === 'error' || parsed.success === false || parsed.errors || (Array.isArray(parsed) && !parsed.length) || (!Array.isArray(parsed) && !Object.keys(parsed).length)) return false; }
+    catch { /* Ordinary log lines can start with a timestamp in brackets. */ }
+  }
+  return true;
+}
+async function evidenceGet(url, label, {video = false, archive = false, proxy = false} = {}) {
+  // The subprocess bound includes curl startup/teardown, not an extra second.
+  if (Date.now() + 45000 > evidenceDeadline) throw new Error(`${label}: full evidence GET allowance unavailable`);
+  if (!/^https:\/\//.test(url)) throw new Error(`${label}: provider HTTPS URL absent`);
+  const file = path.join(out, `${label}.response`);
+  const headers = path.join(out, `.${label}.headers`);
+  const begin = Date.now();
+  let reply;
+  let failure;
+  const args = ['--silent', '--show-error', '--location', '--max-redirs', '5', '--proto', '=https', '--proto-redir', '=https', '--max-time', '45', '--dump-header', headers, '--output', file, '--write-out', '%{http_code}\t%{content_type}\t%{url_effective}\t%{time_total}\t%{size_download}\t%{num_redirects}'];
+  if (['api-cloud.browserstack.com', 'api.browserstack.com', 'app-automate.browserstack.com'].includes(new URL(url).hostname)) args.push('--user', `${authUser}:${authKey}`);
+  args.push(url);
+  // curl with --location (without --location-trusted) withholds Basic Auth on
+  // redirects to another host. Each explicit 418 retry has its own full budget.
+  try { reply = await exec('curl', proxy ? ['--proxy', 'socks5h://100.108.223.54:38471', ...args] : args, {timeout: 45000, maxBuffer: 1024 * 1024}); }
+  catch (error) { reply = error; failure = safeEvidenceText(String(error.stderr || error.message)); }
+  const [statusText, contentType, finalUrl, totalSeconds, downloadBytes, redirects] = String(reply.stdout || '').trim().split('\t');
+  const bytes = fs.existsSync(file) ? fs.readFileSync(file) : Buffer.alloc(0);
+  const mp4Candidate = video && bytes.length >= 12 && bytes.toString('ascii', 4, 8) === 'ftyp';
+  const zipCarrier = archive && bytes.length >= 4 && bytes.readUInt32LE(0) === 0x04034b50;
+  if (!mp4Candidate && !zipCarrier && fs.existsSync(file)) fs.writeFileSync(file, safeEvidenceText(bytes.toString('utf8')));
+  const receipt = {session, label, startedAt: new Date(begin).toISOString(), endedAt: new Date().toISOString(), elapsedMs: Date.now() - begin, endpoint: safeEndpoint(url), urlSha256: crypto.createHash('sha256').update(url).digest('hex'), status: Number(statusText) || 0, curlExit: failure ? (reply.code || 'timeout/error') : 0, contentType: contentType || null, finalEndpoint: safeEndpoint(finalUrl || ''), redirects: Number(redirects) || 0, curlTotalSeconds: totalSeconds || null, curlDownloadBytes: downloadBytes || null, byteCount: bytes.length, originalSha256: crypto.createHash('sha256').update(bytes).digest('hex'), bodyFile: path.basename(file), mp4Candidate, zipCarrier, failure};
+  save(`${label}-receipt.json`, receipt);
+  if (fs.existsSync(headers)) { fs.writeFileSync(path.join(out, `${label}-headers.txt`), safeEvidenceText(fs.readFileSync(headers, 'utf8'))); fs.rmSync(headers, {force: true}); }
+  event({phase: 'evidence-get', ...receipt});
+  if (receipt.status === 418 && !proxy && Date.now() + 45000 <= evidenceDeadline) return evidenceGet(url, `${label}-proxy`, {video, archive, proxy: true});
+  // Keep the fresh signed URLs in memory only. The retained metadata response
+  // is redacted and must never become the input to the provider asset GETs.
+  return {...receipt, file, rawText: video || archive ? undefined : bytes.toString('utf8'), success: !failure && receipt.status >= 200 && receipt.status < 300};
+}
+async function validateVideo(candidate) {
+  const result = {session, source: path.basename(candidate.file), originalSha256: candidate.originalSha256, videoReady: false, reviewRequired: 'Actual frames and native input/render/health join still require independent review'};
+  try {
+    if (Date.now() + 60000 > cleanupDeadline) throw new Error('Full probe plus decode allowance unavailable');
+    const probe = await exec('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-show_frames', '-show_entries', 'format=format_name,duration:format_tags=major_brand:stream=codec_type,codec_name,start_time,duration:frame=pts,pts_time,best_effort_timestamp_time,pkt_dts,pkt_dts_time,pkt_duration_time', '-of', 'json', candidate.file], {timeout: 30000, maxBuffer: 16 * 1024 * 1024});
+    save('continuous-video-original-pts.json', probe.stdout);
+    save('continuous-video-probe-stderr.txt', probe.stderr);
+    const metadata = JSON.parse(probe.stdout);
+    if (!String(metadata.format?.format_name || '').split(',').includes('mp4') || String(metadata.format?.tags?.major_brand || '').trim() === 'qt' || !metadata.streams?.some(stream => stream.codec_type === 'video') || !metadata.frames?.some(frame => frame.pts_time !== undefined)) throw new Error('Original MP4 container/video stream/PTS unavailable');
+    if (Date.now() + 30000 > cleanupDeadline) throw new Error('Full decode allowance unavailable');
+    const decode = await exec('ffmpeg', ['-v', 'error', '-xerror', '-i', candidate.file, '-map', '0:v', '-map', '0:a?', '-f', 'null', '-'], {timeout: 30000, maxBuffer: 1024 * 1024});
+    save('continuous-video-decode.txt', {stdout: decode.stdout, stderr: decode.stderr, exit: 0});
+    if (Date.now() > cleanupDeadline) throw new Error('Video validation exceeded absolute cleanup clock');
+    fs.copyFileSync(candidate.file, path.join(out, 'continuous-video.mp4'));
+    result.videoReady = true;
+    result.duration = metadata.format.duration;
+  } catch (error) {
+    save('continuous-video-validation-error.txt', {message: error.message, stdout: error.stdout || '', stderr: error.stderr || '', exit: error.code || 'timeout/error'});
+    result.reason = 'Probe/container/PTS/full decode did not validate within the fixed reserve';
+  }
+  save('continuous-video-validation.json', result);
+  return result.videoReady;
+}
+async function collectEvidence() {
+  const resources = [['video_url', 'continuous-video', true], ['device_logs_url', 'device-logs'], ['appium_logs_url', 'appium-logs'], ['crash_logs_url', 'crash-logs'], ['session_terminal_logs_url', 'session-terminal-logs'], ['build_terminal_logs_url', 'build-terminal-logs']];
+  const ready = {};
+  const missing = {};
+  const archiveCarriers = {};
+  let candidate;
+  let build;
+  let rounds = 0;
+  let roundsStarted = 0;
+  for (; rounds < 8 && Date.now() + 45000 <= evidenceDeadline; rounds++) {
+    roundsStarted++;
+    const prefix = `readiness-${rounds + 1}`;
+    try {
+      const metadata = await evidenceGet(`https://api-cloud.browserstack.com/app-automate/sessions/${session}.json`, `${prefix}-metadata`);
+      if (!metadata.success) throw new Error('Metadata retrieval failed');
+      const info = JSON.parse(metadata.rawText).automation_session;
+      if (!info || info.hashed_id !== session || info.status !== 'done' || info.reason !== 'CLIENT_STOPPED_SESSION' || info.device !== 'iPhone 16 Pro' || info.os !== 'ios' || info.os_version !== '18.6' || !/^[a-zA-Z0-9]+$/.test(info.build_hashed_id || '') || (build && build !== info.build_hashed_id)) throw new Error('Fresh metadata exact stopped session/build/device binding failed');
+      build = info.build_hashed_id;
+      const urls = [...resources.map(([key, label, binary]) => ({label, video: Boolean(binary), archive: key === 'crash_logs_url', url: info[key]})), {label: 'text-logs', url: `https://api-cloud.browserstack.com/app-automate/builds/${build}/sessions/${session}/logs`}];
+      const replies = await Promise.allSettled(urls.map(async ({label, video, archive, url}) => {
+        if (!url) { missing[label] = 'Provider metadata omitted capture URL'; return; }
+        if (ready[label]) return;
+        const response = await evidenceGet(url, `${prefix}-${label}`, {video, archive});
+        if (response.success && response.zipCarrier) {
+          archiveCarriers[label] = {file: response.bodyFile, originalSha256: response.originalSha256, byteCount: response.byteCount, validatedText: false, interpretation: 'Original ZIP-signature carrier retained; archive content and native health remain unvalidated'};
+          missing[label] = 'ZIP carrier retained; readable crash text not validated';
+          return;
+        }
+        const valid = response.success && (video ? response.mp4Candidate : logBodyValid(fs.readFileSync(response.file, 'utf8')));
+        if (!valid) { missing[label] = 'Empty/error/unvalidated provider body; retained response'; return; }
+        // A recognizable header is provisional. Continue video GETs so a later
+        // complete response can replace an earlier partial MP4 candidate.
+        if (video) { candidate = response; delete missing[label]; }
+        else { fs.copyFileSync(response.file, path.join(out, `${label}.txt`)); ready[label] = true; delete missing[label]; }
+      }));
+      replies.forEach((reply, index) => { if (reply.status === 'rejected') missing[urls[index].label] = reply.reason.message; });
+    } catch (error) { event({phase: 'evidence-gap', label: `${prefix}-metadata`, reason: error.message}); }
+    if (rounds < 7 && Date.now() + 15000 + 45000 <= evidenceDeadline) await new Promise(resolve => setTimeout(resolve, 15000));
+    else break;
+  }
+  ready['continuous-video'] = candidate ? await validateVideo(candidate) : false;
+  if (ready['continuous-video']) delete missing['continuous-video'];
+  else missing['continuous-video'] = 'No validated original recording within fixed fetch/validation clocks';
+  const required = ['continuous-video', 'device-logs', 'appium-logs', 'text-logs'];
+  required.forEach(label => { if (!ready[label] && !missing[label]) missing[label] = 'No valid capture retained within fixed collector clock'; });
+  const evidenceIncomplete = required.some(label => !ready[label]);
+  const optionalCaptureGaps = Object.fromEntries(Object.entries(missing).filter(([label]) => !required.includes(label)));
+  save('evidence-readiness.json', {session, build: build || null, roundsAttempted: roundsStarted, deviceReleased: deleted && stopped, required, ready, missing, optionalCaptureGaps, archiveCarriers, evidenceIncomplete, fetchDeadline: evidenceDeadline, validationDeadline: cleanupDeadline, interpretation: 'Late valid assets establish changed delivery availability only; publication cause and native health remain unresolved until raw evidence review'});
+  if (evidenceIncomplete) { event({phase: 'evidence-incomplete', missing}); process.exitCode = 1; }
+}
+
 async function cleanup() {
   if (!session) {
     save('ownership.json', {ownedDevices: creationAttempted ? 'unknown' : 0, reason: creationAttempted ? 'Create response did not disclose session ID; root must reconcile provider inventory' : 'No session creation attempted'});
@@ -274,28 +393,21 @@ async function cleanup() {
       if (!stopped && attempt < 2) await new Promise(resolve => setTimeout(resolve, 1000));
     }
     if (!stopped) throw new Error('Final stopped provider receipt absent');
-    // Preserve raw provider evidence through its supplied read-only URLs.
-    for (const [key, label, binary] of [['video_url', 'continuous-video', true], ['device_logs_url', 'device-logs', false], ['appium_logs_url', 'appium-logs', false]]) {
-      if (!info[key]) { event({phase: 'evidence-gap', label}); continue; }
-      try {
-        if (binary) await http('GET', info[key], label, {cleanup: true, binary: true});
-        else {
-          // Log bodies may be text, not JSON. Fetch separately and redact secrets.
-          const file = path.join(out, `.${label}.raw`);
-          try {
-            if (Date.now() + 31000 > cleanupDeadline) throw new Error('Evidence retrieval would consume artifact preservation reserve');
-            await exec('curl', ['--silent', '--show-error', '--fail', '--max-time', '30', '--user', `${authUser}:${authKey}`, '--output', file, info[key]], {timeout: 31000});
-            save(`${label}.txt`, fs.readFileSync(file, 'utf8'));
-          } finally { fs.rmSync(file, {force: true}); }
-        }
-      } catch { event({phase: 'evidence-gap', label, reason: 'retrieval failed'}); }
-    }
+    save('ownership.json', {session, canonicalDeleteAcknowledged: deleted, finalStoppedReceipt: stopped, ownedDevices: 0, rootReconciliationRequired: false});
+    await collectEvidence();
   } catch (error) { event({phase: 'cleanup-error', message: error.message}); }
   save('ownership.json', {session, canonicalDeleteAcknowledged: deleted, finalStoppedReceipt: stopped, ownedDevices: deleted && stopped ? 0 : 'unknown', rootReconciliationRequired: !(deleted && stopped)});
 }
 
 try {
   admission();
+  // Fail before uploads/session creation if the cloud runner cannot validate
+  // original media. This preflight executes only inside the admitted executor.
+  for (const tool of ['ffprobe', 'ffmpeg']) {
+    if (Date.now() + 10000 > scenarioDeadline) throw new Error(`${tool}: full cloud preflight allowance unavailable`);
+    const version = await exec(tool, ['-version'], {timeout: 10000, maxBuffer: 1024 * 1024});
+    save(`${tool}-cloud-version.txt`, {stdout: version.stdout, stderr: version.stderr, exit: 0});
+  }
   await capacity('capacity-before-uploads');
   const defaultUrl = await upload('default');
   const candidateUrl = await upload('candidate');
