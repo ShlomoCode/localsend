@@ -12,15 +12,34 @@ image_name=ubuntu-24.04-server-cloudimg-amd64.img
 # and the standard image kernel 6.8.0-136, unlike the reported 7.0.0-30.
 image_sha256=d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
 
+phase() {
+  local name=$1 ceiling=$2 status=0 now remaining duration start
+  shift 2
+  now=$(date +%s)
+  remaining=$(( PREP_DEADLINE - now ))
+  (( remaining > 0 )) || return 124
+  duration=$ceiling
+  (( duration <= remaining )) || duration=$remaining
+  start=$now
+  printf 'PHASE=%s START=%s CEILING=%s REMAINING=%s\n' "$name" "$now" "$duration" "$remaining" >> "$evidence/preparation-phases.log"
+  timeout --signal=TERM --kill-after=10s "${duration}s" "$@" > "$evidence/phase-$name.log" 2>&1 || status=$?
+  printf 'PHASE=%s EXIT=%s ELAPSED=%s REMAINING=%s\n' "$name" "$status" "$(( $(date +%s) - start ))" "$(( PREP_DEADLINE - $(date +%s) ))" >> "$evidence/preparation-phases.log"
+  return "$status"
+}
+
 prepare() {
   mkdir -p "$vm" "$evidence"
   date -u > "$evidence/start-time.txt"
   git rev-parse HEAD > "$evidence/harness-commit.txt"
   printf 'IMAGE_BASE=%s\nIMAGE_NAME=%s\n' "$image_base" "$image_name" > "$evidence/image-source.txt"
-  sudo apt-get update
-  sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick xvfb tigervnc-viewer ffmpeg x11-utils tesseract-ocr
-  curl -fL --retry 3 "$image_base/SHA256SUMS" -o "$vm/SHA256SUMS"
-  curl -fL --retry 3 "$image_base/$image_name" -o "$vm/$image_name"
+  export vm evidence image_base image_name
+  phase host-tools-image 900 bash -s <<'HOST'
+set -euo pipefail
+sudo apt-get update
+sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils socat imagemagick xvfb tigervnc-viewer ffmpeg x11-utils tesseract-ocr
+curl -fL --retry 3 "$image_base/SHA256SUMS" -o "$vm/SHA256SUMS"
+curl -fL --retry 3 "$image_base/$image_name" -o "$vm/$image_name"
+HOST
   (cd "$vm"; awk -v name="$image_name" '$2 == name || $2 == "*" name {print}' SHA256SUMS > selected.sha256; test -s selected.sha256; sha256sum -c selected.sha256)
   (cd "$vm"; printf '%s  %s\n' "$image_sha256" "$image_name" | sha256sum -c -)
   cp "$vm/SHA256SUMS" "$vm/selected.sha256" "$evidence/"
@@ -154,23 +173,14 @@ apt:
     Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
     Snapshot: 20260726T000000Z
 package_update: true
-packages:
-  - ubuntu-desktop-minimal
-  - flatpak
-  - xdg-desktop-portal-gnome
-  - xdg-desktop-portal-gtk
-  - dbus-user-session
-  - openssh-server
-  - acl
-  - auditd
-  - python3-pyatspi
+# The explicit preparation owner resolves, caches and normally installs the
+# unchanged nine-package set after cloud-init's source/update phase finishes.
 write_files:
   - path: /root/3417-bootstrap.sh
     permissions: '0700'
     encoding: b64
 CLOUD
     printf '    content: %s\n' "$(base64 -w 0 "$vm/guest-bootstrap.sh")"
-    printf 'runcmd:\n  - [bash, /root/3417-bootstrap.sh]\n'
   } > "$vm/user-data"
   printf 'instance-id: localsend-3417\nlocal-hostname: localsend-3417\n' > "$vm/meta-data"
   cloud-localds "$vm/seed.iso" "$vm/user-data" "$vm/meta-data"
@@ -186,12 +196,18 @@ CLOUD
     -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 \
     -monitor "unix:$vm/monitor,server,nowait" -qmp "unix:$vm/qmp,server,nowait" \
     -serial "file:$evidence/serial.log" -pidfile "$vm/qemu.pid" -daemonize
+  sudo python3 support/diagnostics/3417-owned-process.py record qemu "$vm/qemu.pid" "$(command -v qemu-system-x86_64)" 0 "file=$vm/$image_name,if=virtio,format=qcow2" > "$evidence/qemu-identity.json"
   cat > "$vm/ssh" <<'SSH'
 #!/bin/bash
-exec timeout 120 ssh -i /home/runner/3417-vm/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/home/runner/3417-vm/known_hosts -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 probe@127.0.0.1 "$@"
+exec timeout "${SSH_TIMEOUT:-120}" ssh -i /home/runner/3417-vm/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/home/runner/3417-vm/known_hosts -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 probe@127.0.0.1 "$@"
 SSH
   chmod +x "$vm/ssh"
-  deadline=$((SECONDS + 1800))
+  bash support/diagnostics/3417-package-preparation.sh
+  flatpak_budget=$(( PREP_DEADLINE - $(date +%s) ))
+  (( flatpak_budget <= 900 )) || flatpak_budget=900
+  (( flatpak_budget > 15 )) || return 124
+  phase official-flatpak-session "$flatpak_budget" env SSH_TIMEOUT="$flatpak_budget" "$vm/ssh" "sudo timeout --signal=TERM --kill-after=10s $(( flatpak_budget - 15 ))s bash /root/3417-bootstrap.sh"
+  deadline=$((SECONDS + 300))
   ready=0
   while (( SECONDS < deadline )); do
     if timeout 10 "$vm/ssh" 'test -e /home/probe/3417-bootstrap-failed'; then
@@ -224,6 +240,7 @@ GUEST
 collect() {
   mkdir -p "$evidence"
   if [[ -x "$vm/ssh" ]]; then
+    timeout 90 "$vm/ssh" 'sudo tar -C / -czf - var/log/cloud-init.log var/log/cloud-init-output.log var/lib/cloud/instance/user-data.txt var/lib/cloud/data/status.json var/lib/cloud/data/result.json home/probe/3417-package-provenance' > "$evidence/early-provenance-cloud-init.tar.gz" 2> "$evidence/early-provenance-collection.log" || true
     timeout 60 "$vm/ssh" 'sudo bash -s' > "$evidence/guest-logs.txt" 2>&1 <<'GUEST' || true
 date -u
 cloud-init status --long
@@ -266,31 +283,26 @@ GUEST
 }
 
 cleanup() {
-  # Kill only processes whose saved PID still identifies this diagnostic VM
-  # or its own recording display. A PID file alone is not sufficient identity.
-  for item in qemu xvfb viewer; do
-    pidfile="$vm/$item.pid"
-    test -f "$pidfile" || continue
-    pid=$(cat "$pidfile")
-    [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    test -e "/proc/$pid/cmdline" || continue
-    cmdline=$(sudo tr '\0' ' ' < "/proc/$pid/cmdline")
-    case "$item:$cmdline" in
-      qemu:*qemu-system-x86_64*"$vm/$image_name"*|xvfb:*Xvfb*":99"*|viewer:*vncviewer*"127.0.0.1:5901"*)
-        sudo kill -TERM "$pid" || true
-        ;;
-      *) printf 'Refusing cleanup of changed process identity PID=%s\n' "$pid" >&2; continue ;;
-    esac
-    for attempt in $(seq 1 10); do test ! -e "/proc/$pid" && break; sleep 1; done
-    if test -e "/proc/$pid/cmdline"; then
-      remaining=$(sudo tr '\0' ' ' < "/proc/$pid/cmdline")
-      if [[ "$remaining" == "$cmdline" ]]; then sudo kill -KILL "$pid" || true; fi
-    fi
+  mkdir -p "$evidence"
+  local status=0 item item_status
+  for item in viewer xvfb qemu; do
+    item_status=0
+    timeout --signal=TERM --kill-after=5s 25s sudo python3 support/diagnostics/3417-owned-process.py cleanup "$item" > "$evidence/cleanup-$item.json" 2> "$evidence/cleanup-$item-error.txt" || item_status=$?
+    printf 'ROLE=%s EXIT=%s\n' "$item" "$item_status" >> "$evidence/cleanup-status.txt"
+    if [[ "$item_status" != 0 ]]; then status=$item_status; fi
   done
+  sudo chown -R "$(id -u):$(id -g)" "$evidence"
+  return "$status"
 }
 
 case "${1:-}" in
-  prepare) prepare ;;
+  prepare)
+    : "${PREP_DEADLINE:?Workflow must set the whole preparation deadline before checkout}"
+    remaining=$(( PREP_DEADLINE - $(date +%s) ))
+    (( remaining > 0 )) || exit 124
+    timeout --signal=TERM --kill-after=10s "${remaining}s" bash "$0" prepare-inner
+    ;;
+  prepare-inner) prepare ;;
   collect) collect ;;
   cleanup) cleanup ;;
   *) printf 'Usage: %s prepare|collect|cleanup\n' "$0" >&2; exit 2 ;;

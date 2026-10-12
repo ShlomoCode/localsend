@@ -9,6 +9,11 @@ on:
       - support/diagnostics/3417-vm.sh
       - support/diagnostics/3417-ui.sh
       - support/diagnostics/3417-accessibility.py
+      - support/diagnostics/3417-visual.cjs
+      - support/diagnostics/3417-package-preparation.sh
+      - support/diagnostics/3417-package-cache.cjs
+      - support/diagnostics/3417-guest-cache.py
+      - support/diagnostics/3417-owned-process.py
 
 permissions:
   contents: read
@@ -22,28 +27,36 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     steps:
+      - name: Start whole preparation budget before checkout
+        run: echo "PREP_DEADLINE=$(( $(date +%s) + 5100 ))" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Prepare supported Ubuntu GNOME Wayland guest
+        timeout-minutes: 86
         run: bash support/diagnostics/3417-vm.sh prepare
       - name: Inspect supported control and actual Nautilus Open With
         run: |
           set -euo pipefail
           Xvfb :99 -screen 0 1280x800x24 -ac > evidence/vm/record-xvfb.log 2>&1 &
           echo "$!" > /home/runner/3417-vm/xvfb.pid
+          sudo python3 support/diagnostics/3417-owned-process.py record xvfb /home/runner/3417-vm/xvfb.pid "$(command -v Xvfb)" "$(id -u)" :99 > evidence/vm/xvfb-identity.json
           DISPLAY=:99 xdpyinfo >/dev/null 2>&1 || sleep 2
           DISPLAY=:99 vncviewer -FullScreen -ViewOnly -RemoteResize=0 127.0.0.1:5901 > evidence/vm/record-viewer.log 2>&1 &
           echo "$!" > /home/runner/3417-vm/viewer.pid
+          sudo python3 support/diagnostics/3417-owned-process.py record viewer /home/runner/3417-vm/viewer.pid "$(command -v vncviewer)" "$(id -u)" 127.0.0.1:5901 > evidence/vm/viewer-identity.json
           sleep 3
           timeout --signal=TERM --kill-after=25s 300s bash support/diagnostics/3417-ui.sh
       - name: Collect guest, package, process, audit, and portal evidence
         if: always()
+        timeout-minutes: 5
         run: bash support/diagnostics/3417-vm.sh collect
+      - name: Stop owned diagnostic VM and recording processes
+        if: always()
+        timeout-minutes: 3
+        run: bash support/diagnostics/3417-vm.sh cleanup
       - uses: actions/upload-artifact@v4
         if: always()
+        timeout-minutes: 3
         with:
           name: issue3417-ubuntu-wayland-${{ github.run_id }}
           path: evidence/vm/
           if-no-files-found: error
-      - name: Stop owned diagnostic VM and recording processes
-        if: always()
-        run: bash support/diagnostics/3417-vm.sh cleanup
