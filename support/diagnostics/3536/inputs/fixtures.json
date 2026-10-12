@@ -1,0 +1,16 @@
+{
+  "source": "Investigator-created diagnostic payload; original reporter file bytes unavailable",
+  "filenameSource": "Exact report body; no normalization",
+  "japanese": "土曜のあさはほめるちゃん 20260926 ＃124「関西のいま気になるエリアのええところ“ほめるポイント＝ほめポ”を見つけながら、ぶらりするほっこりトークがたっぷりのほめぶら番組！今回は、“グラングリーン大阪”をぶらり！」.mp4",
+  "english": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4",
+  "expectedReportedFailure": "土曜のあさはほめるちゃん 20260926 ＃124「関西のいま気になるエリアのええところ“ほめるポイント＝ほめポ”を見つけながら、ぶらりするほっこりトークがたっぷりのほめぶら番組！今回",
+  "utf16Units": 116,
+  "utf8Bytes": 314,
+  "payloadBytes": 65536,
+  "payloadSha256": "4b640d85ab3ba30fd02c9fc9db4a8928f416322ad27022ea58a65aaee68a4df2",
+  "sourceWindowsDirectory": "C:\\s3536\\s",
+  "destinationWindowsDirectory": "C:\\s3536\\d",
+  "sourceFullPathUnits": 127,
+  "destinationFullPathUnits": 127,
+  "qualificationRequired": "Native Windows NTFS volume/component query, real creation/readback, original payload hash before app launch; no local Windows claim"
+}
