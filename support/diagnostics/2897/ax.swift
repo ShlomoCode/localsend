@@ -170,18 +170,19 @@ if mode.hasPrefix("picker-") {
             "verification": "Next operation must observe the native Go to Folder editor"]); exit(0)
     }
     if ["picker-editor", "picker-path", "picker-confirm"].contains(mode) {
-        // Require native Go to Folder context before touching an editable field.
+        // The observed native label changes from "Go to the folder:" to "Go to:"
+        // after entry. Stable sheet/field identifiers qualify the same editor.
         let contexts = panelRows.filter { element in
-            ["AXSheet", "AXDialog", "AXPopover"].contains(attr(element, "AXRole") as? String ?? "") &&
-                tree(element).flatMap { labels($0.0) }.map(normalized).contains {
-                    ["Go to the folder:", "Go to Folder", "Go to folder:"].contains($0)
-                }
+            (attr(element, "AXRole") as? String) == "AXSheet" &&
+                (attr(element, "AXIdentifier") as? String) == "GoToWindow" && hasBounds(element)
         }
+        guard contexts.count == 1 else { fail("Expected one native GoToWindow sheet within the open-panel", 29) }
         var editors: [AXUIElement] = []
         for context in contexts {
             for (element, _) in tree(context) {
-                guard ["AXTextField", "AXComboBox"].contains(attr(element, "AXRole") as? String ?? ""),
-                      (attr(element, "AXIdentifier") as? String) != "Search", visible(element), hasBounds(element) else { continue }
+                guard (attr(element, "AXRole") as? String) == "AXTextField",
+                      (attr(element, "AXIdentifier") as? String) == "PathTextField",
+                      (attr(element, "AXFocused") as? Bool) == true, visible(element), hasBounds(element) else { continue }
                 var settable = DarwinBoolean(false)
                 guard AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success,
                       settable.boolValue, !editors.contains(where: { CFEqual($0, element) }) else { continue }
@@ -204,16 +205,10 @@ if mode.hasPrefix("picker-") {
             exit(0)
         }
         guard (attr(editor, "AXValue") as? String) == expected else { fail("Go to Folder path changed before confirm", 29) }
-        let goButtons = panelRows.filter {
-            (attr($0, "AXRole") as? String) == "AXButton" && labels($0).contains("Go") && visible($0) && hasBounds($0) && actions($0).contains("AXPress")
-        }
-        let target: AXUIElement
-        let action: String
-        if goButtons.count == 1 { target = goButtons[0]; action = "AXPress" }
-        else if goButtons.isEmpty, actions(editor).contains("AXConfirm") { target = editor; action = "AXConfirm" }
-        else { fail("No unique native Go to Folder confirmation control", 29) }
-        let result = AXUIElementPerformAction(target, action as CFString)
-        try emit(["expectedPath": expected, "confirmationAction": action, "result": result.rawValue])
+        guard actions(editor).contains("AXConfirm") else { fail("Native PathTextField does not advertise AXConfirm", 29) }
+        let result = AXUIElementPerformAction(editor, "AXConfirm" as CFString)
+        try emit(["expectedPath": expected, "sheetIdentifier": "GoToWindow", "fieldIdentifier": "PathTextField",
+            "confirmationAction": "AXConfirm", "result": result.rawValue])
         guard result == .success else { fail("Native path confirmation failed", 29) }
         exit(0)
     }

@@ -1,5 +1,5 @@
 name: Diagnose 2897 macOS Finder handover
-# Native display selection and normal capture completion discriminator; same product scenario.
+# Observed native path confirmation and ordinary case capture completion; same product scenario.
 on:
   workflow_dispatch:
   push:

@@ -161,8 +161,8 @@ video() {
   video_start=$SECONDS
   video_case=$1
   printf "event\tscript_seconds\tutc\nrecord_start\t%s\t%s\n" "$SECONDS" "$(date -u +%FT%TZ)" > "$out/$1-timeline.tsv"
-  # Bash background commands can inherit ignored SIGINT. Reset it before exec,
-  # so the unchanged native capture command can finalize on the later SIGINT.
+  # Keep the same native capture command and disposition as the passing short
+  # qualification. Finalization waits for ordinary -V completion without a signal.
   /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die $!;' /usr/sbin/screencapture -v -V 240 -D 1 "$out/$1.mov" > "$out/$1-video.stdout.txt" 2> "$out/$1-video.stderr.txt" &
   recorder=$!
   sleep 2
@@ -207,7 +207,7 @@ qualify_capture() {
   capture_qualified=true
 }
 end_video() {
-  local code=0 final=$SECONDS stop_start
+  local code=0 final=$SECONDS deadline=$((video_start + 240 + 30))
   # The final UI snapshot must occur while the original recording is still live.
   # If an operation exceeds the recording budget, retain partial evidence as infrastructure failure.
   if ! kill -0 "$recorder" 2>/dev/null; then
@@ -217,20 +217,13 @@ end_video() {
     return 1
   fi
   printf "final_snapshot\t%s\t%s\n" "$final" "$(date -u +%FT%TZ)" >> "$out/$1-timeline.tsv"
-  # Retain a short tail, then let native screencapture finalize the movie on SIGINT.
-  sleep 3
-  if ! kill -0 "$recorder" 2>/dev/null; then
-    wait "$recorder" || code=$?
-    printf '%s\n' "$code" > "$out/$1-video.exit-code.txt"
-    recorder=""
-    return 1
-  fi
-  kill -INT "$recorder" || return 1
-  stop_start=$SECONDS
+  # The passing eight-second trials finalized normally. Await the existing
+  # 240-second native cap, bounded by its remaining time plus 30 seconds.
+  printf 'normal_completion_deadline_script_seconds=%s\n' "$deadline" > "$out/$1-video-finalization.txt"
   while kill -0 "$recorder" 2>/dev/null; do
-    if (( SECONDS - stop_start >= 15 )); then
-      kill -9 "$recorder" 2>/dev/null || true
-      wait "$recorder" 2>/dev/null || true
+    if (( SECONDS >= deadline )); then
+      kill -TERM "$recorder" 2>/dev/null || true
+      stop_owned "$recorder"
       printf "124\n" > "$out/$1-video.exit-code.txt"
       recorder=""
       return 1
@@ -240,7 +233,8 @@ end_video() {
   wait "$recorder" || code=$?
   recorder=""
   printf "%s\n" "$code" > "$out/$1-video.exit-code.txt"
-  [[ ( $code == 0 || $code == 130 ) && -s $out/$1.mov ]] || return 1
+  printf 'normal_completion_observed_script_seconds=%s\n' "$SECONDS" >> "$out/$1-video-finalization.txt"
+  [[ $code == 0 && -s $out/$1.mov ]] || return 1
   run "$1-video-metadata" 30 "$scratch/media" "$out/$1.mov" "$((final - video_start))"
 }
 empty_selection() {
