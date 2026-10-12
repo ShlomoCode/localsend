@@ -73,10 +73,10 @@ vncdo -s localhost::5900 type demo key enter
 sleep 3
 vncdo -s localhost::5900 capture evidence/mx/ssh-start.png
 if ! timeout 12 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 true; then
-  vncdo -s localhost::5900 type 'sudo mount /dev/sr1 /mnt' key enter
+  vncdo -s localhost::5900 type 'sudo mount --mkdir=0700 /dev/sr1 /run/issue1310-bootstrap' key enter
   sleep 3
   vncdo -s localhost::5900 capture evidence/mx/bootstrap-mounted.png
-  vncdo -s localhost::5900 type 'sudo bash /mnt/bootstrap.sh' key enter
+  vncdo -s localhost::5900 type 'sudo bash /run/issue1310-bootstrap/bootstrap.sh' key enter
   sleep 3
   vncdo -s localhost::5900 capture evidence/mx/bootstrap-started.png
   ready=0
@@ -145,11 +145,11 @@ if test "${MX_SESSION:-live}" = installed; then
   if ! timeout 12 sshpass -p demo ssh "${opts[@]}" "$guest_user@127.0.0.1" true; then
     vncdo -s localhost::5900 key ctrl-alt-t
     sleep 3
-    vncdo -s localhost::5900 type 'sudo mount /dev/sr0 /mnt' key enter
+    vncdo -s localhost::5900 type 'sudo mount --mkdir=0700 /dev/sr0 /run/issue1310-bootstrap' key enter
     sleep 3
     vncdo -s localhost::5900 type demo key enter
     sleep 3
-    vncdo -s localhost::5900 type 'sudo bash /mnt/bootstrap.sh' key enter
+    vncdo -s localhost::5900 type 'sudo bash /run/issue1310-bootstrap/bootstrap.sh' key enter
     ready=0
     ready_deadline=$((SECONDS + 240))
     while (( SECONDS < ready_deadline )); do

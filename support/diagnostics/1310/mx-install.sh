@@ -15,6 +15,9 @@ printf 'LANG=%s\n' "${LANG:-}" >> evidence/install/installer-identity.txt
 case "${LANG:-}" in en*|C*) ;; *) exit 2;; esac
 case "${INSTALLER_TRACE:-0}" in 0|1) ;; *) exit 2;; esac
 { date -u; cat /etc/os-release; lsblk -f; cat /proc/cmdline; } > evidence/install/before.txt
+{ findmnt -T /mnt -o SOURCE,TARGET,FSTYPE,OPTIONS; findmnt -T /run/issue1310-bootstrap -o SOURCE,TARGET,FSTYPE,OPTIONS || true; stat -Lc '%a %u:%g %n' /mnt; } >> evidence/install/before.txt
+# The observer CD must not occupy the native installer's target hierarchy.
+if test "${INSTALLER_TRACE:-0}" = 0 && mountpoint -q /mnt; then exit 2; fi
 { sha256sum /usr/bin/minstall-launcher; cat /usr/bin/minstall-launcher; cat /usr/share/gazelle-installer-data/installer.conf; } > evidence/install/launcher-original.txt
 dpkg-query -W > evidence/install/packages-before-observer.txt
 # Normal distro accessibility tooling observes and operates actual widgets.
