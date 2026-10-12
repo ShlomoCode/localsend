@@ -72,7 +72,7 @@ async function enforcePriorAttemptHold() {
   if (process.env.GITHUB_RUN_ATTEMPT !== '1') throw new Error('Rerun attempts require explicit prior-attempt reconciliation; no allocation');
   const token = process.env.GH_API_TOKEN;
   if (!token) throw new Error('Read-only Actions attempt ledger token unavailable');
-  const response = await fetch('https://api.github.com/repos/ShlomoCode/localsend/actions/workflows/diagnostic-2973.yml/runs?per_page=100', {
+  const response = await fetch('https://api.github.com/repos/ShlomoCode/localsend/actions/workflows/build_android_apk.yml/runs?per_page=100&branch=codex%2Fbug-2973-intake', {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
     signal: AbortSignal.timeout(Math.min(20000, Math.max(1, deadline - Date.now()))),
   });
