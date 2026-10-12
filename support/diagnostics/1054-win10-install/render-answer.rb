@@ -26,7 +26,7 @@ File.write(ARGV.fetch(0), <<~XML)
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-International-Core" #{component}><InputLocale>0409:00000409</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale></component>
     <component name="Microsoft-Windows-Shell-Setup" #{component}>
-      <OOBE><HideEULAPage>true</HideEULAPage><HideOEMRegistrationScreen>true</HideOEMRegistrationScreen><HideOnlineAccountScreens>true</HideOnlineAccountScreens><ProtectYourPC>3</ProtectYourPC></OOBE>
+      <OOBE><HideEULAPage>true</HideEULAPage><HideOEMRegistrationScreen>true</HideOEMRegistrationScreen><HideOnlineAccountScreens>true</HideOnlineAccountScreens><HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE><ProtectYourPC>3</ProtectYourPC></OOBE>
       <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Name>Probe</Name><DisplayName>Probe</DisplayName><Group>Administrators</Group><Password><Value>#{password}</Value><PlainText>true</PlainText></Password></LocalAccount></LocalAccounts></UserAccounts>
       <AutoLogon><Enabled>true</Enabled><Username>Probe</Username><LogonCount>1</LogonCount><Password><Value>#{password}</Value><PlainText>true</PlainText></Password></AutoLogon>
       <FirstLogonCommands><SynchronousCommand wcm:action="add"><Order>1</Order><Description>Record valid evaluation and launch official app</Description><CommandLine>#{command}</CommandLine></SynchronousCommand></FirstLogonCommands>
