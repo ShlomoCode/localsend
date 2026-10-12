@@ -256,6 +256,17 @@ def control_cmd(*args, timeout=30):
     return cmd(*args, timeout=min(timeout, remaining))
 
 
+def native_window_geometry(window):
+    raw = control_cmd('xwininfo', '-id', window, timeout=5)
+    values = []
+    for label in ('Absolute upper-left X', 'Absolute upper-left Y', 'Width', 'Height'):
+        matches = re.findall(r'^\s*' + re.escape(label) + r':\s*(-?\d+)\s*$', raw, re.MULTILINE)
+        if len(matches) != 1:
+            raise RuntimeError('Native X11 absolute geometry is ambiguous')
+        values.append(int(matches[0]))
+    return values, raw
+
+
 def rendered_sender_label(label):
     """Resolve ordinary mouse input from current rendered text and native PID."""
     global sequence
@@ -271,12 +282,17 @@ def rendered_sender_label(label):
     if control_cmd('xdotool', 'getactivewindow', timeout=5).strip() != window:
         raise RuntimeError('Rendered sender input has wrong foreground window')
     raw_geometry = control_cmd('xdotool', 'getwindowgeometry', '--shell', window, timeout=5)
-    geometry = dict(line.split('=', 1) for line in raw_geometry.splitlines() if '=' in line)
-    x, y, width, height = (int(geometry[key]) for key in ('X', 'Y', 'WIDTH', 'HEIGHT'))
+    geometry, absolute_geometry = native_window_geometry(window)
+    x, y, width, height = geometry
     sequence += 1
     prefix = f'{sequence:04d}-{stage}-rendered'
     screenshot = OUT / (prefix + '.png')
     control_cmd('scrot', str(screenshot), timeout=10)
+    image_probe = json.loads(control_cmd('ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(screenshot), timeout=5))
+    image_streams = image_probe.get('streams', [])
+    if len(image_streams) != 1:
+        raise RuntimeError('Original screen image dimensions are ambiguous')
+    screenshot_dimensions = [image_streams[0]['width'], image_streams[0]['height']]
     # Preserve the original pixels. Scale only the OCR observation so small
     # visible labels are readable; inverse-map every returned bound explicitly.
     ocr_scale = 3
@@ -292,7 +308,7 @@ def rendered_sender_label(label):
         left, top, w, h = (int(row[key])/ocr_scale for key in ('left', 'top', 'width', 'height'))
         if w > 0 and h > 0 and x <= left and y <= top and left+w <= x+width and top+h <= y+height:
             matches.append({'label': label, 'bounds': [left, top, w, h], 'confidence': float(row['conf'])})
-    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': [x, y, width, height], 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter}
+    observation = {'window': window, 'sender_pid': sender_process.pid, 'geometry': geometry, 'absolute_geometry': absolute_geometry, 'xdotool_geometry': raw_geometry, 'coordinate_system': 'X11 root pixels from original full-screen image', 'screenshot_dimensions': screenshot_dimensions, 'image_probe': image_probe, 'label': label, 'matches': matches, 'screenshot': screenshot.name, 'ocr_image': ocr_image.name, 'ocr_scale': ocr_scale, 'ocr_filter': ocr_filter}
     write(prefix + '.json', observation)
     if len(matches) > 1:
         raise RuntimeError('Ambiguous rendered sender label')
@@ -309,16 +325,39 @@ def rendered_sender_tap(label, scroll=False):
             raise RuntimeError('Sender native PID/window identity changed before input')
         if target is not None:
             left, top, width, height = target['bounds']
+            qualify_native_pointer(observation, round(left+width/2), round(top+height/2))
             log('rendered-sender-click', {**observation, 'target': target})
-            control_cmd('xdotool', 'mousemove', '--sync', str(round(left+width/2)), str(round(top+height/2)), 'click', '1', timeout=5)
+            control_cmd('xdotool', 'click', '1', timeout=5)
             time.sleep(.5)
             return
         if scroll and attempt < 24:
             x, y, width, height = observation['geometry']
+            qualify_native_pointer(observation, x+width*3//4, y+height//2)
             log('rendered-sender-scroll', {**observation, 'direction': 'down' if attempt < 12 else 'up'})
-            control_cmd('xdotool', 'mousemove', '--sync', str(x+width*3//4), str(y+height//2), 'click', '--repeat', '3', '--delay', '100', '5' if attempt < 12 else '4', timeout=5)
+            control_cmd('xdotool', 'click', '--repeat', '3', '--delay', '100', '5' if attempt < 12 else '4', timeout=5)
             time.sleep(.3)
     raise RuntimeError(f'Absent rendered sender label {label!r}')
+
+
+def qualify_native_pointer(observation, x, y):
+    geometry, raw_geometry = native_window_geometry(observation['window'])
+    display = control_cmd('xdpyinfo', timeout=5)
+    monitors = control_cmd('xrandr', '--current', timeout=5)
+    owner = control_cmd('xprop', '-id', observation['window'], '_NET_WM_PID', '_NET_FRAME_EXTENTS', timeout=5)
+    display_sizes = re.findall(r'^\s*dimensions:\s*(\d+)x(\d+) pixels', display, re.MULTILINE)
+    display_screens = re.findall(r'^number of screens:\s*(\d+)\s*$', display, re.MULTILINE)
+    coordinate_evidence = {'display': display, 'monitors': monitors, 'window_owner_frame': owner, 'current_geometry': geometry, 'xwininfo': raw_geometry, 'screenshot_dimensions': observation['screenshot_dimensions'], 'display_dimensions': display_sizes, 'display_screen_count': display_screens}
+    log('native-root-coordinate-evidence', coordinate_evidence)
+    if display_screens != ['1'] or len(display_sizes) != 1 or list(map(int, display_sizes[0])) != observation['screenshot_dimensions']:
+        raise RuntimeError('Original screen pixels do not match the single X11 root; no input admitted')
+    before = control_cmd('xdotool', 'getmouselocation', '--shell', timeout=5)
+    control_cmd('xdotool', 'mousemove', '--screen', '0', str(x), str(y), timeout=5)
+    after = control_cmd('xdotool', 'getmouselocation', '--shell', timeout=5)
+    location = dict(line.split('=', 1) for line in after.splitlines() if '=' in line)
+    active = control_cmd('xdotool', 'getactivewindow', timeout=5).strip()
+    log('native-pointer-qualification', {'requested_root_pixels': [x, y], 'before': before, 'after': after, 'active_window': active, 'expected_window': observation['window'], 'sender_pid': sender_process.pid, 'current_geometry': geometry, 'xwininfo': raw_geometry, 'display': display, 'monitors': monitors, 'window_owner_frame': owner})
+    if int(location['X']) != x or int(location['Y']) != y or int(location['SCREEN']) != 0 or active != observation['window'] or sender_process.poll() is not None or geometry != observation['geometry'] or not re.search(r'_NET_WM_PID\(CARDINAL\)\s*=\s*' + str(sender_process.pid) + r'\s*$', owner, re.MULTILINE):
+        raise RuntimeError('Native pointer/foreground does not match observed control target; no input admitted')
 
 
 def qualify_sender_input_actions():
@@ -330,6 +369,8 @@ def qualify_sender_input_actions():
         raise RuntimeError('No baseline port53317 listener owned by actual senderPID')
     stage = 'rendered-control-settings'
     rendered_sender_tap('Settings')
+    stage = 'rendered-settings-page-proof'
+    until(lambda: rendered_sender_label('General')[1], seconds=5)
     if os.environ.get('SETTINGS_ONLY_2955') == '1':
         stage = 'rendered-settings-native-controls-observation'
         observations = []
@@ -343,8 +384,9 @@ def qualify_sender_input_actions():
                 if control_cmd('xdotool', 'getactivewindow', timeout=5).strip() != observation['window'] or sender_process.poll() is not None:
                     raise RuntimeError('Sender identity changed before Settings observation scroll')
                 x, y, width, height = observation['geometry']
+                qualify_native_pointer(observation, x+width*3//4, y+height//2)
                 log('rendered-settings-observation-scroll', observation)
-                control_cmd('xdotool', 'mousemove', '--sync', str(x+width*3//4), str(y+height//2), 'click', '--repeat', '3', '--delay', '100', '5', timeout=5)
+                control_cmd('xdotool', 'click', '--repeat', '3', '--delay', '100', '5', timeout=5)
                 time.sleep(.3)
         raise RuntimeError('Server row not located; retain actual Settings observations')
     stage = 'rendered-control-stop'
