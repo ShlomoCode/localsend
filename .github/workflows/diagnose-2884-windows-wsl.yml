@@ -1,0 +1,27 @@
+name: Diagnose 2884 Windows 24H2 WSL2 capability
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/diagnose-2884-kvm-capability]
+    paths: [.github/workflows/diagnose-2884-windows-wsl.yml]
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-2884
+  cancel-in-progress: false
+jobs:
+  windows-wsl2:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normal Windows 24H2 setup and actual WSL2 execution
+        shell: bash
+        run: bash support/diagnostics/2884-windows-host.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2884-windows-wsl-${{ github.run_id }}
+          path: evidence/2884-windows-wsl
+          if-no-files-found: error

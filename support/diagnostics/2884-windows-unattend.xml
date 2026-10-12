@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runtime substitutes only the verified install.wim image index and a random hex password.
+     This is normal Enterprise Evaluation setup; no hardware requirement bypasses. -->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <DynamicUpdate><Enable>false</Enable></DynamicUpdate>
+      <DiskConfiguration>
+        <Disk wcm:action="add"><DiskID>0</DiskID><WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>260</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+        <WillShowUI>OnError</WillShowUI>
+      </DiskConfiguration>
+      <ImageInstall><OSImage>
+        <InstallFrom><MetaData wcm:action="add"><Key>/IMAGE/INDEX</Key><Value>${WIN_IMAGE_INDEX}</Value></MetaData></InstallFrom>
+        <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+        <WillShowUI>OnError</WillShowUI>
+      </OSImage></ImageInstall>
+      <UserData><AcceptEula>true</AcceptEula><FullName>Issue2884</FullName><Organization>LocalSend diagnostics</Organization></UserData>
+    </component>
+  </settings>
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>en-US</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <OOBE><HideEULAPage>true</HideEULAPage><HideOnlineAccountScreens>true</HideOnlineAccountScreens><ProtectYourPC>3</ProtectYourPC></OOBE>
+      <UserAccounts><LocalAccounts><LocalAccount wcm:action="add">
+        <Name>Issue2884</Name><DisplayName>Issue2884</DisplayName><Group>Administrators</Group>
+        <Password><Value>${WIN_LOCAL_PASSWORD}</Value><PlainText>true</PlainText></Password>
+      </LocalAccount></LocalAccounts></UserAccounts>
+      <AutoLogon><Enabled>true</Enabled><Username>Issue2884</Username><LogonCount>4</LogonCount>
+        <Password><Value>${WIN_LOCAL_PASSWORD}</Value><PlainText>true</PlainText></Password>
+      </AutoLogon>
+      <FirstLogonCommands><SynchronousCommand wcm:action="add">
+        <Order>1</Order><Description>Collect native Windows and actual WSL2 proof</Description>
+        <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $seed=@(Get-CimInstance Win32_LogicalDisk | Where-Object VolumeName -eq 'ISSUE2884'); if($seed.Count -ne 1){throw 'Expected one ISSUE2884 seed CD'}; $root=$seed[0].DeviceID+'\'; New-Item -ItemType Directory -Force C:\Issue2884 | Out-Null; Copy-Item ($root+'2884-windows-wsl.ps1') C:\Issue2884\2884-windows-wsl.ps1; Copy-Item ($root+'config.json') C:\Issue2884\config.json; &amp; C:\Issue2884\2884-windows-wsl.ps1"</CommandLine>
+      </SynchronousCommand></FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>
