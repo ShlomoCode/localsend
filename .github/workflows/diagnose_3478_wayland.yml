@@ -1,0 +1,58 @@
+name: Diagnose 3478 native Wayland clipboard
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue3478-wayland-diagnostic
+  cancel-in-progress: false
+jobs:
+  clipboard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Start absolute job budget
+        run: |
+          cut -d' ' -f1 /proc/uptime > /tmp/3478-job-start
+          date -u +%FT%T.%N > /tmp/3478-job-start-utc
+      - uses: actions/checkout@v4
+        timeout-minutes: 2
+        with:
+          fetch-depth: 0
+      - name: Prepare official Debian 13 KVM guest (setup budget 20 minutes)
+        timeout-minutes: 18
+        run: bash support/diagnostics/3478/environment.sh setup
+      - name: Start build budget
+        run: cut -d' ' -f1 /proc/uptime > /tmp/3478-build-start
+      - uses: subosito/flutter-action@v2
+        timeout-minutes: 8
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+      - name: Build unchanged pinned source (combined build budget 30 minutes)
+        timeout-minutes: 30
+        run: bash support/diagnostics/3478/environment.sh build
+      - name: Verify GNOME 48.7 native Wayland and stage supported oracle
+        timeout-minutes: 15
+        run: bash support/diagnostics/3478/environment.sh ready
+      - name: Actual GTK4 Nautilus to LocalSend clipboard episode
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          source support/diagnostics/3478/environment.sh
+          seconds=$(work_remaining)
+          if (( seconds > 900 )); then seconds=900; fi
+          test "$seconds" -gt 0
+          timeout --signal=TERM --kill-after=5s "${seconds}s" bash support/diagnostics/3478/scenario.sh
+      - name: Retain originals and shut down VM (reserved final 10 minutes)
+        if: always()
+        timeout-minutes: 5
+        run: bash support/diagnostics/3478/environment.sh collect
+      - uses: actions/upload-artifact@v4
+        if: always()
+        timeout-minutes: 5
+        with:
+          name: issue3478-wayland-originals-${{ github.run_id }}
+          path: evidence/vm/
+          if-no-files-found: error
+          retention-days: 30
