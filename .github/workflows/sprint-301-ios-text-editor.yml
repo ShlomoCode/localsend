@@ -1,0 +1,47 @@
+name: Sprint 301 iOS text editor qualification
+on:
+  push:
+    branches: ['codex/**']
+    paths:
+      - .github/workflows/sprint-301-ios-text-editor.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sprint-301-ios-text-editor
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BS_SPRINT_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BS_SPRINT_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      EVIDENCE_DIR: evidence301
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Freeze diagnostic source
+        shell: bash
+        run: |
+          mkdir -p evidence301
+          git rev-parse HEAD > evidence301/harness-source-head.txt
+          sha256sum support/diagnostics/issue301/ios-text-editor.mjs .github/workflows/sprint-301-ios-text-editor.yml > evidence301/harness-source-sha256.txt
+      - name: One bounded device attempt
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 720s node support/diagnostics/issue301/ios-text-editor.mjs
+      - name: Reconcile only the owned session and retain original provider video
+        if: always()
+        shell: bash
+        run: timeout --signal=TERM --kill-after=5s 60s node support/diagnostics/issue301/ios-text-editor.mjs --cleanup
+      - name: Retain diagnostic evidence (private signed URLs must not be printed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue301-ios-text-editor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence301/
+          retention-days: 30
+          if-no-files-found: error
