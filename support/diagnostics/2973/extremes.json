@@ -1,0 +1,12 @@
+{
+  "purpose": "Calibrate supported native maximum endpoints and exercise two report-faithful conditions: font maximum at original zoom, then zoom maximum at restored original font. No Cartesian matrix or guessed scale factors.",
+  "scope": "two-separate-native-maximum-conditions",
+  "originalNativeControlText": "2.0",
+  "maximumAdvancesPerAxis": 8,
+  "endpointEvidence": "Actual Increase control disabled with stable native value and retained original pixels",
+  "scenarioMinutes": 10,
+  "controllerRestorationMinutes": 4,
+  "independentCleanupMinutes": 3,
+  "steps": [],
+  "restore": []
+}

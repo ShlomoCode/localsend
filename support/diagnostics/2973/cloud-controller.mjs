@@ -30,11 +30,12 @@ capabilities.capabilities.alwaysMatch['appium:app'] = process.env.APK_APP_URL;
 capabilities.capabilities.alwaysMatch['bstack:options'].buildName = buildName;
 capabilities.capabilities.alwaysMatch['bstack:options'].sessionName = `${buildName}-original`;
 if (!/^bs:\/\/[a-zA-Z0-9_-]+$/.test(process.env.APK_APP_URL ?? '')) throw new Error('A verified original APK upload identity is required');
-const planFile = { preflight: 'preflight.json', observation: 'observation.json', native_observation: 'native-observation.json', matrix: 'matrix.json' }[process.env.PICKER_PLAN];
+const planFile = { preflight: 'preflight.json', observation: 'observation.json', native_observation: 'native-observation.json', extremes: 'extremes.json', matrix: 'matrix.json' }[process.env.PICKER_PLAN];
 if (!planFile) throw new Error('Unknown reviewed plan');
 const plan = JSON.parse(await readFile(resolve(root, planFile), 'utf8'));
 if (JSON.stringify(plan).includes('REPLACE_')) throw new Error('Observed native controls and restoration values are not filled in; no session allocated');
 const matrix = process.env.PICKER_PLAN === 'matrix';
+const extremes = process.env.PICKER_PLAN === 'extremes';
 if (matrix && (!plan.restore?.length || !plan.originalSettingsIdentity || !plan.restore.some(step => step.expectedSourceIncludes?.length))) {
   throw new Error('Settings changes require observed original values and explicit restore input sequence');
 }
@@ -43,9 +44,14 @@ await writeFile(resolve(evidence, 'plan.json'), JSON.stringify(plan, null, 2));
 
 async function transport(mode, ...args) {
   await new Promise((resolvePromise, reject) => {
-    const remaining = (cleaning ? cleanupDeadline : deadline) - Date.now();
+    const phaseEnd = cleaning && mode === 'observe' && args[0] === 'restore-extremes' ? cleanupDeadline - 20000 : cleaning ? cleanupDeadline : deadline;
+    const remaining = phaseEnd - Date.now();
     if (remaining <= 0) return reject(new Error('Controller phase deadline reached'));
-    const child = spawn(process.execPath, [resolve(root, 'appium-rest.mjs'), mode, evidence, ...args.map(String)], { stdio: 'inherit', timeout: Math.min(mode === 'observe' ? 300000 : 100000, remaining) });
+    const observedExtremes = mode === 'observe' && ['extremes', 'restore-extremes'].includes(args[0]);
+    const child = spawn(process.execPath, [resolve(root, 'appium-rest.mjs'), mode, evidence, ...args.map(String)], {
+      stdio: 'inherit', timeout: Math.min(observedExtremes ? remaining : mode === 'observe' ? 300000 : 100000, remaining),
+      env: { ...process.env, DIAGNOSTIC_PHASE_DEADLINE_MS: String(phaseEnd) },
+    });
     child.once('error', reject);
     child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`Transport ${mode} failed with code ${code}`)));
   });
@@ -99,7 +105,7 @@ let failure;
 let owned;
 let cleaning = false;
 let cleanupDeadline;
-const deadline = Date.now() + 5 * 60000;
+const deadline = Date.now() + (extremes ? 10 : 5) * 60000;
 async function verifyCapturedSource(step) {
   if (!step.expectedSourceIncludes?.length) return;
   if (step.mode !== 'snapshot') throw new Error('Source assertions must refer to a named captured screenshot/source');
@@ -160,6 +166,7 @@ try {
   await transport('snapshot', '00-original-app-start');
   if (process.env.PICKER_PLAN === 'observation') await transport('observe', 'control');
   if (process.env.PICKER_PLAN === 'native_observation') await transport('observe', 'settings');
+  if (extremes) await transport('observe', 'extremes');
   for (const [index, step] of plan.steps.entries()) {
     if (Date.now() > deadline) throw new Error('Bounded cloud scenario deadline reached');
     if (!['tap', 'swipe', 'snapshot'].includes(step.mode)) throw new Error('Unsupported UI plan operation');
@@ -176,7 +183,7 @@ try {
   await writeFile(resolve(evidence, 'failure.txt'), `${error.message}\n`);
 } finally {
   cleaning = true;
-  cleanupDeadline = Date.now() + 2 * 60000;
+  cleanupDeadline = Date.now() + (extremes ? 4 : 2) * 60000;
   if (!owned) owned = JSON.parse(await readFile(resolve(evidence, 'owned-session.json'), 'utf8').catch(() => 'null'));
   if (!owned) {
     try {
@@ -188,6 +195,17 @@ try {
     }
   }
   if (owned) {
+    if (extremes) {
+      try {
+        await transport('observe', 'restore-extremes');
+        const state = JSON.parse(await readFile(resolve(evidence, 'extremes-state.json'), 'utf8').catch(() => 'null'));
+        if (state && !state.finalBaselineAndPickerRestored) throw new Error('Exact native baselines/picker restoration unverified');
+        await writeFile(resolve(evidence, 'extremes-restoration-verdict.json'), JSON.stringify({ state, restorationRequired: state !== null, nativeAndPickerRestorationVerified: state?.finalBaselineAndPickerRestored ?? false, originalPixelsRequireInspection: true }, null, 2));
+      } catch (error) {
+        failure ??= error;
+        await writeFile(resolve(evidence, 'extremes-restoration-failure.txt'), `${error.message}\n`);
+      }
+    }
     if (process.env.PICKER_PLAN === 'observation') {
       const state = JSON.parse(await readFile(resolve(evidence, 'observation-state.json'), 'utf8').catch(() => 'null'));
       if (state?.mutationMayHaveOccurred || (state && !state.restorationVerified)) {

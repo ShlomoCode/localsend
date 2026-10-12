@@ -1,7 +1,8 @@
 // Diagnostic cloud UI transport. Prepared only; do not execute before root reviews the plan.
 // Uses Node's built-in fetch. No application source or device setting is substituted.
-import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, appendFile, mkdir, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { runExtremes, restoreExtremes } from './native-extremes.mjs';
 
 const [mode, evidenceArgument, ...args] = process.argv.slice(2);
 if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('This diagnostic transport may execute only in fork GitHub Actions');
@@ -29,11 +30,13 @@ function redact(value) {
 
 async function request(method, path, body) {
   const started = new Date().toISOString();
+  const remaining = Number(process.env.DIAGNOSTIC_PHASE_DEADLINE_MS ?? Infinity) - Date.now();
+  if (remaining <= 0) throw new Error('Diagnostic phase deadline reached before remote input/read');
   const response = await fetch(endpoint + path, {
     method,
     headers: { Authorization: authorization, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(Math.min(45000, remaining)),
   });
   const responseText = await response.text();
   if (method === 'POST' && path === '/session') {
@@ -71,12 +74,13 @@ if (mode === 'create') {
   const { sessionId } = JSON.parse(await readFile(resolve(evidence, 'owned-session.json'), 'utf8'));
   const prefix = `/session/${encodeURIComponent(sessionId)}`;
   if (mode === 'observe') {
-    if (!['control', 'settings'].includes(args[0])) throw new Error('Observe requires an explicit reviewed control or settings scope');
-    // This stage exercises the real picker and reads Android settings without slider inputs.
-    const events = [];
-    let serial = 0;
+    if (!['control', 'settings', 'extremes', 'restore-extremes'].includes(args[0])) throw new Error('Observe requires an explicit reviewed scope');
+    const events = JSON.parse(await readFile(resolve(evidence, 'observation-native-targets.json'), 'utf8').catch(() => '[]'));
+    let serial = Math.max(-1, ...(await readdir(evidence)).map(name => /^observe-(\d+)-/.exec(name)).filter(Boolean).map(match => Number(match[1]))) + 1;
+    let captureGroup = '';
     const decode = text => text.replace(/&#10;/g, '\n').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     async function capture(label) {
+      label = captureGroup ? `${captureGroup}-${label}` : label;
       const source = await request('GET', prefix + '/source');
       const image = await request('GET', prefix + '/screenshot');
       await writeFile(resolve(evidence, `observe-${serial++}-${label}.xml`), source.value);
@@ -89,7 +93,7 @@ if (mode === 'create') {
         nodes.push(node);
         if (!token[4]) stack.push(nodes.length - 1);
       }
-      return { source: source.value, nodes };
+      return { source: source.value, nodes, snapshotLabel: `observe-${serial - 1}-${label}` };
     }
     async function touch(node, label) {
       if (node.clickable !== 'true' || node.enabled !== 'true' || node.displayed !== 'true') throw new Error(`Observed ${label} is not a visible enabled touch target`);
@@ -109,17 +113,32 @@ if (mode === 'create') {
       ] }] });
     }
     async function byLabel(label, snapshotLabel) {
-      const screen = await capture(snapshotLabel);
-      const matches = screen.nodes.filter(node => node.text === label || node['content-desc'] === label || node['content-desc']?.split('\n')[0] === label);
+      for (let attempt = 0; attempt < 3; attempt++) {
+      const screen = await capture(`${snapshotLabel}-${attempt}`);
+      const matches = screen.nodes.filter(node => node.package === 'org.localsend.localsend_app' &&
+        (node.text === label || node['content-desc'] === label || node['content-desc']?.split('\n')[0] === label));
       const targets = [...new Set(matches.map(node => {
         let target = node;
         while (target.clickable !== 'true' && target.parentIndex !== null) target = screen.nodes[target.parentIndex];
         return target;
-      }).filter(node => node.clickable === 'true' && node.enabled === 'true' && node.displayed === 'true'))];
-      if (targets.length !== 1) throw new Error(`Native label ${label} has ${targets.length} visible targets; retained screen requires inspection`);
-      await touch(targets[0], label);
+      }).filter(node => node.package === 'org.localsend.localsend_app' && node.clickable === 'true' && node.enabled === 'true' && node.displayed === 'true'))];
+      if (targets.length > 1) throw new Error(`Native LocalSend label ${label} is ambiguous`);
+      if (targets.length === 1) { await touch(targets[0], label); return; }
+      }
+      throw new Error(`Native LocalSend label ${label} unavailable after bounded readiness; retained screen requires inspection`);
     }
     async function back() { await request('POST', prefix + '/appium/device/press_keycode', { keycode: 4 }); }
+    async function activate(packageName) {
+      if (!['org.localsend.localsend_app', 'com.android.settings'].includes(packageName)) throw new Error('Unreviewed application activation');
+      await request('POST', prefix + '/execute/sync', { script: 'mobile: activateApp', args: [{ appId: packageName }] });
+      if (packageName === 'org.localsend.localsend_app') {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const screen = await capture(`activate-localsend-ready-${attempt}`);
+          if (screen.nodes.some(node => node.package === packageName && node.displayed === 'true')) return;
+        }
+        throw new Error('LocalSend package not observed after bounded activation readiness');
+      }
+    }
     async function openApps(label) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const screen = await capture(`${label}-${attempt}`);
@@ -143,10 +162,24 @@ if (mode === 'create') {
       }
       throw new Error('Apps remains unavailable after bounded actual picker-bar navigation');
     }
-    if (args[0] === 'control') {
+    async function pickerControl(condition = 'default-control') {
+    const previousGroup = captureGroup;
+    captureGroup = condition;
+    try {
     await byLabel('Send', 'receive');
     const initialSend = await capture('initial-send-selection');
-    if (!['File','Media','Paste'].every(label => initialSend.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true'))) throw new Error('Initial Send selection is not observed empty; preserve it and stop');
+    const sourceBars = initialSend.nodes.filter(node => node.package === 'org.localsend.localsend_app' && node.class === 'android.widget.HorizontalScrollView' && node.displayed === 'true' && node.enabled === 'true');
+    const sourceBarIndex = sourceBars.length === 1 ? initialSend.nodes.indexOf(sourceBars[0]) : -1;
+    const sourceButtons = initialSend.nodes.filter(node => node.package === 'org.localsend.localsend_app' && node.class === 'android.widget.Button' &&
+      node.clickable === 'true' && node.enabled === 'true' && node.displayed === 'true' && ['File','Media','Paste','Text','Folder','App'].includes(node['content-desc'])).filter(node => {
+        let ancestor = node;
+        while (ancestor.parentIndex !== null) {
+          if (ancestor.parentIndex === sourceBarIndex) return true;
+          ancestor = initialSend.nodes[ancestor.parentIndex];
+        }
+        return false;
+      });
+    if (sourceBars.length !== 1 || !sourceButtons.length || initialSend.nodes.some(node => node['content-desc']?.startsWith('Selection\nFiles: '))) throw new Error('Initial empty Selection/native source bar is not uniquely observed; preserve it and stop');
     await openApps('send-picker-bar');
     await capture('apps-original-no-input');
     const keyboard = await request('GET', prefix + '/appium/device/is_keyboard_shown');
@@ -164,7 +197,7 @@ if (mode === 'create') {
       /(?:^|\n)[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+){2,}(?:$|\n)/.test(node['content-desc'] ?? ''));
     if (appRows.length < 2) throw new Error('Two actual installed app row identities are not observable; retained picker needs inspection');
     const chosen = appRows.slice(0, 2).map(node => ({ label: node['content-desc'].split('\n')[0], package: node['content-desc'].split('\n').find(line => /^[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+){2,}$/.test(line)) }));
-    await writeFile(resolve(evidence, 'control-selected-app-identities.json'), JSON.stringify(chosen, null, 2));
+    await writeFile(resolve(evidence, `${condition}-selected-app-identities.json`), JSON.stringify(chosen, null, 2));
     for (const app of chosen) {
       const fresh = await capture(`before-select-${app.package.replaceAll('.', '-')}`);
       const rows = fresh.nodes.filter(node => node.clickable === 'true' && node.displayed === 'true' && node['content-desc']?.split('\n').includes(app.package));
@@ -176,7 +209,7 @@ if (mode === 'create') {
     // Normal Send displays the count and app icons, not file-name semantics.
     const selection = added.nodes.filter(node => node['content-desc']?.startsWith('Selection\nFiles: 2\n') && node.displayed === 'true');
     if (selection.length !== 1) throw new Error('Send does not expose one observed two-file Selection card after Add');
-    await writeFile(resolve(evidence, 'default-control-verdict.json'), JSON.stringify({ multipleSwitchEnabledByVisibleTouch: true, actualApps: chosen, add2AppsCompleted: true, sendFileCount: 2, matchingIconsRequireOriginalScreenshotInspection: true }, null, 2));
+    await writeFile(resolve(evidence, `${condition}-verdict.json`), JSON.stringify({ condition, multipleSwitchEnabledByVisibleTouch: true, actualApps: chosen, add2AppsCompleted: true, sendFileCount: 2, matchingIconsRequireOriginalScreenshotInspection: true }, null, 2));
     // The original screenshot establishes the X. Native ancestry identifies its
     // sole unlabeled Button inside the current, semantically identified card.
     const cardIndex = added.nodes.indexOf(selection[0]);
@@ -197,8 +230,46 @@ if (mode === 'create') {
     if (!restoredPicker.nodes.some(node => node.class === 'android.widget.Switch' && node.checked === 'false')) throw new Error('Original picker switch off not verified');
     await writeFile(resolve(evidence, 'observation-state.json'), JSON.stringify({ originalSendSelection: 'empty-observed', originalMultipleSwitch: false, mutationMayHaveOccurred: false, restorationVerified: true }, null, 2));
     await back();
-      await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ scope: 'default-picker-control-only', originalSelectionAndSwitchRestorationVerified: true, androidSettingsChanged: false, aboutAndNativeSettingsObserved: false, enlargementProductFailureValidated: false }, null, 2));
+      await writeFile(resolve(evidence, `${condition}-picker-restoration.json`), JSON.stringify({ originalSelectionAndSwitchRestorationVerified: true, productValidated: false }, null, 2));
+    } finally { captureGroup = previousGroup; }
+    }
+    async function restorePicker() {
+      const state = JSON.parse(await readFile(resolve(evidence, 'observation-state.json'), 'utf8').catch(() => 'null'));
+      if (!state?.mutationMayHaveOccurred) return;
+      if (state.originalSendSelection !== 'empty-observed') throw new Error('Original picker selection unknown; no cleanup clear');
+      await activate('org.localsend.localsend_app');
+      let screen = await capture('restore-picker-current');
+      if (screen.nodes.some(node => node.package === 'org.localsend.localsend_app' && node['content-desc'] === 'Apps (APK)' && node.displayed === 'true')) {
+        const keyboard = await request('GET', prefix + '/appium/device/is_keyboard_shown');
+        if (keyboard.value === true) await back();
+        else if (keyboard.value !== false) throw new Error('Picker keyboard identity unavailable during cleanup');
+        await back();
+      }
+      await byLabel('Send', 'restore-picker-send');
+      screen = await capture('restore-picker-selection');
+      const cards = screen.nodes.filter(node => node['content-desc']?.startsWith('Selection\nFiles: ') && node.displayed === 'true');
+      if (cards.length > 1) throw new Error('Picker cleanup selection card ambiguous');
+      if (cards.length === 1) {
+        const cardIndex = screen.nodes.indexOf(cards[0]);
+        const clear = screen.nodes.filter(node => node.parentIndex === cardIndex && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true' && !node['content-desc'] && !node.text);
+        if (clear.length !== 1) throw new Error('Picker cleanup clear X unavailable');
+        await touch(clear[0], 'Restore original empty Selection X');
+      }
+      const empty = await capture('restore-picker-empty-send');
+      if (['File','Media','Paste','Text','Folder','App'].filter(label => empty.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true')).length < 2) throw new Error('Empty Send cleanup unverified');
+      await openApps('restore-picker-open-app');
+      const keyboard = await request('GET', prefix + '/appium/device/is_keyboard_shown');
+      if (keyboard.value === true) await back();
+      else if (keyboard.value !== false) throw new Error('Picker restoration keyboard unknown');
+      const restored = await capture('restore-picker-off');
+      if (!restored.nodes.some(node => node.class === 'android.widget.Switch' && node.checked === 'false')) throw new Error('Picker off cleanup unverified');
+      await writeFile(resolve(evidence, 'observation-state.json'), JSON.stringify({ ...state, mutationMayHaveOccurred: false, restorationVerified: true }, null, 2));
+      await back();
+    }
+    if (args[0] === 'control') {
+      await pickerControl();
     } else {
+    if (args[0] !== 'restore-extremes') {
     await byLabel('Settings', 'send-after-apps');
     let versionFound = false;
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -233,6 +304,7 @@ if (mode === 'create') {
         (node['resource-id']?.endsWith(':id/settings_button') || node['content-desc'] === 'Settings'));
       if (gears.length === 1) { await touch(gears[0], 'native Settings gear'); break; }
       if (attempt === 1) throw new Error('Native Settings gear not observable; no guessed input');
+    }
     }
     async function openNativePreference(label, snapshotLabel, parentHeading) {
       let swipes = 0;
@@ -286,9 +358,6 @@ if (mode === 'create') {
       }
       throw new Error(`Native Settings ${label} unavailable after bounded package readiness and observed list navigation`);
     }
-    await openNativePreference('Display', 'android-settings', 'Settings');
-    await capture('display-original');
-    await openNativePreference('Screen zoom', 'display-before-zoom', 'Display');
     function describeOriginalSettingsScreen(screen, heading) {
       const headings = screen.nodes.filter(node => node.package === 'com.android.settings' && node.displayed === 'true' && (node.text === heading || node['content-desc'] === heading));
       const headerHeadings = headings.filter(node => {
@@ -310,6 +379,13 @@ if (mode === 'create') {
         rangeEstablished: false, screenshotInspectionRequired: true,
       };
     }
+    const adapter = { evidence, capture, touch, back, activate, openNativePreference, describeOriginalSettingsScreen, pickerControl, restorePicker };
+    if (args[0] === 'restore-extremes') {
+      await restoreExtremes(adapter);
+    } else {
+    await openNativePreference('Display', 'android-settings', 'Settings');
+    await capture('display-original');
+    await openNativePreference('Screen zoom', 'display-before-zoom', 'Display');
     const zoom = await capture('screen-zoom-original');
     const originalControls = { screenZoom: describeOriginalSettingsScreen(zoom, 'Screen zoom') };
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
@@ -319,8 +395,10 @@ if (mode === 'create') {
     originalControls.fontSize = describeOriginalSettingsScreen(font, 'Font size and style');
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
     const identitiesVerified = originalControls.screenZoom.subpageIdentityVerified && originalControls.fontSize.subpageIdentityVerified;
-    await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ settingsChanged: false, productValidated: false, originalNativeSnapshotsCaptured: true, originalNativeSubpageIdentitiesVerified: identitiesVerified, rangesEstablished: false }, null, 2));
+    await writeFile(resolve(evidence, 'observation-verdict.json'), JSON.stringify({ scope: 'original-native-capture-before-any-calibration', settingsChanged: false, productValidated: false, originalNativeSnapshotsCaptured: true, originalNativeSubpageIdentitiesVerified: identitiesVerified, rangesEstablished: false }, null, 2));
     if (!identitiesVerified) throw new Error('Native target subpage identity requires original screenshot inspection; matrix remains blocked');
+    if (args[0] === 'extremes') await runExtremes(adapter);
+    }
     }
   } else if (mode === 'snapshot') {
     const label = args[0];

@@ -7,9 +7,9 @@ on:
         description: Uploaded unmodified official APK bs:// identity
         required: true
       plan:
-        description: Reviewed source-only plan (preflight or matrix)
+        description: Reviewed bounded diagnostic stage
         type: choice
-        options: [preflight, observation, native_observation, matrix]
+        options: [preflight, observation, native_observation, extremes, matrix]
         default: preflight
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
   device:
     if: github.repository == 'ShlomoCode/localsend'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
