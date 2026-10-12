@@ -293,24 +293,25 @@ def sockets(stage):
         (OUT/(stage+'-'+role+'-sockets.txt')).write_text(raw)
     event('sockets_retained',stage=stage)
 
-def cancel_case(stage):
+def cancel_case(stage, file_count=6, bytes_each=512*1024*1024, fixture_seed=None):
     fixture=SENDER/stage; fixture.mkdir()
-    block=(b'LocalSend original large folder fixture '+stage.encode()+b'\n')
+    block=(b'LocalSend original large folder fixture '+(fixture_seed or stage).encode()+b'\n')
     block=(block*((1024*1024)//len(block)+1))[:1024*1024]
-    for i in range(6):
+    for i in range(file_count):
         with (fixture/('queued-%02d.bin'%i)).open('wb') as f:
-            for _ in range(512): f.write(block)
+            for _ in range(bytes_each//(1024*1024)): f.write(block)
     subprocess.run(['chown','-R','sender1425:sender1425',str(fixture)],check=True)
     expected_hash=sha_file(fixture/'queued-00.bin')
-    event('fixture',stage=stage,files=6,bytes_each=512*1024*1024,source=str(fixture),sha256_each=expected_hash)
+    event('fixture',stage=stage,files=file_count,bytes_each=bytes_each,source=str(fixture),sha256_each=expected_hash,
+          fixture_seed=fixture_seed or stage)
     movies=recording(stage)
     try:
         send(fixture,True,stage)
-        total_expected=6*512*1024*1024
+        total_expected=file_count*bytes_each
         end=time.monotonic()+600
         while time.monotonic()<end:
             state=file_state()
-            active={p:n for p,n in state.items() if stage in p and 0<n<512*1024*1024}
+            active={p:n for p,n in state.items() if stage in p and 0<n<bytes_each}
             total=sum(n for p,n in state.items() if stage in p)
             if active and total_expected*.4 <= total <= total_expected*.6: break
             if total >= total_expected:
@@ -325,7 +326,7 @@ def cancel_case(stage):
                 event('nonqualifying_finished_during_cancel_location',stage=stage); return {'stage':stage,'qualifying':False}
             raise
         # Locate and native-size sampling can outlast a fast unbounded transfer.
-        still_active={p:n for p,n in file_state().items() if stage in p and 0<n<512*1024*1024}
+        still_active={p:n for p,n in file_state().items() if stage in p and 0<n<bytes_each}
         if not still_active:
             event('nonqualifying_finished_during_cancel_location',stage=stage); return {'stage':stage,'qualifying':False}
         click('sender',point,'Cancel active sending session')
@@ -338,12 +339,12 @@ def cancel_case(stage):
         confirmation=modal_cancel_target(stage)
         before=file_state()
         total_before=sum(n for p,n in before.items() if stage in p)
-        if not any(stage in p and 0<n<512*1024*1024 for p,n in before.items()) or not total_expected*.4 <= total_before <= total_expected*.6:
+        if not any(stage in p and 0<n<bytes_each for p,n in before.items()) or not total_expected*.4 <= total_before <= total_expected*.6:
             event('nonqualifying_midpoint_window_missed',stage=stage,total_native_bytes=total_before,total_expected=total_expected)
             return {'stage':stage,'qualifying':False,'reason':'midpoint window missed before actual confirmation'}
         mark=click('sender',confirmation,'Confirm Cancel transfer inside actual modal')
         confirmation_state=file_state()
-        if sum(n for p,n in confirmation_state.items() if stage in p) >= 6*512*1024*1024:
+        if sum(n for p,n in confirmation_state.items() if stage in p) >= total_expected:
             event('nonqualifying_all_files_finished_at_confirmation',stage=stage)
             return {'stage':stage,'qualifying':False}
         verified_sender_cancel_return(stage)
@@ -421,35 +422,16 @@ try:
     ALIAS_WORD=max(alias_candidates,key=lambda w:w['h'])['text']
     event('receiver_alias_word',word=ALIAS_WORD,entire_large_alias_words=alias_candidates)
     control('initial-control')
-    RESULTS.append(cancel_case('cancel-unbounded'))
-    if not RESULTS[-1]['qualifying']:
-        # A completed fast transfer is not a cancel trial. Close through real Done before applying a constant normal link rate.
-        finish_fast_transfer()
-        # Fully completed fast data is verified and retained as hashes before disk reclamation.
-        fixture=SENDER/'cancel-unbounded'
-        saved=DEST/'cancel-unbounded'
-        comparisons=[]
-        for source in sorted(fixture.iterdir()):
-            target=saved/source.name
-            source_hash=sha_file(source); saved_hash=sha_file(target)
-            if source_hash!=saved_hash: raise RuntimeError('Completed fast folder content mismatch')
-            comparisons.append({'name':source.name,'sha256':source_hash,'bytes':target.stat().st_size})
-        event('completed_fast_folder_verified_before_fixture_cleanup',files=comparisons)
-        shutil.rmtree(fixture);shutil.rmtree(saved)
-        subprocess.run(['ip','netns','exec','sender1425','tc','qdisc','add','dev','send1425','root','tbf','rate','50mbit','burst','64kb','latency','50ms'],check=True)
-        RATE='constant-50mbit-normal-network'
-        event('network_rate_needed',reason='Original link missed active40–60% confirmation window; native3GiB completion, terminalUI and all saved hashes observed before fallback',rate=RATE)
-        RESULTS.append(cancel_case('cancel-rate-1'))
+    # Root-selected unmodified-app discriminator: only remove queued successors, preserving the original 3 GiB payload bytes.
+    event('causal_discriminator',baseline_run=38249423969,baseline_files=6,baseline_bytes_each=512*1024*1024,
+          selected_files=1,selected_bytes_each=3*1024*1024*1024,total_bytes=3*1024*1024*1024,
+          artifact='unmodified official 1.14 AppImage',native_action='Folder then actual midpoint modal Cancel',rate=RATE)
+    RESULTS.append(cancel_case('cancel-single-file',file_count=1,bytes_each=3*1024*1024*1024,fixture_seed='cancel-unbounded'))
     if not RESULTS[-1]['qualifying']:
         raise RuntimeError('Selected link conditions did not yield a genuine midpoint Cancel')
-    # Preserve state if the original bug leaves an active transfer. A fresh control must be attempted in this same process pair.
+    # Preserve actual state; the control follows normal terminal Done in this unchanged process pair.
     dismiss_terminal_receiver('post-cancel')
     control('post-cancel-control')
-    RESULTS.append(cancel_case('cancel-replay-2'))
-    if not RESULTS[-1]['qualifying']:
-        raise RuntimeError('Second fixed replay did not reach genuine midpoint Cancel; no repeatability claim')
-    dismiss_terminal_receiver('final-cancel')
-    control('final-control')
     (OUT/'results.json').write_text(json.dumps(RESULTS,indent=2))
 finally:
     stop.set();sampler.join()
