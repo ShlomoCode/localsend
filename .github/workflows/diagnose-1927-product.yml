@@ -11,13 +11,13 @@ concurrency:
 jobs:
   product:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 45
     steps:
       - name: Start the shared wall deadline
         run: |
           now=$(date +%s)
           echo "ISSUE1927_WALL_START=$now" >> "$GITHUB_ENV"
-          echo "ISSUE1927_WALL_DEADLINE=$((now + 4500))" >> "$GITHUB_ENV"
+          echo "ISSUE1927_WALL_DEADLINE=$((now + 2700))" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         timeout-minutes: 1
         with:
@@ -27,42 +27,31 @@ jobs:
           mkdir -p evidence/workflow
           git rev-parse HEAD > evidence/workflow/diagnostic-head.txt
           elapsed=$(($(date +%s) - ISSUE1927_WALL_START))
-          printf 'checkout_elapsed_seconds=%s\nplanned_total_seconds=4320\nwall_ceiling_seconds=4500\nsource_shared_seconds=2400\npackage_shared_seconds=300\nmint_shared_seconds=1200\n' "$elapsed" > evidence/workflow/budget.txt
+          printf 'checkout_elapsed_seconds=%s\nwall_ceiling_seconds=2700\nocr_discriminator_seconds=60\nmint_shared_seconds=1200\nno_rebuild=true\nno_automatic_rerun=true\n' "$elapsed" > evidence/workflow/budget.txt
           test "$elapsed" -le 30
       - uses: actions/download-artifact@v4
-        timeout-minutes: 1
+        timeout-minutes: 3
         with:
-          name: issue1927-source-38166504952
-          run-id: 38166504952
+          artifact-ids: 11768777826
+          run-id: 38294752104
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: evidence/immutable-source
-      - uses: actions/download-artifact@v4
-        timeout-minutes: 1
-        with:
-          name: issue1927-packages-38167715193
-          run-id: 38167715193
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: evidence/immutable-packages
-      - name: Generate and compile both matched baseline and product sources
+          path: evidence/audited-run
+          merge-multiple: true
+      - name: Bind replay to the audited source and identical packages
         run: |
-          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 320 - 1270 - 150 - 30))
-          test "$limit" -gt 0
-          if [ "$limit" -gt 2400 ]; then limit=2400; fi
-          set +e
-          timeout --signal=TERM --kill-after=30 "$limit" bash support/diagnostics/issue1927-product-build.sh
-          status=$?
-          printf 'source_status=%s\nsource_execution_ceiling=%s\n' "$status" "$limit" > evidence/workflow/source-status.txt
-          exit "$status"
-      - name: Build unchanged source and candidate in the same normal create manifest
+          test "$(cat evidence/audited-run/workflow/diagnostic-head.txt)" = 6d7111ac1a796d9ad61b27f53cc50bb0e94dc1ac
+          test "$(cat evidence/audited-run/workflow/source-status.txt | head -1)" = source_status=0
+          test "$(cat evidence/audited-run/workflow/package-status.txt | head -1)" = package_status=0
+          printf '%s  %s\n' a9b8ea52e24acbb4e1136332661313ac81de46d752b5a0e24a33ba45186726cf evidence/audited-run/source/provenance/product-source.patch | sha256sum -c -
+          cmp support/diagnostics/issue1927-product-source.patch evidence/audited-run/source/provenance/product-source.patch
+          printf '%s  %s\n' 20e6455998268d0eeb0eb469fbdbe9359f5221c4510510b75fe64cc0ef511858 evidence/audited-run/packages/baseline.flatpak 224fa3013bd5240fa6e79d198c18afc54f885ac7808dd633e686108aa0284a4f evidence/audited-run/packages/candidate.flatpak | sha256sum -c -
+          cp -a evidence/audited-run/packages evidence/packages
+          printf 'reuse_run=38294752104\nreuse_job=114963036255\nreuse_head=6d7111ac1a796d9ad61b27f53cc50bb0e94dc1ac\nartifact_id=11768777826\nartifact_provider_digest=e262522dc46070d718b417ad6a7cc1c1a2f5388d098873ed13b4d385172f4dd4\n' > evidence/workflow/reuse.txt
+      - name: Prove the OCR correction on the immutable original image
         run: |
-          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 1270 - 150 - 20))
-          test "$limit" -gt 0
-          if [ "$limit" -gt 300 ]; then limit=300; fi
-          set +e
-          timeout --signal=TERM --kill-after=20 "$limit" bash support/diagnostics/issue1927-product-package.sh
-          status=$?
-          printf 'package_status=%s\npackage_execution_ceiling=%s\n' "$status" "$limit" > evidence/workflow/package-status.txt
-          exit "$status"
+          timeout --signal=TERM --kill-after=5 180 sudo apt-get update
+          timeout --signal=TERM --kill-after=5 120 sudo apt-get install -y imagemagick tesseract-ocr
+          timeout --signal=TERM --kill-after=1 60 bash support/diagnostics/issue1927-navigation-check.sh evidence/audited-run/cloud/guest/product/baseline-navigation.png evidence/audited-run/cloud/guest/product/baseline-navigation.tsv evidence/ocr-discriminator
       - name: Replay the five product conditions in qualified Mint Cinnamon
         run: |
           limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 150 - 70))

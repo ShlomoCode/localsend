@@ -241,18 +241,28 @@ await_visible() {
   return 124
 }
 open_settings() {
-  local label=$1 y
+  local label=$1 x y width height observed_window
   # Reuse source-qualified geometry/theme. Navigation input is located by
   # current OCR text, not a remembered coordinate alone.
   stabilize_window initialized
   visible_identity "$label-before-settings-input"
+  observed_window=$wid
+  run xdotool getwindowgeometry --shell "$wid" > "$OUT/$label-navigation-geometry.txt"
+  width=$(run awk -F= '$1=="WIDTH" {print $2}' "$OUT/$label-navigation-geometry.txt")
+  height=$(run awk -F= '$1=="HEIGHT" {print $2}' "$OUT/$label-navigation-geometry.txt")
   run import -window "$wid" "$OUT/$label-navigation.png"
-  run tesseract "$OUT/$label-navigation.png" "$OUT/$label-navigation" tsv > "$OUT/$label-navigation-ocr.log" 2>&1
-  y=$(run awk -F '\t' 'NR>1 && $1==5 && $11>=50 && $7<200 && $12=="Settings" {n++; y=int($8+$10/2)} END{if(n!=1)exit 1; print y}' "$OUT/$label-navigation.tsv")
-  [[ $y =~ ^[0-9]+$ ]]
+  observe_navigation_rail "$OUT/$label-navigation.png" "$OUT/$label-navigation" "$width" "$height"
+  read -r x y < <(run awk -F '\t' '$1=="settings" {print $2, $3}' "$OUT/$label-navigation-coordinates.tsv")
+  [[ $x =~ ^[0-9]+$ && $y =~ ^[0-9]+$ ]]
+  # OCR coordinates are relative to this exact owned client, not its frame
+  # or screen origin. Reject a moved, resized or replaced window before input.
+  visible_identity "$label-after-navigation-observation" "$label-before-settings-input"
+  [[ $wid == "$observed_window" ]]
+  run xdotool getwindowgeometry --shell "$wid" > "$OUT/$label-navigation-before-click-geometry.txt"
+  run cmp "$OUT/$label-navigation-geometry.txt" "$OUT/$label-navigation-before-click-geometry.txt"
   start_ui_recording "$label-settings-input"
-  printf '%s window=%s semantic=Settings coordinate=105,%s\n' "$(date -u --iso-8601=ns)" "$wid" "$y" >> "$OUT/inputs.txt"
-  run xdotool mousemove --window "$wid" 105 "$y" click 1
+  printf '%s window=%s semantic=Settings coordinate=%s,%s\n' "$(date -u --iso-8601=ns)" "$wid" "$x" "$y" >> "$OUT/inputs.txt"
+  run xdotool mousemove --window "$wid" "$x" "$y" click 1
   finish_recording "$label-settings-input"
   run import -window "$wid" "$OUT/$label-settings.png"
 }

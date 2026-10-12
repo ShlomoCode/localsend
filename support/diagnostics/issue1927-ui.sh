@@ -50,6 +50,42 @@ stabilize_window() {
   sleep 2
   xdotool getwindowgeometry --shell "$wid" > "$OUT/window-geometry.txt"
 }
+observe_navigation_rail() {
+  local original=$1 prefix=$2 expected_width=$3 expected_height=$4 width height
+  # This crop is the label region used by the existing rendered-shell check.
+  # Require its qualified 1000x700 layout before translating OCR coordinates.
+  [[ $expected_width == 1000 && $expected_height == 700 ]]
+  run_ui_observer identify -format '%w %h\n' "$original" > "$prefix-dimensions.txt" || return
+  read -r width height < "$prefix-dimensions.txt"
+  [[ $width == "$expected_width" && $height == "$expected_height" ]] || return 1
+  run_ui_observer convert "$original" -crop 170x170+70+90 +repage -filter Lanczos -resize 300% "$prefix-rail.png" || return
+  run_ui_observer tesseract "$prefix-rail.png" "$prefix-rail" --psm 11 tsv > "$prefix-rail-ocr.log" 2>&1 || return
+  # The HomeTab order is Receive, Send, Settings. All three labels must be
+  # unique, confident and ordered in this live rail before any input.
+  run_ui_observer awk -F '\t' '
+    NR>1 && $1==5 && $11>=50 {
+      label=tolower($12)
+      if(label=="receive" || label=="send" || label=="settings") {
+        count[label]++; x[label]=70+($7+$9/2)/3; y[label]=90+($8+$10/2)/3
+        left[label]=70+$7/3; top[label]=90+$8/3
+        right[label]=70+($7+$9)/3; bottom[label]=90+($8+$10)/3
+        confidence[label]=$11
+      }
+    }
+    END {
+      if(count["receive"]!=1 || count["send"]!=1 || count["settings"]!=1) exit 1
+      if(!(bottom["receive"]<top["send"] && bottom["send"]<top["settings"])) exit 1
+      split("receive send settings", labels, " ")
+      for(i=1;i<=3;i++) {
+        label=labels[i]
+        if(left[label]<70 || right[label]>240 || top[label]<90 || bottom[label]>260) exit 1
+        if(!(left[label]<right[label] && top[label]<bottom[label])) exit 1
+      }
+      print "label\tx\ty\tconfidence\tleft\ttop\tright\tbottom"
+      for(i=1;i<=3;i++) {label=labels[i]; print label "\t" int(x[label]) "\t" int(y[label]) "\t" confidence[label] "\t" left[label] "\t" top[label] "\t" right[label] "\t" bottom[label]}
+    }
+  ' "$prefix-rail.tsv" > "$prefix-coordinates.tsv"
+}
 wait_rendered_application() {
   # Replace the existing eight-second startup sleep with read-only observation.
   # Rendered navigation proves a mature app shell, not ownership or Settings.
