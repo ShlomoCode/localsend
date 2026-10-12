@@ -193,7 +193,7 @@ guest 12 gtk-focused '. /home/probe/session-env; timeout --kill-after=1s 10s pyt
 input gtk-end key ctrl+End
 zoom_state false
 recording gtk-before-on-ready
-step 1 recording-readiness-interval sleep 1
+step 2 recording-readiness-interval sleep 1
 recording gtk-before-on-advancing
 input gtk-zoom-on key alt+Super_L+8
 zoom_state true
