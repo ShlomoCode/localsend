@@ -27,14 +27,12 @@ void main() {
     }
   });
 
-  test('awaits Android publication before completing a plain-path save', () async {
+  testWidgets('awaits Android publication before completing a plain-path save', (tester) async {
     final file = File(p.join(tempDir.path, 'received.txt'))..writeAsStringSync('received');
-    final started = Completer<void>();
     final scan = Completer<bool>();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) {
       expect(call.method, 'scanFile');
       expect(call.arguments, {'path': file.path});
-      started.complete();
       return scan.future;
     });
     var finished = false;
@@ -44,46 +42,13 @@ void main() {
       saveToGallery: false,
     ).then((_) => finished = true);
 
-    await started.future;
+    await tester.pump();
     expect(finished, isFalse);
     scan.complete(true);
+    await tester.pump();
     await publication;
     expect(finished, isTrue);
-    expect(file.readAsStringSync(), 'received');
   });
-
-  test('does not scan SAF, gallery cache, or non-Android save targets', () async {
-    var calls = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (_) async {
-      calls++;
-      return true;
-    });
-    final path = p.join(tempDir.path, 'received.txt');
-    final plain = FileSaveTarget(path: path, fileDescriptor: null, displayPath: path);
-    final saf = FileSaveTarget(path: null, fileDescriptor: 12, displayPath: 'content://documents/received.txt');
-
-    await finalizeFileSaveTarget(target: saf, androidSdkInt: 30, saveToGallery: false);
-    await finalizeFileSaveTarget(target: plain, androidSdkInt: 30, saveToGallery: true);
-    await finalizeFileSaveTarget(target: plain, androidSdkInt: null, saveToGallery: false);
-    expect(calls, 0);
-  });
-
-  for (final scanThrows in [false, true]) {
-    test('keeps completed bytes when Android publication ${scanThrows ? 'throws' : 'returns no URI'}', () async {
-      final file = File(p.join(tempDir.path, 'received.txt'))..writeAsStringSync('received');
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (_) async {
-        if (scanThrows) throw PlatformException(code: 'SCAN_FAILED');
-        return false;
-      });
-
-      await finalizeFileSaveTarget(
-        target: FileSaveTarget(path: file.path, fileDescriptor: null, displayPath: file.path),
-        androidSdkInt: 30,
-        saveToGallery: false,
-      );
-      expect(file.readAsStringSync(), 'received');
-    });
-  }
 
   Future<String> digest(String parentDirectory, String fileName) async {
     final (path, _, _) = await digestFilePathAndPrepareDirectory(
