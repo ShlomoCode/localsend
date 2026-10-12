@@ -11,13 +11,13 @@ concurrency:
 jobs:
   product:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - name: Start the shared wall deadline
         run: |
           now=$(date +%s)
           echo "ISSUE1927_WALL_START=$now" >> "$GITHUB_ENV"
-          echo "ISSUE1927_WALL_DEADLINE=$((now + 2700))" >> "$GITHUB_ENV"
+          echo "ISSUE1927_WALL_DEADLINE=$((now + 4500))" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         timeout-minutes: 1
         with:
@@ -27,7 +27,7 @@ jobs:
           mkdir -p evidence/workflow
           git rev-parse HEAD > evidence/workflow/diagnostic-head.txt
           elapsed=$(($(date +%s) - ISSUE1927_WALL_START))
-          printf 'checkout_elapsed_seconds=%s\nplanned_total_seconds=2580\nwall_ceiling_seconds=2700\n' "$elapsed" > evidence/workflow/budget.txt
+          printf 'checkout_elapsed_seconds=%s\nplanned_total_seconds=4320\nwall_ceiling_seconds=4500\nsource_shared_seconds=2400\npackage_shared_seconds=300\nmint_shared_seconds=1200\n' "$elapsed" > evidence/workflow/budget.txt
           test "$elapsed" -le 30
       - uses: actions/download-artifact@v4
         timeout-minutes: 1
@@ -43,11 +43,11 @@ jobs:
           run-id: 38167715193
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: evidence/immutable-packages
-      - name: Build exact product source with normal generation and focused checks
+      - name: Generate and compile both matched baseline and product sources
         run: |
-          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 150 - 30))
+          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 320 - 1270 - 150 - 30))
           test "$limit" -gt 0
-          if [ "$limit" -gt 720 ]; then limit=720; fi
+          if [ "$limit" -gt 2400 ]; then limit=2400; fi
           set +e
           timeout --signal=TERM --kill-after=30 "$limit" bash support/diagnostics/issue1927-product-build.sh
           status=$?
@@ -55,9 +55,9 @@ jobs:
           exit "$status"
       - name: Build unchanged source and candidate in the same normal create manifest
         run: |
-          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 150 - 20))
+          limit=$((ISSUE1927_WALL_DEADLINE - $(date +%s) - 1270 - 150 - 20))
           test "$limit" -gt 0
-          if [ "$limit" -gt 240 ]; then limit=240; fi
+          if [ "$limit" -gt 300 ]; then limit=300; fi
           set +e
           timeout --signal=TERM --kill-after=20 "$limit" bash support/diagnostics/issue1927-product-package.sh
           status=$?
