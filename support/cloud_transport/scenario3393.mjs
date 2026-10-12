@@ -5,8 +5,9 @@ import {createHash} from 'node:crypto';
 import {waitForNativeControl} from './native-readiness.mjs';
 import {exactNativeButton} from './native-labels.mjs';
 const exec=promisify(execFile);
-export default async function({session,wd,senderPort,transportStatus,transportSnapshot}) {
+export default async function({session,wd,senderPort,transportStatus,transportSnapshot,assertJobBudget}) {
  const results=[];
+ const natural90=Number(process.env.PICKER_LONG_DWELL_MS)===90000;
  const oneplusPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='oneplus-enable-and-restore';
  const samsungPolicyOn=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-enable-and-restore';
  const samsungPolicyObserved=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-observe-optimized';
@@ -15,13 +16,25 @@ export default async function({session,wd,senderPort,transportStatus,transportSn
  if(ordinaryHelper&&!samsungPolicyObserved)throw new Error('Ordinary helper comparison requires the matched Samsung Optimized condition');
  const samsungDiscovery=process.env.BACKGROUND_POLICY_EXPERIMENT==='samsung-policy-discovery';
  if(samsungDiscovery&&process.env.BS_DEVICE!=='Samsung Galaxy S25')throw new Error('Samsung policy discovery requires Samsung Galaxy S25');
- if(policyOn&&(process.env.BS_DEVICE!==(samsungPolicyOn?'Samsung Galaxy S25':'OnePlus 13R')||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Policy experiment requires its selected device and scheduled 20 s');
+ if(natural90&&(process.env.DIAGNOSTIC_SCENARIO!=='physical-control'||process.env.BS_DEVICE!=='Samsung Galaxy S25'||process.env.BS_OS!=='15.0'||!samsungPolicyOn||ordinaryHelper||process.env.HELPER_SERVICE_MODE!=='foreground'||process.env.HELPER_OBSERVATION_MODE!=='native'))throw new Error('90-second condition requires the matched Samsung Android15 physical foreground/native experiment');
+ if(policyOn&&(process.env.BS_DEVICE!==(samsungPolicyOn?'Samsung Galaxy S25':'OnePlus 13R')||(!natural90&&Number(process.env.PICKER_LONG_DWELL_MS)!==20000)))throw new Error('Policy experiment requires its selected device and scheduled 20 s or admitted Samsung 90 s');
  if(samsungPolicyObserved&&(process.env.BS_DEVICE!=='Samsung Galaxy S25'||Number(process.env.PICKER_LONG_DWELL_MS)!==20000))throw new Error('Samsung Optimized observation requires Samsung Galaxy S25 and scheduled 20 s');
  let policyAttempted=false,policyModule,samsungPolicyState;
  const controlFile=`issue3393-${process.env.GITHUB_RUN_ID}-control.txt`;
  async function ui(action,x,y,label) { await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-ui.ps1','-Action',action,'-X',String(x),'-Y',String(y),'-Label',label]); }
- async function source(label) { const xml=await wd('GET',`/session/${session}/source`);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
+ async function source(label) { const xml=await wd('GET',`/session/${session}/source`,undefined,natural90?{timeoutMs:10000}:undefined);writeFileSync(`evidence/${label}.xml`,xml);return xml; }
  async function lifecycle(label,observationOptions={}) {
+  if(natural90){
+   const command='dumpsys activity -p org.localsend.localsend_app processes',receipt={command,started:new Date().toISOString(),fallbackAllowed:false};
+   try{
+    const state=await wd('POST',`/session/${session}/execute/sync`,{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]},{timeoutMs:10000});
+    writeFileSync(`evidence/${label}-processes.txt`,String(state));
+    if(typeof state!=='string'||!state.includes('org.localsend.localsend_app')||/permission denial|permission denied|not allowed|not supported/i.test(state))throw new Error('Focused LocalSend lifecycle observation unavailable');
+    receipt.succeeded=true;
+   }catch(error){receipt.error=String(error);throw error;}
+   finally{receipt.ended=new Date().toISOString();writeFileSync(`evidence/${label}-lifecycle-capability.json`,JSON.stringify(receipt,null,2));}
+   return;
+  }
   if(ordinaryHelper){
    const {observeHelper}=await import(process.env.HELPER_OBSERVATION_MODE==='public-supplementary'?'./helper-public-observation3393.mjs':'./helper-lifecycle3393.mjs');
    await observeHelper({session,wd,label,transportSnapshot,...observationOptions});
@@ -59,6 +72,24 @@ export default async function({session,wd,senderPort,transportStatus,transportSn
  }
  async function click(label,phase='calibration') {const e=await ready(phase+'-'+label.toLowerCase(),appTarget(label));await clickElement(e,phase+'-'+label.toLowerCase());}
  async function approvalReady(label) {return await ready(label,appTarget('Accept'));}
+ async function pendingUploadReady(label,beforeSend){
+  const markers=['content-desc="Windows3393"','content-desc="wants to send you a file"','content-desc="Options"','content-desc="Accept"'];
+  const accept=await ready(label,appTarget('Accept'),{sourceIncludes:markers});
+  const xml=await source(label+'-identity');
+  writeFileSync(`evidence/${label}-identity.png`,Buffer.from(await wd('GET',prefix+'/screenshot',undefined,{timeoutMs:10000}),'base64'));
+  const nodes=xml.match(/<[^>]+>/g)||[];
+  if(!markers.every(marker=>nodes.filter(node=>node.includes(`package="${appPackage}"`)&&node.includes(marker)).length===1))throw new Error('Unique actual Windows3393 pending upload identity is absent');
+  const snapshot=transportSnapshot(),active=new Map();
+  for(const event of snapshot.trace){if(event.origin==='sender-open')active.set(event.id,event);if(event.origin==='sender-close')active.delete(event.id);}
+  const peers=[...active.values()],previousIds=new Set((beforeSend?.trace||[]).filter(event=>event.origin==='sender-open').map(event=>event.id));
+  const candidates=beforeSend?peers.filter(peer=>!previousIds.has(peer.id)):[];
+  // TLS and connection reuse prevent this trace from identifying an HTTP request.
+  const uniqueNewActiveCandidateId=candidates.length===1?candidates[0].id:null;
+  const receipt={utc:new Date().toISOString(),identityMarkers:markers,sourceFile:`evidence/${label}-identity.xml`,screenshotFile:`evidence/${label}-identity.png`,beforeSend,snapshot,activePeers:peers,newActiveCandidates:candidates,uniqueNewActiveCandidateId,peerId:null,correlationKnown:false,deviceTargetConnectedCorrelation:'requires original provider device log; exact peer is required for reset attribution; runner trace cannot prove target connection',qualificationAccepted:false};
+  writeFileSync(`evidence/${label}-pending-peer.json`,JSON.stringify(receipt,null,2));
+  if(snapshot.status.peers!==peers.length)throw new Error('Runner active-peer snapshot is inconsistent');
+  return {accept,peerId:null,correlationKnown:false,uniqueNewActiveCandidateId,candidatePeerIds:peers.map(peer=>peer.id)};
+ }
  async function completedReady(label){
   const doneTarget={...appTarget('Done'),sourceIncludes:['content-desc="100, Finished"']};
   const choices=[doneTarget,{using:'id',value:'com.android.permissioncontroller:id/permission_allow_button'}];
@@ -87,8 +118,9 @@ export default async function({session,wd,senderPort,transportStatus,transportSn
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows_release_ui_probe.ps1','-OutputDirectory','evidence','-ReleaseVersion','1.17.0','-AssetArchitecture','x86-64','-RunnerLabel','windows-11-arm','-FixtureTimestampUtc','2026-10-11T00:00:00Z','-FixtureFileName',controlFile,'-DiagnosticPeerPort',String(senderPort)]);
   await source('control-before');await lifecycle('control-before');
   await ui('click',246,266,'windows-favorites');
+  const controlBeforeSend=natural90?transportSnapshot():undefined;
   await ui('click',145,205,'windows-send');
-  const controlApproval=await approvalReady('control-pending');
+  const controlApproval=natural90?(await pendingUploadReady('control-pending',controlBeforeSend)).accept:await approvalReady('control-pending');
   await clickElement(controlApproval,'control-accept');
   await completedReady('control-completion');
   await source('control-after-accept');
@@ -108,7 +140,7 @@ export default async function({session,wd,senderPort,transportStatus,transportSn
   if(samsungDiscovery)return;
   if(policyOn||samsungPolicyObserved){
    const {default:timedPicker}=await import('./picker3393-timed.mjs');
-   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true,samsungPicker:samsungPolicyOn||samsungPolicyObserved});
+   await timedPicker({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,pendingUploadReady,transportSnapshot,assertJobBudget,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong:true,skipInitialCompletion:true,semanticSelectionAfterHold:true,samsungPicker:samsungPolicyOn||samsungPolicyObserved,natural90});
    return;
   }
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case','picker-calibration']);

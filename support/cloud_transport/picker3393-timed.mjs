@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const exec=promisify(execFile);
 
-export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false,semanticSelectionAfterHold=false,samsungPicker=false}) {
+export default async function({session,wd,source,lifecycle,ui,click,ready,clickElement,approvalReady,pendingUploadReady,transportSnapshot,assertJobBudget,completedReady,selectedDestination,editTarget,documentRow,folderTarget,results,onlyLong=false,skipInitialCompletion=false,semanticSelectionAfterHold=false,samsungPicker=false,natural90=false}) {
  const prefix=`/session/${session}`;
  function phase(caseName,name){const event={phase:name,utc:new Date().toISOString()};writeFileSync(`evidence/${caseName}-phase.json`,JSON.stringify(event,null,2));appendFileSync(`evidence/${caseName}-phases.jsonl`,JSON.stringify(event)+'\n');}
  async function returnToOptions(caseName){
@@ -21,14 +21,17 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
   throw new Error(`${caseName}: preflight picker did not return to original Options/default Download`);
  }
  const longDwellMs=Number(process.env.PICKER_LONG_DWELL_MS||10000);
- if(![10000,20000,30000].includes(longDwellMs))throw new Error('Unsupported diagnostic long dwell');
+ if(![10000,20000,30000].includes(longDwellMs)&&!(natural90&&longDwellMs===90000&&onlyLong&&skipInitialCompletion&&semanticSelectionAfterHold&&samsungPicker))throw new Error('Unsupported diagnostic long dwell');
  let firstCase=true;
  for(const dwellMs of onlyLong?[longDwellMs]:[2000,longDwellMs]) {
   const caseName=`picker-${dwellMs/1000}s`,fileName=`issue3393-${process.env.GITHUB_RUN_ID}-${caseName}.txt`;
   if(!firstCase||!skipInitialCompletion)await clickElement(await completedReady(`${caseName}-previous-completion`),`${caseName}-previous-done`);
   firstCase=false;
+  const beforeSend=natural90?transportSnapshot():undefined;
   await exec('pwsh',['-NoProfile','-File','support/diagnostics/windows3393-repeat.ps1','-Case',caseName]);
-  await approvalReady(`${caseName}-pending`);
+  const pending=natural90?await pendingUploadReady(`${caseName}-pending`,beforeSend):undefined;
+  if(!natural90)await approvalReady(`${caseName}-pending`);
+  if(natural90)await lifecycle(`${caseName}-before-opening`);
   await click('Options',caseName);
   let folderRect;
   if(!semanticSelectionAfterHold){
@@ -47,6 +50,37 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
   if(process.env.HELPER_SERVICE_MODE==='ordinary')await lifecycle(`${caseName}-before-timed-opening`);
   await ui('snapshot',0,0,`windows-${caseName}-before-timed-opening`);
   const edit=await ready(`${caseName}-timed-edit`,editTarget,{sourceIncludes:['pane-title="Options"','/storage/emulated/0/Download']});
+  let timing;
+  if(natural90){
+   phase(caseName,'bounded-native-opening');
+   await clickElement(edit,`${caseName}-timed-edit`);
+   const documentsBreadcrumb='//*[@package="com.google.android.documentsui" and @resource-id="com.google.android.documentsui:id/breadcrumb_text" and @text="Documents"]';
+   const documentsTitle='//*[@package="com.google.android.documentsui" and @resource-id="android:id/title" and @text="Documents" and @displayed="true"]';
+   const documentsFolder={...folderTarget,sourceIncludes:['text="Documents" resource-id="com.google.android.documentsui:id/breadcrumb_text"']};
+   const rootDocumentsRow={using:'xpath',value:`${documentsTitle}/ancestor::*[@package="com.google.android.documentsui" and @clickable="true" and @enabled="true" and @displayed="true"][1][count(${documentsTitle})=1 and count(${documentsBreadcrumb})=0]`};
+   const native=await ready(`${caseName}-native-entry`,{}, {choices:[documentsFolder,rootDocumentsRow],sourceIncludes:['package="com.google.android.documentsui"'],timeoutMs:10000});
+   await source(`${caseName}-native-entry`);
+   writeFileSync(`evidence/${caseName}-native-entry.png`,Buffer.from(await wd('GET',prefix+'/screenshot',undefined,{timeoutMs:10000}),'base64'));
+   await lifecycle(`${caseName}-native-entry`);
+   await ui('snapshot',0,0,`windows-${caseName}-native-entry`);
+   const boundary=transportSnapshot();
+   writeFileSync(`evidence/${caseName}-before-hold-relay.json`,JSON.stringify({pendingPeerId:pending.peerId,correlationKnown:pending.correlationKnown,uniqueNewActiveCandidateId:pending.uniqueNewActiveCandidateId,candidatePeerIds:pending.candidatePeerIds,...boundary},null,2));
+   if(typeof assertJobBudget!=='function')throw new Error('Measured remaining job budget unavailable');
+   assertJobBudget({caseName,holdMs:90000,cleanupReserveMs:600000});
+   phase(caseName,'runner-no-device-rpc-hold');
+   const monotonicStart=process.hrtime.bigint();
+   timing={started:new Date().toISOString(),runnerMonotonicStartNs:monotonicStart.toString(),requestedRunnerHoldMs:90000,nativeEntryReadiness:native.readiness,pendingPeerId:pending.peerId,correlationKnown:pending.correlationKnown,candidatePeerIds:pending.candidatePeerIds,noDeviceRpcDuringRunnerHold:true,openingBeforeMeasuredHold:true,exactOpeningToSelectionDwellClaimed:false,timingObservedViaVideo:false,requiresVideoValidation:true};
+   writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));
+   while(true){
+    const remainingNs=90000000000n-(process.hrtime.bigint()-monotonicStart);
+    if(remainingNs<=0n)break;
+    await new Promise(resolve=>setTimeout(resolve,Math.ceil(Number(remainingNs)/1e6)));
+   }
+   const monotonicEnd=process.hrtime.bigint();
+   timing.ended=new Date().toISOString();timing.runnerMonotonicEndNs=monotonicEnd.toString();timing.measuredRunnerHoldMs=Number(monotonicEnd-monotonicStart)/1e6;timing.completed=true;
+   writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));
+   writeFileSync(`evidence/${caseName}-after-hold-relay.json`,JSON.stringify({pendingPeerId:pending.peerId,correlationKnown:pending.correlationKnown,uniqueNewActiveCandidateId:pending.uniqueNewActiveCandidateId,candidatePeerIds:pending.candidatePeerIds,...transportSnapshot()},null,2));
+  }else{
   const center=rect=>({x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)});
   const opening=center(edit.readiness.rect);
   const actions=[{type:'pointer',id:'folder-picker-touch',parameters:{pointerType:'touch'},actions:[
@@ -59,17 +93,18 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
    {type:'pointerDown',button:0},{type:'pause',duration:125},{type:'pointerUp',button:0}
   );
   phase(caseName,'timed-actions');
-  const started=Date.now(),timing={started:new Date().toISOString(),timingObservedViaVideo:false,requiresVideoValidation:true,editRect:edit.readiness.rect,actions,...(semanticSelectionAfterHold?{
+  const started=Date.now();timing={started:new Date().toISOString(),timingObservedViaVideo:false,requiresVideoValidation:true,editRect:edit.readiness.rect,actions,...(semanticSelectionAfterHold?{
    scheduledOpeningToHoldEndMs:dwellMs,noRpcBetweenOpeningAndHoldEnd:true,selectionAfterNativeReadiness:true,exactWallClockDwellClaimed:false
   }:{scheduledOpeningToFolderClickMs:dwellMs,selectionGeometrySource:'same-case native preflight; video must confirm timed reopening in Documents',folderRect,noRpcBetweenOpeningAndSelection:true})};
   writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));
   try{await wd('POST',prefix+'/actions',{actions},{timeoutMs:dwellMs+10000});timing.completed=true;}
   catch(error){timing.error=String(error);throw error;}
   finally{timing.ended=new Date().toISOString();timing.requestElapsedMs=Date.now()-started;writeFileSync(`evidence/${caseName}-timing.json`,JSON.stringify(timing,null,2));}
+  }
   if(semanticSelectionAfterHold){
    phase(caseName,'native-readiness-after-hold');
    await source(`${caseName}-after-timed-hold`);
-   writeFileSync(`evidence/${caseName}-after-timed-hold.png`,Buffer.from(await wd('GET',prefix+'/screenshot'),'base64'));
+   writeFileSync(`evidence/${caseName}-after-timed-hold.png`,Buffer.from(await wd('GET',prefix+'/screenshot',undefined,natural90?{timeoutMs:10000}:undefined),'base64'));
    await lifecycle(`${caseName}-after-timed-hold`,{exposureInterval:{started:timing.started,ended:timing.ended}});
    await ui('snapshot',0,0,`windows-${caseName}-after-timed-hold`);
    // A Documents row at the storage root is not the current Documents folder.
@@ -111,6 +146,6 @@ export default async function({session,wd,source,lifecycle,ui,click,ready,clickE
   writeFileSync(`evidence/${caseName}-saved-hash.json`,JSON.stringify({fileName,size:data.length,senderSha256:senderHash,savedSha256:savedHash,verified:savedHash===senderHash},null,2));
   if(savedHash!==senderHash)throw new Error(`${caseName}: saved hash differs from actual Windows fixture`);
   phase(caseName,'saved-hash-verified');
-  results.push({case:caseName,fileName,destination:'/sdcard/Documents',savedContentVerified:true,savedSha256:savedHash,timingObservedViaVideo:false,requiresVideoValidation:true,...(semanticSelectionAfterHold?{scheduledOpeningToHoldEndMs:dwellMs,selectionAfterNativeReadiness:true,exactWallClockDwellClaimed:false}:{scheduledOpeningToFolderClickMs:dwellMs})});
+  results.push({case:caseName,fileName,destination:'/sdcard/Documents',savedContentVerified:true,savedSha256:savedHash,timingObservedViaVideo:false,requiresVideoValidation:true,...(natural90?{requestedRunnerHoldMs:90000,measuredRunnerHoldMs:timing.measuredRunnerHoldMs,pendingPeerId:pending.peerId,correlationKnown:pending.correlationKnown,qualificationAccepted:false,requiresOriginalDeviceLogReview:true,exactPeerRequiredForResetAttribution:true,selectionAfterNativeReadiness:true,exactWallClockDwellClaimed:false}:semanticSelectionAfterHold?{scheduledOpeningToHoldEndMs:dwellMs,selectionAfterNativeReadiness:true,exactWallClockDwellClaimed:false}:{scheduledOpeningToFolderClickMs:dwellMs})});
  }
 }

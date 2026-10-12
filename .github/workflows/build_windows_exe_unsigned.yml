@@ -12,7 +12,7 @@ on:
         default: Google Pixel 9
       picker_dwell_ms:
         type: choice
-        options: ['10000', '20000', '30000']
+        options: ['10000', '20000', '30000', '90000']
         default: '10000'
       background_policy:
         type: choice
@@ -30,7 +30,7 @@ permissions:
   contents: read
 jobs:
   windows-android:
-    if: inputs.scenario == 'software-emulator'
+    if: inputs.scenario == 'software-emulator' && inputs.picker_dwell_ms != '90000'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -96,6 +96,9 @@ jobs:
     if: inputs.scenario == 'physical-control'
     runs-on: windows-11-arm
     timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
@@ -107,6 +110,7 @@ jobs:
       HELPER_SERVICE_MODE: ${{ inputs.helper_service_mode || 'foreground' }}
       HELPER_OBSERVATION_MODE: ${{ inputs.helper_observation_mode || 'native' }}
       BS_OS: '15.0'
+      DIAGNOSTIC_SCENARIO: ${{ inputs.scenario }}
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario3393.mjs
     steps:
       - uses: actions/checkout@v4
@@ -122,6 +126,23 @@ jobs:
       - name: Build the separate transport app
         shell: pwsh
         run: ./support/cloud_transport/build-helper.ps1
+      - name: Retain the current physical job start for 90-second budget admission
+        if: inputs.picker_dwell_ms == '90000'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:BS_DEVICE -ne 'Samsung Galaxy S25' -or $env:BS_OS -ne '15.0' -or $env:BACKGROUND_POLICY_EXPERIMENT -ne 'samsung-enable-and-restore' -or $env:HELPER_SERVICE_MODE -ne 'foreground' -or $env:HELPER_OBSERVATION_MODE -ne 'native') { throw '90-second condition configuration is not admitted' }
+          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT/jobs?per_page=100"
+          $headers = @{Authorization="Bearer $env:GITHUB_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'}
+          $response = Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 30
+          if ($response.total_count -gt 100) { throw 'Job metadata is incomplete; budget unavailable' }
+          $matches = @($response.jobs | Where-Object { $_.name -eq 'physical-control' -and $_.status -eq 'in_progress' -and [string]$_.run_id -eq $env:GITHUB_RUN_ID -and $_.runner_name -eq $env:RUNNER_NAME })
+          if ($matches.Count -ne 1 -or -not $matches[0].started_at) { throw 'Unique current physical-control started_at unavailable' }
+          $job = $matches[0]
+          $started = [DateTimeOffset]::Parse($job.started_at).ToUniversalTime()
+          if ($started -gt [DateTimeOffset]::UtcNow) { throw 'Job start is in the future; budget unavailable' }
+          @{schema=1; repository=$env:GITHUB_REPOSITORY; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; jobId=[string]$job.id; jobName=$job.name; status=$job.status; runnerName=$job.runner_name; startedAt=$started.ToString('o'); retrievedAt=[DateTimeOffset]::UtcNow.ToString('o'); configuredTimeoutMs=1500000; source='GitHub Actions list jobs for workflow run attempt'} | ConvertTo-Json | Set-Content evidence/physical-job-budget.json
       - name: Start Local and run the physical app control in one process scope
         shell: pwsh
         run: |
@@ -163,7 +184,7 @@ jobs:
             relay-trace.json
           retention-days: 14
   windows11-sender-ui:
-    if: inputs.scenario == 'windows11-sender-ui'
+    if: inputs.scenario == 'windows11-sender-ui' && inputs.picker_dwell_ms != '90000'
     runs-on: windows-11-arm
     timeout-minutes: 15
     steps:
