@@ -18,10 +18,10 @@ on:
       apk:
         description: Existing APK, diagnostic source pair, or clean production source pair
         type: choice
-        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair, format-helper, ndk-toolchain]
+        options: [original, current-c1ce, source-pair, source-reuse, source-trace-reuse, production-pair, production-reuse, format-helper, ndk-toolchain]
         default: original
       candidate_commit:
-        description: Reviewed production candidate full 40-character commit SHA (production-pair only)
+        description: Reviewed production candidate full 40-character commit SHA (production-pair or production-reuse)
         type: string
         default: ''
       focus_trace:
@@ -48,11 +48,11 @@ jobs:
   baseline:
     if: inputs.apk != 'format-helper' && inputs.apk != 'ndk-toolchain'
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ inputs.apk == 'production-pair' && 150 || 60 }}
+    timeout-minutes: ${{ (inputs.apk == 'production-pair' || inputs.apk == 'production-reuse') && 150 || 60 }}
     steps:
       - uses: actions/checkout@v4
       - name: Require isolated production comparison inputs
-        if: inputs.apk == 'production-pair'
+        if: inputs.apk == 'production-pair' || inputs.apk == 'production-reuse'
         env:
           ISSUE1864_CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           ISSUE1864_IMAGE: ${{ inputs.image }}
@@ -142,6 +142,12 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+      - name: Reuse verified normal production APKs and build proof
+        if: inputs.apk == 'production-reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE1864_CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: bash support/tests/issue1864-production-reuse.sh
       - name: Reuse exact retained normal source pair
         if: inputs.apk == 'source-reuse'
         env:
@@ -213,7 +219,7 @@ jobs:
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/current-c1ce.apk
             echo '69df1d0fa252328f8b80a2197d850c78483df1fd711a4de18fbb021f23a637ea  evidence-cloud/current-c1ce.apk' | sha256sum -c -
             echo 'Existing build run38107226429, artifact11691000051, workflow head6dd3184ef65cb473a717fd52dd37b9b88ae4edc4; app source c1ce322fb3acf08e44f329b8b7208b8b0d91e244; Flutter3.41.9, Dart3.11.5, Rust1.97.1; legitimate runtime ARM64 ABI/native bridge only; no new build.' > evidence-cloud/current-build-provenance.txt
-          elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ] || [ '${{ inputs.apk }}' = production-pair ]; then
+          elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ] || [ '${{ inputs.apk }}' = production-pair ] || [ '${{ inputs.apk }}' = production-reuse ]; then
             ISSUE_DIAGNOSTIC_APK=evidence-cloud/source-baseline.apk
           else
             curl -fsSL https://github.com/localsend/localsend/releases/download/v1.15.4/LocalSend-1.15.4-android-google-play.apk -o evidence-cloud/original-1.15.4.apk
@@ -256,7 +262,7 @@ jobs:
           for color in red green blue yellow purple orange; do adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/issue1864/$color.jpg; done
           sleep 3
           adb shell content query --uri content://media/external/images/media --projection _id:_display_name > evidence-cloud/seeded-mediastore.txt
-          if [ '${{ inputs.apk }}' != production-pair ]; then
+          if [ '${{ inputs.apk }}' != production-pair ] && [ '${{ inputs.apk }}' != production-reuse ]; then
             for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_MEDIA_IMAGES READ_MEDIA_VIDEO; do adb shell pm grant org.localsend.localsend_app android.permission.$permission 2>&1 | tee -a evidence-cloud/permission-grants.txt || true; done
           fi
           npm install -g appium
@@ -269,7 +275,7 @@ jobs:
           curl -fsS http://127.0.0.1:4723/status > evidence-cloud/appium-readiness.json
           ISSUE_TV_SCRIPT=support/tests/issue1864-tv.mjs
           if [ '${{ inputs.recording_stop }}' = whole ]; then ISSUE_TV_SCRIPT=support/tests/issue1864-whole.mjs; fi
-          if [ '${{ inputs.apk }}' = production-pair ]; then
+          if [ '${{ inputs.apk }}' = production-pair ] || [ '${{ inputs.apk }}' = production-reuse ]; then
             bash support/tests/issue1864-production-replay.sh
           elif [ '${{ inputs.apk }}' = source-pair ] || [ '${{ inputs.apk }}' = source-reuse ] || [ '${{ inputs.apk }}' = source-trace-reuse ]; then
             ISSUE1864_PHASE=paired-core ISSUE1864_APK=source-baseline node "$ISSUE_TV_SCRIPT"

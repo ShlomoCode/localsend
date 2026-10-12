@@ -24,18 +24,19 @@ if(manifest.files.length!==6 || manifest.files.some(f=>!f.name.endsWith('.jpg') 
 fs.copyFileSync(env.ISSUE1864_FIXTURE_MANIFEST,`${out}/fixture-manifest.json`);
 fs.copyFileSync(env.ISSUE1864_APP_SOURCE_MANIFEST,`${out}/source-manifest.txt`);
 let session;
-async function request(path,body) {
-  check();const response=await fetch(`http://127.0.0.1:4723/session${path}`,{method:body ? 'POST' : 'GET',headers:{'content-type':'application/json'},body:body ? JSON.stringify(body) : undefined,signal:AbortSignal.timeout(Math.min(30000,deadline-Date.now()))});
+async function request(path,body,until=deadline) {
+  check();if(Date.now()>=until) throw new Error('Observation readiness budget exhausted');const response=await fetch(`http://127.0.0.1:4723/session${path}`,{method:body ? 'POST' : 'GET',headers:{'content-type':'application/json'},body:body ? JSON.stringify(body) : undefined,signal:AbortSignal.timeout(Math.min(30000,deadline-Date.now(),until-Date.now()))});
   const result=await response.json();if(!response.ok || result.value?.error) throw new Error(`Appium failed ${path}: ${JSON.stringify(result)}`);return result;
 }
-async function snapshot(name) {
-  check();const source=await request(`/${session}/source`);
+async function snapshot(name,until=deadline) {
+  const remaining=()=>{check();const ms=Math.min(deadline,until)-Date.now();if(ms<=0) throw new Error('Observation readiness budget exhausted');return Math.min(30000,ms);};
+  remaining();const source=await request(`/${session}/source`,undefined,until);remaining();
   if(typeof source.value!=='string') throw new Error('Missing raw XML');
   fs.writeFileSync(`${out}/${name}.xml`,source.value);
-  fs.writeFileSync(`${out}/${name}.png`,execFileSync('adb',['exec-out','screencap','-p'],{timeout:Math.min(30000,Math.max(1,deadline-Date.now()))}));
-  fs.writeFileSync(`${out}/${name}-window.txt`,adb('shell','dumpsys','window','windows'));
-  fs.writeFileSync(`${out}/${name}-input.txt`,adb('shell','dumpsys','input'));
-  log({type:'snapshot',name});check();return source.value;
+  fs.writeFileSync(`${out}/${name}.png`,execFileSync('adb',['exec-out','screencap','-p'],{timeout:remaining()}));
+  fs.writeFileSync(`${out}/${name}-window.txt`,execFileSync('adb',['shell','dumpsys','window','windows'],{encoding:'utf8',timeout:remaining()}));
+  fs.writeFileSync(`${out}/${name}-input.txt`,execFileSync('adb',['shell','dumpsys','input'],{encoding:'utf8',timeout:remaining()}));
+  log({type:'snapshot',name});remaining();return source.value;
 }
 async function mouse(x,y,label) {
   check();
@@ -133,10 +134,32 @@ try {
     const permissionBefore=adb('shell','dumpsys','package',pkg);fs.writeFileSync(`${out}/permissions-before.txt`,permissionBefore);if(/READ_MEDIA_(IMAGES|VIDEO): granted=true/.test(permissionBefore)) throw new Error('Initial permission control was pregranted');
     await tapLabel(/^Send(?:\nTab.*)?$/,'permission-send');await tapLabel(/^Media$/,'permission-media');
     const responses=[];
-    for(let i=0;i<4;i++) {
-      const xml=await snapshot(`permission-denial-${i}`);
-      const deny=nodes(xml).filter(n=>n.package!==pkg && /^(Don.t allow|Deny)$/i.test(n.text || n['content-desc'] || ''));
-      if(!deny.length) break;if(deny.length!==1) throw new Error('Ambiguous OS denial prompt');
+    for(let i=0;i<=4;i++) {
+      // A successful native click precedes asynchronous OS window creation.
+      // Observe readiness without clicking Media again or granting permissions.
+      const waitUntil=Math.min(deadline,Date.now()+20000);
+      let deny=[],terminalStable=0;
+      for(let poll=0;Date.now()<waitUntil;poll++) {
+        const name=`permission-denial-${i}-poll-${poll}`,xml=await snapshot(name,waitUntil);
+        deny=nodes(xml).filter(n=>n.package!==pkg && /^(Don.t allow|Deny)$/i.test(n.text || n['content-desc'] || ''));
+        if(deny.length>1) throw new Error('Ambiguous OS denial prompt');
+        if(deny.length===1) break;
+        const window=fs.readFileSync(`${out}/${name}-window.txt`,'utf8');
+        const input=fs.readFileSync(`${out}/${name}-input.txt`,'utf8');
+        const focus=input.split('  FocusedWindows:')[1]?.split('  FocusRequests:')[0] ?? '';
+        const osVisible=window.split(/(?=  Window #\d+ Window\{)/).some(b=>/^  Window #\d+ Window\{[^\n]*permissioncontroller[^\n]*\}:/.test(b) && !b.split('\n')[0].includes('EXITING') && b.includes('isVisible=true'));
+        terminalStable=responses.length && !osVisible && focus.includes(`${pkg}/`) && nodes(xml).some(n=>n.package===pkg && n.displayed!=='false') ? terminalStable+1 : 0;
+        log({type:'permission-readiness',i,poll,osVisible,terminalStable,waitUntil});
+        if(terminalStable>=2) break;
+        await pause(Math.min(750,Math.max(0,waitUntil-Date.now())));check();
+      }
+      if(!deny.length) {
+        if(!responses.length) throw new Error('No genuine initial OS permission denial observed within bounded readiness wait');
+        if(terminalStable<2) throw new Error('Denied permission route did not reach stable app state within bounded readiness wait');
+        break;
+      }
+      if(i===4) throw new Error('More than four OS permission denial prompts observed');
+      if(Date.now()>=waitUntil) throw new Error('OS denial prompt arrived after bounded readiness wait');
       const b=bounds(deny[0]);await mouse(Math.round((b[0]+b[2])/2),Math.round((b[1]+b[3])/2),'OS-permission-deny');responses.push(deny[0]);
     }
     if(!responses.length) throw new Error('No genuine initial OS permission denial observed');
