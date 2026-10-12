@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Issue3536.UIA;
 public sealed class Control3536 {
- public string Name, Value, ClassName; public int Type, Pid, Left,Top,Right,Bottom,Handle;
+ public string Name, Value, ClassName; public int Type, Pid, Left,Top,Right,Bottom; public long Handle;
 }
 public static class Controls3536 {
  static IUIAutomation Client() { var c=new CUIAutomation8Class(); var t=(IUIAutomation2)c; t.ConnectionTimeout=2000; t.TransactionTimeout=2000; return (IUIAutomation)c; }
@@ -17,7 +17,7 @@ public static class Controls3536 {
    var r=e.CurrentBoundingRectangle; if(r.right<=r.left || r.bottom<=r.top) continue;
    if(e.CurrentProcessId!=pid) throw new Exception("UIA descendant ownership differs");
    object v=e.GetCurrentPropertyValue(30045);
-   list.Add(new Control3536 {Name=e.CurrentName,Value=v is string?(string)v:null,ClassName=e.CurrentClassName,Type=e.CurrentControlType,Pid=e.CurrentProcessId,Left=r.left,Top=r.top,Right=r.right,Bottom=r.bottom,Handle=e.CurrentNativeWindowHandle});
+   list.Add(new Control3536 {Name=e.CurrentName,Value=v is string?(string)v:null,ClassName=e.CurrentClassName,Type=e.CurrentControlType,Pid=e.CurrentProcessId,Left=r.left,Top=r.top,Right=r.right,Bottom=r.bottom,Handle=e.CurrentNativeWindowHandle.ToInt64()});
   } return list.ToArray();
  }
  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback,IntPtr data);
