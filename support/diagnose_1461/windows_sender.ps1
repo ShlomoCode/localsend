@@ -95,7 +95,12 @@ public class SenderTextObservation {
 }
 public class SenderShortcutObservation {
  public int Pid,VirtualKey,InputSize,Win32Error,CleanupWin32Error;
- public uint Inserted,CleanupInserted;
+ public uint Inserted,CleanupInserted,AppThreadId,ControlScan,TargetScan;
+ public long AppLayout;
+ public ushort ControlVirtualKey=0xA2;
+ public ushort InputVirtualKey=0;
+ public uint DownFlags=8,UpFlags=10;
+ public string Mode="SCANCODE";
  public bool ForegroundOwned,KeysInitiallyUp,Accepted;
  public string Error;
 }
@@ -112,24 +117,36 @@ public static class SenderInput {
  [DllImport("user32.dll",SetLastError=true)] private static extern uint SendInput(uint count,[In] INPUT[] inputs,int size);
  [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
  [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
- private static INPUT Key(ushort key,bool up) { return new INPUT { Type=1,Data=new INPUTUNION { Keyboard=new KEYBDINPUT { Vk=key,Flags=up?2u:0u } } }; }
+ [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint threadId);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern uint MapVirtualKeyEx(uint code,uint mapType,IntPtr layout);
+ private static INPUT Key(ushort scan,bool up) { return new INPUT { Type=1,Data=new INPUTUNION { Keyboard=new KEYBDINPUT { Vk=0,Scan=scan,Flags=up?10u:8u } } }; }
  public static SenderShortcutObservation ControlShortcut(IntPtr hwnd,int expectedPid,ushort key) {
   var result=new SenderShortcutObservation { Pid=expectedPid,VirtualKey=key,InputSize=Marshal.SizeOf(typeof(INPUT)) };
   if(key!=0x41&&key!=0x43){result.Error="Only explicit VK_A and VK_C shortcuts are supported.";return result;}
   if(result.InputSize!=(IntPtr.Size==8?40:28)){result.Error="Unexpected native INPUT ABI size; no input sent.";return result;}
-  uint owner;GetWindowThreadProcessId(hwnd,out owner);
+  uint owner;result.AppThreadId=GetWindowThreadProcessId(hwnd,out owner);
   result.ForegroundOwned=GetForegroundWindow()==hwnd&&owner==(uint)expectedPid&&IsWindowVisible(hwnd);
   if(!result.ForegroundOwned){result.Error="Original app does not own the foreground window; no input sent.";return result;}
   result.KeysInitiallyUp=true;
   foreach(int check in new int[] {0x10,0x11,0x12,0x5B,0x5C,key})if((GetAsyncKeyState(check)&0x8000)!=0)result.KeysInitiallyUp=false;
   if(!result.KeysInitiallyUp){result.Error="Shortcut or modifier key already down; no input sent.";return result;}
+  if(result.AppThreadId==0){result.Error="Original app window thread unavailable; no input sent.";return result;}
+  IntPtr layout=GetKeyboardLayout(result.AppThreadId);result.AppLayout=layout.ToInt64();
+  if(layout==IntPtr.Zero){result.Error="Original app keyboard layout unavailable; no input sent.";return result;}
+  result.ControlScan=MapVirtualKeyEx(result.ControlVirtualKey,4,layout);result.TargetScan=MapVirtualKeyEx(key,4,layout);
+  if(result.ControlScan==0||result.ControlScan>0xff||result.TargetScan==0||result.TargetScan>0xff){result.Error="Shortcut mapping missing or unexpectedly extended; no input sent.";return result;}
+  ushort controlScan=(ushort)result.ControlScan,targetScan=(ushort)result.TargetScan;
+  INPUT[] inputs=new INPUT[] {Key(controlScan,false),Key(targetScan,false),Key(targetScan,true),Key(controlScan,true)};
+  uint currentOwner;uint currentThread=GetWindowThreadProcessId(hwnd,out currentOwner);
+  result.ForegroundOwned=GetForegroundWindow()==hwnd&&currentOwner==(uint)expectedPid&&IsWindowVisible(hwnd);
+  if(!result.ForegroundOwned||currentThread!=result.AppThreadId||GetKeyboardLayout(currentThread)!=layout){result.Error="Original owner/thread/layout changed before shortcut; no input sent.";return result;}
   SetLastError(0);
-  result.Inserted=SendInput(4,new INPUT[] {Key(0x11,false),Key(key,false),Key(key,true),Key(0x11,true)},result.InputSize);
+  result.Inserted=SendInput(4,inputs,result.InputSize);
   result.Win32Error=Marshal.GetLastWin32Error();
   if(result.Inserted!=4){
    // Never retry the shortcut. Release only the keys that this attempt could
    // have pressed; retain any uncertain cleanup as infrastructure failure.
-   if(result.Inserted>0){SetLastError(0);result.CleanupInserted=SendInput(2,new INPUT[] {Key(key,true),Key(0x11,true)},result.InputSize);result.CleanupWin32Error=Marshal.GetLastWin32Error();}
+   if(result.Inserted>0){SetLastError(0);result.CleanupInserted=SendInput(2,new INPUT[] {Key(targetScan,true),Key(controlScan,true)},result.InputSize);result.CleanupWin32Error=Marshal.GetLastWin32Error();}
    result.Error="SendInput did not insert all four shortcut events; action and modifier cleanup are not credited.";return result;
   }
   result.Accepted=true;return result;
@@ -336,7 +353,7 @@ function InputObservation([string]$label,[bool]$rawFrame=$false){
  # Read-only receipts: no activation, worker, OCR, UIA, extra input or polling.
  try{
  $script:sequence++;$name=('{0:D4}-{1}' -f $script:sequence,($label -replace '[^a-zA-Z0-9-]','-'))
- $receipt=[ordered]@{startedUtc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;expectedProcessStartedTicks=$appStartedTicks;rawFrameRequested=$rawFrame;before=$null;after=$null;beforeNative=$null;afterNative=$null;captureOwnershipQualified=$false;errors=@();inputConfiguration=@{mode='VK';control=0x11;targets=@(0x41,0x43);scan=0;downFlags=0;upFlags=2;events='Control down, target down, target up, Control up';scope='Configured INPUT only; not OS-dispatched scan metadata'}}
+ $receipt=[ordered]@{startedUtc=[DateTime]::UtcNow.ToString('o');processId=$app.Id;expectedProcessStartedTicks=$appStartedTicks;rawFrameRequested=$rawFrame;before=$null;after=$null;beforeNative=$null;afterNative=$null;captureOwnershipQualified=$false;errors=@();inputConfiguration=$script:lastShortcutObservation;inputConfigurationScope='Most recent actual shortcut attempt configuration/result; not OS-dispatched scan metadata'}
  try{$receipt['before']=Window;$receipt['beforeProcessStartedTicks']=$app.StartTime.ToUniversalTime().Ticks;$receipt['beforeNative']=[SenderObservationNative]::Read($appHwnd)}catch{$receipt.errors+=$_.Exception.Message}
  if($rawFrame -and $receipt.before){
   $bitmap=$null;$g=$null
@@ -450,6 +467,7 @@ function ControlShortcut([string]$key){
  $before=Window;if([ReceiverNative]::GetForegroundWindow() -ne $appHwnd){throw 'Original sender is not foreground; shortcut withheld.'}
  $virtualKey=if($key -eq 'A'){0x41}else{0x43}
  $native=[SenderInput]::ControlShortcut($appHwnd,$app.Id,[ushort]$virtualKey)
+ $script:lastShortcutObservation=$native
  $report.actions+=@{utc=[DateTime]::UtcNow.ToString('o');name='ordinary native Control shortcut';key=$key;window=$before;native=$native};Persist
  if(-not $native.Accepted){throw "Native Control shortcut infrastructure failure: $($native.Error)"}
 }
@@ -475,7 +493,7 @@ function FavoriteFieldReadback([string]$expected,[string]$field){
  do{$actual=[Windows.Forms.Clipboard]::GetText();if($actual -cne $marker){break};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $copyDeadline)
  $copyObservedUtc=[DateTime]::UtcNow;$withinDeadline=$copyObservedUtc -lt $copyDeadline
  $after=Window
- $observation=@{utc=$copyObservedUtc.ToString('o');field=$field;expected=$expected;actual=$actual;marker=$marker;markerReplaced=$actual -cne $marker;withinCopyDeadline=$withinDeadline;processId=$app.Id;before=$before;after=$after;foreground=[ReceiverNative]::GetForegroundWindow().ToInt64();method='Explicit native VK_CONTROL+VK_A Select All then VK_CONTROL+VK_C Copy on the source-defined focused field; fresh clipboard marker prevents stale acceptance'}
+ $observation=@{utc=$copyObservedUtc.ToString('o');field=$field;expected=$expected;actual=$actual;marker=$marker;markerReplaced=$actual -cne $marker;withinCopyDeadline=$withinDeadline;processId=$app.Id;before=$before;after=$after;foreground=[ReceiverNative]::GetForegroundWindow().ToInt64();method='Mapped original-layout left Control+A Select All then Control+C Copy scan INPUT; actual attempt receipts record encoding; fresh clipboard marker prevents stale acceptance'}
  $report.actions+=@{name='favorite focused-field readback';observation=$observation};Persist
  if(-not $withinDeadline -or $actual -ceq $marker -or $actual -cne $expected -or $before.Hwnd -ne $after.Hwnd -or [ReceiverNative]::GetForegroundWindow() -ne $appHwnd){try{InputObservation ('favorite-'+$field+'-failed-readback') $true}catch{$report.actions+=@{name='failed-readback observation error';error=$_.Exception.Message}};throw "Actual focused favorite field readback failed: $field"}
  return $observation
@@ -586,7 +604,7 @@ function NativePicker([IntPtr]$hwnd,[string]$path,[string]$id){
  $buttons=@($children|Where-Object{$_.Pid -eq $app.Id -and $_.Visible -and $_.Enabled -and $_.ClassName -eq 'Button' -and $_.Id -eq 1 -and $_.Text -match '^(&)?Open$'})
  if($edits.Count -ne 1 -or $buttons.Count -ne 1){throw 'Native File name Edit (under ID 1148) and Open Button (ID 1) must be unique; inspect retained HWND evidence.'}
  Focus $hwnd;$edit=$edits[0];[SenderInput]::Click([int]($edit.Left+$edit.Width/2),[int]($edit.Top+$edit.Height/2))
- $selectionShortcut=[SenderInput]::ControlShortcut($hwnd,$app.Id,[ushort]0x41);$evidence['selectAllShortcut']=$selectionShortcut;Json $record $evidence
+ $selectionShortcut=[SenderInput]::ControlShortcut($hwnd,$app.Id,[ushort]0x41);$script:lastShortcutObservation=$selectionShortcut;$evidence['selectAllShortcut']=$selectionShortcut;Json $record $evidence
  if(-not $selectionShortcut.Accepted){throw "Native picker Select All infrastructure failure: $($selectionShortcut.Error)"}
  $escaped=[regex]::Replace($path,'([+^%~(){}\[\]])','{$1}')
  [System.Windows.Forms.SendKeys]::SendWait($escaped);Start-Sleep -Milliseconds 200
