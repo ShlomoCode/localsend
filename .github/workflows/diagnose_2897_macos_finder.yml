@@ -20,11 +20,17 @@ jobs:
       - name: Qualify native GUI and observe official 1.18.2
         shell: bash
         run: bash support/diagnostics/2897/run.sh
-      - name: Preserve observations even when qualification fails
+      - name: Archive raw observations even when qualification fails
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence/issue2897
+          tar -czf evidence/issue2897.tar.gz -C evidence issue2897
+      - name: Preserve the observation archive
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: issue2897-macos-finder-${{ github.run_id }}-${{ github.run_attempt }}
-          path: evidence/issue2897
+          path: evidence/issue2897.tar.gz
           if-no-files-found: error
           retention-days: 14

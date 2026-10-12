@@ -17,11 +17,18 @@ installed=false
 stage=environment
 classification=infrastructure_failure
 candidate_failure=false
+last_failed_label=""
+last_failed_code=""
 printf "stage\tresult\n" > "$out/ledger.tsv"
 # Bound long-running operations and retain stdout, stderr, and exit status.
 run() {
   local label=$1 limit=$2 child start code=0
   shift 2
+  # Artifact services reject colons and other reserved filename characters.
+  # Preserve the original label inside the evidence, with a portable filename key.
+  local original_label=$label
+  label=$(printf '%s' "$label" | LC_ALL=C tr -c 'A-Za-z0-9_.-' '_')
+  printf '%s\n' "$original_label" > "$out/$label.command-label.txt"
   "$@" > "$out/$label.stdout.txt" 2> "$out/$label.stderr.txt" &
   child=$!; start=$SECONDS
   while kill -0 "$child" 2>/dev/null; do
@@ -31,18 +38,32 @@ run() {
       kill -9 "$child" 2>/dev/null || true
       wait "$child" 2>/dev/null || true
       printf "124\n" > "$out/$label.exit-code.txt"
+      last_failed_label=$label
+      last_failed_code=124
       return 124
     fi
     sleep 1
   done
   wait "$child" || code=$?
   printf "%s\n" "$code" > "$out/$label.exit-code.txt"
+  if [[ $code != 0 ]]; then last_failed_label=$label; last_failed_code=$code; fi
   return "$code"
 }
 cleanup() {
   local code=$?
+  local failure_label=$last_failed_label failure_code=$last_failed_code
   trap - EXIT
-  printf "stage=%s\nclassification=%s\nexit=%s\n" "$stage" "$classification" "$code" > "$out/result.txt"
+  printf "stage=%s\nclassification=%s\nexit=%s\nlast_failed_subcommand=%s\nlast_failed_subcommand_exit=%s\n" "$stage" "$classification" "$code" "$failure_label" "$failure_code" > "$out/result.txt"
+  if [[ $code != 0 ]]; then
+    printf 'Diagnostic stage=%s exit=%s last_failed_subcommand=%s subcommand_exit=%s\n' "$stage" "$code" "$failure_label" "$failure_code"
+    if [[ -n $failure_label ]]; then
+      printf 'Last failed subcommand stdout (first 6000 bytes):\n'
+      head -c 6000 "$out/$failure_label.stdout.txt" || true
+      printf '\nLast failed subcommand stderr (first 6000 bytes):\n'
+      head -c 6000 "$out/$failure_label.stderr.txt" || true
+      printf '\n'
+    fi
+  fi
   if [[ -n $recorder ]]; then
     kill -INT "$recorder" 2>/dev/null || true
     stop_owned "$recorder"
