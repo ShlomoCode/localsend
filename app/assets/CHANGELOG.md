@@ -1,5 +1,6 @@
 ## Unreleased
 
+- fix: try another known address when a device's preferred encrypted connection is unavailable (@ShlomoCode)
 - fix: avoid adding a trailing dot when renaming files without an extension (@ShlomoCode)
 - fix(macos): prevent intermittent MissingPluginException during startup (@ShlomoCode)
 - fix(macos): file sharing via Share Extension doesn't work in DMG builds (@ShlomoCode, @vdmkotai)

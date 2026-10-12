@@ -56,6 +56,17 @@ abstract class RsHttpClient implements RustOpaqueInterface {
     required RegisterDto payload,
   });
 
+  /// Selects a reachable endpoint before any upload session is prepared.
+  ///
+  /// All probes use this client's certificate pin and the requested protocol;
+  /// a failed HTTPS candidate never falls back to HTTP.
+  Future<RsHttpEndpoint> selectEndpoint({
+    required List<RsHttpEndpoint> candidates,
+    required ProtocolType protocol,
+    required String expectedFingerprint,
+    required RsCancellationToken cancelToken,
+  });
+
   /// Uploads a single file, emitting [RsUploadEvent]s on [sink].
   ///
   /// Failures are emitted as [RsUploadEvent::Failed] instead of being
@@ -139,6 +150,27 @@ sealed class RsHttpClientError with _$RsHttpClientError implements FrbException 
   const factory RsHttpClientError.other(
     String field0,
   ) = RsHttpClientError_Other;
+}
+
+/// One address of a peer's HTTP listener, including an IPv6 scope when needed.
+class RsHttpEndpoint {
+  final String host;
+  final int port;
+  final ProtocolType protocol;
+
+  const RsHttpEndpoint({
+    required this.host,
+    required this.port,
+    required this.protocol,
+  });
+
+  @override
+  int get hashCode => host.hashCode ^ port.hashCode ^ protocol.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RsHttpEndpoint && runtimeType == other.runtimeType && host == other.host && port == other.port && protocol == other.protocol;
 }
 
 @freezed
