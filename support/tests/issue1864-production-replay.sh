@@ -5,7 +5,7 @@ set -euo pipefail
 mkdir -p evidence-cloud/production-observation
 mkdir -p evidence-cloud/production-observation/original-fixtures
 cp /tmp/issue1864-photos/*.jpg evidence-cloud/production-observation/original-fixtures/
-sha256sum support/tests/issue1864-production.mjs support/tests/issue1864-production-whole.mjs support/tests/issue1864-production-replay.sh > evidence-cloud/production-observation/observer-source-sha256.txt
+sha256sum support/tests/issue1864-production.mjs support/tests/issue1864-production-whole.mjs support/tests/issue1864-production-replay.sh support/tests/issue1864-production-coverage.mjs > evidence-cloud/production-observation/observer-source-sha256.txt
 adb shell wm density > evidence-cloud/production-observation/device-density.txt
 adb shell wm size > evidence-cloud/production-observation/device-size.txt
 adb shell getprop persist.sys.locale > evidence-cloud/production-observation/device-locale.txt
@@ -94,8 +94,20 @@ phase production-base mixed
 phase production-candidate mixed
 node --input-type=module <<'JS'
 import fs from 'node:fs';
+import {phases,variants} from './support/tests/issue1864-production-coverage.mjs';
 const root='evidence-cloud/production-observation';
 const read=(v,p)=>JSON.parse(fs.readFileSync(`${root}/${v}/${p}/outcome.json`));
+const admission=[];
+for(const variant of variants) for(const phase of phases) {
+  const dir=`${root}/${variant}/${phase}`,outcome=read(variant,phase);
+  const capture=JSON.parse(fs.readFileSync(`${dir}/whole-phase-coverage.json`));
+  const actions=JSON.parse(fs.readFileSync(`${dir}/action-coverage.json`));
+  const frames=JSON.parse(fs.readFileSync(`${dir}/raw-frame-index.json`));
+  if([outcome,capture,actions].some(receipt=>receipt.apk!==variant || receipt.phase!==phase || receipt.runId!==process.env.GITHUB_RUN_ID || receipt.runAttempt!==process.env.GITHUB_RUN_ATTEMPT || receipt.harnessSha!==process.env.GITHUB_SHA) || !outcome.automatedObservationPassed || !capture.eligibleForManualReview || !capture.decoded || !actions.automatedEvidenceComplete || !frames.frameCount || actions.rawSha256!==frames.rawSha256) throw new Error(`Missing/failed/stale/wrong-identity production phase ${variant}/${phase}`);
+  admission.push({variant,phase,rawSha256:frames.rawSha256,automatedObservationPassed:true,automatedEvidenceComplete:true,manualVisualQualification:'pending'});
+}
+if(admission.length!==16 || new Set(admission.map(item=>`${item.variant}/${item.phase}`)).size!==16) throw new Error('Incomplete/duplicate production phase matrix');
+fs.writeFileSync(`${root}/sixteen-phase-evidence.json`,JSON.stringify({admission,manualVisualQualification:'pending',boundary:'All16 successful outcomes and original evidence inventories; actual visual acceptance remains independent review'},null,2));
 const base=read('production-base','core'),candidate=read('production-candidate','core');
 if(base.controls.core.shortCount!==0 || base.controls.core.freshCount!==0 || candidate.controls.core.shortCount!==1 || candidate.controls.core.freshCount!==1) throw new Error('Clean pair core result mismatch');
 fs.writeFileSync(`${root}/pair-verdict.json`,JSON.stringify({base,candidate,automatedCorePairPassed:true,shippingAcceptance:'PENDING independent original-frame review of focus outline, native Settings/mouse events, preview, folder focus confinement, actual dark/light palette, denial/grant/cancel controls; no physical Sony TV or 999 saturation claim'},null,2));
