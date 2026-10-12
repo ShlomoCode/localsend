@@ -34,6 +34,8 @@ sequence = 0
 started = time.monotonic()
 limit = min(max(args.timeout, 30), 1080)
 at = None
+observed_app = None
+destroyed_branches = 0
 
 
 def emit(kind, **data):
@@ -86,18 +88,50 @@ def info(node, path):
             'enabled': state(node, at.STATE_ENABLED)}
 
 
-def scan(root=None):
-    root = root if root is not None else at.Registry.getDesktop(0)
+def destroyed_object(error):
+    # This is the exact transient seen in run 38208883235. Do not suppress
+    # timeouts, permission errors, other D-Bus errors, or action failures.
+    error_name = getattr(error, '_dbus_error_name', '')
+    return error_name == 'org.freedesktop.DBus.Error.UnknownObject' or bool(
+        re.search(r'object /org/a11y/atspi/accessible/[0-9]+ does not exist', str(error)))
+
+
+def scan(root=None, max_depth=35):
+    global destroyed_branches
+    root = root if root is not None else (observed_app if observed_app is not None else at.Registry.getDesktop(0))
     found = []
     pending = [(root, '0', 0)]
+    skipped = 0
+
+    def skip(error, path):
+        nonlocal skipped
+        global destroyed_branches
+        if not destroyed_object(error):
+            raise error
+        skipped += 1
+        destroyed_branches += 1
+        emit('destroyed-object-observation', path=path, error=str(error),
+             snapshot_skips=skipped, total_skips=destroyed_branches)
+        if skipped > 8 or destroyed_branches > 40:
+            raise Stop('destroyed-object observation bound exceeded')
+
     while pending:
         node, path, depth = pending.pop()
         if len(found) >= 2500 or depth > 35:
             raise Stop('accessible tree exceeded observation bound')
-        record = info(node, path)
+        try:
+            record = info(node, path)
+            child_count = node.childCount if depth < max_depth else 0
+        except Exception as error:
+            skip(error, path)
+            continue
         found.append((node, record))
-        for index in reversed(range(node.childCount)):
-            child = node.getChildAtIndex(index)
+        for index in reversed(range(child_count)):
+            try:
+                child = node.getChildAtIndex(index)
+            except Exception as error:
+                skip(error, path + '.' + str(index))
+                continue
             if child is not None:
                 pending.append((child, path + '.' + str(index), depth + 1))
     return found
@@ -239,15 +273,24 @@ def authentication(rows):
     return True
 
 
-def installer(rows):
-    return unique([(node, rec) for node, rec in visible(rows)
-                   if rec['role'] in ('dialog', 'frame')
-                   and clean(rec['name']) in ('MX Linux Installer', 'MX Installer')],
-                  'MX installer window')
+def minstall_apps():
+    # Application nodes need not report SHOWING. Inspect only the desktop's
+    # immediate children, never recursively traverse unrelated desktop apps.
+    inventory = scan(at.Registry.getDesktop(0), max_depth=1)
+    matches = [(node, rec) for node, rec in inventory
+               if rec['role'] == 'application' and rec['name'] == 'minstall']
+    if len(matches) > 1:
+        raise Stop('multiple observed minstall applications')
+    return matches, inventory
+
+
+def top_windows(app):
+    return [(node, rec) for node, rec in visible(scan(app, max_depth=1))
+            if rec['path'].count('.') == 1 and rec['role'] in ('dialog', 'frame')]
 
 
 def run():
-    global at, phase
+    global at, phase, observed_app
     if sys.platform != 'linux' or not args.cloud_vm:
         raise Stop('cloud Linux live VM required')
     mounts = Path('/proc/mounts').read_text()
@@ -261,14 +304,20 @@ def run():
     authenticated = False
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        rows = scan()
+        apps, inventory = minstall_apps()
+        if apps:
+            observed_app = apps[0][0]
+            windows = top_windows(observed_app)
+            capture('observed-minstall', scan(observed_app))
+            if windows:
+                root = unique(windows, 'observed minstall top-level window')
+                emit('installer-identity', application=apps[0][1], window=windows[0][1],
+                     shell_root_process_gate_required=True)
+                break
+            time.sleep(.5)
+            continue
+        rows = scan(at.Registry.getDesktop(0))
         capture('launcher-wait', rows)
-        windows = [(n, rec) for n, rec in visible(rows)
-                   if rec['role'] in ('dialog', 'frame')
-                   and clean(rec['name']) in ('MX Linux Installer', 'MX Installer')]
-        if windows:
-            root = unique(windows, 'MX installer window')
-            break
         if authenticated and any(rec['role'] == 'password text' for _, rec in visible(rows)):
             raise Stop('authentication dialog appeared again after submission')
         if authentication(rows):
@@ -368,7 +417,7 @@ def run():
         rows = scan(root)
         if named(rows, 'Installation complete') and named(rows, 'Finish', ['push button']):
             break
-        dialogs = [(n, rec) for n, rec in visible(scan())
+        dialogs = [(n, rec) for n, rec in visible(scan(observed_app))
                    if rec['role'] == 'dialog' and n != root]
         if dialogs:
             capture('unexpected-modal')
@@ -388,11 +437,21 @@ def run():
     capture('reboot-disabled')
     click(button(scan(root), 'Finish'), 'actual Finish')
     until = time.monotonic() + 10
+    clean_closed_observations = 0
     while time.monotonic() < until:
-        rows = scan()
-        if not any(rec['showing'] and rec['role'] in ('frame', 'dialog') and
-                   clean(rec['name']) in ('MX Linux Installer', 'MX Installer') for _, rec in rows):
-            capture('finish-closed', rows)
+        previous_skips = destroyed_branches
+        apps, inventory = minstall_apps()
+        windows = top_windows(apps[0][0]) if apps else []
+        if len(windows) > 1:
+            raise Stop('ambiguous minstall windows after Finish')
+        # A skipped destroyed object alone cannot prove closure. Require two
+        # consecutive clean observations of app absence or no visible window.
+        if not windows and previous_skips == destroyed_branches:
+            clean_closed_observations += 1
+        else:
+            clean_closed_observations = 0
+        if clean_closed_observations >= 2:
+            capture('finish-closed', inventory)
             emit('GUIFinished', shell_finished_gate_still_required=True)
             (out / 'GUIFinished').write_text('Observed End, reboot disabled, Finish, window closed.\n')
             return
