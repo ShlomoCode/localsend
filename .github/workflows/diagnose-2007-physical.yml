@@ -6,6 +6,18 @@ on:
         description: Successful source build-pair run ID; dispatch only after fresh capacity check
         required: true
         type: string
+      candidate_ref:
+        description: Expected immutable candidate source SHA; verified before device allocation
+        required: true
+        type: string
+      source_arms:
+        description: Source comparison arm count
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '4'
+          - '2'
 permissions:
   contents: read
   actions: read
@@ -32,11 +44,15 @@ jobs:
       SCENARIO_MODULE: ${{ github.workspace }}/support/diagnostics/2007-source-session.mjs
       BASELINE_LINUX_SHA256: 98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b
       PAIR_BUILD_RUN: ${{ inputs.build_pair_run }}
+      ISSUE_2007_EXPECTED_CANDIDATE_SHA: ${{ inputs.candidate_ref }}
+      ISSUE_2007_SOURCE_ARMS: ${{ inputs.source_arms }}
     steps:
       - uses: actions/checkout@v6
       - name: Static harness validation before device allocation
         run: |
           [[ "$PAIR_BUILD_RUN" =~ ^[0-9]+$ ]]
+          [[ "$ISSUE_2007_EXPECTED_CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ISSUE_2007_SOURCE_ARMS" == 2 || "$ISSUE_2007_SOURCE_ARMS" == 4 ]]
           node --check support/cloud_transport/mobile-control.mjs
           node --check support/diagnostics/2007-source-session.mjs
           node --check support/diagnostics/2007-source-pair-preflight.mjs
@@ -99,7 +115,7 @@ jobs:
         run: |
           curl --fail --silent --show-error -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" https://api-cloud.browserstack.com/app-automate/upload -F file=@/tmp/helper/cloud-transport-helper.apk -o /tmp/helper/upload.json
           node --input-type=module -e 'import fs from "node:fs";const app=JSON.parse(fs.readFileSync("/tmp/helper/upload.json")).app_url;if(!app)throw new Error("Helper upload failed");fs.appendFileSync(process.env.GITHUB_ENV,"HELPER_APP="+app+"\n");'
-      - name: One Samsung Android 11 session, candidate baseline candidate baseline
+      - name: One Samsung Android 11 source comparison session
         run: node support/cloud_transport/mobile-control.mjs
       - name: Retain actual continuous session video
         if: always()

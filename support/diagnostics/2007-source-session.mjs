@@ -43,7 +43,11 @@ export default async function(context){
  assert.equal(process.env.BS_DEVICE,'Samsung Galaxy S21');assert.equal(process.env.BS_OS,'11.0');
  assert.equal(process.env.ISSUE_2007_SOURCE_COMPARISON,'1');
  const pair=JSON.parse(readFileSync(process.env.ISSUE_2007_BUILD_PAIR_JSON,'utf8'));
- const summary={session:context.session,startedUtc:new Date().toISOString(),order:['candidate','baseline','candidate','baseline'],helperScannerInvoked:false,configuredPreTrashInterventionWaitMs:0,configuredPostDeleteWaitMs:0,timingPolicy:'Identical native UI and read-only observation sequence; no fixed 45-second intervention wait',installDocs,arms:[]};
+ const armCount=Number(process.env.ISSUE_2007_SOURCE_ARMS||'4');
+ assert(armCount===2||armCount===4,'Source arm count must be 2 or 4');
+ assert.equal(pair.candidate.source_sha,process.env.ISSUE_2007_EXPECTED_CANDIDATE_SHA,'Candidate must match the requested immutable source SHA');
+ const order=['candidate','baseline','candidate','baseline'].slice(0,armCount);
+ const summary={session:context.session,startedUtc:new Date().toISOString(),order,armCount,helperScannerInvoked:false,configuredPreTrashInterventionWaitMs:0,configuredPostDeleteWaitMs:0,timingPolicy:'Identical native UI and read-only observation sequence; no fixed 45-second intervention wait',installDocs,arms:[]};
  const summaryPath=join(root,'evidence/source-session-summary.json');
  const save=()=>writeFileSync(summaryPath,JSON.stringify(summary,null,2));
  async function shell(command){return context.wd('POST',prefix+'/execute/sync',{script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command}}),args:[]});}
@@ -126,8 +130,9 @@ export default async function(context){
  // Save all observed outcomes before applying expected-result assertions.
  summary.observationsCompletedUtc=new Date().toISOString();save();
  try{
-  assert.equal(new Set(summary.arms.map(arm=>arm.fixtureName)).size,4,'All arms need fresh owned names');
-  assert.equal(new Set(summary.arms.map(arm=>arm.initialReceive.sha256)).size,1,'All four arms must send identical bytes');
+  assert.equal(summary.arms.length,armCount,'All selected arms must complete');
+  assert.equal(new Set(summary.arms.map(arm=>arm.fixtureName)).size,armCount,'All selected arms need fresh owned names');
+  assert.equal(new Set(summary.arms.map(arm=>arm.initialReceive.sha256)).size,1,'All selected arms must send identical bytes');
   assert.equal(context.sourceAudit.scannerGuardViolations,0,'No helper scanner selector or helper coordinate action may be attempted');
   assert.equal(context.sourceAudit.events.filter(event=>event.method==='POST'&&event.path==='/session').length,1,'Exactly one device session must be allocated');
   summary.helperControlAudit={scannerGuardViolations:context.sourceAudit.scannerGuardViolations,helperClicks:context.sourceAudit.events.filter(event=>event.activePackage==='org.localsend.cloudtransport'&&event.path.endsWith('/click')).map(event=>({utc:event.utc,locator:event.locator})),fullAudit:'source-webdriver-audit.json'};

@@ -58,7 +58,11 @@ try {
   // https://www.browserstack.com/docs/app-automate/appium/advanced-features/test-app-upgrades
   caps['bstack:options'].midSessionInstallApps=[pair.candidate.browserstack_app_url,pair.baseline.browserstack_app_url];
   caps['bstack:options'].resignApp=false;
-  caps['bstack:options'].sessionName='issue-2007-source-candidate-baseline-candidate-baseline';
+  const sourceArms=Number(process.env.ISSUE_2007_SOURCE_ARMS||'4');
+  assert(sourceArms===2||sourceArms===4,'Source arm count must be 2 or 4 before allocation');
+  assert(/^[0-9a-f]{40}$/.test(process.env.ISSUE_2007_EXPECTED_CANDIDATE_SHA),'Expected immutable candidate SHA is required before allocation');
+  assert.equal(pair.candidate.source_sha,process.env.ISSUE_2007_EXPECTED_CANDIDATE_SHA,'Candidate identity must match before allocation');
+  caps['bstack:options'].sessionName=sourceArms===2?'issue-2007-source-candidate-baseline':'issue-2007-source-candidate-baseline-candidate-baseline';
   writeFileSync('evidence/source-session-capabilities.json',JSON.stringify(redactSourceAudit(caps),null,2));
   const planResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
   assert(planResponse.ok,'Fresh BrowserStack capacity probe failed before allocation');

@@ -10,6 +10,8 @@ const pair=JSON.parse(readFileSync(join(directory,'build-pair.json'),'utf8'));
 const tools=join(process.env.ANDROID_HOME,'build-tools/36.0.0');
 assert.equal(pair.baseline.source_sha,'c1ce322fb3acf08e44f329b8b7208b8b0d91e244');
 assert.notEqual(pair.baseline.source_sha,pair.candidate.source_sha);
+assert(/^[0-9a-f]{40}$/.test(process.env.ISSUE_2007_EXPECTED_CANDIDATE_SHA),'Expected immutable candidate SHA is required');
+assert.equal(pair.candidate.source_sha,process.env.ISSUE_2007_EXPECTED_CANDIDATE_SHA,'Source pair must contain the exact requested candidate before allocation');
 const certificates=[];
 for(const label of ['baseline','candidate']){
  const arm=pair[label],apk=join(directory,label,'app-arm64-v8a-release.apk');
