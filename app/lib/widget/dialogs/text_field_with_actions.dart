@@ -8,13 +8,19 @@ import 'package:routerino/routerino.dart';
 class TextFieldWithActions extends StatefulWidget {
   final String name;
   final TextEditingController controller;
-  final ValueChanged<String> onSubmitted;
+
+  /// Called while typing. Without [onSubmitted], edits are kept on cancellation.
+  final ValueChanged<String>? onChanged;
+
+  /// Called on confirmation. When provided, cancellation restores the original text.
+  final ValueChanged<String>? onSubmitted;
   final List<Widget> actions;
 
   const TextFieldWithActions({
     required this.name,
     required this.controller,
-    required this.onSubmitted,
+    this.onChanged,
+    this.onSubmitted,
     required this.actions,
   });
 
@@ -50,6 +56,7 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
                   TextFormField(
                     controller: widget.controller,
                     textAlign: TextAlign.center,
+                    onChanged: widget.onChanged,
                     autofocus: true,
                     onFieldSubmitted: (text) => dialogContext.pop(text),
                   ),
@@ -74,10 +81,11 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
         if (!mounted) {
           return;
         }
-        final textToDisplay = confirmedText ?? originalText;
+        final textIfCancelled = widget.onSubmitted != null ? originalText : widget.controller.text;
+        final textToDisplay = confirmedText ?? textIfCancelled;
         setState(() => widget.controller.text = textToDisplay);
         if (confirmedText != null) {
-          widget.onSubmitted(confirmedText);
+          widget.onSubmitted?.call(confirmedText);
         }
       },
       child: Padding(
