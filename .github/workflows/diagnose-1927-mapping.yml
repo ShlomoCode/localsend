@@ -1,0 +1,44 @@
+name: Diagnose Flatpak autostart host mapping 1927
+on:
+  push:
+    branches: [codex/bug-1927-mapping]
+jobs:
+  mint-mapping:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 1
+      - name: Restore immutable normally built application archive
+        uses: actions/download-artifact@v4
+        timeout-minutes: 2
+        with:
+          name: issue1927-source-38166504952
+          run-id: 38166504952
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence/source
+      - name: Restore unchanged baseline comparator and package provenance
+        uses: actions/download-artifact@v4
+        timeout-minutes: 2
+        with:
+          name: issue1927-packages-38167715193
+          run-id: 38167715193
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence/packages
+      - name: Package normal source with declared autostart directory exposure
+        timeout-minutes: 16
+        run: timeout --signal=TERM --kill-after=30s 900s bash support/diagnostics/issue1927-mapping-package.sh
+      - name: Observe host mapping in Mint Cinnamon
+        run: timeout --signal=TERM --kill-after=75s 1800s bash support/diagnostics/issue1927-mapping-mint.sh
+      - name: Preserve files after every outcome
+        if: always()
+        run: timeout --signal=KILL 30s bash -c 'sudo chown -R "$(id -u):$(id -g)" evidence && chmod -R a+rX evidence'
+      - uses: actions/upload-artifact@v4
+        timeout-minutes: 5
+        if: always()
+        with:
+          name: issue1927-mapping-${{ github.run_id }}
+          path: evidence/
