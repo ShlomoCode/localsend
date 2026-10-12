@@ -1,70 +1,83 @@
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync,writeFileSync} from 'node:fs';
-const pidFile = 'evidence/local-parent-pid.txt';
-if (!existsSync(pidFile)) process.exit(0);
-const parent = Number(readFileSync(pidFile, 'utf8').trim());
-const expected = readFileSync('evidence/local-parent-start-ticks.txt', 'utf8').trim();
-assert(Number.isInteger(parent) && parent > 1);
-function identity(pid) {
-  try {
-    const raw = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const fields = raw.slice(raw.lastIndexOf(')') + 2).trim().split(/\s+/);
-    return {pid, name:raw.slice(raw.indexOf('(') + 1, raw.lastIndexOf(')')), state:fields[0], parent:Number(fields[1]), startTicks:fields[19]};
-  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
-}
-const observed = identity(parent);
-assert(!observed || observed.startTicks === expected, 'Local tunnel parent PID was reused; refuse signaling');
-const owned = [];
-function descendants(pid) {
-  const item = identity(pid);
-  if (!item) return;
-  owned.push(item);
-  let children;
-  try { children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim(); }
-  catch (error) { if (error.code === 'ENOENT') return; throw error; }
-  if (children) for (const child of children.split(/\s+/)) {
-    const current = identity(Number(child));
-    if (current?.parent === pid) descendants(Number(child));
+import {randomUUID} from 'node:crypto';
+import {existsSync,readFileSync} from 'node:fs';
+import {paths,timestamp,delay,observeOwned,writeJson,sanitizeRawLogs} from './local-supervisor.mjs';
+
+const mode=process.argv[2]||'stop';
+assert(['stop','record','check'].includes(mode),'Unknown owned Local cleanup mode');
+const client={requestedUtc:timestamp(),mode,qualified:false,managementProof:null,daemonProof:null,cleanupReceipt:null,final:[],error:null};
+const save=()=>writeJson('evidence/local-cleanup-client.json',client);
+
+try{
+ const path=existsSync(paths.ready)?paths.ready:paths.state;
+ assert(existsSync(path),'Missing manager/connected-daemon receipt; cleanup is unqualified');
+ const receipt=JSON.parse(readFileSync(path,'utf8'));
+ assert(receipt.managementId&&receipt.manager,'Missing exact management identity receipt');
+ const manager=observeOwned(receipt.manager);
+ client.managementProof=manager;
+ assert.equal(manager.status,'running','Original management process lost, terminal, reused, or unavailable; no same-object supported stop can be established');
+ const currentState=JSON.parse(readFileSync(paths.state,'utf8'));
+ assert.equal(currentState.managementId,receipt.managementId,'Current manager receipt identity changed');
+ assert.equal(currentState.manager.startTicks,receipt.manager.startTicks,'Current manager process receipt changed');
+ assert(Date.now()-Date.parse(currentState.observedUtc)<=5000,'Management state is stale; cleanup is unqualified');
+ if(mode!=='stop'){
+  assert.equal(currentState.daemonQualified,true,'Connected daemon qualification is missing');
+  assert(!currentState.stopping&&!currentState.stopFinished&&!currentState.requestSeen&&!currentState.firstFailure&&!currentState.startupExpired,'Local management is stopping, failed, or expired; do not admit a device');
+  assert(!existsSync(paths.request),'Owned stop was requested; do not admit a device');
+  assert(Number.isFinite(currentState.cleanupBoundaryMs)&&Date.now()<currentState.cleanupBoundaryMs,'Original cleanup boundary has been reached');
+  assert(existsSync(paths.ready),'Connected Local daemon readiness receipt is missing');
+  assert(receipt.daemon,'Daemon PID/start identity receipt is missing');
+  client.daemonProof=observeOwned(receipt.daemon);
+  assert.equal(client.daemonProof.status,'running','Connected Local daemon identity/liveness failed');
+  assert.equal(currentState.wrapperIsRunning,true,'Maintained Local isRunning is false');
+  assert.equal(currentState.daemon.pid,receipt.daemon.pid,'Maintained Local daemon PID changed');
+  assert.equal(currentState.daemon.startTicks,receipt.daemon.startTicks,'Maintained Local daemon start ticks changed');
+  client.final=receipt.owned.map(observeOwned);
+  assert(client.final.every(item=>item.status==='running'),'Readiness descendant identity changed');
+  client.qualified=true;client.completedUtc=timestamp();save();
+ }else{
+  // The management process may still be waiting for Local.start. Request stop
+  // from the same retained object; no signals or guessed daemon ancestry.
+  const request={managementId:receipt.managementId,requestId:randomUUID(),requestedUtc:timestamp(),manager:receipt.manager};
+  client.request=request;save();writeJson(paths.request,request);
+  const end=Date.now()+25000;
+  let stopped=null;
+  while(Date.now()<end){
+   if(existsSync(paths.cleanup)){
+    const candidate=JSON.parse(readFileSync(paths.cleanup,'utf8'));
+    if(candidate.managementId===receipt.managementId&&candidate.completedUtc){stopped=candidate;break;}
+   }
+   const currentManager=observeOwned(receipt.manager);
+   client.lastManagerObservation=currentManager;
+   // A terminal manager can leave its completed receipt just before exit.
+   if(currentManager.status==='pid-reused'||currentManager.status==='unavailable')throw new Error('Management process identity changed during stop; no fallback signaling');
+   await delay(100);
   }
-}
-descendants(parent);
-const receiptPath = 'evidence/local-owned-process-receipt.json';
-if (process.argv[2] === 'record') {
-  assert(observed, 'Owned Local parent exited before descendant ownership could be recorded');
-  writeFileSync(receiptPath, JSON.stringify({parent, expectedStartTicks:expected, recordedUtc:new Date().toISOString(), owned}, null, 2));
-  process.exit(0);
-}
-if (!existsSync(receiptPath)) {
-  writeFileSync('evidence/local-process-cleanup.json', JSON.stringify({parent, qualified:false, reason:'Missing readiness descendant receipts; orphaned child termination cannot be established'}, null, 2));
-  throw new Error('Owned Local descendant cleanup is unqualified; preserve evidence');
-}
-const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
-assert.equal(receipt.parent, parent);
-assert.equal(receipt.expectedStartTicks, expected);
-for (const item of receipt.owned) if (!owned.some(current => current.pid === item.pid && current.startTicks === item.startTicks)) owned.push(item);
-const report = {startedUtc:new Date().toISOString(), parent, expectedStartTicks:expected, ownedBeforeStop:owned, signals:[], final:[]};
-const save = () => writeFileSync('evidence/local-process-cleanup.json', JSON.stringify(report, null, 2));
-function alive(item) {
-  const current = identity(item.pid);
-  return current && current.state !== 'Z' && current.state !== 'X';
-}
-function signal(item, name) {
-  const current = identity(item.pid);
-  if (!current || current.state === 'Z' || current.state === 'X') return;
-  assert.equal(current.startTicks, item.startTicks, 'Owned tunnel PID identity changed; refuse signaling');
-  process.kill(item.pid, name);
-  report.signals.push({pid:item.pid, signal:name, utc:new Date().toISOString()});
+  assert(stopped,'Same-object supported stop produced no completed receipt within 25 seconds');
+  client.cleanupReceipt=stopped;
+  assert.equal(stopped.supportedStopInvoked,true,'Maintained Local.stop invocation was not established');
+  assert.equal(stopped.manager.startTicks,receipt.manager.startTicks,'Stop receipt came from a different manager process');
+  assert.equal(stopped.manager.pid,receipt.manager.pid,'Stop receipt manager PID differs');
+  assert(Array.isArray(stopped.ownedBeforeStop)&&stopped.ownedBeforeStop.length>0,'Missing connected daemon/descendant ownership receipts');
+  client.final=stopped.ownedBeforeStop.map(observeOwned);
+  assert(client.final.every(item=>item.terminal),'Actual owned daemon/descendants remain alive, unavailable, or reused after stop');
+  assert.equal(stopped.qualified,true,'Supported stop callback/terminal proof was unqualified; preserve callback errors and counts');
+  const managerEnd=Date.now()+Math.max(0,end-Date.now());
+  while(Date.now()<managerEnd&&observeOwned(receipt.manager).status==='running')await delay(100);
+  client.managementAfter=observeOwned(receipt.manager);
+  assert(client.managementAfter.terminal,'Local manager did not finish after completed supported stop');
+  client.qualified=true;client.completedUtc=timestamp();save();
+ }
+}catch(error){
+ client.error=String(error);client.completedUtc=timestamp();save();
+ // Preserve an existing supervisor receipt, especially its first fault and
+ // callback count. Missing/lost manager establishes no cleanup success.
+ if(!existsSync(paths.cleanup))writeJson(paths.cleanup,{qualified:false,firstFailure:client.error,cleanupError:'Cleanup client could not establish same-object supported stop and terminal proof',completedUtc:timestamp()});
+ process.exitCode=1;
+}finally{
+ if(mode==='stop'){
+  try{client.logRedaction=sanitizeRawLogs();}
+  catch(error){client.logRedactionError=String(error);client.qualified=false;process.exitCode=1;}
   save();
+ }
 }
-save();
-if (observed) signal(observed, 'SIGTERM');
-const grace = Date.now() + 10_000;
-while (owned.some(alive) && Date.now() < grace) await new Promise(resolve => setTimeout(resolve, 200));
-for (const item of owned.slice().reverse()) if (alive(item)) signal(item, 'SIGTERM');
-await new Promise(resolve => setTimeout(resolve, 1000));
-for (const item of owned.slice().reverse()) if (alive(item)) signal(item, 'SIGKILL');
-await new Promise(resolve => setTimeout(resolve, 300));
-report.final = owned.map(item => ({owned:item, current:identity(item.pid), stillAlive:Boolean(alive(item))}));
-report.completedUtc = new Date().toISOString();
-save();
-assert(report.final.every(item => !item.stillAlive), 'Owned tunnel cleanup did not reach a terminal process state');
