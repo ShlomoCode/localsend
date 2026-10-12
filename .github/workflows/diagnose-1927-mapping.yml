@@ -19,7 +19,7 @@ jobs:
           name: issue1927-source-38166504952
           run-id: 38166504952
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: evidence/source
+          path: evidence
       - name: Restore unchanged baseline comparator and package provenance
         uses: actions/download-artifact@v4
         timeout-minutes: 2
@@ -27,7 +27,7 @@ jobs:
           name: issue1927-packages-38167715193
           run-id: 38167715193
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: evidence/packages
+          path: evidence
       - name: Package normal source with declared autostart directory exposure
         timeout-minutes: 16
         run: timeout --signal=TERM --kill-after=30s 900s bash support/diagnostics/issue1927-mapping-package.sh
