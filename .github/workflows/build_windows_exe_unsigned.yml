@@ -127,23 +127,90 @@ jobs:
         shell: pwsh
         run: ./support/cloud_transport/build-helper.ps1
       - name: Retain the current physical job start for 90-second budget admission
+        id: job-clock-metadata
         if: inputs.picker_dwell_ms == '90000'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if ($env:BS_DEVICE -ne 'Samsung Galaxy S25' -or $env:BS_OS -ne '15.0' -or $env:BACKGROUND_POLICY_EXPERIMENT -ne 'samsung-enable-and-restore' -or $env:HELPER_SERVICE_MODE -ne 'foreground' -or $env:HELPER_OBSERVATION_MODE -ne 'native') { throw '90-second condition configuration is not admitted' }
-          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT/jobs?per_page=100"
-          $headers = @{Authorization="Bearer $env:GITHUB_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'}
-          $response = Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 30
-          if ($response.total_count -gt 100) { throw 'Job metadata is incomplete; budget unavailable' }
-          $matches = @($response.jobs | Where-Object { $_.name -eq 'physical-control' -and $_.status -eq 'in_progress' -and [string]$_.run_id -eq $env:GITHUB_RUN_ID -and $_.runner_name -eq $env:RUNNER_NAME })
-          if ($matches.Count -ne 1 -or -not $matches[0].started_at) { throw 'Unique current physical-control started_at unavailable' }
-          $job = $matches[0]
-          $started = [DateTimeOffset]::Parse($job.started_at).ToUniversalTime()
-          if ($started -gt [DateTimeOffset]::UtcNow) { throw 'Job start is in the future; budget unavailable' }
-          @{schema=1; repository=$env:GITHUB_REPOSITORY; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; jobId=[string]$job.id; jobName=$job.name; status=$job.status; runnerName=$job.runner_name; startedAt=$started.ToString('o'); retrievedAt=[DateTimeOffset]::UtcNow.ToString('o'); configuredTimeoutMs=1500000; source='GitHub Actions list jobs for workflow run attempt'} | ConvertTo-Json | Set-Content evidence/physical-job-budget.json
+          $receipt = @{schema=1; phase='entry'; admitted=$false; repository=$env:GITHUB_REPOSITORY; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; runnerName=$env:RUNNER_NAME; powerShellVersion=$PSVersionTable.PSVersion.ToString(); powerShellEdition=$PSVersionTable.PSEdition; localTimeZoneId=[TimeZoneInfo]::Local.Id; localBaseUtcOffsetMinutes=[TimeZoneInfo]::Local.BaseUtcOffset.TotalMinutes; culture=[Globalization.CultureInfo]::CurrentCulture.Name; enteredUtc=[DateTimeOffset]::UtcNow.ToString('o')}
+          $metadataFailure = $null
+          try {
+            if ($env:BS_DEVICE -ne 'Samsung Galaxy S25' -or $env:BS_OS -ne '15.0' -or $env:BACKGROUND_POLICY_EXPERIMENT -ne 'samsung-enable-and-restore' -or $env:HELPER_SERVICE_MODE -ne 'foreground' -or $env:HELPER_OBSERVATION_MODE -ne 'native') { throw '90-second condition configuration is not admitted' }
+            $receipt.phase = 'date-kind-contract'
+            $dateKindParameter = (Get-Command ConvertFrom-Json).Parameters['DateKind']
+            $receipt.dateKindStringSupported = [bool]($dateKindParameter -and $dateKindParameter.ParameterType.IsEnum -and ([Enum]::GetNames($dateKindParameter.ParameterType) -contains 'String'))
+            if (-not $receipt.dateKindStringSupported) { throw 'ConvertFrom-Json -DateKind String unavailable; budget qualification ends' }
+            $receipt.phase = 'metadata-request'
+            $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT/jobs?per_page=100"
+            $headers = @{Authorization="Bearer $env:GITHUB_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'}
+            $receipt.requestStartedUtc = [DateTimeOffset]::UtcNow.ToString('o')
+            try { $http = Invoke-WebRequest -Uri $url -Headers $headers -TimeoutSec 30 }
+            finally { $receipt.requestEndedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
+            $receipt.httpStatus = [int]$http.StatusCode
+            $rawBody = [string]$http.Content
+            $rawBody | Set-Content -Encoding utf8 -NoNewline evidence/job-clock-api-response.json
+            $receipt.rawResponseFile = 'evidence/job-clock-api-response.json'
+            $receipt.phase = 'identity-validation'
+            $response = ConvertFrom-Json -InputObject $rawBody -DateKind String
+            $receipt.totalJobCount = $response.total_count
+            if ($response.total_count -gt 100) { throw 'Job metadata is incomplete; budget unavailable' }
+            $matches = @($response.jobs | Where-Object { $_.name -eq 'physical-control' -and $_.status -eq 'in_progress' -and [string]$_.run_id -eq $env:GITHUB_RUN_ID -and $_.runner_name -eq $env:RUNNER_NAME })
+            $receipt.matchedJobCount = $matches.Count
+            if ($matches.Count -ne 1 -or -not $matches[0].started_at) { throw 'Unique current physical-control started_at unavailable' }
+            $job = $matches[0]
+            $receipt.jobId = [string]$job.id
+            $receipt.jobName = $job.name
+            $receipt.jobStatus = $job.status
+            $receipt.rawStartedAtType = $job.started_at.GetType().FullName
+            $receipt.rawStartedAtValue = $job.started_at
+            $receipt.rawStartedAtKind = 'String has no DateTime.Kind'
+            $receipt.phase = 'default-conversion-diagnostic'
+            # Diagnostic comparison only. The budget never consumes this conversion.
+            try {
+              $defaultResponse = ConvertFrom-Json -InputObject $rawBody
+              $defaultMatches = @($defaultResponse.jobs | Where-Object { [string]$_.id -eq [string]$job.id })
+              if ($defaultMatches.Count -ne 1) { throw 'Default conversion job identity is ambiguous' }
+              $defaultValue = $defaultMatches[0].started_at
+              $conversion = @{type=$defaultValue.GetType().FullName; kind='Not a DateTime'; defaultToString=$defaultValue.ToString(); legacyBoundString=[string]$defaultValue}
+              if ($defaultValue -is [DateTime]) { $conversion.kind=$defaultValue.Kind.ToString(); $conversion.roundTripValue=$defaultValue.ToString('o') }
+              try { $conversion.legacyParseUtc=[DateTimeOffset]::Parse($defaultValue).ToUniversalTime().ToString('o') }
+              catch { $conversion.legacyParseError=$_.Exception.Message }
+              $receipt.defaultConversion = $conversion
+            } catch { $receipt.defaultConversionError=$_.Exception.Message }
+            $receipt.phase = 'strict-utc-parse'
+            if ($job.started_at -isnot [string] -or $job.started_at -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') { throw 'GitHub started_at must be an exact ISO UTC string ending in Z' }
+            $styles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+            $receipt.parserContract = 'Exact yyyy-MM-ddTHH:mm:ssZ; invariant culture; AssumeUniversal | AdjustToUniversal'
+            $started = [DateTimeOffset]::ParseExact($job.started_at, "yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture, $styles)
+            $receipt.parsedStartedAtUtc = $started.ToString('o')
+            $compareUtc = [DateTimeOffset]::UtcNow
+            $receipt.comparisonUtc = $compareUtc.ToString('o')
+            $receipt.comparisonMinusStartedMs = ($compareUtc - $started).TotalMilliseconds
+            $receipt.localUtcOffsetAtComparisonMinutes = [TimeZoneInfo]::Local.GetUtcOffset($compareUtc).TotalMinutes
+            $receipt.phase = 'strict-future-guard'
+            $receipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 evidence/job-clock-diagnostic.json
+            if ($started -gt $compareUtc) { throw 'Job start is in the future; budget unavailable' }
+            $receipt.phase = 'budget-receipt'
+            @{schema=1; repository=$env:GITHUB_REPOSITORY; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; jobId=[string]$job.id; jobName=$job.name; status=$job.status; runnerName=$job.runner_name; startedAt=$started.ToString('o'); retrievedAt=$compareUtc.ToString('o'); configuredTimeoutMs=1500000; source='GitHub Actions list jobs for workflow run attempt'} | ConvertTo-Json | Set-Content -Encoding utf8 evidence/physical-job-budget.json
+            $receipt.admitted = $true
+            $receipt.phase = 'complete'
+          } catch {
+            $metadataFailure = $_
+            $receipt.error = $_.Exception.Message
+            $receipt.errorPhase = $receipt.phase
+            if ($_.Exception.Response) { $receipt.httpStatus = [int]$_.Exception.Response.StatusCode }
+            throw
+          } finally {
+            $receipt.endedUtc = [DateTimeOffset]::UtcNow.ToString('o')
+            try { $receipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 evidence/job-clock-diagnostic.json }
+            catch {
+              Write-Warning "Job clock diagnostic receipt could not be retained: $($_.Exception.Message)"
+              if (-not $metadataFailure) { throw }
+            }
+          }
       - name: Start Local and run the physical app control in one process scope
+        id: physical-app-control
         shell: pwsh
         run: |
           Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile C:/tmp/bs-local.zip
@@ -166,7 +233,38 @@ jobs:
       - name: Collect session identity
         if: always()
         shell: pwsh
-        run: Copy-Item C:/tmp/helper/session-id evidence/session-id -ErrorAction SilentlyContinue
+        env:
+          JOB_CLOCK_STEP_OUTCOME: ${{ steps.job-clock-metadata.outcome }}
+          PHYSICAL_CONTROL_STEP_OUTCOME: ${{ steps.physical-app-control.outcome }}
+        run: |
+          Copy-Item C:/tmp/helper/session-id evidence/session-id -ErrorAction SilentlyContinue
+          if ($env:PICKER_LONG_DWELL_MS -eq '90000') {
+            $identityPresent = Test-Path C:/tmp/helper/session-id
+            $sessionReceipt = @{schema=1; observedUtc=[DateTimeOffset]::UtcNow.ToString('o'); jobClockStepOutcome=$env:JOB_CLOCK_STEP_OUTCOME; physicalControlStepOutcome=$env:PHYSICAL_CONTROL_STEP_OUTCOME; localSessionIdFilePresent=[bool]$identityPresent; providerQueried=$false}
+            try {
+              $sessionReceipt.identityRawReadStatus = 'not-attempted; local file absent'
+              $sessionReceipt.identityEmptyStatus = 'unknown; not read'
+              if ($identityPresent) {
+                try {
+                  $identityRaw = Get-Content C:/tmp/helper/session-id -Raw -ErrorAction Stop
+                  $sessionReceipt.identityRawReadStatus = if ($null -eq $identityRaw) { 'read-returned-null' } else { 'read-succeeded' }
+                  $identity = ([string]$identityRaw).Trim()
+                  $sessionReceipt.identityEmptyStatus = if ($identity.Length -eq 0) { 'empty-after-trim' } else { 'nonempty-after-trim' }
+                  if ($identity.Length -gt 0) { $sessionReceipt.localSessionId = $identity }
+                } catch {
+                  $sessionReceipt.identityRawReadStatus = 'read-failed'
+                  $sessionReceipt.identityReadError = $_.Exception.Message
+                }
+              }
+              if ($env:PHYSICAL_CONTROL_STEP_OUTCOME -eq 'skipped') {
+                $sessionReceipt.allocationObservation='Physical app control was skipped; its session POST and DELETE did not run. A local identity file cannot establish ownership for this attempt.'
+              } else {
+                $sessionReceipt.allocationObservation='Physical app control was not skipped; absent, empty, or unreadable local identity leaves provider allocation unknown. Inspect the control and cleanup receipts.'
+              }
+            } finally {
+              $sessionReceipt | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 evidence/natural90-phase-session-receipt.json
+            }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
