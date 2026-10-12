@@ -39,12 +39,13 @@ visual_row() {
     "evidence/vm/$label-ocr.tsv" evidence/vm/installed-appnames.json "evidence/vm/$label-visual.json" > "evidence/vm/$label-point.txt"
 }
 click_row() {
-  local label=$1 x y kind extra
+  local label=$1 button=${2:-left} x y kind extra
+  [[ "$button" == left || "$button" == right ]]
   read -r x y kind extra < "evidence/vm/$label-point.txt"
   [[ -z "$extra" && "$x" =~ ^[0-9]+$ && "$y" =~ ^[0-9]+$ && "$x" -lt 1280 && "$y" -lt 800 ]]
   qevent "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":$((x * 32767 / 1279))}},{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":$((y * 32767 / 799))}}]}}"
-  qevent '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":true,"button":"left"}}]}}'
-  qevent '{"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"down":false,"button":"left"}}]}}'
+  qevent "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"btn\",\"data\":{\"down\":true,\"button\":\"$button\"}}]}}"
+  qevent "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"btn\",\"data\":{\"down\":false,\"button\":\"$button\"}}]}}"
   sleep 1
 }
 identity() {
@@ -116,11 +117,19 @@ sleep 8
 action 03-desktop-prompts desktop
 guest "nohup nautilus /home/probe/Documents >>/home/probe/3417-nautilus.log 2>&1 </dev/null &"
 sleep 3
-key ctrl-a
+record running-open-with
+capture 03-visible-file
+[[ "$(identify -format '%wx%h' evidence/vm/03-visible-file.png)" == 1280x800 ]]
+# File selection uses the unique rendered fixture in the full screenshot.
+# These are screen bounds, not GTK Wayland's unavailable native file bounds.
+printf '[0,0,1280,800]\n' > evidence/vm/03-visible-file-screen-bounds.json
+timeout 15 tesseract evidence/vm/03-visible-file.png evidence/vm/03-visible-file-ocr --psm 11 tsv > evidence/vm/03-visible-file-ocr.log 2>&1
+node support/diagnostics/3417-visual.cjs file evidence/vm/03-visible-file-screen-bounds.json \
+  evidence/vm/03-visible-file-ocr.tsv unused evidence/vm/03-visible-file-visual.json > evidence/vm/03-visible-file-point.txt
+click_row 03-visible-file
 capture 03-documents-selected
 tree 03-documents-selected
-record running-open-with
-key shift-f10
+click_row 03-visible-file right
 capture 04-context-menu
 tree 04-context-menu
 if ! action 05-open-with menu "'Open With…'"; then
