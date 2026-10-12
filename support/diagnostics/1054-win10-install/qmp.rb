@@ -13,7 +13,7 @@ class GuestQMP
       loop do
         budget
         begin
-          @socket = Timeout.timeout(budget) { UNIXSocket.new(path) }
+          @socket = Timeout.timeout(budget) { path.is_a?(Array) ? TCPSocket.new(*path) : UNIXSocket.new(path) }
           break
         rescue Errno::ENOENT, Errno::ECONNREFUSED
           sleep [0.1, budget].min
@@ -21,7 +21,8 @@ class GuestQMP
       end
       greeting = read_message
       version = greeting.dig('QMP', 'version', 'qemu')
-      raise 'Unexpected QMP greeting/version' unless version && version.values_at('major', 'minor', 'micro') == [11, 1, 0]
+      expected = ENV['ISSUE1054_HOST'] == 'linux' ? [8, 2, 2] : [11, 1, 0]
+      raise 'Unexpected QMP greeting/version' unless version && version.values_at('major', 'minor', 'micro') == expected
       record('greeting', version)
       command('qmp_capabilities')
     rescue StandardError

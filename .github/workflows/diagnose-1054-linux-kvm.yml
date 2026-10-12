@@ -1,0 +1,58 @@
+name: Issue 1054 Windows 10 Linux KVM readiness
+on:
+  workflow_dispatch:
+  # Registration only: the job condition below admits manual dispatch alone.
+  push:
+    branches: [codex/bug-1054-reselection-diagnostic]
+    paths: [.github/workflows/diagnose-1054-linux-kvm.yml]
+permissions:
+  contents: read
+concurrency:
+  group: issue-1054-linux-kvm
+  cancel-in-progress: false
+jobs:
+  readiness:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_DIR: ${{ runner.temp }}/issue1054-linux-private
+      ISSUE1054_HOST: linux
+      INSTALL_ACCELERATION: kvm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Entire prelaunch allowance (14 minutes)
+        env:
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence/1054-linux-kvm
+        run: timeout --signal=TERM --kill-after=5s 840s bash support/diagnostics/1054-linux-kvm/prepare.sh
+      - name: Windows and official app readiness (40 minutes including GUI)
+        env:
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence/1054-linux-kvm/install
+          CAPABILITY_DIR: ${{ github.workspace }}/evidence/1054-linux-kvm
+          QEMU: /usr/bin/qemu-system-x86_64
+          ISSUE1054_LINUX_LAUNCHER: ${{ github.workspace }}/support/diagnostics/1054-linux-kvm/launch-qemu.sh
+        run: |
+          xvfb-run -a -s '-screen 0 1280x960x24 -nolisten tcp' /usr/bin/ruby support/diagnostics/1054-win10-install/install.rb "$EVIDENCE_DIR" "$PRIVATE_DIR" "$PRIVATE_DIR/windows.iso"
+      - name: Scoped cleanup and receipts
+        if: always()
+        timeout-minutes: 3
+        run: timeout --signal=TERM --kill-after=5s 150s bash support/diagnostics/1054-linux-kvm/cleanup.sh
+      - name: Allowlisted evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue1054-linux-kvm-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            evidence/1054-linux-kvm/**/*.txt
+            evidence/1054-linux-kvm/**/*.json
+            evidence/1054-linux-kvm/**/*.jsonl
+            evidence/1054-linux-kvm/**/*.tsv
+            evidence/1054-linux-kvm/**/*.sha256
+            evidence/1054-linux-kvm/**/*.bmp
+            evidence/1054-linux-kvm/**/*.png
+            evidence/1054-linux-kvm/**/*.mp4
+            evidence/1054-linux-kvm/**/*.mkv
+            evidence/1054-linux-kvm/**/*.stderr
+            evidence/1054-linux-kvm/**/*.stdout

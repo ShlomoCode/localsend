@@ -3,6 +3,7 @@ require 'time'
 require 'timeout'
 require 'digest'
 require 'ipaddr'
+require 'rbconfig'
 require_relative 'vnc'
 require_relative 'qmp'
 out, private_dir, iso = ARGV
@@ -10,17 +11,27 @@ serial = File.join(out, 'guest-serial.txt')
 frames = File.join(out, 'frames')
 Dir.mkdir(frames)
 qemu = ENV.fetch('QEMU', 'qemu-system-x86_64')
-raise 'QEMU version differs from measured TCG control 11.1.0' unless File.read(File.join(ENV.fetch('CAPABILITY_DIR'), 'qemu-version.txt')).start_with?('QEMU emulator version 11.1.0')
+linux = ENV['ISSUE1054_HOST'] == 'linux'
+expected_version = linux ? '8.2.2' : '11.1.0'
+raise 'QEMU version differs from selected control' unless File.read(File.join(ENV.fetch('CAPABILITY_DIR'), 'qemu-version.txt')).start_with?("QEMU emulator version #{expected_version}")
 acceleration = ENV.fetch('INSTALL_ACCELERATION', 'hvf')
-raise 'Unsupported installation acceleration' unless %w[hvf tcg].include?(acceleration)
-accelerator_args = acceleration == 'hvf' ? ['-accel', 'hvf', '-cpu', 'host'] : ['-accel', 'tcg,thread=multi', '-cpu', 'max']
+raise 'Unsupported installation acceleration' unless linux ? acceleration == 'kvm' : %w[hvf tcg].include?(acceleration)
+accelerator_args = if linux
+  ['-accel', 'kvm', '-cpu', 'host']
+elsif acceleration == 'hvf'
+  ['-accel', 'hvf', '-cpu', 'host']
+else
+  ['-accel', 'tcg,thread=multi', '-cpu', 'max']
+end
+qmp_endpoint = linux ? ['127.0.0.1', 4444] : File.join(private_dir, 'qmp.sock')
+qmp_argument = linux ? 'tcp:127.0.0.1:4444,server=on,wait=off' : "unix:#{qmp_endpoint},server=on,wait=off"
 args = [qemu, '-machine', 'pc', *accelerator_args, '-smp', '2', '-m', '4096',
   '-drive', "file=#{private_dir}/windows.qcow2,format=qcow2,if=ide,index=0",
   '-drive', "file=#{iso},media=cdrom,if=ide,index=2,readonly=on",
   '-drive', "file=#{private_dir}/seed.iso,media=cdrom,if=ide,index=3,readonly=on",
   '-boot', 'order=c,once=d', '-netdev', 'user,id=net0',
   '-device', 'e1000,netdev=net0,id=nic0,mac=52:54:00:12:34:56',
-  '-qmp', "unix:#{private_dir}/qmp.sock,server=on,wait=off", '-S', '-vga', 'std',
+  '-qmp', qmp_argument, '-S', '-vga', 'std',
   '-usb', '-device', 'usb-tablet', '-display', 'none', '-vnc', '127.0.0.1:1',
   '-serial', "file:#{serial}"]
 # The private paths reveal no credentials; never copy the seed or guest disk.
@@ -30,10 +41,11 @@ log = File.open(File.join(out, 'qemu-stderr.txt'), 'w')
 # dependency or ISO preparation must not silently shorten the guest experiment.
 preparation_start = Time.iso8601(File.readlines(File.join(ENV.fetch('CAPABILITY_DIR'), 'stages.tsv')).first.split("\t").first)
 preparation_seconds = Time.now.utc - preparation_start
-raise 'Preparation exceeded 14 minutes; insufficient reserved job time for 90-minute guest gate' if preparation_seconds > 840
+raise "Preparation exceeded 14 minutes; insufficient reserved job time for #{linux ? 40 : 90}-minute guest gate" if preparation_seconds > 840
 launch_utc = Time.now.utc.iso8601
 launch_monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-deadline = launch_monotonic + 5400
+guest_seconds = linux ? 2400 : 5400
+deadline = launch_monotonic + guest_seconds
 guest = nil
 qmp = nil
 def budget(deadline, maximum)
@@ -56,7 +68,8 @@ end
 def convert_frame(path, deadline)
   png = path.sub(/\.bmp$/, '.png')
   allowance = budget(deadline, 20)
-  converter = Process.spawn('sips', '-s', 'format', 'png', path, '--out', png, out: File::NULL)
+  converter_args = ENV['ISSUE1054_HOST'] == 'linux' ? ['ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', path, '-frames:v', '1', png] : ['sips', '-s', 'format', 'png', path, '--out', png]
+  converter = Process.spawn(*converter_args, out: File::NULL)
   begin
     _, status = Timeout.timeout(allowance) { Process.waitpid2(converter) }
     raise 'PNG conversion failed' unless status.success?
@@ -69,14 +82,21 @@ def observed_text(path, private_dir, deadline)
   output = path.sub(/\.png$/, '.ocr.raw.json')
   error = path.sub(/\.png$/, '.ocr.stderr.txt')
   allowance = budget(deadline, 20)
-  pid = Process.spawn(File.join(private_dir, 'setup-ocr'), path, out: output, err: error)
+  ocr_args = if ENV['ISSUE1054_HOST'] == 'linux'
+    [RbConfig.ruby, File.expand_path('../1054-linux-kvm/ocr.rb', __dir__), path]
+  else
+    [File.join(private_dir, 'setup-ocr'), path]
+  end
+  ocr_environment = ENV['ISSUE1054_HOST'] == 'linux' ? {'OCR_STAGE_SECONDS' => allowance.to_s, 'LOCALSEND_STAGE_DEADLINE_MONOTONIC' => deadline.to_s} : {}
+  pid = Process.spawn(ocr_environment, *ocr_args, out: output, err: error, pgroup: true)
   begin
     _, status = Timeout.timeout(allowance) { Process.waitpid2(pid) }
     raise "Setup OCR failed; inspect #{File.basename(error)}" unless status.success?
     budget(deadline, 20)
-    JSON.parse(File.read(output))
+    parsed = JSON.parse(File.read(output))
+    ENV['ISSUE1054_HOST'] == 'linux' ? parsed.fetch('lines').select { |line| line.fetch('confidence') >= 0.5 }.map { |line| line.fetch('text') } : parsed
   ensure
-    stop_child(pid)
+    stop_child(pid, true)
   end
 end
 def guest_records(serial)
@@ -123,19 +143,26 @@ def qualified_network_ready(records, waiting)
 end
 begin
   # Cleanup covers every operation after spawn, including the paused QMP gate.
-  guest = Process.spawn(*args, out: log, err: log)
+  if linux
+    %w[INT TERM].each { |signal| Signal.trap(signal) { raise Interrupt, "Received #{signal}; cleaning owned Windows guest" } }
+  end
+  if linux
+    guest = Process.spawn('/bin/bash', ENV.fetch('ISSUE1054_LINUX_LAUNCHER'), 'windows', out: log, err: log, pgroup: true)
+  else
+    guest = Process.spawn(*args, out: log, err: log)
+  end
   File.write(File.join(out, 'preparation-timing.json'), JSON.pretty_generate(launch_utc: launch_utc,
-    guest_pid: guest, preparation_seconds: preparation_seconds, guest_budget_seconds: 5400,
-    initial_boot_gate_seconds: 720, checkpoint_minutes: [45, 60, 75, 90],
+    guest_pid: guest, preparation_seconds: preparation_seconds, guest_budget_seconds: guest_seconds,
+    initial_boot_gate_seconds: 720, checkpoint_minutes: linux ? [10, 20, 30, 40] : [45, 60, 75, 90],
     scope: 'Finite installation/activation/window preparation budget; not a transfer experiment.'))
-  qmp = GuestQMP.new(File.join(private_dir, 'qmp.sock'), File.join(out, 'qmp-transitions.jsonl'),
+  qmp = GuestQMP.new(qmp_endpoint, File.join(out, 'qmp-transitions.jsonl'),
     [deadline, Process.clock_gettime(Process::CLOCK_MONOTONIC) + 20].min)
   qmp.command('set_link', {'name' => 'nic0', 'up' => false})
   qmp.command('cont')
   qmp.close
   qmp = nil
   boot_deadline = launch_monotonic + 720
-  checkpoints = [45, 60, 75, 90]
+  checkpoints = linux ? [10, 20, 30, 40] : [45, 60, 75, 90]
   setup_observed = false
   count = 0
   next_capture = 0
@@ -183,7 +210,7 @@ begin
       remaining_marker = (110_000 - elapsed) / 1000.0 - marker_age
       raise 'Stale guest network-wait marker; no reconnect' unless remaining_marker > 0
       reconnect_deadline = [reconnect_deadline, Process.clock_gettime(Process::CLOCK_MONOTONIC) + remaining_marker].min
-      qmp = GuestQMP.new(File.join(private_dir, 'qmp.sock'), File.join(out, 'qmp-transitions.jsonl'), reconnect_deadline)
+      qmp = GuestQMP.new(qmp_endpoint, File.join(out, 'qmp-transitions.jsonl'), reconnect_deadline)
       qmp.command('set_link', {'name' => 'nic0', 'up' => true})
       qmp.close
       qmp = nil
@@ -210,7 +237,7 @@ begin
       end
       File.open(File.join(out, 'timing-checkpoints.jsonl'), 'a') { |file| file.puts JSON.generate(checkpoint) }
     end
-    raise 'Windows installation/activation/window deadline exceeded (90 minutes)' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+    raise "Windows installation/activation/window deadline exceeded (#{guest_seconds / 60} minutes)" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
     ready = records.find { |record| record['stage'] == 'app-window-ready' }
     if ready
       raise 'App readiness preceded network restoration' unless network_restored && network_wait
@@ -248,8 +275,9 @@ begin
         end
         # Only one ordinary recovery action; the helper independently requires
         # this exact header and a unique Next whole line in fresh original pixels.
-        action = Process.spawn({'ISSUE1054_RECOVERY_DEADLINE' => deadline.to_s}, '/usr/bin/ruby', File.join(__dir__, 'recovery-action.rb'),
-          File.join(out, 'oobe-recovery'), File.join(private_dir, 'recovery-ocr'), pgroup: true)
+        recovery_ocr = linux ? File.expand_path('../1054-linux-kvm/ocr.rb', __dir__) : File.join(private_dir, 'recovery-ocr')
+        action = Process.spawn({'ISSUE1054_RECOVERY_DEADLINE' => deadline.to_s}, RbConfig.ruby, File.join(__dir__, 'recovery-action.rb'),
+          File.join(out, 'oobe-recovery'), recovery_ocr, pgroup: true)
         begin
           action_budget = [160, deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)].min
           raise 'Preparation deadline reached while starting OOBE recovery action' unless action_budget > 0
@@ -266,8 +294,23 @@ begin
     end
     sleep budget(deadline, 2)
   end
+  gui_script = linux ? File.expand_path('../1054-linux-kvm/gui.sh', __dir__) : nil
+  gui_deadline = linux ? [deadline, Process.clock_gettime(Process::CLOCK_MONOTONIC) + 120].min : deadline
+  if linux
+    raise 'Insufficient remaining guest budget for two-minute GUI check' unless deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC) >= 120
+    ENV['LOCALSEND_GUI_DEADLINE_MONOTONIC'] = gui_deadline.to_s
+    %w[start record].each do |operation|
+      helper = Process.spawn('/bin/bash', gui_script, operation, out, budget(gui_deadline, 120).to_s, pgroup: true)
+      begin
+        _, status = Timeout.timeout(budget(gui_deadline, 120)) { Process.waitpid2(helper) }
+        raise "Linux GUI #{operation} gate failed" unless status.success?
+      ensure
+        stop_child(helper, true)
+      end
+    end
+  end
   # Capture normal OS input response while preserving the original application.
-  input_deadline = [deadline, Process.clock_gettime(Process::CLOCK_MONOTONIC) + 20].min
+  input_deadline = [gui_deadline, Process.clock_gettime(Process::CLOCK_MONOTONIC) + 20].min
   Timeout.timeout(budget(input_deadline, 20)) do
     client = GuestVNC.new
     begin
@@ -283,6 +326,20 @@ begin
     end
   end
   convert_frame(File.join(frames, 'run-dialog.bmp'), input_deadline)
+  if linux
+    frame(File.join(frames, 'app-after-run.bmp'), gui_deadline)
+    run_lines = observed_text(File.join(frames, 'run-dialog.png'), private_dir, gui_deadline)
+    app_lines = observed_text(File.join(frames, 'app-after-run.png'), private_dir, gui_deadline)
+    raise 'Actual Run dialog was not observed' unless run_lines.any? { |line| line == 'Run' } && run_lines.any? { |line| line.match?(/Open:/) }
+    raise 'Actual LocalSend pixels missing after Escape' unless app_lines.any? { |line| line.include?('LocalSend') }
+    helper = Process.spawn('/bin/bash', gui_script, 'stop', out, budget(gui_deadline, 120).to_s, pgroup: true)
+    begin
+      _, status = Timeout.timeout(budget(gui_deadline, 120)) { Process.waitpid2(helper) }
+      raise 'Linux GUI recording validation failed' unless status.success?
+    ensure
+      stop_child(helper, true)
+    end
+  end
   File.write(File.join(out, 'gui-stage.json'), JSON.pretty_generate(stage: 'official-window-and-vnc-captured', record: ready,
     limitation: 'Inspect frames. Native window handle alone does not establish correct rendering, completed onboarding, or transfer.'))
   # A parent-owned same-job script may continue the actual-app pair while this VM
@@ -312,7 +369,18 @@ ensure
   ensure
     if guest
       begin
-        stop_child(guest)
+        if linux
+          cleanup = Process.spawn('/bin/bash', File.expand_path('../1054-linux-kvm/cleanup.sh', __dir__), '--install-only', pgroup: true)
+          begin
+            _, status = Timeout.timeout(30) { Process.waitpid2(cleanup) }
+            raise 'Guarded privileged Windows cleanup failed' unless status.success?
+          ensure
+            stop_child(cleanup, true)
+          end
+          begin; Timeout.timeout(5) { Process.wait(guest) }; rescue Errno::ECHILD; end
+        else
+          stop_child(guest)
+        end
         File.write(File.join(out, 'guest-cleanup.json'), JSON.pretty_generate(utc: Time.now.utc.iso8601, guest_pid: guest, kill_and_wait: 'completed'))
       rescue StandardError => cleanup_error
         File.write(File.join(out, 'guest-cleanup.json'), JSON.pretty_generate(utc: Time.now.utc.iso8601, guest_pid: guest, error: cleanup_error.class.to_s))

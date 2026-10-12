@@ -2,6 +2,7 @@ require 'json'
 require 'time'
 require 'timeout'
 require 'digest'
+require 'rbconfig'
 require_relative 'vnc'
 
 out, ocr = ARGV
@@ -25,7 +26,12 @@ def capture(client, out, name)
   path = File.join(out, "#{name}.bmp")
   Timeout.timeout(20) { client.screenshot(path) }
   captured = Time.now.utc
-  bounded_child(['sips', '-s', 'format', 'png', path, '--out', path.sub(/\.bmp$/, '.png')], out, "#{name}-convert")
+  converter = if ENV['ISSUE1054_HOST'] == 'linux'
+    ['ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', path, '-frames:v', '1', path.sub(/\.bmp$/, '.png')]
+  else
+    ['sips', '-s', 'format', 'png', path, '--out', path.sub(/\.bmp$/, '.png')]
+  end
+  bounded_child(converter, out, "#{name}-convert")
   [path, captured]
 end
 begin
@@ -33,7 +39,13 @@ begin
   path, captured = capture(client, out, 'before')
   record[:before_utc] = captured.iso8601(6)
   record[:before_sha256] = Digest::SHA256.file(path).hexdigest
-  bounded_child([ocr, path.sub(/\.bmp$/, '.png')], out, 'before-ocr')
+  if ENV['ISSUE1054_HOST'] == 'linux'
+    ENV['LOCALSEND_STAGE_DEADLINE_MONOTONIC'] = deadline.to_s
+    ENV['OCR_STAGE_SECONDS'] = '20'
+    bounded_child([RbConfig.ruby, ocr, path.sub(/\.bmp$/, '.png')], out, 'before-ocr')
+  else
+    bounded_child([ocr, path.sub(/\.bmp$/, '.png')], out, 'before-ocr')
+  end
   data = JSON.parse(File.read(File.join(out, 'before-ocr.stdout')))
   width, height = File.binread(path, 54).byteslice(18, 8).unpack('l<2')
   raise 'OCR/frame geometry mismatch' unless data['origin'] == 'top-left' && data['width'] == width && data['height'] == height.abs
