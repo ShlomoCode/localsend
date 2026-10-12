@@ -75,7 +75,7 @@ trap cleanup EXIT
 trap 'exit 143' TERM INT
 printf 'apt\n' > evidence/stage.txt
 # The global 870-second work deadline takes precedence over every stage ceiling.
-timeout --signal=TERM --kill-after=5s 355s sudo bash -c 'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y xfce4 xfce4-terminal dbus-x11 xvfb xauth x11-utils xdotool scrot ffmpeg tesseract-ocr tesseract-ocr-eng libfuse2 libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgl1-mesa-dri network-manager at-spi2-core' > evidence/apt.log 2>&1
+timeout --signal=TERM --kill-after=5s 355s sudo bash -c 'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y xfce4 xfce4-terminal dbus-x11 xvfb xauth x11-utils xdotool scrot ffmpeg tesseract-ocr tesseract-ocr-eng libfuse2 libayatana-appindicator3-1 libsecret-1-0 libopengl0 libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri network-manager at-spi2-core' > evidence/apt.log 2>&1
 printf 'download\n' > evidence/stage.txt
 timeout --signal=TERM --kill-after=5s 115s bash -c '
   set -euo pipefail
@@ -97,7 +97,10 @@ timeout 5 busctl --system list > evidence/system-bus.txt
 test -c /dev/fuse
 if command -v fusermount >/dev/null; then timeout 5 fusermount --version > evidence/fuse.txt; else timeout 5 fusermount3 --version > evidence/fuse.txt; fi
 for command in startxfce4 xfce4-terminal Xvfb dbus-run-session xdotool xprop xwininfo scrot ffmpeg ffprobe tesseract; do command -v "$command"; done > evidence/tool-paths.txt
-timeout 5 dpkg-query -W xfce4 xfce4-session xfwm4 network-manager libfuse2 xvfb xfce4-terminal > evidence/package-versions.txt
+timeout 5 dpkg-query -W xfce4 xfce4-session xfwm4 network-manager libfuse2 libgles2 xvfb xfce4-terminal > evidence/package-versions.txt
+timeout 5 dpkg-query -L libgles2 > evidence/libgles2-files.txt
+timeout 5 ldconfig -p > evidence/native-library-cache.txt
+grep -F 'libGLESv2.so.2' evidence/native-library-cache.txt > evidence/GLES-runtime-control.txt
 # setsid provides an exact owned process group. The supervisor remains alive
 # after the observation exits, so its PID/start identity is available to cleanup.
 export ISSUE1035_DESKTOP_SECONDS=$((desktop_deadline - SECONDS))
