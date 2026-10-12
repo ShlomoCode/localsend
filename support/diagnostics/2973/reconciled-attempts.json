@@ -59,5 +59,14 @@
     "classification": "harness-before-picker",
     "androidSettingsChanged": false,
     "resolution": "Four stable native Settings originals show exact Settings title in collapsing_appbar_extended_title under collapsing_app_bar, with action_bar ViewGroup rather than Toolbar class. Native coordinator ScrollView wraps resource-identified RecyclerView. No list swipe or setting change occurred. Provider done and independent cleanup unresolved false. Correction recognizes actual native header ancestry and only the uniquely observed RecyclerView; parent, slider and viewport gates remain."
+  },
+  {
+    "runId": "38209910859",
+    "headSha": "4bd8e1008fb6d9f528b89589224e0496ec46e1a2",
+    "sessionId": "1a8b1b277b8b85a666573cdf1cffbd2ac0cec526",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "androidSettingsChanged": false,
+    "resolution": "Native main Settings scrolling and Display entry succeeded. Four stable Display originals show visible brightness SeekBar and right-side switches; Screen zoom below viewport. Broad slider-presence guard stopped swipes before any value-control input. Provider done and independent cleanup unresolved false. Correction derives a native-list swipe corridor disjoint from every visible setting control, retaining parent/viewport and finite bounds."
   }
 ]

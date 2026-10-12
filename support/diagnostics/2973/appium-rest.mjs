@@ -251,7 +251,6 @@ if (mode === 'create') {
         if (targets.length === 1) { await touch(targets[0], `Native Settings ${label}`); return; }
         if (targets.length > 1) throw new Error(`Native Settings ${label} identity ambiguous`);
         if (attempt === 3 || swipes === 2) break;
-        if (screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true' && /SeekBar|Slider/.test(node.class ?? ''))) continue;
         const lists = screen.nodes.filter(node => node.package === 'com.android.settings' && node.scrollable === 'true' && node.enabled === 'true' &&
           node.displayed === 'true' && node.class === 'androidx.recyclerview.widget.RecyclerView' && node['resource-id'] === 'com.android.settings:id/recycler_view');
         if (lists.length !== 1) throw new Error(`Native Settings ${label} list not uniquely observable; no guessed swipe`);
@@ -260,8 +259,25 @@ if (mode === 'create') {
         const [x1, y1, x2, y2] = bounds.slice(1).map(Number);
         const { value: viewport } = await request('GET', prefix + '/window/rect');
         if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || x2 <= x1 || y2 <= y1 || x1 < 0 || y1 < 0 || x2 > viewport.width || y2 > viewport.height) throw new Error('Native Settings list is not fully inside current viewport');
-        const x = Math.floor((x1 + x2) / 2), y = Math.floor(y1 + (y2 - y1) * 0.8), endY = Math.floor(y1 + (y2 - y1) * 0.3);
-        events.push({ label: `Scroll observed native Settings list toward ${label}`, nativeNode: lists[0], x, y, endY, at: new Date().toISOString() });
+        const y = Math.floor(y1 + (y2 - y1) * 0.8), endY = Math.floor(y1 + (y2 - y1) * 0.3);
+        const controls = screen.nodes.filter(node => node.package === 'com.android.settings' && node.displayed === 'true' &&
+          (/SeekBar|Slider|Switch|CheckBox|RadioButton/.test(node.class ?? '') || node.checkable === 'true'));
+        let corridors = [[x1 + 10, x2 - 10]];
+        for (const control of controls) {
+          const controlBounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(control.bounds ?? '');
+          if (!controlBounds) throw new Error('Visible native setting control bounds unavailable; no list swipe');
+          const [left, top, right, bottom] = controlBounds.slice(1).map(Number);
+          if (right <= left || bottom <= top) throw new Error('Visible native setting control bounds invalid; no list swipe');
+          if (bottom + 10 < endY || top - 10 > y) continue;
+          corridors = corridors.flatMap(([start, end]) => {
+            if (right + 10 <= start || left - 10 >= end) return [[start, end]];
+            return [[start, Math.min(end, left - 10)], [Math.max(start, right + 10), end]].filter(([a, b]) => b - a >= 40);
+          });
+        }
+        corridors = corridors.filter(([start, end]) => end - start >= 40).sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+        if (!corridors.length) throw new Error('No observed native list swipe corridor clear of setting controls');
+        const x = Math.floor((corridors[0][0] + corridors[0][1]) / 2);
+        events.push({ label: `Scroll observed native Settings list toward ${label}`, nativeNode: lists[0], avoidedNativeControls: controls, safeHorizontalCorridor: corridors[0], x, y, endY, at: new Date().toISOString() });
         await writeFile(resolve(evidence, 'observation-native-targets.json'), JSON.stringify(events, null, 2));
         await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
           { type: 'pointerMove', duration: 0, x, y }, { type: 'pointerDown', button: 0 }, { type: 'pointerMove', duration: 600, x, y: endY }, { type: 'pointerUp', button: 0 },
