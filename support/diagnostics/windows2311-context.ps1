@@ -5,6 +5,14 @@ if($QualifyFavoritesPointerOnly -and ($env:ISSUE2311_SENDER_FAVORITES_QUALIFICAT
  $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or $CompletePrevious -or $FixtureExtension -ne 'jpg')){
  throw 'Sender pointer qualification requires its isolated job and JPEG fixture; no recipient input is permitted'
 }
+$physicalRemainingFavorites=$env:ISSUE2311_PHYSICAL_REMAINING_FAVORITES -eq 'true'
+if($physicalRemainingFavorites -and ($QualifyFavoritesPointerOnly -or $env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -eq 'true' -or
+ $env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or
+ $env:DIAGNOSTIC_RUNNER_LABEL -ne 'windows-2022' -or $env:VALIDATION_SUITE -ne 'remaining-media' -or
+ $Case -notin @('jpeg-off','video-on','video-off') -or
+ ($Case -eq 'jpeg-off' -and $FixtureExtension -ne 'jpg') -or ($Case -ne 'jpeg-off' -and $FixtureExtension -ne 'mp4'))){
+ throw 'Physical native Favorites delivery is restricted to the three remaining media cases on the authorized Windows 2022 job'
+}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Windows.Forms,System.Drawing
 $ui="$PSScriptRoot/windows3393-ui.ps1"
 $control=Get-Content evidence/windows-control-send-action.json -Raw|ConvertFrom-Json
@@ -188,7 +196,7 @@ SaveSenderBoundary 'after-send-to'
 & $ui -Action snapshot -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -Label "windows-$Case-image-selected"
 SaveSemanticObservation 'before-favorites'
 SaveSenderBoundary 'before-favorites'
-& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseNativePointer:$QualifyFavoritesPointerOnly
+& $ui -Action click -ExpectedPid $senderPid -ExpectedHwnd $senderHwnd -X 246 -Y 266 -Label "windows-$Case-favorites" -RequireForeground -UseNativePointer:($QualifyFavoritesPointerOnly -or $physicalRemainingFavorites)
 SaveSemanticObservation 'before-send'
 SaveSenderBoundary 'before-send'
 # A queued mouse gesture and an opaque accessibility pane do not establish the

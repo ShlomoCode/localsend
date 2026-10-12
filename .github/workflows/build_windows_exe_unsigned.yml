@@ -190,6 +190,7 @@ jobs:
       PICKER_LONG_DWELL_MS: ${{ inputs.picker_dwell_ms || '10000' }}
       BS_OS: ${{ inputs.bs_os || '15.0' }}
       VALIDATION_SUITE: ${{ inputs.validation_suite || 'png' }}
+      ISSUE2311_PHYSICAL_REMAINING_FAVORITES: ${{ inputs.validation_suite == 'remaining-media' && 'true' || 'false' }}
       MEDIA_FIXTURE_DIRECTORY: ${{ github.workspace }}/media-fixtures
       SCENARIO_MODULE: ${{ github.workspace }}/support/cloud_transport/scenario2311.mjs
       SOURCE_APK_KIND: ${{ inputs.source_apk_kind || 'original-release' }}

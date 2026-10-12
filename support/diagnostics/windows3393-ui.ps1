@@ -1,10 +1,13 @@
 param([string]$Action='snapshot',[int]$X=0,[int]$Y=0,[string]$Label='snapshot',[switch]$RequireForeground,[switch]$UseControlSequence,[uint32]$ExpectedPid=0,[long]$ExpectedHwnd=0,[switch]$UseNativePointer)
 $ErrorActionPreference='Stop'
 if($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -eq 'true' -and $Action -eq 'click' -and !$UseNativePointer){throw 'Only the qualified native Favorites pointer action is permitted in the sender-only job'}
-if($UseNativePointer -and ($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -ne 'true' -or $env:OS -ne 'Windows_NT' -or
+$physicalRemainingFavorites=$env:ISSUE2311_PHYSICAL_REMAINING_FAVORITES -eq 'true' -and
+ $env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -ne 'true' -and $env:VALIDATION_SUITE -eq 'remaining-media' -and
+ $env:DIAGNOSTIC_RUNNER_LABEL -eq 'windows-2022' -and $Label -in @('windows-jpeg-off-favorites','windows-video-on-favorites','windows-video-off-favorites')
+if($UseNativePointer -and (($env:ISSUE2311_SENDER_FAVORITES_QUALIFICATION -ne 'true' -and !$physicalRemainingFavorites) -or $env:OS -ne 'Windows_NT' -or
  $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'ShlomoCode/localsend' -or $Action -ne 'click' -or
  !$ExpectedPid -or !$ExpectedHwnd -or !$RequireForeground -or $UseControlSequence -or $X -ne 246 -or $Y -ne 266)){
- throw 'Native pointer input is restricted to the isolated sender Favorites qualification'
+ throw 'Native pointer input requires the isolated sender qualification or the guarded physical remaining-media Favorites action'
 }
 function Write-DiagnosticPhase([string]$phase){
  @{utc=[DateTime]::UtcNow.ToString('o');phase=$phase}|ConvertTo-Json -Compress|Add-Content "evidence/$Label-phases.jsonl"
