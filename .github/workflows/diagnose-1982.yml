@@ -96,12 +96,16 @@ jobs:
       - name: Verify byte-exact opaque transport mechanics
         timeout-minutes: 2
         run: node support/cloud_transport/control.mjs
+      - name: Generate isolated relay capability for subsequent steps
+        run: |
+          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
       - name: Build isolated helper with unchanged transport source
         timeout-minutes: 4
         run: |
-          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");'
+          node --input-type=module -e 'if (!/^[0-9a-f]{48}$/.test(process.env.RELAY_TOKEN||"")) throw new Error("Relay capability missing before normal helper build");'
           bash support/cloud_transport/build-helper.sh
           sha256sum /tmp/helper/cloud-transport-helper.apk > evidence/helper-apk-sha256.txt
+          node support/diagnostics/1982/helper-config-proof.mjs
       - name: Connect only the owned BrowserStack Local tunnel
         timeout-minutes: 2
         run: |

@@ -17,6 +17,9 @@ assert.equal(readFileSync('current-reuse/provenance/source-sha.txt', 'utf8').tri
 assert.equal(createHash('sha256').update(readFileSync('current-reuse/source-bundle.tar.gz')).digest('hex'), '98f6e749c0eb470b7d2bb4a365f704328ae7dc4bbc6d78ddf2d574dfb63cc20b');
 const token = process.env.RELAY_TOKEN;
 assert(token && /^[0-9a-f]{48}$/.test(token));
+const compiledProof = JSON.parse(readFileSync('evidence/helper-config-proof.json', 'utf8'));
+assert.equal(compiledProof.capabilityMatches,true);
+assert.equal(compiledProof.compiledCapabilitySha256,createHash('sha256').update(token).digest('hex'),'Compiled helper and actual runner capability digest differ; do not allocate');
 assert(/^bs:\/\/[0-9a-f]{40}$/.test(process.env.HELPER_APP || ''));
 assert.equal(provenance.browserstack_app_url, 'bs://6b6263a47e4923fd6caa200636a98f0184e7f928');
 const jobStart = Number(process.env.ISSUE1982_JOB_STARTED_MS);
