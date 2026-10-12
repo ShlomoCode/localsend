@@ -220,6 +220,176 @@ def picker_control(word,label):
     if (focused in visible_choosers or returned_pid!=str(app.pid) or returned_title!="LocalSend"
             or not any(r["text"].lower().strip()=="selection" for r in rows)):
         raise RuntimeError("Chooser cancel did not return to rendered Send page: "+label)
+def capture_observer_policy_phase():
+    phase=out/"observer-policy"; phase.mkdir(exist_ok=True)
+    status=dict(status="started",app_pid=app.pid,window_id=w[-1],native_baseline_during_wait=False)
+    capture=None
+    original_start=pathlib.Path(f"/proc/{app.pid}/stat").read_text().rsplit(") ",1)[1].split()[19]
+    original_exe=os.readlink(f"/proc/{app.pid}/exe")
+    def app_detached():
+        if app.poll() is not None: raise RuntimeError("Original app exited during policy observation")
+        current_start=pathlib.Path(f"/proc/{app.pid}/stat").read_text().rsplit(") ",1)[1].split()[19]
+        if current_start!=original_start or os.readlink(f"/proc/{app.pid}/exe")!=original_exe:
+            raise RuntimeError("Original app identity changed during policy observation")
+        tasks=list(pathlib.Path(f"/proc/{app.pid}/task").glob("*/status"))
+        if not tasks: raise RuntimeError("Original app threads absent")
+        for task in tasks:
+            values=dict(line.split(":",1) for line in task.read_text().splitlines() if ":" in line)
+            if values.get("TracerPid","").strip()!="0" or values.get("State","").strip().split()[0] in ("T","t","Z"):
+                raise RuntimeError("Original app must be detached and running for native observation")
+    def bounded_run(deadline,*args):
+        remaining=deadline-time.monotonic()
+        if remaining<=0: raise RuntimeError("Native policy observation deadline reached")
+        result=run(*args,timeout=min(3,remaining))
+        if result.returncode!=0: raise RuntimeError("Native policy command failed: "+args[0])
+        return result
+    def frame(name,deadline):
+        app_detached()
+        path=out/(name+".png")
+        bounded_run(deadline,"scrot",str(path))
+        result=bounded_run(deadline,"tesseract",str(path),"stdout","--psm","11","tsv")
+        path.with_suffix(".tsv").write_text(result.stdout)
+        rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+        focus=bounded_run(deadline,"xdotool","getwindowfocus").stdout.strip()
+        owner=bounded_run(deadline,"xdotool","getwindowpid",focus).stdout.strip()
+        if owner!=str(app.pid) or focus!=w[-1]:
+            raise RuntimeError("Native policy frame lost original LocalSend focus")
+        log("policy-native-frame",file=path.name,window_id=focus,owner_pid=owner)
+        return rows
+    def modal(rows,marker=None):
+        labels={r["text"].lower().strip() for r in rows}
+        if not {"type","message","cancel","confirm"}.issubset(labels):
+            raise RuntimeError("Full native Text dialog and Cancel/Confirm must be visible")
+        if marker and marker not in labels: raise RuntimeError("Native marker absent from saved pixels: "+marker)
+        cancels=[r for r in rows if r["text"].lower().strip()=="cancel"]
+        if len(cancels)!=1: raise RuntimeError("Native Cancel label is ambiguous")
+        return cancels[0]
+    def wait_modal(name,deadline,marker=None):
+        attempt=0
+        while True:
+            rows=frame(name+"-"+str(attempt),deadline)
+            try:
+                modal(rows,marker)
+                return rows
+            except RuntimeError:
+                if deadline-time.monotonic()<=0.1: raise
+                time.sleep(0.1); attempt+=1
+    def baseline_unresolved(call):
+        records=[]
+        for line in (phase/"none.jsonl").read_text().splitlines():
+            try: records.append(json.loads(line))
+            except json.JSONDecodeError: pass
+        if ((phase/"arm-finished-none").exists() or any(r.get("kind")=="process_exit" for r in records)
+                or any(r.get("kind")=="query" and r.get("call_id")==call for r in records)):
+            raise RuntimeError("Baseline observer completed during native observation; result is inconclusive")
+        identities=json.loads((phase/"root-name-evidence-none"/"process-identities.json").read_text())
+        client=identities["client_pid"]
+        current_start=pathlib.Path(f"/proc/{client}/stat").read_text().rsplit(") ",1)[1].split()[19]
+        if current_start!=identities["client_starttime"] or os.readlink(f"/proc/{client}/exe")!=identities["client_exe"]:
+            raise RuntimeError("Baseline observer identity changed during native observation")
+        log("policy-baseline-unresolved-check",call_id=call,client_pid=client,client_starttime=current_start)
+    def prepare(arm):
+        deadline=time.monotonic()+18
+        rows=frame("policy-"+arm+"-before-open",deadline)
+        labels={r["text"].lower().strip() for r in rows}
+        if {"type","message"}.issubset(labels): raise RuntimeError("Old modal remains before policy arm")
+        hits=[r for r in rows if r["text"].lower().strip()=="text"]
+        if len(hits)!=1 or "selection" not in labels: raise RuntimeError("Policy arm requires rendered Send/Text control")
+        hit=hits[0]; x=int(hit["left"])+int(hit["width"])//2; y=int(hit["top"])+int(hit["height"])//2
+        log("policy-native-text-click",arm=arm,x=x,y=y)
+        bounded_run(deadline,"xdotool","mousemove",str(x),str(y),"click","1")
+        wait_modal("policy-"+arm+"-opened",deadline)
+        bounded_run(deadline,"xdotool","type","--clearmodifiers","--delay","30","precheck")
+        wait_modal("policy-"+arm+"-preobserver-marker",deadline,"precheck")
+        log("policy-native-preobserver-pass",arm=arm,marker="precheck")
+    def native_during_wait(arm,call):
+        deadline=time.monotonic()+18
+        rows=frame("policy-"+arm+"-during-wait-before",deadline); modal(rows,"precheck")
+        baseline_unresolved(call)
+        log("policy-native-marker-input",arm=arm,marker="probecheck")
+        bounded_run(deadline,"xdotool","key","--clearmodifiers","ctrl+a")
+        bounded_run(deadline,"xdotool","type","--clearmodifiers","--delay","30","probecheck")
+        rows=wait_modal("policy-"+arm+"-during-wait-marker",deadline,"probecheck"); cancel=modal(rows,"probecheck")
+        baseline_unresolved(call)
+        x=int(cancel["left"])+int(cancel["width"])//2; y=int(cancel["top"])+int(cancel["height"])//2
+        log("policy-native-cancel-click",arm=arm,x=x,y=y)
+        bounded_run(deadline,"xdotool","mousemove",str(x),str(y),"click","1")
+        attempt=0
+        while True:
+            rows=frame("policy-"+arm+"-during-wait-dismissed-"+str(attempt),deadline)
+            labels={r["text"].lower().strip() for r in rows}
+            send_labels=[r for r in rows if r["text"].lower().strip() in ("selection","text")]
+            unique_send=(len(send_labels)==2 and {r["text"].lower().strip() for r in send_labels}=={"selection","text"}
+                         and all(float(r["conf"])>=90 for r in send_labels))
+            if not {"type","message","cancel","confirm","probecheck"}.intersection(labels) and unique_send: break
+            if deadline-time.monotonic()<=0.1:
+                raise RuntimeError("Native Cancel did not visibly dismiss Text and return to Send")
+            time.sleep(0.1); attempt+=1
+        baseline_unresolved(call)
+        log("policy-native-during-wait-pass",arm=arm,marker="probecheck",cancel_dismissed=True)
+    try:
+        if (out.resolve()!=pathlib.Path("/home/mint/evidence") or not (out/"bootstrap-complete").is_file()
+                or "ID=linuxmint" not in pathlib.Path("/etc/os-release").read_text().splitlines()):
+            raise RuntimeError("Observer policy capture requires staged cloud Mint session")
+        prepare("none")
+        fixture=pathlib.Path(__file__).resolve().parent/"2754-accessibility"/"capture-geometry.sh"
+        env=os.environ.copy(); env["PROBE_CLOUD_GEOMETRY"]="1"
+        command=["timeout","--kill-after=5s","450s","bash",str(fixture),str(app.pid),"observer-policy",str(phase),w[-1]]
+        with (phase/"capture.stdout").open("w") as stdout, (phase/"capture.stderr").open("w") as stderr:
+            capture=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,text=True,stdin=subprocess.DEVNULL)
+            deadline=time.monotonic()+460
+            ready=set(); root_enter_time=None
+            while capture.poll() is None:
+                if time.monotonic()>=deadline: raise RuntimeError("Observer policy capture exceeded original bound")
+                for arm in ("none","states"):
+                    request=phase/("arm-request-"+arm)
+                    if request.is_file() and arm not in ready:
+                        requested=json.loads(request.read_text())
+                        if requested.get("arm")!=arm: raise RuntimeError("Policy arm request mismatch")
+                        if arm=="states":
+                            if not status["native_baseline_during_wait"]:
+                                raise RuntimeError("Baseline native responsiveness gate was not reached")
+                            prepare(arm)
+                        temporary=phase/("arm-ready-"+arm+".tmp")
+                        temporary.write_text(json.dumps(dict(arm=arm,status="ready")))
+                        temporary.replace(phase/("arm-ready-"+arm)); ready.add(arm)
+                if "none" in ready and not status["native_baseline_during_wait"]:
+                    records=[]; path=phase/"none.jsonl"
+                    if path.is_file():
+                        for line in path.read_text().splitlines():
+                            try: records.append(json.loads(line))
+                            except json.JSONDecodeError: pass
+                    entries=[r for r in records if r.get("kind")=="query_enter" and r.get("op")=="GetName"
+                             and r.get("identity",{}).get("path")=="/org/a11y/atspi/accessible/root"]
+                    if entries:
+                        entry=entries[-1]; call=entry["call_id"]
+                        if any(r.get("kind")=="query" and r.get("call_id")==call for r in records):
+                            raise RuntimeError("Baseline Name completed; required unresolved observer condition absent")
+                        if root_enter_time is None: root_enter_time=time.monotonic()
+                        watcher_result=phase/"root-name-evidence-none"/"result.json"
+                        watcher_finished=False
+                        if watcher_result.is_file():
+                            try: watcher_finished=json.loads(watcher_result.read_text()).get("status")=="collected-only"
+                            except json.JSONDecodeError: pass
+                        if time.monotonic()-root_enter_time>=3 and watcher_finished:
+                            log("policy-baseline-name-unresolved",call_id=call,elapsed_seconds=time.monotonic()-root_enter_time)
+                            native_during_wait("none",call); status["native_baseline_during_wait"]=True
+                time.sleep(0.1)
+            status.update(status="capture-finished",returncode=capture.returncode)
+            if capture.returncode!=0 or not status["native_baseline_during_wait"]:
+                raise RuntimeError("Policy process/native responsiveness gates incomplete")
+    except Exception as error:
+        status.update(status="capture-failed",error=type(error).__name__+": "+str(error))
+        log("policy-capture-failed",**status)
+    finally:
+        if capture is not None and capture.poll() is None:
+            capture.terminate()
+            try: capture.wait(timeout=25)
+            except subprocess.TimeoutExpired:
+                capture.kill(); capture.wait(timeout=5)
+        (phase/"native-policy-status.json").write_text(json.dumps(status,indent=2))
+    return status["status"]=="capture-finished" and status.get("returncode")==0
+
 def capture_geometry_phase():
     # Optional accessibility queries occur only after every original timing case.
     # Capture completion is process evidence, not a geometry or speech pass.
@@ -387,7 +557,10 @@ if run("gsettings","get","org.cinnamon.desktop.a11y.applications","screen-keyboa
     raise RuntimeError("UI failed to enable virtual keyboard for stack capture")
 run("xdotool","windowactivate","--sync",w[-1]); time.sleep(2)
 text_case("keyboard-on-stack")
-if os.environ.get("PROBE_CAPTURE_GEOMETRY","0") == "1":
+policy_completed=True
+if os.environ.get("PROBE_OBSERVER_POLICY_DISCRIMINATOR","0") == "1":
+    policy_completed=capture_observer_policy_phase()
+elif os.environ.get("PROBE_CAPTURE_GEOMETRY","0") == "1":
     capture_geometry_phase()
 interaction_completed=True
 if os.environ.get("PROBE_CAPTURE_INTERACTIONS","0") == "1":
@@ -396,3 +569,5 @@ log("completed")
 settings.terminate(); app.terminate()
 if not interaction_completed:
     raise RuntimeError("Requested interaction phase did not complete its process/API gates; inspect separate raw verdicts")
+if not policy_completed:
+    raise RuntimeError("Observer policy/native responsiveness stage did not complete; inspect retained raw evidence")

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Cloud Mint session only. Run after opening the real Text dialog.
+# Cloud Mint session only. Geometry mode starts with the real Text dialog open.
+# Policy mode requests a fresh native Text dialog before each observer birth.
 set -euo pipefail
 # This script compiles and queries an app; reject execution outside the staged
 # Mint guest even if somebody accidentally invokes it from a local checkout.
@@ -16,8 +17,20 @@ label=${2:?label required}
 out=${3:?output directory required}
 [[ $pid =~ ^[1-9][0-9]*$ ]] || exit 2
 mkdir -p "$out"
+policy_mode=${PROBE_OBSERVER_POLICY_DISCRIMINATOR:-0}
+[[ $policy_mode == 0 || $policy_mode == 1 ]] || exit 2
+result_file="$out/geometry-comparison.json"
+if [[ $policy_mode == 1 ]]; then
+  result_file="$out/observer-policy-comparison.json"
+fi
 # Even setup failures have an explicit global result; raw files remain beside it.
-printf '{"probe_status":"incomplete","reason":"capture did not finish"}\n' > "$out/geometry-comparison.json"
+printf '{"probe_status":"incomplete","reason":"capture did not finish"}\n' > "$result_file"
+if [[ $policy_mode == 1 ]]; then
+  [[ ${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0} == 1 ]] || { printf "Policy capture requires the birth evidence watcher\n" >&2; exit 8; }
+  for arm in none states; do
+    [[ ! -e $out/arm-request-$arm && ! -e $out/arm-ready-$arm && ! -e $out/arm-finished-$arm && ! -e $out/arm-started-$arm ]] || exit 3
+  done
+fi
 version=$(pkg-config --modversion atspi-2)
 [[ $version == 2.52.* ]] || { printf "Expected libatspi 2.52.x, found %s\n" "$version" >&2; exit 3; }
 printf "%s\n" "$version" > "$out/libatspi-version.txt"
@@ -29,19 +42,21 @@ pkg-config --cflags --libs atspi-2 glib-2.0 gobject-2.0 > "$out/build-flags.txt"
 # Intentional word splitting for the pkg-config compiler flags.
 cc -std=c11 -Wall -Wextra -O0 -g "$here/geometry-client.c" -o "$out/geometry-client" $(pkg-config --cflags --libs atspi-2 glib-2.0 gobject-2.0) 2> "$out/build.log"
 sha256sum "$here/geometry-client.c" "$out/geometry-client" "$here/x11-window.c" "$out/x11-window" > "$out/fixture-sha256.txt"
-if [[ -n ${4:-} ]]; then
-  window=$4
-else
-  xdotool search --onlyvisible --pid "$pid" > "$out/window-candidates.txt" || true
-  mapfile -t candidates < "$out/window-candidates.txt"
-  [[ ${#candidates[@]} == 1 ]] || { printf "Ambiguous window; supply actual Text dialog window ID explicitly\n" >&2; exit 6; }
-  window=${candidates[0]}
+if [[ $policy_mode == 0 ]]; then
+  if [[ -n ${4:-} ]]; then
+    window=$4
+  else
+    xdotool search --onlyvisible --pid "$pid" > "$out/window-candidates.txt" || true
+    mapfile -t candidates < "$out/window-candidates.txt"
+    [[ ${#candidates[@]} == 1 ]] || { printf "Ambiguous window; supply actual Text dialog window ID explicitly\n" >&2; exit 6; }
+    window=${candidates[0]}
+  fi
+  [[ $window =~ ^[0-9]+$ ]] || exit 2
+  xdotool getwindowpid "$window" > "$out/window-pid.txt"
+  [[ $(cat "$out/window-pid.txt") == "$pid" ]] || { printf "Window PID mismatch\n" >&2; exit 7; }
+  printf "%s\n" "$window" > "$out/window-id.txt"
+  xdotool getwindowname "$window" > "$out/window-name.txt"
 fi
-[[ $window =~ ^[0-9]+$ ]] || exit 2
-xdotool getwindowpid "$window" > "$out/window-pid.txt"
-[[ $(cat "$out/window-pid.txt") == "$pid" ]] || { printf "Window PID mismatch\n" >&2; exit 7; }
-printf "%s\n" "$window" > "$out/window-id.txt"
-xdotool getwindowname "$window" > "$out/window-name.txt"
 host_geometry() {
   local phase=$1 rc=0
   timeout --kill-after=2s 10s "$out/x11-window" "$window" > "$out/x11-$phase.raw.json" 2> "$out/x11-$phase.stderr" || rc=$?
@@ -213,7 +228,14 @@ stop_geometry_launcher() {
   geometry_launcher_pid=
 }
 probe() {
-  local phase=$1 rc=0
+  local phase=$1 rc=0 observer_policy=NONE
+  if [[ $policy_mode == 1 ]]; then
+    case $phase in
+      none) observer_policy=NONE ;;
+      states) observer_policy=STATES ;;
+      *) return 2 ;;
+    esac
+  fi
   # Preserve partial JSONL on deadline. A separate process may still hang despite
   # the public per-call timeout, so the entire session is externally bounded.
   if [[ ${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0} == 1 ]]; then
@@ -249,7 +271,7 @@ probe() {
     pending_previous_child=${!:-}
     pending_geometry_label="$label-$phase"
     pending_background_role=geometry
-    timeout --kill-after=5s 180s "$(readlink -f "$(command -v strace)")" -DD -I2 -f -ttt -T -yy -xx -s1048576 \
+    ATSPI_OBSERVER_CACHE_POLICY="$observer_policy" timeout --kill-after=5s 180s "$(readlink -f "$(command -v strace)")" -DD -I2 -f -ttt -T -yy -xx -s1048576 \
       -o "$evidence_watcher_out/transport.strace" \
       -e trace=socket,socketpair,connect,accept,accept4,bind,listen,getsockname,getpeername,sendto,sendmsg,sendmmsg,recvfrom,recvmsg,recvmmsg,read,readv,write,writev,splice,tee,vmsplice,sendfile,copy_file_range,io_uring_setup,io_uring_register,io_uring_enter,pidfd_getfd,unshare,dup,dup2,dup3,fcntl,close,close_range,shutdown,poll,ppoll,select,pselect6,futex,clone,clone3,fork,vfork,execve,execveat,exit,exit_group \
       "$out/geometry-client" "$pid" "$label-$phase" > "$out/$phase.jsonl" 2> "$out/$phase.stderr" &
@@ -262,32 +284,78 @@ probe() {
     pending_background_role=
     printf '%s\t%s\n' "$wrapper_pid" "$wrapper_start" > "$evidence_watcher_out/launcher.tmp"
     mv "$evidence_watcher_out/launcher.tmp" "$evidence_watcher_out/launcher.tsv"
+    if [[ $policy_mode == 1 ]]; then
+      # This is the launcher's observed birth, not a guarantee that an
+      # accessibility call is unresolved. UI reads the query entry/return too.
+      read -r launch_time _ < /proc/uptime
+      jq -n --arg arm "$phase" --arg policy "$observer_policy" --arg monotonic "$launch_time" \
+        --argjson launcher_pid "$wrapper_pid" --arg starttime "$wrapper_start" \
+        '{arm:$arm,cache_policy:$policy,launcher_pid:$launcher_pid,launcher_starttime:$starttime,launch_monotonic:$monotonic}' \
+        > "$out/arm-started-$phase.tmp"
+      mv "$out/arm-started-$phase.tmp" "$out/arm-started-$phase"
+    fi
     wait "$wrapper_pid" || rc=$?
     geometry_launcher_pid= geometry_launcher_start= geometry_launcher_exe= geometry_launcher_out=
     stop_evidence_watcher
   else
-    timeout --kill-after=5s 180s "$out/geometry-client" "$pid" "$label-$phase" > "$out/$phase.jsonl" 2> "$out/$phase.stderr" || rc=$?
+    ATSPI_OBSERVER_CACHE_POLICY="$observer_policy" timeout --kill-after=5s 180s "$out/geometry-client" "$pid" "$label-$phase" > "$out/$phase.jsonl" 2> "$out/$phase.stderr" || rc=$?
   fi
   printf "{\"kind\":\"process_exit\",\"phase\":\"%s\",\"status\":%d,\"deadline_hit\":%s}\n" "$phase" "$rc" "$([[ $rc == 124 || $rc == 137 ]] && printf true || printf false)" >> "$out/$phase.jsonl"
+  if [[ $policy_mode == 1 ]]; then
+    # The process outcome does not depend on parsing partial client JSONL.
+    jq -n --arg arm "$phase" --argjson status "$rc" \
+      '{arm:$arm,status:$status,deadline_hit:($status == 124 or $status == 137)}' > "$out/arm-finished-$phase.tmp"
+    mv "$out/arm-finished-$phase.tmp" "$out/arm-finished-$phase"
+  fi
 }
-host_geometry before
-x=$(jq -r .x "$out/host-before.json")
-y=$(jq -r .y "$out/host-before.json")
+if [[ $policy_mode == 0 ]]; then
+  host_geometry before
+  x=$(jq -r .x "$out/host-before.json")
+  y=$(jq -r .y "$out/host-before.json")
+fi
 restore_on_exit() {
   local rc=$? latest_child=${!:-} restore_rc=0
   trap - EXIT
   recover_pending_launch "$latest_child"
   stop_evidence_watcher
   stop_geometry_launcher
-  timeout --kill-after=2s 15s xdotool windowmove --sync "$window" "$x" "$y" > "$out/restore.stdout" 2> "$out/restore.stderr" || restore_rc=$?
-  printf '{"status":%d}\n' "$restore_rc" > "$out/restore-status.json"
-  host_geometry restored || true
+  if [[ $policy_mode == 0 ]]; then
+    timeout --kill-after=2s 15s xdotool windowmove --sync "$window" "$x" "$y" > "$out/restore.stdout" 2> "$out/restore.stderr" || restore_rc=$?
+    printf '{"status":%d}\n' "$restore_rc" > "$out/restore-status.json"
+    host_geometry restored || true
+  fi
   exit "$rc"
 }
 trap restore_on_exit EXIT
 if [[ ${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0} == 1 ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
+fi
+if [[ $policy_mode == 1 ]]; then
+  for arm in none states; do
+    case $arm in none) observer_policy=NONE ;; states) observer_policy=STATES ;; esac
+    jq -n --arg arm "$arm" --arg policy "$observer_policy" \
+      '{arm:$arm,cache_policy:$policy,client_deadline_seconds:180,ready_deadline_seconds:20}' > "$out/arm-request-$arm.tmp"
+    mv "$out/arm-request-$arm.tmp" "$out/arm-request-$arm"
+    # UI owner publishes this file atomically only after a fresh native marker,
+    # full visible Cancel, and original application focus have been verified.
+    ready_deadline=$((SECONDS+20))
+    while [[ ! -f $out/arm-ready-$arm && $SECONDS -lt $ready_deadline ]]; do sleep 0.1; done
+    if [[ ! -f $out/arm-ready-$arm ]] || ! jq -e --arg arm "$arm" \
+      'type == "object" and .arm == $arm and .status == "ready"' "$out/arm-ready-$arm" > /dev/null 2> "$out/arm-ready-$arm.parse.stderr"; then
+      jq -n --arg arm "$arm" '{probe_status:"incomplete",reason:"native arm readiness missing or invalid",arm:$arm}' > "$result_file.tmp"
+      mv "$result_file.tmp" "$result_file"
+      exit 6
+    fi
+    probe "$arm"
+  done
+  # This records process outcomes only. NONE reaching its deadline is retained
+  # as an expected baseline possibility, rather than a geometry pass/fail.
+  jq -n --slurpfile none "$out/arm-finished-none" --slurpfile states "$out/arm-finished-states" \
+    '{probe_status:"complete",experiment:"observer-cache-policy",client_deadline_seconds:180,baseline_deadline_expected:true,arms:[$none[0],$states[0]],inference:"process outcomes only; no geometry or product conclusion"}' \
+    > "$result_file.tmp"
+  mv "$result_file.tmp" "$result_file"
+  exit 0
 fi
 probe before
 host_geometry before-end

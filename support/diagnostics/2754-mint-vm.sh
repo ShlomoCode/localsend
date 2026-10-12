@@ -29,6 +29,11 @@ esac
 probe_capture_geometry=${PROBE_CAPTURE_GEOMETRY:-0}
 probe_capture_interactions=${PROBE_CAPTURE_INTERACTIONS:-0}
 probe_capture_root_name_evidence=${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0}
+probe_observer_policy_discriminator=${PROBE_OBSERVER_POLICY_DISCRIMINATOR:-0}
+case "$probe_observer_policy_discriminator" in 0|1) ;; *) exit 2 ;; esac
+if [[ $probe_observer_policy_discriminator == 1 ]]; then
+ [[ $probe_capture_root_name_evidence == 1 && $probe_capture_interactions == 0 ]] || exit 2
+fi
 case "$probe_capture_root_name_evidence" in 0|1) ;; *) exit 2 ;; esac
 if [[ $probe_capture_root_name_evidence == 1 ]]; then
  [[ $probe_capture_geometry == 1 && $probe_engine_variant == B && $probe_bridge_variant == A && $probe_bridge_delivery == package ]]
@@ -537,7 +542,7 @@ status=$?
 if [ "$status" = 0 ]; then
 scenario_deadline=1500
 if [[ $probe_capture_interactions == 1 ]]; then scenario_deadline=3000; fi
-timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
+timeout "$scenario_deadline" ssh "${opts[@]}" mint@127.0.0.1 "PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence PROBE_OBSERVER_POLICY_DISCRIMINATOR=$probe_observer_policy_discriminator bash -s" > evidence/cloud/scenario.log 2>&1 <<"GUEST"
 set -euo pipefail
 cd /home/mint
 while IFS= read -r assignment; do export "$assignment"; done < evidence/session-environment.txt
@@ -557,7 +562,7 @@ set +e
 # A quick query or capture exit cannot establish valid geometry or correction success.
 # This bash reads its commands from SSH stdin. UI subprocesses must not consume
 # that command stream; in particular FFmpeg otherwise reads interactive keys.
-PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" python3 support/diagnostics/2754-ui.py < /dev/null
+PROBE_BRIDGE_VARIANT="$PROBE_BRIDGE_VARIANT" PROBE_CAPTURE_GEOMETRY="$PROBE_CAPTURE_GEOMETRY" PROBE_CAPTURE_INTERACTIONS="$PROBE_CAPTURE_INTERACTIONS" PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$PROBE_CAPTURE_ROOT_NAME_EVIDENCE" PROBE_OBSERVER_POLICY_DISCRIMINATOR="$PROBE_OBSERVER_POLICY_DISCRIMINATOR" python3 support/diagnostics/2754-ui.py < /dev/null
 status=$?
 if [ "$(cat evidence/bridge-variant.txt)" != bridge_variant=system ] || [ "$PROBE_ENGINE_VARIANT" != official ]; then
  grep -qx 'mapped_selected_bridge=true' evidence/bridge-process-map-check.txt || status=1

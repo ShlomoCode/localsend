@@ -121,8 +121,13 @@ static void walk(AtspiAccessible *a, unsigned depth) {
   t = enter("GetName",a);
   gchar *name = atspi_accessible_get_name(a,&e); begin("GetName",a,t,e); printf(",\"result\":"); string(name); end(&e);
   t = enter("GetRole",a); AtspiRole role = atspi_accessible_get_role(a,&e); begin("GetRole",a,t,e); printf(",\"result\":%d",role); end(&e);
+  /* Name/role can dispatch cache hydration. Clear again so this public getter
+   * requests fresh GetState even when the application caches states. */
+  t = enter("ClearCacheBeforeState",a);
+  atspi_accessible_clear_cache_single(a);
+  begin("ClearCacheBeforeState",a,t,NULL); printf(",\"cached_properties\":%u",a->cached_properties); end(&e);
   t = enter("GetStateSet",a); AtspiStateSet *state = atspi_accessible_get_state_set(a);
-  begin("GetStateSet",a,t,NULL); printf(",\"state_available\":%s",state?"true":"false"); end(&e);
+  begin("GetStateSet",a,t,NULL); printf(",\"state_available\":%s,\"cached_properties\":%u",state?"true":"false",a->cached_properties); end(&e);
   gboolean focused = state_contains(a,state,ATSPI_STATE_FOCUSED,"StateContainsFocused");
   gboolean editable = state_contains(a,state,ATSPI_STATE_EDITABLE,"StateContainsEditable");
   gboolean defunct = state_contains(a,state,ATSPI_STATE_DEFUNCT,"StateContainsDefunct");
@@ -178,11 +183,19 @@ int main(int argc, char **argv) {
   if(argc != 3) { fprintf(stderr,"usage: geometry-client PID LABEL\n"); return 2; }
   char *pid_end = NULL; unsigned long pid = strtoul(argv[1],&pid_end,10);
   if(!pid || *pid_end) return 2;
+  const char *cache_policy = getenv("ATSPI_OBSERVER_CACHE_POLICY");
+  if (!cache_policy) cache_policy = "NONE";
+  AtspiCache cache_mask;
+  if (strcmp(cache_policy,"NONE") == 0) cache_mask = ATSPI_CACHE_NONE;
+  else if (strcmp(cache_policy,"STATES") == 0) cache_mask = ATSPI_CACHE_STATES;
+  else { fprintf(stderr,"ATSPI_OBSERVER_CACHE_POLICY must be NONE or STATES\n"); return 2; }
   setvbuf(stdout,NULL,_IOLBF,0); started = g_get_monotonic_time();
   GError *e = NULL; gint64 t = enter("GetVersion",NULL);
   gint major,minor,micro; atspi_get_version(&major,&minor,&micro);
   begin("GetVersion",NULL,t,NULL); printf(",\"result\":\"%d.%d.%d\"",major,minor,micro); end(&e);
-  printf("{\"kind\":\"session\",\"pid\":%lu,\"label\":",pid); string(argv[2]); printf(",\"libatspi_version\":\"%d.%d.%d\",\"timeout_ms\":1500,\"max_nodes\":160,\"max_depth\":14}\n",major,minor,micro);
+  printf("{\"kind\":\"session\",\"pid\":%lu,\"label\":",pid); string(argv[2]);
+  printf(",\"cache_policy\":"); string(cache_policy);
+  printf(",\"cache_mask\":%u,\"libatspi_version\":\"%d.%d.%d\",\"timeout_ms\":1500,\"max_nodes\":160,\"max_depth\":14}\n",(unsigned)cache_mask,major,minor,micro);
   if(major != 2 || minor != 52) { puts("{\"kind\":\"failure\",\"reason\":\"requires libatspi 2.52.x\"}"); return 3; }
   t = enter("SetTimeout",NULL); atspi_set_timeout(1500,1500); begin("SetTimeout",NULL,t,NULL); end(&e);
   t = enter("Init",NULL); int init_status = atspi_init(); begin("Init",NULL,t,NULL); printf(",\"result\":%d",init_status); end(&e);
@@ -209,8 +222,10 @@ int main(int argc, char **argv) {
       printf(",\"source\":\"public cached fields, not a live property query\",\"cached_name\":"); string(app->name);
       printf(",\"cached_role\":%d,\"cached_properties\":%u,\"is_application_root\":%s}\n",app->role,app->cached_properties,app->parent.app && app->parent.app->root == app ? "true" : "false"); fflush(stdout);
       /* 2.52 documents this setter for desktop/application root only. */
-      t=enter("SetCacheMaskNone",app); atspi_accessible_set_cache_mask(app,ATSPI_CACHE_NONE);
-      begin("SetCacheMaskNone",app,t,NULL); end(&e);
+      const char *cache_op = cache_mask == ATSPI_CACHE_NONE ? "SetCacheMaskNone" : "SetCacheMaskStates";
+      t=enter(cache_op,app); atspi_accessible_set_cache_mask(app,cache_mask);
+      begin(cache_op,app,t,NULL); printf(",\"cache_policy\":"); string(cache_policy);
+      printf(",\"cache_mask\":%u",(unsigned)cache_mask); end(&e);
       walk(app,0);
     }
     g_object_unref(app);

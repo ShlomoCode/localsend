@@ -24,6 +24,11 @@ jq -e '.variant == "B"' "$candidate/provenance/manifest.json"
 suite_status=0
 root_name_evidence=${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0}
 case "$root_name_evidence" in 0|1) ;; *) exit 2 ;; esac
+policy_discriminator=${PROBE_OBSERVER_POLICY_DISCRIMINATOR:-0}
+case "$policy_discriminator" in 0|1) ;; *) exit 2 ;; esac
+if [[ $policy_discriminator == 1 ]]; then
+  [[ $root_name_evidence == 1 && ${PROBE_CAPTURE_INTERACTIONS:-0} == 0 ]] || exit 2
+fi
 labels=(control-system B-system AB-package)
 if [[ $root_name_evidence == 1 ]]; then
   # Evidence-only follow-up to the retained AB public-call timeout. This is one
@@ -31,6 +36,7 @@ if [[ $root_name_evidence == 1 ]]; then
   labels=(AB-package)
 fi
 printf 'capture_root_name_evidence=%s\nselected_cohorts=%s\n' "$root_name_evidence" "${labels[*]}" > evidence/comparison/capture-scope.txt
+printf 'observer_policy_discriminator=%s\n' "$policy_discriminator" >> evidence/comparison/capture-scope.txt
 for label in "${labels[@]}"; do
   # Each variant receives a fresh Mint 22.2 live login with the same ISO and
   # UI actions. Keyboard off/on/off and File/Folder/Paste share its app PID.
@@ -56,6 +62,7 @@ for label in "${labels[@]}"; do
      PROBE_BRIDGE_DELIVERY="$delivery" PROBE_BRIDGE_PACKAGE_DIR="$package" PROBE_CAPTURE_GEOMETRY=1 \
      PROBE_CAPTURE_INTERACTIONS="${PROBE_CAPTURE_INTERACTIONS:-0}" \
      PROBE_CAPTURE_ROOT_NAME_EVIDENCE="$root_name_evidence" \
+     PROBE_OBSERVER_POLICY_DISCRIMINATOR="$policy_discriminator" \
      bash support/diagnostics/2754-mint-vm.sh; then
     status=0
   else
