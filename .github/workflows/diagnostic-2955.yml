@@ -28,7 +28,7 @@ jobs:
       - name: Install native diagnostic tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox xdotool at-spi2-core python3-pyatspi libgtk-3-0 libayatana-appindicator3-1 ffmpeg scrot
+          sudo apt-get install -y xvfb openbox xdotool at-spi2-core python3-pyatspi libgtk-3-0 libayatana-appindicator3-1 libegl1 libegl-mesa0 libgl1 libglx-mesa0 libgl1-mesa-dri libgles2 ffmpeg scrot
           sudo chmod a+rw /dev/kvm
           mkdir -p "$EVIDENCE"
           uname -a > "$EVIDENCE/runner-os.txt"
