@@ -1,5 +1,6 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:localsend_isolates/util/sleep.dart';
 
 class RotatingWidget extends StatefulWidget {
   final Duration duration;
@@ -25,14 +26,29 @@ class RotatingWidgetState extends State<RotatingWidget> {
   static const _maxRadians = 6.28; // 360 degrees in radians
   double _angle = 0; // in radians
   double _anglePerTick = 0;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _updateAnglePerTick();
-      _loop();
-    });
+    _updateAnglePerTick();
+    _startTimer();
+  }
+
+  @override
+  void didUpdateWidget(RotatingWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateAnglePerTick();
+    if (oldWidget.spinning != widget.spinning) {
+      _timer?.cancel();
+      _startTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   void _updateAnglePerTick() {
@@ -42,20 +58,15 @@ class RotatingWidgetState extends State<RotatingWidget> {
     }
   }
 
-  /// This loop has a much greater performance than using [AnimationController].
-  void _loop() async {
-    while (true) {
-      await sleepAsync(_tickDuration);
-      if (!mounted) {
-        return;
-      }
-      if (!widget.spinning) {
-        continue;
-      }
+  void _startTimer() {
+    if (!widget.spinning) {
+      return;
+    }
+    _timer = Timer.periodic(const Duration(milliseconds: _tickDuration), (_) {
       setState(() {
         _angle = (_angle + _anglePerTick) % _maxRadians;
       });
-    }
+    });
   }
 
   @override
