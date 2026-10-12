@@ -8,6 +8,7 @@ import 'package:routerino/routerino.dart';
 class TextFieldWithActions extends StatefulWidget {
   final String name;
   final TextEditingController controller;
+  final bool allowEmpty;
 
   /// Called while typing. Cancellation does not undo this callback's effects.
   final ValueChanged<String>? onChanged;
@@ -19,6 +20,7 @@ class TextFieldWithActions extends StatefulWidget {
   const TextFieldWithActions({
     required this.name,
     required this.controller,
+    this.allowEmpty = true,
     this.onChanged,
     this.onSubmitted,
     required this.actions,
@@ -58,21 +60,25 @@ class _TextFieldWithActionsState extends State<TextFieldWithActions> {
                     textAlign: TextAlign.center,
                     onChanged: widget.onChanged,
                     autofocus: true,
-                    onFieldSubmitted: (text) => dialogContext.pop(text),
+                    onFieldSubmitted: (text) {
+                      if (widget.allowEmpty || text.trim().isNotEmpty) {
+                        dialogContext.pop(text);
+                      }
+                    },
                   ),
                 ],
               ),
               actions: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(dialogContext).colorScheme.primary,
-                    foregroundColor: Theme.of(dialogContext).colorScheme.onPrimary,
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.controller,
+                  builder: (context, value, child) => ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(dialogContext).colorScheme.primary,
+                      foregroundColor: Theme.of(dialogContext).colorScheme.onPrimary,
+                    ),
+                    onPressed: widget.allowEmpty || value.text.trim().isNotEmpty ? () => dialogContext.pop(widget.controller.text) : null,
+                    child: Text(t.general.confirm),
                   ),
-                  onPressed: () {
-                    final editedText = widget.controller.text;
-                    dialogContext.pop(editedText);
-                  },
-                  child: Text(t.general.confirm),
                 ),
               ],
             );

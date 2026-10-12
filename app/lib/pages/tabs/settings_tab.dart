@@ -368,6 +368,7 @@ class SettingsTab extends StatelessWidget {
                   child: TextFieldWithActions(
                     name: t.settingsTab.network.alias,
                     controller: vm.aliasController,
+                    allowEmpty: false,
                     onSubmitted: (confirmedAlias) async {
                       await ref.notifier(settingsProvider).setAlias(confirmedAlias);
                     },
