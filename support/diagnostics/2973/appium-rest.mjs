@@ -130,7 +130,7 @@ if (mode === 'create') {
     async function back() { await request('POST', prefix + '/appium/device/press_keycode', { keycode: 4 }); }
     async function activate(packageName) {
       if (!['org.localsend.localsend_app', 'com.android.settings'].includes(packageName)) throw new Error('Unreviewed application activation');
-      await request('POST', prefix + '/execute/sync', { script: 'mobile: activateApp', args: [{ appId: packageName }] });
+      await request('POST', prefix + '/appium/device/activate_app', { appId: packageName });
       if (packageName === 'org.localsend.localsend_app') {
         for (let attempt = 0; attempt < 3; attempt++) {
           const screen = await capture(`activate-localsend-ready-${attempt}`);

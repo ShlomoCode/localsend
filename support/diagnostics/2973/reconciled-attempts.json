@@ -68,5 +68,14 @@
     "classification": "harness-before-picker",
     "androidSettingsChanged": false,
     "resolution": "Native main Settings scrolling and Display entry succeeded. Four stable Display originals show visible brightness SeekBar and right-side switches; Screen zoom below viewport. Broad slider-presence guard stopped swipes before any value-control input. Provider done and independent cleanup unresolved false. Correction derives a native-list swipe corridor disjoint from every visible setting control, retaining parent/viewport and finite bounds."
+  },
+  {
+    "runId": "38252606014",
+    "headSha": "ca3dcbf316656d7e5885fdf136ef602c022f7c60",
+    "sessionId": "b4bf0a44809b7fcb0bb9e64076f483ffa43139af",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "androidSettingsChanged": false,
+    "resolution": "Appium 1.22 rejected mobile activateApp at the baseline activation smoke before any setting input. Exact native originals retained, no extremes mutation state created, controller restorationRequired false, DELETE session 200 and independent cleanup done/unresolved false. Version-era official docs specify POST appium/device/activate_app with appId; corrected route preserves baseline smoke/readiness and all trial/restoration gates."
   }
 ]
