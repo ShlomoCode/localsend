@@ -119,10 +119,33 @@ if (mode === 'create') {
       await touch(targets[0], label);
     }
     async function back() { await request('POST', prefix + '/appium/device/press_keycode', { keycode: 4 }); }
+    async function openApps(label) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const screen = await capture(`${label}-${attempt}`);
+        const apps = screen.nodes.filter(node => node.clickable === 'true' && node.displayed === 'true' && (node['content-desc'] === 'Apps' || node.text === 'Apps'));
+        if (apps.length === 1) { await touch(apps[0], 'Apps'); return; }
+        if (apps.length > 1) throw new Error('Apps touch identity ambiguous');
+        if (attempt === 2) break; // The final capture observes the previous swipe; never leave an unobserved final swipe.
+        const bars = screen.nodes.filter(node => node.class === 'android.widget.HorizontalScrollView' && node.scrollable === 'true' && node.displayed === 'true' && node.enabled === 'true');
+        if (bars.length !== 1) throw new Error('Actual empty Selection horizontal picker bar is not unique');
+        const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(bars[0].bounds ?? '');
+        if (!bounds) throw new Error('Observed picker bar has no live bounds');
+        const [x1,y1,x2,y2] = bounds.slice(1).map(Number);
+        const { value: viewport } = await request('GET', prefix + '/window/rect');
+        if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || x2 <= x1 || y2 <= y1 || x1 < 0 || y1 < 0 || x2 > viewport.width || y2 > viewport.height) throw new Error('Native picker bar is not fully inside the current viewport');
+        const x = Math.floor(x1 + (x2 - x1) * 0.8), endX = Math.floor(x1 + (x2 - x1) * 0.2), y = Math.floor((y1+y2)/2);
+        events.push({ label: 'Scroll actual horizontal picker bar toward Apps', nativeNode: bars[0], x, y, endX, at: new Date().toISOString() });
+        await writeFile(resolve(evidence, 'observation-native-targets.json'), JSON.stringify(events, null, 2));
+        await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
+          { type: 'pointerMove', duration: 0, x, y }, { type: 'pointerDown', button: 0 }, { type: 'pointerMove', duration: 600, x: endX, y }, { type: 'pointerUp', button: 0 },
+        ] }] });
+      }
+      throw new Error('Apps remains unavailable after bounded actual picker-bar navigation');
+    }
     await byLabel('Send', 'receive');
     const initialSend = await capture('initial-send-selection');
-    if (!initialSend.nodes.some(node => (node['content-desc'] ?? node.text) === 'Apps')) throw new Error('Initial Send selection is not observed empty; preserve it and stop');
-    await byLabel('Apps', 'send');
+    if (!['File','Media','Paste'].every(label => initialSend.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true'))) throw new Error('Initial Send selection is not observed empty; preserve it and stop');
+    await openApps('send-picker-bar');
     await capture('apps-original-no-input');
     const keyboard = await request('GET', prefix + '/appium/device/is_keyboard_shown');
     await writeFile(resolve(evidence, 'picker-original-keyboard-state.json'), JSON.stringify({ shown: keyboard.value }, null, 2));
@@ -166,8 +189,8 @@ if (mode === 'create') {
     if (clearTargets.length !== 1) throw new Error('Selection clear button not unique in current visible header');
     await touch(clearTargets[0], 'Observed Selection header clear X');
     const restoredSend = await capture('send-original-selection-restored');
-    if (!restoredSend.nodes.some(node => (node['content-desc'] ?? node.text) === 'Apps')) throw new Error('Original empty Send selection not restored');
-    await byLabel('Apps', 'send-before-picker-state-restore');
+    if (['File','Media','Paste','Text','Folder','Apps'].filter(label => restoredSend.nodes.some(node => node['content-desc'] === label && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true')).length < 2) throw new Error('Original empty Send selection not restored');
+    await openApps('send-before-picker-state-restore');
     const restoreKeyboard = await request('GET', prefix + '/appium/device/is_keyboard_shown');
     if (restoreKeyboard.value === true) await back();
     else if (restoreKeyboard.value !== false) throw new Error('Keyboard state unavailable before picker restoration');
