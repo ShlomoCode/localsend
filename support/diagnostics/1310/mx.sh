@@ -94,14 +94,18 @@ fi
 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'id; cat /etc/os-release; command -v xdotool || true; command -v scrot || true; command -v tesseract || true'
 if test "${MX_SESSION:-live}" = installed; then
   sshpass -p demo scp -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$mxroot/known" support/diagnostics/1310/mx-install.sh support/diagnostics/1310/mx-install-gui.py demo@127.0.0.1:/home/demo/
-  timeout 1200 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'bash /home/demo/mx-install.sh' > evidence/mx/install-ssh.log 2>&1 &
+  timeout 1200 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 "INSTALLER_TRACE=${INSTALLER_TRACE:-0} bash /home/demo/mx-install.sh" > evidence/mx/install-ssh.log 2>&1 &
   install_job=$!
   install_done=0
   install_deadline=$((SECONDS + 1200))
   n=0
   while (( SECONDS < install_deadline )); do
     n=$((n + 1))
-    if grep -q 'FAILED Phase\|MANUALLY ABORTED' evidence/mx/install-ssh.log; then exit 1; fi
+    if grep -q 'FAILED Phase\|MANUALLY ABORTED' evidence/mx/install-ssh.log; then
+      # Give the guest only a short evidence/detach window, never an install retry.
+      timeout 15 sshpass -p demo ssh "${opts[@]}" demo@127.0.0.1 'for n in $(seq 1 20); do test -f /home/demo/evidence/install/observation-finished && exit 0; sleep 0.5; done; exit 1' || true
+      exit 1
+    fi
     if ! sudo kill -0 "$(sudo cat "$mxroot/qemu.pid")" 2>/dev/null; then install_done=1; break; fi
     if ! kill -0 "$install_job" 2>/dev/null; then
       if ! grep -Eq '^\+\+[[:space:]]+Finished[[:space:]]+\+\+[[:space:]]*$' evidence/mx/install-ssh.log; then
