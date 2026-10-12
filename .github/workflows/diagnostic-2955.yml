@@ -37,6 +37,9 @@ jobs:
         run: |
           printf 'y\n%.0s' {1..20} | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > "$EVIDENCE/sdk-licenses.txt"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'emulator' 'platforms;android-36' 'build-tools;36.0.0' 'system-images;android-36;google_apis;x86_64'
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n receiver2955 -k 'system-images;android-36;google_apis;x86_64'
       - name: Run finite real-app cases
         timeout-minutes: 35
