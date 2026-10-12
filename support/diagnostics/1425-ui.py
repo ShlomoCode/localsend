@@ -37,6 +37,7 @@ def capture(role, stage):
     # Full-screen PSM11 omits small left-navigation labels in original retained wide-home pixels.
     # Keep those original pixels and separately OCR the observed navigation/footer regions.
     modes=[('full', ['-colorspace','Gray','-resize','200%','-threshold','70%','-negate'],2,0,0,11),
+           ('full-color', ['-resize','300%'],3,0,0,11),
            ('nav', ['-crop','256x250+0+100','+repage','-resize','300%'],3,0,100,6),
            ('footer', ['-crop','600x400+500+400','+repage','-resize','300%'],3,500,400,6)]
     for name,filters,scale,offset_x,offset_y,psm in modes:
