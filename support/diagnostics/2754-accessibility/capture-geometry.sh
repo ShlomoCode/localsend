@@ -65,6 +65,10 @@ geometry_launcher_pid=
 geometry_launcher_start=
 geometry_launcher_exe=
 geometry_launcher_out=
+pending_background_role=
+pending_previous_child=
+pending_jsonl=
+pending_geometry_label=
 proc_starttime() {
   local process=$1 stat_line
   local -a stat_fields
@@ -90,9 +94,66 @@ owned_timeout_matches() {
   read -r -a stat_fields <<< "${stat_line##*) }"
   [[ ${stat_fields[19]:-} == "$expected_start" && ${stat_fields[2]:-} == "$process" ]]
 }
+recover_pending_launch() {
+  local latest=$1 attempt recovered_start recovered_exe stat_line retained_pid retained_start matched=false
+  local -a stat_fields launch_args
+  [[ -n $pending_background_role && $latest =~ ^[1-9][0-9]*$ && $latest != "$pending_previous_child" ]] || return 0
+  if [[ $pending_background_role == watcher ]]; then
+    retained_pid=$evidence_watcher_pid; retained_start=$evidence_watcher_start
+  else
+    retained_pid=$geometry_launcher_pid; retained_start=$geometry_launcher_start
+  fi
+  [[ -z $retained_pid || $retained_pid == "$latest" ]] || return 0
+  # Preserve a previously observed identity. Recovery only supplies a tuple
+  # missing because EXIT interrupted the assignment immediately after '&'.
+  recovered_exe=$(readlink -f "$(command -v timeout)") || return 0
+  for ((attempt=0; attempt<20; attempt++)); do
+    recovered_start=$(proc_starttime "$latest") || break
+    [[ -z $retained_start || $recovered_start == "$retained_start" ]] || break
+    stat_line=$(cat "/proc/$latest/stat" 2>/dev/null) || break
+    read -r -a stat_fields <<< "${stat_line##*) }"
+    launch_args=()
+    matched=false
+    mapfile -d '' -t launch_args < "/proc/$latest/cmdline" || break
+    if [[ $pending_background_role == watcher ]]; then
+      [[ ${launch_args[1]:-} == --kill-after=16s && ${launch_args[2]:-} == 70s &&
+         ${launch_args[3]:-} == bash && ${launch_args[4]:-} == "$here/capture-root-name-evidence.sh" &&
+         ${launch_args[5]:-} == "$pid" && ${launch_args[6]:-} == "$out/geometry-client" &&
+         ${launch_args[7]:-} == "$pending_jsonl" && ${launch_args[8]:-} == "$evidence_watcher_out" ]] && matched=true
+    elif (( ${#launch_args[@]} >= 3 )); then
+      [[ ${launch_args[1]:-} == --kill-after=5s && ${launch_args[2]:-} == 180s &&
+         ${launch_args[3]:-} == "$(readlink -f "$(command -v strace)")" &&
+         ${launch_args[4]:-} == -DD && ${launch_args[5]:-} == -I2 &&
+         ${launch_args[-3]:-} == "$out/geometry-client" && ${launch_args[-2]:-} == "$pid" &&
+         ${launch_args[-1]:-} == "$pending_geometry_label" ]] && matched=true
+    fi
+    if [[ $matched == true && ${stat_fields[1]:-} == "$$" &&
+          $(awk '/^Uid:/ {print $2}' "/proc/$latest/status" 2>/dev/null) == "$(id -u)" ]] &&
+       owned_timeout_matches "$latest" "$recovered_start" "$recovered_exe"; then
+      if [[ $pending_background_role == watcher ]]; then
+        evidence_watcher_pid=$latest; evidence_watcher_start=${retained_start:-$recovered_start}; evidence_watcher_exe=$recovered_exe
+      else
+        geometry_launcher_pid=$latest; geometry_launcher_start=${retained_start:-$recovered_start}
+        geometry_launcher_exe=$recovered_exe; geometry_launcher_out=$evidence_watcher_out
+      fi
+      return 0
+    fi
+    sleep 0.05
+  done
+  printf '{"status":"partial","reason":"pending background launcher identity unverified"}\n' > "$evidence_watcher_out/launch-recovery.json"
+}
 stop_evidence_watcher() {
   local watcher_rc=0 attempt current_start
   [[ -n $evidence_watcher_pid ]] || return 0
+  # Publish ownership even if cancellation interrupted normal handoff after
+  # launch. The independent watcher must own the daemon before it exits.
+  if [[ -n $geometry_launcher_pid && ! -f $evidence_watcher_out/launcher.tsv ]]; then
+    if [[ -n $geometry_launcher_start ]]; then
+      # A previously retained starttime is immutable even if the PID exited.
+      printf '%s\t%s\n' "$geometry_launcher_pid" "$geometry_launcher_start" > "$evidence_watcher_out/launcher.tmp"
+      mv "$evidence_watcher_out/launcher.tmp" "$evidence_watcher_out/launcher.tsv"
+    fi
+  fi
   current_start=$(proc_starttime "$evidence_watcher_pid") || current_start=
   if owned_timeout_matches "$evidence_watcher_pid" "$evidence_watcher_start" "$evidence_watcher_exe"; then
     # GNU timeout forwards TERM to its helper process group. The helper owns
@@ -100,7 +161,7 @@ stop_evidence_watcher() {
     kill -TERM "$evidence_watcher_pid" 2>> "$evidence_watcher_out/cleanup.stderr" || true
     # Allow the helper's aggregate TERM/KILL/reap cleanup to finish before
     # stopping its group. This shutdown grace never extends the client query.
-    for ((attempt=0; attempt<40; attempt++)); do
+    for ((attempt=0; attempt<160; attempt++)); do
       current_start=$(proc_starttime "$evidence_watcher_pid") || current_start=
       [[ $current_start == "$evidence_watcher_start" ]] || break
       sleep 0.1
@@ -156,51 +217,53 @@ probe() {
   # Preserve partial JSONL on deadline. A separate process may still hang despite
   # the public per-call timeout, so the entire session is externally bounded.
   if [[ ${PROBE_CAPTURE_ROOT_NAME_EVIDENCE:-0} == 1 ]]; then
-    local wrapper_pid wrapper_start client_pid= client_start= child executable attempt current_start
-    local -a children
+    local wrapper_pid wrapper_start attempt launch_time
+    [[ -z $evidence_watcher_pid && -z $geometry_launcher_pid ]] || return 3
+    evidence_watcher_pid= evidence_watcher_start= evidence_watcher_exe=
     evidence_watcher_out="$out/root-name-evidence-$phase"
     mkdir -p "$evidence_watcher_out"
-    timeout --kill-after=5s 180s "$out/geometry-client" "$pid" "$label-$phase" > "$out/$phase.jsonl" 2> "$out/$phase.stderr" &
-    wrapper_pid=$!
+    [[ ! -e $evidence_watcher_out/watcher-ready && ! -e $evidence_watcher_out/launcher.tsv &&
+       ! -e $evidence_watcher_out/result.json ]] || return 3
+    # Independent owner is ready before client birth. Its group is distinct
+    # from GNU timeout's client group; its outer bound covers capture, detach,
+    # and the parallel 12s + 2s debugger snapshots.
+    pending_previous_child=${!:-}
+    pending_jsonl="$out/$phase.jsonl"
+    pending_background_role=watcher
+    timeout --kill-after=16s 70s bash "$here/capture-root-name-evidence.sh" "$pid" "$out/geometry-client" "$out/$phase.jsonl" "$evidence_watcher_out" \
+      > "$evidence_watcher_out/watcher.stdout" 2> "$evidence_watcher_out/watcher.stderr" &
+    evidence_watcher_pid=$!
+    evidence_watcher_start=$(proc_starttime "$evidence_watcher_pid") || evidence_watcher_start=
+    evidence_watcher_exe=$(readlink -f "$(command -v timeout)") || evidence_watcher_exe=
+    pending_background_role=
+    for ((attempt=0; attempt<40; attempt++)); do
+      [[ -f $evidence_watcher_out/watcher-ready ]] && break
+      [[ $(proc_starttime "$evidence_watcher_pid" 2>/dev/null || true) == "$evidence_watcher_start" ]] || break
+      sleep 0.05
+    done
+    [[ -f $evidence_watcher_out/watcher-ready ]] || { stop_evidence_watcher; return 3; }
+    read -r launch_time _ < /proc/uptime
+    printf '%s\n' "$launch_time" > "$evidence_watcher_out/launch-monotonic.tmp"
+    mv "$evidence_watcher_out/launch-monotonic.tmp" "$evidence_watcher_out/launch-monotonic"
+    geometry_launcher_pid= geometry_launcher_start= geometry_launcher_exe= geometry_launcher_out=$evidence_watcher_out
+    pending_previous_child=${!:-}
+    pending_geometry_label="$label-$phase"
+    pending_background_role=geometry
+    timeout --kill-after=5s 180s "$(readlink -f "$(command -v strace)")" -DD -I2 -f -ttt -T -yy -xx -s1048576 \
+      -o "$evidence_watcher_out/transport.strace" \
+      -e trace=socket,socketpair,connect,accept,accept4,bind,listen,getsockname,getpeername,sendto,sendmsg,sendmmsg,recvfrom,recvmsg,recvmmsg,read,readv,write,writev,splice,tee,vmsplice,sendfile,copy_file_range,io_uring_setup,io_uring_register,io_uring_enter,pidfd_getfd,unshare,dup,dup2,dup3,fcntl,close,close_range,shutdown,poll,ppoll,select,pselect6,futex,clone,clone3,fork,vfork,execve,execveat,exit,exit_group \
+      "$out/geometry-client" "$pid" "$label-$phase" > "$out/$phase.jsonl" 2> "$out/$phase.stderr" &
+    geometry_launcher_pid=$!
+    wrapper_pid=$geometry_launcher_pid
     wrapper_start=$(proc_starttime "$wrapper_pid") || wrapper_start=
-    geometry_launcher_pid=$wrapper_pid
     geometry_launcher_start=$wrapper_start
     geometry_launcher_exe=$(readlink -f "$(command -v timeout)") || geometry_launcher_exe=
     geometry_launcher_out=$evidence_watcher_out
-    executable=$(readlink -f "$out/geometry-client") || executable=
-    # Resolve the real timeout child, not the wrapper or an app/tree PID.
-    # Discovery consumes at most two seconds of the existing 180s budget.
-    for ((attempt=0; attempt<20; attempt++)); do
-      current_start=$(proc_starttime "$wrapper_pid") || current_start=
-      [[ -n $wrapper_start && $current_start == "$wrapper_start" ]] || break
-      children=()
-      if [[ -r /proc/$wrapper_pid/task/$wrapper_pid/children ]]; then
-        read -r -a children < "/proc/$wrapper_pid/task/$wrapper_pid/children" || true
-      fi
-      for child in "${children[@]}"; do
-        [[ $child =~ ^[1-9][0-9]*$ ]] || continue
-        [[ -n $executable && $(readlink "/proc/$child/exe" 2>/dev/null || true) == "$executable" ]] || continue
-        client_start=$(proc_starttime "$child") || client_start=
-        [[ -n $client_start ]] || continue
-        client_pid=$child
-        break
-      done
-      [[ -z $client_pid ]] || break
-      sleep 0.1
-    done
-    if [[ -n $client_pid && -f $here/capture-root-name-evidence.sh ]]; then
-      printf '{"status":"started","wrapper_pid":%d,"wrapper_starttime":"%s","client_pid":%d,"client_starttime":"%s"}\n' "$wrapper_pid" "$wrapper_start" "$client_pid" "$client_start" > "$evidence_watcher_out/integration-status.json"
-      # 170s + 5s termination grace, started within 2s, fits inside the
-      # unchanged client deadline. Observer failure cannot make geometry pass.
-      PROBE_ROOT_NAME_CLIENT_STARTTIME="$client_start" timeout --kill-after=5s 170s bash "$here/capture-root-name-evidence.sh" "$pid" "$client_pid" "$out/$phase.jsonl" "$evidence_watcher_out" > "$evidence_watcher_out/watcher.stdout" 2> "$evidence_watcher_out/watcher.stderr" &
-      evidence_watcher_pid=$!
-      evidence_watcher_start=$(proc_starttime "$evidence_watcher_pid") || evidence_watcher_start=
-      evidence_watcher_exe=$geometry_launcher_exe
-    else
-      printf '{"status":"not_started","reason":"verified client or helper unavailable"}\n' > "$evidence_watcher_out/integration-status.json"
-    fi
+    pending_background_role=
+    printf '%s\t%s\n' "$wrapper_pid" "$wrapper_start" > "$evidence_watcher_out/launcher.tmp"
+    mv "$evidence_watcher_out/launcher.tmp" "$evidence_watcher_out/launcher.tsv"
     wait "$wrapper_pid" || rc=$?
-    geometry_launcher_pid=
+    geometry_launcher_pid= geometry_launcher_start= geometry_launcher_exe= geometry_launcher_out=
     stop_evidence_watcher
   else
     timeout --kill-after=5s 180s "$out/geometry-client" "$pid" "$label-$phase" > "$out/$phase.jsonl" 2> "$out/$phase.stderr" || rc=$?
@@ -211,8 +274,9 @@ host_geometry before
 x=$(jq -r .x "$out/host-before.json")
 y=$(jq -r .y "$out/host-before.json")
 restore_on_exit() {
-  local rc=$? restore_rc=0
+  local rc=$? latest_child=${!:-} restore_rc=0
   trap - EXIT
+  recover_pending_launch "$latest_child"
   stop_evidence_watcher
   stop_geometry_launcher
   timeout --kill-after=2s 15s xdotool windowmove --sync "$window" "$x" "$y" > "$out/restore.stdout" 2> "$out/restore.stderr" || restore_rc=$?

@@ -71,6 +71,17 @@ df -Th /home/runner /tmp >> evidence/cloud/resources.txt
 test "$(df -Pk /home/runner | awk "NR==2 {print \$4}")" -ge 12582912
 sudo apt-get update
 sudo apt-get install -y qemu-system-x86 qemu-utils genisoimage socat imagemagick openssh-client tesseract-ocr
+if [[ $probe_capture_root_name_evidence == 1 ]]; then
+ # Required exact debug/type gate completes on the host before VM creation.
+ sudo apt-get install -y gdb binutils jq
+ host_symbol_status=0
+ PROBE_CAPTURE_ROOT_NAME_EVIDENCE=1 bash support/diagnostics/2754-accessibility/prepare-root-name-symbols-host.sh \
+  evidence/cloud/root-name-symbols-host "$bridge_package" \
+  > evidence/cloud/root-name-symbols-host.stdout 2> evidence/cloud/root-name-symbols-host.stderr || host_symbol_status=$?
+ printf 'symbol_prepare_exit_status=%s\n' "$host_symbol_status" > evidence/cloud/root-name-symbols-host-status.txt
+ [[ $host_symbol_status == 0 ]] || exit "$host_symbol_status"
+ jq -e '.status == "required-symbols-verified"' evidence/cloud/root-name-symbols-host/result.json
+fi
 for mirror in https://mirror.csclub.uwaterloo.ca/linuxmint https://mirrors.edge.kernel.org/linuxmint; do
   if curl -fL --connect-timeout 20 --max-time 600 --speed-time 90 --speed-limit 1048576 "$mirror/stable/22.2/linuxmint-22.2-cinnamon-64bit.iso" -o /home/runner/issue2754-mint/mint.iso; then break; fi
 done
@@ -245,6 +256,24 @@ if [[ $probe_bridge_delivery == package ]]; then
 elif [ "$probe_bridge_variant" != system ]; then
  scp -r -i /tmp/issue2754-mint/id -P 2275 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known /tmp/issue2754-mint/diagnostic-bridge mint@127.0.0.1:/home/mint/diagnostic-bridge
 fi
+if [[ $probe_capture_root_name_evidence == 1 ]]; then
+ # Only verified debug files and the manifest cross this separate boundary.
+ # No archive, runtime ELF, debug package install or debuginfod fetch in Mint.
+ symbol_transfer_status=0
+ timeout --kill-after=2s 60s ssh "${opts[@]}" mint@127.0.0.1 "mkdir -p /home/mint/evidence/root-name-symbols" \
+  > evidence/cloud/root-name-symbols-transfer.stdout 2> evidence/cloud/root-name-symbols-transfer.stderr || symbol_transfer_status=$?
+ if [[ $symbol_transfer_status == 0 ]]; then
+ timeout --kill-after=2s 60s scp -r -i /tmp/issue2754-mint/id -P 2275 -o BatchMode=yes -o ConnectTimeout=5 \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/tmp/issue2754-mint/known \
+  evidence/cloud/root-name-symbols-host/transfer/.build-id \
+  evidence/cloud/root-name-symbols-host/transfer/manifest.tsv \
+  evidence/cloud/root-name-symbols-host/transfer/manifest.sha256 \
+  mint@127.0.0.1:/home/mint/evidence/root-name-symbols/ \
+  >> evidence/cloud/root-name-symbols-transfer.stdout 2>> evidence/cloud/root-name-symbols-transfer.stderr || symbol_transfer_status=$?
+ fi
+ printf 'symbol_transfer_exit_status=%s\n' "$symbol_transfer_status" > evidence/cloud/root-name-symbols-transfer-status.txt
+ [[ $symbol_transfer_status == 0 ]] || exit "$symbol_transfer_status"
+fi
 set +e
 timeout 900 ssh "${opts[@]}" mint@127.0.0.1 "PROBE_APP_SOURCE=$probe_app_source PROBE_BRIDGE_VARIANT=$probe_bridge_variant PROBE_BRIDGE_DELIVERY=$probe_bridge_delivery PROBE_ENGINE_VARIANT=$probe_engine_variant PROBE_BUNDLE_RUN_ID=$probe_bundle_run_id PROBE_ENGINE_PATCH_HASH=$probe_engine_patch_hash PROBE_CAPTURE_GEOMETRY=$probe_capture_geometry PROBE_CAPTURE_INTERACTIONS=$probe_capture_interactions PROBE_CAPTURE_ROOT_NAME_EVIDENCE=$probe_capture_root_name_evidence bash -s" > evidence/cloud/provision.log 2>&1 <<"GUEST"
 set -euo pipefail
@@ -264,7 +293,7 @@ fi
 interaction_packages=()
 root_name_packages=()
 if [[ $PROBE_CAPTURE_ROOT_NAME_EVIDENCE == 1 ]]; then
- root_name_packages=(curl ca-certificates)
+ root_name_packages=()
  test -f support/diagnostics/2754-accessibility/capture-root-name-evidence.sh
  test -f support/diagnostics/2754-accessibility/prepare-root-name-symbols.sh
 fi
@@ -489,6 +518,8 @@ if [[ $PROBE_CAPTURE_ROOT_NAME_EVIDENCE == 1 ]]; then
  bash support/diagnostics/2754-accessibility/prepare-root-name-symbols.sh /home/mint/evidence/root-name-symbols \
   > evidence/root-name-symbols-prepare.stdout 2> evidence/root-name-symbols-prepare.stderr || symbol_status=$?
  printf 'symbol_prepare_exit_status=%s\n' "$symbol_status" > evidence/root-name-symbols-prepare-status.txt
+ [[ $symbol_status == 0 ]] || exit "$symbol_status"
+ jq -e '.status == "required-symbols-verified"' evidence/root-name-symbols/result.json
 fi
 # Use the actual Cinnamon login bus, which need not equal the systemd user bus.
 desktop_pid=$(pgrep -u "$(id -u)" -x cinnamon | head -n 1)
