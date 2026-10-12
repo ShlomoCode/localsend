@@ -37,10 +37,21 @@ jobs:
           } > evidence/2884-kvm/host.txt 2>&1
           sha256sum support/diagnostics/2884-kvm-capability.c > evidence/2884-kvm/source-sha256.txt
           gcc --version > evidence/2884-kvm/compiler.txt 2>&1
-          if ! gcc -O2 -Wall -Wextra -Werror support/diagnostics/2884-kvm-capability.c -o /tmp/2884-kvm-capability 2> evidence/2884-kvm/compile.txt; then exit 1; fi
+          if ! probe_dir=$(mktemp -d /tmp/2884-kvm-capability.XXXXXXXX); then exit 1; fi
+          trap 'rm -rf -- "$probe_dir"' EXIT
+          if ! gcc -O2 -Wall -Wextra -Werror support/diagnostics/2884-kvm-capability.c -o "$probe_dir/probe" 2> evidence/2884-kvm/compile.txt; then exit 1; fi
           set +e
-          timeout --signal=TERM --kill-after=2s 15s /tmp/2884-kvm-capability > evidence/2884-kvm/kvm.txt 2>&1
+          timeout --signal=TERM --kill-after=2s 15s "$probe_dir/probe" > evidence/2884-kvm/kvm-unprivileged.txt 2>&1
           probe_status=$?
+          printf '%s\n' "$probe_status" > evidence/2884-kvm/probe-unprivileged-exit.txt
+          # Exit 4 means only open(/dev/kvm) returned EACCES. Keep that
+          # observation and run the same owned probe using runner sudo.
+          # No device permissions, group membership, or modules are changed.
+          if [ "$probe_status" -eq 4 ]; then
+            sudo -n -- /usr/bin/timeout --signal=TERM --kill-after=2s 15s "$probe_dir/probe" > evidence/2884-kvm/kvm-sudo.txt 2>&1
+            probe_status=$?
+            printf '%s\n' "$probe_status" > evidence/2884-kvm/probe-sudo-exit.txt
+          fi
           printf '%s\n' "$probe_status" > evidence/2884-kvm/probe-exit.txt
           exit "$probe_status"
       - uses: actions/upload-artifact@v4
