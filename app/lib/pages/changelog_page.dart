@@ -14,23 +14,42 @@ class ChangelogPage extends StatelessWidget {
       appBar: AppBar(
         title: Text(t.changelogPage.title),
       ),
-      body: FutureBuilder(
-        future: rootBundle.loadString(Assets.changelog), // ignore: discarded_futures
-        builder: (context, data) {
-          if (!data.hasData) {
-            return Container();
-          }
-          return Markdown(
-            padding: EdgeInsets.only(
-              left: 15,
-              right: 15,
-              top: 15,
-              bottom: 15 + getNavBarPadding(context),
-            ),
-            data: data.data!,
-          );
-        },
-      ),
+      body: const ChangelogContent(),
+    );
+  }
+}
+
+class ChangelogContent extends StatefulWidget {
+  const ChangelogContent({super.key});
+
+  @override
+  State<ChangelogContent> createState() => _ChangelogContentState();
+}
+
+class _ChangelogContentState extends State<ChangelogContent> {
+  late final Future<String> _changelog = rootBundle.loadString(Assets.changelog);
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _changelog,
+      builder: (context, data) {
+        if (data.hasError) {
+          return Center(child: Text(t.general.error));
+        }
+        if (!data.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return Markdown(
+          padding: EdgeInsets.only(
+            left: 15,
+            right: 15,
+            top: 15,
+            bottom: 15 + getNavBarPadding(context),
+          ),
+          data: data.data!,
+        );
+      },
     );
   }
 }
