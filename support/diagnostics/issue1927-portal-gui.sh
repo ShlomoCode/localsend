@@ -142,7 +142,7 @@ fail_case() {
 }
 permission_read() {
   local label=$1 expected=$2 value result=0
-  timeout -s KILL 8 flatpak permission-show background background > "$OUT/$label-permission-table.txt" 2>&1 || printf 'exit=%s\n' "$?" >> "$OUT/$label-permission-table.txt"
+  timeout -s KILL 8 flatpak permission-show "$APP" > "$OUT/$label-permission-table.txt" 2>&1 || printf 'exit=%s\n' "$?" >> "$OUT/$label-permission-table.txt"
   timeout -s KILL 8 gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore --object-path /org/freedesktop/impl/portal/PermissionStore --method org.freedesktop.impl.portal.PermissionStore.GetPermission background background "$APP" > "$OUT/$label-permission-exact.txt" 2>&1 || result=$?
   if [ "$result" != 0 ]; then
     test "$result" = 1 && grep -q 'GDBus.Error:org.freedesktop.portal.Error.NotFound:' "$OUT/$label-permission-exact.txt" && test -z "$expected" || fail_case "$label-permission-read-error"
@@ -162,7 +162,12 @@ permission_set() {
   test "$(wc -l < "$OUT/portal-calls.txt")" = "$known_call_count" || fail_case "$label-late-request-before-permission-mutation"
   timeout -s KILL 8 flatpak permission-set background background "$APP" "$value" > "$OUT/$label-permission-operation.txt" 2>&1 || result=$?
   printf '%s exit=%s exact_app=%s value=%s\n' "$(date -u --iso-8601=ns)" "$result" "$APP" "$value" >> "$OUT/$label-permission-operation.txt"
-  test "$result" = 0 || fail_case "$label-permission-operation"
+  if [ "$result" != 0 ]; then
+    # SetPermission can update the service's in-memory entry before a save error.
+    # Observe that possibility, then stop; never interpret failure as unchanged.
+    permission_read "$label-failed-operation" ''
+    fail_case "$label-permission-operation"
+  fi
   permission_read "$label-after" "$value"
 }
 migration_gate() {

@@ -46,6 +46,11 @@ mkfs.ext4 -F -L FLATPAK /dev/vda
 mkdir -p /home/mint/.local/share/flatpak
 mount /dev/vda /home/mint/.local/share/flatpak
 chown mint:mint /home/mint/.local/share/flatpak
+# The already-running permission store may retain a table created before this
+# storage mount. Recreate only its normal parent directory, never a database.
+mkdir -p /home/mint/.local/share/flatpak/db
+chown mint:mint /home/mint/.local/share/flatpak/db
+stat -Lc 'path=%n owner=%U mode=%a device=%d inode=%i' /home/mint/.local/share/flatpak/db > /home/mint/evidence/permission-storage-parent.txt
 df -Th / /home/mint/.local/share/flatpak > /home/mint/evidence/installation-storage.txt
 cp -a /etc/apt /home/mint/evidence/apt-before
 for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
