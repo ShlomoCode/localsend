@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 [[ ${GITHUB_ACTIONS:-} == true ]] || exit 8
 BASE=c1ce322fb3acf08e44f329b8b7208b8b0d91e244
-PATCH_SHA=e52ab393a247b3dd0b854fc067628ea4d7df4ec91fa238de8b572831955a6891
+PATCH_SHA=a9b8ea52e24acbb4e1136332661313ac81de46d752b5a0e24a33ba45186726cf
 LOCK_SHA=f00d703bc5a5f0b68ce6ca2d231cb14bd480d413bde3d8fc26bda3b67058f3df
 BASELINE_SHA=d76437b6effdbcd8e0835f353c95b0fa7affeac123dcc853e7dd5b25107e9e5c
 mkdir -p evidence/source/provenance
@@ -46,7 +46,7 @@ git -C "$SOURCE" add -N app/lib/util/native/linux_autostart.dart app/test/unit/u
   cd "$SOURCE"
   sha256sum -c - <<'PRODUCT_HASHES'
 6f75567db5cd1784bc275018f403bb135abaea552b39c09e0a71f412c6efb132  app/lib/util/native/autostart_helper.dart
-30f19e2bfe184055d018c630a08eaf5b96b3d891b12538eaf56e484b66930e33  app/lib/util/native/linux_autostart.dart
+eb1a5e1867adb337d6867681ecc52b3d88798738692d9682b44a6b10c698f632  app/lib/util/native/linux_autostart.dart
 fbf93adff413cac644ea2ca7371408ce2a4ad8a6380b94c8fc1fa13d14d94692  app/lib/pages/tabs/settings_tab_controller.dart
 7dba4e68e733dd9d119a096dc34d4c96ee1e97ce7062c02ee7096d7dcb2fcfc5  app/lib/pages/tabs/settings_tab_vm.dart
 e0bcbb22eb4174dc8fb955c9ce5342a9de078c325731b8a1f81495ea42c439b2  app/lib/pages/tabs/settings_tab.dart
@@ -80,16 +80,10 @@ rustc -Vv > "$OUT/provenance/rust.txt"
 cd app
 fvm flutter pub get --enforce-lockfile > "$OUT/provenance/pub-get.log" 2>&1
 cmp ../pubspec.lock "$INPUT/provenance/resolved-pubspec.lock"
-fvm dart run build_runner build > "$OUT/provenance/build-runner.log" 2>&1
+fvm dart run build_runner build --build-filter=lib/pages/tabs/settings_tab_vm.mapper.dart > "$OUT/provenance/build-runner.log" 2>&1
 git diff --binary HEAD > "$OUT/provenance/raw-generation.patch"
-# Normal generation may reformat unrelated mocks. Preserve the raw diff, then
-# retain only the expected Settings VM mapper from this generation.
-while IFS= read -r generated; do
-  case "$generated" in
-    app/lib/pages/tabs/settings_tab_vm.mapper.dart) ;;
-    *.mapper.dart|*.freezed.dart|*.g.dart|*.mocks.dart) git -C "$SOURCE" restore -- "$generated" ;;
-  esac
-done < <(git diff --name-only HEAD)
+# The pinned builder filters outputs before generation. Unchanged committed
+# model mappers and assets remain inputs; no generated output is replaced.
 fvm dart format lib/util/native/autostart_helper.dart lib/util/native/linux_autostart.dart lib/pages/tabs/settings_tab.dart lib/pages/tabs/settings_tab_controller.dart lib/pages/tabs/settings_tab_vm.dart lib/pages/tabs/settings_tab_vm.mapper.dart test/unit/util/native/linux_autostart_test.dart > "$OUT/provenance/format.log" 2>&1
 git diff --binary HEAD > "$OUT/provenance/consumed-source-after-generation.patch"
 git status --short > "$OUT/provenance/generated-source-status.txt"

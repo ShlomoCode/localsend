@@ -138,7 +138,7 @@ class LinuxAutoStart {
     try {
       final file = File(filePath!);
       file.parent.createSync(recursive: true);
-      temporary = File('${file.path}.${pid}.${DateTime.now().microsecondsSinceEpoch}.tmp');
+      temporary = File('${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
       temporary.writeAsStringSync(serializeLinuxAutoStartEntry(appName, [...command, if (hidden) '--hidden']), flush: true);
       temporary.renameSync(file.path);
       return true;

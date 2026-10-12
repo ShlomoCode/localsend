@@ -397,7 +397,7 @@ index ddbf47d73..990226660 100644
 -}
 diff --git a/app/lib/util/native/linux_autostart.dart b/app/lib/util/native/linux_autostart.dart
 new file mode 100644
-index 000000000..99d737117
+index 000000000..99e085dcf
 --- /dev/null
 +++ b/app/lib/util/native/linux_autostart.dart
 @@ -0,0 +1,266 @@
@@ -541,7 +541,7 @@ index 000000000..99d737117
 +    try {
 +      final file = File(filePath!);
 +      file.parent.createSync(recursive: true);
-+      temporary = File('${file.path}.${pid}.${DateTime.now().microsecondsSinceEpoch}.tmp');
++      temporary = File('${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
 +      temporary.writeAsStringSync(serializeLinuxAutoStartEntry(appName, [...command, if (hidden) '--hidden']), flush: true);
 +      temporary.renameSync(file.path);
 +      return true;

@@ -293,7 +293,12 @@ entry_absent() { [[ ! -e $ENTRY && ! -L $ENTRY ]]; }
 observe_state() {
   local label=$1 expected=$2 hidden=${3:-} state
   state=$(observed_switch_row 'Autostart after login' "$label-autostart")
-  [[ ${state##* } == "$expected" ]]
+  if [[ $expected == OBSERVE ]]; then
+    [[ ${state##* } == ON || ${state##* } == OFF ]]
+    printf '%s label=%s baseline_reopened_actual=%s\n' "$(date -u --iso-8601=ns)" "$label" "${state##* }" >> "$OUT/verdicts.txt"
+  else
+    [[ ${state##* } == "$expected" ]]
+  fi
   [[ -z $hidden ]] || { state=$(observed_switch_row 'Start hidden' "$label-hidden"); [[ ${state##* } == "$hidden" ]]; }
   snapshot "$label"
 }
@@ -313,11 +318,24 @@ click_switch() {
         host-hidden) entry_read "$label-observed" ON;;
         host-absent) entry_absent;;
         sandbox)
-          local pid
+          local pid old_entry
           pid=$(qualified_app_pid "$label-sandbox" "$PHASE_DEADLINE")
-          run sudo cat "/proc/$pid/root$HOME/.config/autostart/localsend_app.desktop" > "$OUT/$label-sandbox-entry.desktop"
-          run grep -q '^Exec=/app/localsend_app' "$OUT/$label-sandbox-entry.desktop"
-          entry_absent;;
+          old_entry="/proc/$pid/root$HOME/.config/autostart/localsend_app.desktop"
+          run sudo cat "$old_entry" > "$OUT/$label-sandbox-entry.desktop"
+          run sudo stat -Lc '%d:%i' "$old_entry" > "$OUT/$label-sandbox-entry-inode.txt"
+          run awk '/^Exec=/ {n++;if($0!="Exec=/app/localsend_app")bad=1} END{exit !(n==1 && !bad)}' "$OUT/$label-sandbox-entry.desktop"
+          if [[ -e $ENTRY || -L $ENTRY ]]; then
+            [[ -f $ENTRY && ! -L $ENTRY ]]
+            run cat "$ENTRY" > "$OUT/$label-legacy-host-entry.desktop"
+            run stat -Lc '%d:%i' "$ENTRY" > "$OUT/$label-legacy-host-entry-inode.txt"
+            run cmp "$OUT/$label-sandbox-entry.desktop" "$OUT/$label-legacy-host-entry.desktop"
+            run cmp "$OUT/$label-sandbox-entry-inode.txt" "$OUT/$label-legacy-host-entry-inode.txt"
+            owned_entry_hash=$(run sha256sum "$ENTRY")
+            printf 'baseline legacy HOME entry maps to host; identical bytes/inode; Exec=/app/localsend_app\n' > "$OUT/$label-legacy-host-view.txt"
+          else
+            entry_absent
+            printf 'baseline legacy HOME entry private; host entry absent\n' > "$OUT/$label-legacy-host-view.txt"
+          fi;;
       esac
       snapshot "$label-observed"
       return
@@ -368,7 +386,7 @@ observe_state baseline-initial OFF
 click_switch baseline-enable 'Autostart after login' OFF ON sandbox
 close_app baseline-first
 launch_settings baseline-reopened
-observe_state baseline-reopened OFF
+observe_state baseline-reopened OBSERVE
 close_app baseline-login-close
 relogin baseline-login
 login_absence baseline-login
@@ -378,7 +396,7 @@ owned_launch baseline-exported gtk-launch "$APP"
 await_visible baseline-exported
 open_settings baseline-exported
 close_app baseline-exported
-condition_pass 'baseline ON then reopen OFF; real-login absent; exported launcher qualifies harness'
+condition_pass 'baseline enable writes exact legacy Exec; reopen state observed; real-login absent; exported launcher qualifies harness'
 current_condition=2-candidate-visible
 # Package change requires the previous qualified app to have actually exited.
 no_instance candidate-package-change
