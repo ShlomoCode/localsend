@@ -389,8 +389,11 @@ def rendered_sender_tap(label, scroll=False):
 
 def qualify_native_pointer(observation, x, y):
     geometry, raw_geometry = native_window_geometry(observation['window'])
+    log('native-root-window', {'geometry': geometry, 'xwininfo': raw_geometry})
     display = control_cmd('xdpyinfo', timeout=5)
+    log('native-root-display', display)
     monitors = control_cmd('xrandr', '--current', timeout=5)
+    log('native-root-monitors', monitors)
     owner = control_cmd('xprop', '-id', observation['window'], '_NET_WM_PID', '_NET_FRAME_EXTENTS', timeout=5)
     display_sizes = re.findall(r'^\s*dimensions:\s*(\d+)x(\d+) pixels', display, re.MULTILINE)
     display_screens = re.findall(r'^number of screens:\s*(\d+)\s*$', display, re.MULTILINE)
