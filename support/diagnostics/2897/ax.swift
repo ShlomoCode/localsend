@@ -158,6 +158,49 @@ if mode.hasPrefix("picker-") {
     if mode == "picker-ready" {
         try emit(["nativeOpenPanel": true, "role": "AXSheet", "identifier": "open-panel"]); exit(0)
     }
+    if mode == "picker-go-closed" {
+        let remaining = panelRows.filter { (attr($0, "AXRole") as? String) == "AXSheet" && (attr($0, "AXIdentifier") as? String) == "GoToWindow" }
+        guard remaining.isEmpty else { fail("Native GoToWindow remains open", 32) }
+        try emit(["nativeGoToWindowClosed": true, "nativeOpenPanelRemains": true]); exit(0)
+    }
+    if ["picker-suggestion", "picker-open-suggestion"].contains(mode) {
+        guard args.count == 4, args[3].hasPrefix("/") else { fail("Expected absolute native picker fixture path", 32) }
+        let expected = args[3]
+        let filename = URL(fileURLWithPath: expected).lastPathComponent
+        let sheets = panelRows.filter {
+            (attr($0, "AXRole") as? String) == "AXSheet" && (attr($0, "AXIdentifier") as? String) == "GoToWindow" && hasBounds($0)
+        }
+        guard sheets.count == 1 else { fail("Expected one native GoToWindow suggestion sheet", 32) }
+        let suggestionRows = tree(sheets[0]).map { $0.0 }
+        let fields = suggestionRows.filter {
+            (attr($0, "AXRole") as? String) == "AXTextField" && (attr($0, "AXIdentifier") as? String) == "PathTextField" && visible($0) && hasBounds($0)
+        }
+        guard fields.count == 1, (attr(fields[0], "AXValue") as? String) == expected else { fail("Native suggestion path readback changed", 32) }
+        let selected = suggestionRows.filter {
+            ["AXCell", "AXRow"].contains(attr($0, "AXRole") as? String ?? "") &&
+                (attr($0, "AXSelected") as? Bool) == true && (attr($0, "AXFocused") as? Bool) == true && visible($0) && hasBounds($0)
+        }
+        var leaves: [AXUIElement] = []
+        for container in selected {
+            for (leaf, _) in tree(container) {
+                guard (attr(leaf, "AXRole") as? String) == "AXStaticText", (attr(leaf, "AXEnabled") as? Bool) == true,
+                      labels(leaf).contains(filename), hasBounds(leaf), actions(leaf).contains("AXOpen"),
+                      !leaves.contains(where: { CFEqual($0, leaf) }) else { continue }
+                leaves.append(leaf)
+            }
+        }
+        guard leaves.count == 1 else { fail("Expected one exact native fixture leaf under the focused selected suggestion", 32) }
+        try emit(["sheetIdentifier": "GoToWindow", "fieldIdentifier": "PathTextField", "expectedPath": expected,
+            "readback": attr(fields[0], "AXValue") as? String ?? "", "fieldFocused": (attr(fields[0], "AXFocused") as? Bool) ?? false,
+            "focusedSelectedContainerRoles": selected.map { attr($0, "AXRole") as? String ?? "" },
+            "exactFixtureLeaf": filename, "leafRole": "AXStaticText", "leafActions": actions(leaves[0])])
+        if mode == "picker-open-suggestion" {
+            let result = AXUIElementPerformAction(leaves[0], "AXOpen" as CFString)
+            try emit(["nativeSuggestionAction": "AXOpen", "result": result.rawValue])
+            guard result == .success else { fail("Native GoToWindow suggestion AXOpen failed", 32) }
+        }
+        exit(0)
+    }
     if mode == "picker-go" {
         let raised = AXUIElementPerformAction(panel, kAXRaiseAction as CFString)
         guard raised == .success else { fail("Could not raise the native picker sheet", 28) }
@@ -214,6 +257,9 @@ if mode.hasPrefix("picker-") {
     }
     if ["picker-selected", "picker-open"].contains(mode) {
         guard args.count == 4 else { fail("Expected the fixture filename", 30) }
+        guard !panelRows.contains(where: { (attr($0, "AXIdentifier") as? String) == "GoToWindow" }) else {
+            fail("Fixture selection requires the native GoToWindow to be closed", 30)
+        }
         let filename = args[3]
         var selected: [AXUIElement] = []
         for element in panelRows {

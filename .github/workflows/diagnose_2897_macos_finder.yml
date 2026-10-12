@@ -1,5 +1,5 @@
 name: Diagnose 2897 macOS Finder handover
-# Observed native path confirmation and ordinary case capture completion; same product scenario.
+# Open the observed native selected path suggestion; same product scenario and capture.
 on:
   workflow_dispatch:
   push:
