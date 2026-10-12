@@ -73,9 +73,14 @@ flatpak remote-info --log flathub "$app" > "$out/flathub-history.txt"
 flatpak remote-info --commit="$historical_commit" flathub "$app" > "$out/historical-remote-info.txt"
 flatpak remote-info --commit="$historical_commit" --show-metadata flathub "$app" > "$out/historical-remote-metadata.txt"
 flatpak remote-info --commit="$historical_commit" --show-commit flathub "$app" > "$out/historical-remote-commit.txt"
+flatpak remote-info --commit="$historical_commit" --show-ref flathub "$app" > "$out/historical-remote-ref.txt"
 test "$(cat "$out/historical-remote-commit.txt")" = "$historical_commit"
 grep -Fx 'runtime=org.freedesktop.Platform/x86_64/25.08' "$out/historical-remote-metadata.txt"
-grep -Eq '^ *Version: *1\.18\.2 *$' "$out/historical-remote-info.txt"
+# remote-info's optional Version comes from the remote AppStream catalog,
+# not the selected commit. The retained official manifest at the source
+# commit below identifies its prebuilt LocalSend 1.18.2 x86_64 archive:
+# SHA256 287690a9a8eb6da9c83cc97b3e3030ac67daf32a7331fcf307d0939300658d16.
+test "$(cat "$out/historical-remote-ref.txt")" = app/org.localsend.localsend_app/x86_64/stable
 # Official manifest parent baaea3098bfef8324d41bbc98c80563d0f37c734 uses
 # runtime 25.08 and release 1.18.2. The following package parent was recorded
 # by Flatpak itself in scout 38181076198; admit its signed remote metadata
@@ -86,13 +91,16 @@ flatpak info --show-metadata "$app" > "$out/latest-app-metadata.txt"
 flatpak install --noninteractive -y flathub org.freedesktop.Platform/x86_64/25.08
 flatpak update --noninteractive -y --commit="$historical_commit" "$app"
 flatpak info "$app" > "$out/app-info.txt"
+flatpak info --show-ref "$app" > "$out/app-ref.txt"
 flatpak info --show-commit "$app" > "$out/app-commit.txt"
 flatpak info --show-origin "$app" > "$out/app-origin.txt"
 flatpak info --show-runtime "$app" > "$out/app-runtime.txt"
 flatpak info --show-metadata "$app" > "$out/app-metadata.txt"
 test "$(cat "$out/app-origin.txt")" = flathub
+test "$(cat "$out/app-ref.txt")" = app/org.localsend.localsend_app/x86_64/stable
 test "$(cat "$out/app-commit.txt")" = "$historical_commit"
-grep -Eq '^ *Version: *1\.18\.2 *$' "$out/app-info.txt"
+# Retain installed Version metadata if supplied; exact official commit/ref
+# and runtime are the admission gates, not optional friendly output fields.
 test "$(cat "$out/app-runtime.txt")" = org.freedesktop.Platform/x86_64/25.08
 flatpak info org.freedesktop.Platform/x86_64/25.08 > "$out/runtime-info.txt"
 flatpak info --show-commit org.freedesktop.Platform/x86_64/25.08 > "$out/runtime-commit.txt"
@@ -112,7 +120,14 @@ location=$(flatpak info --show-location "$app")
 printf '%s\n' "$location" > "$out/app-location.txt"
 cp "$location/export/share/applications/$app.desktop" "$out/exported-desktop-entry.txt"
 sha256sum "$location/export/share/applications/$app.desktop" > "$out/exported-desktop-entry-sha256.txt"
-find "$location/files" -maxdepth 4 -type f -name '*localsend*' -exec sha256sum {} \; > "$out/app-binary-sha256.txt"
+# Record actual application executable, libraries and Flutter data identity.
+# These are evidence hashes, not an archive/ELF transformation certification.
+test -f "$location/files/localsend_app"
+test -d "$location/files/lib"
+test -d "$location/files/data"
+sha256sum "$location/files/localsend_app" > "$out/app-binary-sha256.txt"
+find "$location/files/lib" "$location/files/data" -type f -exec sha256sum {} \; >> "$out/app-binary-sha256.txt"
+find "$location/files/bin" "$location/files/lib" "$location/files/data" -type l -printf '%p -> %l\n' > "$out/app-payload-symlinks.txt"
 cat /etc/os-release > "$out/os-release.txt"
 grep -Fx 'VERSION="24.04.4 LTS (Noble Numbat)"' "$out/os-release.txt"
 test "$(dpkg-query -W -f='${Version}' base-files)" = 13ubuntu10.4
