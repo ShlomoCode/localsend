@@ -22,10 +22,15 @@ export async function runWebSocketQualification({wd, save, redact, auth, token, 
     return Math.min(maximum, remaining);
   };
   const setupDeadline = performance.now() + 600000;
-  const setupWd = async (method,path,body,maximum=30000) => {
-    try {return await wd(method,path,body,budget(setupDeadline,maximum));}
+  const setupWd = async (method,path,body,maximum=30000,until=setupDeadline) => {
+    if(ambiguous)throw new Error('Native UI prohibited after ambiguous input');
+    try {
+      const value=await wd(method,path,body,budget(Math.min(setupDeadline,until),maximum));
+      budget(Math.min(setupDeadline,until),maximum); // A late mutation response is ambiguous.
+      return value;
+    }
     catch(error) {
-      if(method==='POST' && /\/activate_app$|\/(?:clear|value)$/.test(path)) ambiguous=true;
+      if(method==='POST' && /\/activate_app$|\/(?:clear|value|click)$/.test(path)) {ambiguous=true;receipt.inputAmbiguous=true;}
       throw error;
     }
   };
@@ -52,6 +57,90 @@ export async function runWebSocketQualification({wd, save, redact, auth, token, 
     const element = matches[0]['element-6066-11e4-a52e-4f735466cecf'];
     if (!await setupWd('GET',prefix()+'/element/'+element+'/displayed')) throw new Error('Owned helper control not visible: '+name);
     return element;
+  };
+  // These snapshots precede the first field input, so screenshots cannot expose
+  // the relay token. Retain the original XML through the existing redactor.
+  let setupSnapshot=0;
+  const snapshot = async (phase,until) => {
+    const source=await setupWd('GET',prefix()+'/source',undefined,3000,until);
+    const name='ws-setup-'+phase+'-'+(++setupSnapshot);
+    save(name+'.xml',source);
+    const screenshot=await setupWd('GET',prefix()+'/screenshot',undefined,3000,until);
+    writeFileSync('evidence/'+name+'.png',Buffer.from(screenshot,'base64'));
+    return source;
+  };
+  const decode = text => text.replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/&#(?:x([a-f0-9]+)|(\d+));/gi,(_,hex,decimal)=>String.fromCodePoint(parseInt(hex||decimal,hex?16:10)))
+    .replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
+  const attribute = (tag,name) => decode(tag.match(new RegExp('\\b'+name+'="([^"]*)"'))?.[1] || '');
+  const alertTitle='Allow “LocalSend” to find devices on local networks?';
+  const alertsIn = source => source.match(/<XCUIElementTypeAlert\b[^>]*>[\s\S]*?<\/XCUIElementTypeAlert>/g) || [];
+  const observedPermission = source => {
+    const alerts=alertsIn(source);
+    // Include self-closing/otherwise unrecognized alerts in the ambiguity count.
+    if((source.match(/<XCUIElementTypeAlert\b/g) || []).length!==1 || alerts.length!==1)throw new Error('Unknown or ambiguous receiver startup alert');
+    const tags=alerts[0].match(/<XCUIElementType\w+\b[^>]*>/g) || [];
+    const texts=tags.filter(tag=>tag.startsWith('<XCUIElementTypeStaticText')).map(tag=>attribute(tag,'name'));
+    const buttons=tags.filter(tag=>tag.startsWith('<XCUIElementTypeButton')).map(tag=>attribute(tag,'name'));
+    if(texts.filter(text=>text===alertTitle).length!==1 ||
+      buttons.length!==2 || buttons.filter(name=>name==='Allow').length!==1 || buttons.filter(name=>name==='Don’t Allow').length!==1)
+      throw new Error('Receiver alert differs from observed LocalSend Local Network permission');
+  };
+  const receiverStartup = async () => {
+    const until=Math.min(setupDeadline,performance.now()+5000);
+    const permissionXPath='//XCUIElementTypeAlert[.//XCUIElementTypeStaticText[normalize-space(@name)=\''+alertTitle+'\'] and '+
+      './/XCUIElementTypeButton[@name="Don’t Allow"]]//XCUIElementTypeButton[@name="Allow"]';
+    let allowed=false;
+    while(true) {
+      const source=await snapshot(allowed?'receiver-after-permission':'receiver-startup',until);
+      if(/<XCUIElementTypeAlert\b/.test(source)) {
+        observedPermission(source);
+        if(allowed) {
+          await pause(budget(until,100)); // Read-only disappearance observation; never repeat the click.
+          continue;
+        }
+        const matches=await setupWd('POST',prefix()+'/elements',{using:'xpath',value:permissionXPath},3000,until);
+        if(matches.length!==1)throw new Error('Observed receiver Allow control absent or ambiguous');
+        const element=matches[0]['element-6066-11e4-a52e-4f735466cecf'];
+        if(!await setupWd('GET',prefix()+'/element/'+element+'/displayed',undefined,3000,until) ||
+          !await setupWd('GET',prefix()+'/element/'+element+'/enabled',undefined,3000,until))throw new Error('Observed receiver Allow control not ready');
+        await setupWd('POST',prefix()+'/element/'+element+'/click',{},3000,until);
+        allowed=true;receipt.receiverLocalNetworkPermissionAllowed=true;
+        continue;
+      }
+      const appTags=source.match(/<XCUIElementTypeApplication\b[^>]*>/g) || [];
+      const receiverSource=appTags.some(tag=>attribute(tag,'name')==='LocalSend');
+      const state=await setupWd('POST',prefix()+'/execute/sync',{script:'mobile: queryAppState',args:[{bundleId:appId}]},3000,until);
+      const controls=await setupWd('POST',prefix()+'/elements',{using:'accessibility id',value:'Receive'},3000,until);
+      if(controls.length>1)throw new Error('Receiver startup readiness ambiguous');
+      if(receiverSource && state===4 && controls.length===1 &&
+        await setupWd('GET',prefix()+'/element/'+controls[0]['element-6066-11e4-a52e-4f735466cecf']+'/displayed',undefined,3000,until)) {
+        // Re-read immediately before leaving the receiver, including late alerts.
+        const fresh=await snapshot('receiver-ready',until);
+        if(/<XCUIElementTypeAlert\b/.test(fresh))continue;
+        receipt.receiverStartupReady=true;return;
+      }
+      await pause(budget(until,100));
+    }
+  };
+  const helperReady = async () => {
+    const until=Math.min(setupDeadline,performance.now()+5000);
+    while(true) {
+      const source=await snapshot('helper-before-input',until);
+      if(/<XCUIElementTypeAlert\b/.test(source))throw new Error('Unexpected alert before owned helper inputs');
+      const state=await setupWd('POST',prefix()+'/execute/sync',{script:'mobile: queryAppState',args:[{bundleId:proxyId}]},3000,until);
+      let ready=state===4;
+      for(const name of ['relayURL','relayToken','qualificationID','qualifyWebSocket']) {
+        const matches=await setupWd('POST',prefix()+'/elements',{using:'accessibility id',value:name},3000,until);
+        if(matches.length>1)throw new Error('Owned helper control ambiguous: '+name);
+        if(matches.length===0) {ready=false;continue;}
+        const element=matches[0]['element-6066-11e4-a52e-4f735466cecf'];
+        ready=(await setupWd('GET',prefix()+'/element/'+element+'/displayed',undefined,3000,until)) && ready;
+        ready=(await setupWd('GET',prefix()+'/element/'+element+'/enabled',undefined,3000,until)) && ready;
+      }
+      if(ready) {receipt.helperReadyBeforeInput=true;return;}
+      await pause(budget(until,100));
+    }
   };
   const pollHost = async predicate => {
     while (true) {
@@ -109,7 +198,9 @@ export async function runWebSocketQualification({wd, save, redact, auth, token, 
       receipt.creationAmbiguous=true;ambiguous=true;throw error;
     }
     save('owned-session.json',{session,capabilities:created.capabilities,createdUtc:new Date().toISOString()});
+    await receiverStartup();
     await setupWd('POST',prefix()+'/appium/device/activate_app',{appId:proxyId});
+    await helperReady();
     for (const [name,value] of [['relayURL','http://bs-local.com:8080'],['relayToken',token],['qualificationID',id]]) {
       const element = await one(name);
       await setupWd('POST',prefix()+'/element/'+element+'/clear',{});
