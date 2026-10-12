@@ -36,9 +36,22 @@ async function request(method, path, body, provider = false) {
   const at = new Date().toISOString();
   const host = provider ? 'https://api-cloud.browserstack.com' : 'https://hub-cloud.browserstack.com/wd/hub';
   const remaining = (cleanupPhase ? deadline : productDeadline) - Date.now();
-  const response = await fetch(host + path, { method, headers: { Authorization: `Basic ${Buffer.from(`${username}:${key}`).toString('base64')}`, 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(Math.min(30000, remaining)) });
-  const text = await response.text();
+  const creating = method === 'POST' && path === '/session';
+  const timeoutMs = Math.min(creating ? 90000 : 30000, remaining), monotonicStart = performance.now();
+  const clientDeadlineUtc = new Date(Date.now() + timeoutMs).toISOString(), signal = AbortSignal.timeout(timeoutMs);
+  const budgets = () => ({ productRemainingMs: productDeadline - Date.now(), nativeRemainingMs: deadline - Date.now(), deviceRemainingMs: deviceHardDeadline - Date.now() });
+  if (creating) await save('create-request-start.json', { at, method, path, timeoutMs, clientDeadlineUtc, monotonicStartMs: monotonicStart,
+    capabilitySha256: hash(JSON.stringify(body)), runId, runAttempt, buildName: ownership.buildName, ...budgets() });
+  let response, text;
+  try {
+    response = await fetch(host + path, { method, headers: { Authorization: `Basic ${Buffer.from(`${username}:${key}`).toString('base64')}`, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body), signal });
+    text = await response.text();
+  } catch (error) {
+    if (creating) await save('create-request-end.json', { at, completedAt: new Date().toISOString(), timeoutMs, clientDeadlineUtc,
+      elapsedMs: performance.now() - monotonicStart, status: response?.status ?? null, completeBody: false, error: String(error.message), ...budgets() });
+    throw error;
+  }
   let result;
   try { result = JSON.parse(text); } catch { result = { parseError: true, responseText: text }; }
   // Persist a returned handle before processing status or making another request.
@@ -56,6 +69,9 @@ async function request(method, path, body, provider = false) {
     }
     await save('create-response.json', result);
   }
+  if (creating) await save('create-request-end.json', { at, completedAt: new Date().toISOString(), timeoutMs, clientDeadlineUtc,
+    elapsedMs: performance.now() - monotonicStart, status: response.status, completeBody: true, parseError: result.parseError ?? false,
+    session: ownership.session, ...budgets() });
   await appendFile(resolve(evidence, 'events.jsonl'), JSON.stringify(redact({ at, completedAt: new Date().toISOString(), stage, method, path, body, status: response.status, error: result.value?.error })) + '\n');
   if (!response.ok || result.value?.error || result.parseError) throw Object.assign(new Error(`Remote ${method} ${path} failed with status ${response.status}: ${result.value?.error ?? 'response unavailable'}`), { definitiveResponse: !response.ok || Boolean(result.value?.error) });
   return result;
@@ -128,6 +144,10 @@ try {
       'bstack:options': { projectName: 'LocalSend issue1774 frozen short round', buildName: ownership.buildName,
         sessionName: 'unchanged-1.18.2-original-max-restored', debug: true, video: true, networkLogs: false, idleTimeout: 60 } } } });
     if (!session) throw new Error('Creation result has no owned handle; do not POST again; reconcile unique build');
+    const creationBudget = { observedAt: new Date().toISOString(), session, minimumProductRemainingMs: 5 * 60000,
+      productRemainingMs: productDeadline - Date.now(), nativeRemainingMs: deadline - Date.now(), deviceRemainingMs: deviceHardDeadline - Date.now() };
+    await save('after-creation-budget.json', creationBudget);
+    if (creationBudget.productRemainingMs < creationBudget.minimumProductRemainingMs) throw new Error('Actual product reserve exhausted after creation; owned handle retained for cleanup');
     stage = 'observed-provider-device-identity';
     const providerSession = await request('GET', `/app-automate/sessions/${encodeURIComponent(session)}.json`, undefined, true);
     await save('observed-provider-session.json', providerSession);
@@ -140,49 +160,57 @@ try {
     const pulled = Buffer.from((await command('POST', '/appium/device/pull_file', { path: devicePath })).value, 'base64');
     await save('fixture-roundtrip.json', { devicePath, pushedBytes: fixture.length, pulledBytes: pulled.length, sha256: hash(pulled) });
     if (pulled.length !== fixture.length || hash(pulled) !== FIXTURE_HASH) throw new Error('Supported fixture roundtrip hash mismatch');
+    const verifyFixtureAfterClear = async label => {
+      const bytes = Buffer.from((await command('POST', '/appium/device/pull_file', { path: devicePath })).value, 'base64');
+      await save(label + '-fixture-preserved.json', { devicePath, bytes: bytes.length, sha256: hash(bytes), afterOrdinarySelectionClear: true });
+      if (bytes.length !== fixture.length || hash(bytes) !== FIXTURE_HASH) throw new Error('Downloads fixture changed after ordinary selection clear; no reselection');
+    };
     stage = 'native-original-font-zoom'; const nativeOriginal = await ui.originals();
-    const conditionObservations = [{ label: 'original', nativeZoomValue: nativeOriginal.originalZoom, defaultPositionUnknown: true }];
-    stage = 'actual-localsend-file-picker'; await ui.selectFixture(filename, fixture.length);
-    stage = 'original-scale-working-control'; let original, originalStructuralError;
-    try { original = await ui.monitor('original'); }
+    await save('provider-initial-launch-scope.json', { setupOnly: true, initialProviderLaunchIsReportedProductStep: false,
+      reportedProductOrder: ['maximum-native-display-size', 'activate-localsend', 'actual-file-selection', 'send-mode-gear', 'share-via-link', 'monitor'] });
+    stage = 'native-maximum-zoom-font-unchanged'; const endpoint = await ui.maximum(); await ui.verifyFont('maximum-font-unchanged');
+    const conditionObservations = [];
+    stage = 'maximum-actual-localsend-file-picker'; await ui.selectFixture(filename, fixture.length);
+    stage = 'maximum-scale-monitor'; let maximum;
+    try { maximum = await ui.monitor('maximum'); }
     catch (error) {
       if (error.monitorBeforeInput !== true || !error.actualUrl) throw error;
-      originalStructuralError = error;
-      original = { url: error.actualUrl, opened: false, actualMonitorActivationAttempted: false };
-      await save('original-structural-observation.json', { error: error.message, actualUrl: error.actualUrl, snapshot: error.snapshot,
+      maximum = { url: error.actualUrl, opened: false, actualMonitorActivationAttempted: false };
+      await save('maximum-structural-observation.json', { error: error.message, actualUrl: error.actualUrl, snapshot: error.snapshot,
         actualMonitorActivationAttempted: false, productVerdict: null, pixelVerdict: 'pending-pixel-inspection' });
     }
-    stage = 'native-maximum-zoom-font-unchanged'; let endpoint = await ui.maximum(); await ui.verifyFont('maximum-font-unchanged');
-    if (Number(nativeOriginal.originalZoom) === Number(endpoint.value)) {
-      stage = 'observed-distinct-nonmax-control';
-      const lower = await ui.nonmaxControl(); await ui.verifyFont('nonmax-control-font-unchanged');
-      const lowerControl = await ui.monitor('observed-nonmax-control', original.url);
-      conditionObservations.push({ label: 'observed-nonmax-control', nativeZoomValue: lower, defaultPositionUnknown: true, monitorOpened: lowerControl.opened });
-      if (!lowerControl.opened) throw new Error('Observed distinct nonmax monitor working control unmet');
-      stage = 'return-to-qualified-maximum'; endpoint = await ui.maximum(); await ui.verifyFont('returned-maximum-font-unchanged');
-    } else if (originalStructuralError) throw originalStructuralError;
-    else if (!original.opened) throw new Error('Original nonmax monitor did not open actual ZoomDialog; harness control unmet');
-    stage = 'maximum-scale-monitor'; const maximum = await ui.monitor('maximum', original.url);
-    // A repeat is one bounded identical observation, not a recovery or a
-    // candidate replay. Preserve both outcomes and require pixel inspection.
-    conditionObservations.push({ label: 'maximum', nativeZoomValue: endpoint.value, monitorOpened: maximum.opened });
-    if (productDeadline - Date.now() > 90000) {
-      stage = 'maximum-scale-identical-repeat'; const repeated = await ui.monitor('maximum-repeat', original.url);
-      await save('maximum-identical-repeat.json', { nativeZoomValue: endpoint.value, sameCondition: true, monitorOpened: repeated.opened, pixelVerdict: 'pending-pixel-inspection' });
+    conditionObservations.push({ label: 'maximum', nativeZoomValue: endpoint.value, monitorOpened: maximum.opened,
+      actualMonitorActivationAttempted: maximum.actualMonitorActivationAttempted ?? true, freshActualFileSelection: true });
+    stage = 'restore-exact-original-for-control'; cleanupPhase = true; await ui.restore(); cleanupPhase = false;
+    let controlValue = nativeOriginal.originalZoom;
+    if (Number(controlValue) === Number(endpoint.value)) {
+      stage = 'observed-distinct-nonmax-control'; controlValue = await ui.nonmaxControl(); await ui.verifyFont('nonmax-control-font-unchanged');
     }
+    let control = null, repeated = null;
+    if (productDeadline - Date.now() > 150000) {
+      stage = 'ordinary-selection-clear-for-control'; await ui.clearFixture(); await verifyFixtureAfterClear('control');
+      stage = 'control-fresh-actual-file-selection'; await ui.selectFixture(filename, fixture.length);
+      stage = 'fresh-nonmax-working-control'; control = await ui.monitor('fresh-nonmax-control', maximum.url);
+      conditionObservations.push({ label: 'fresh-nonmax-control', nativeZoomValue: controlValue, monitorOpened: control.opened,
+        freshActualFileSelection: true, defaultPositionUnknown: true });
+      if (!control.opened) throw new Error('Fresh distinct nonmax monitor working control unmet');
+      if (productDeadline - Date.now() > 150000) {
+        stage = 'return-to-qualified-maximum'; await ui.maximum(); await ui.verifyFont('returned-maximum-font-unchanged');
+        stage = 'ordinary-selection-clear-for-repeat'; await ui.clearFixture(); await verifyFixtureAfterClear('maximum-repeat');
+        stage = 'maximum-repeat-fresh-actual-file-selection'; await ui.selectFixture(filename, fixture.length);
+        stage = 'maximum-scale-fresh-selection-repeat'; repeated = await ui.monitor('maximum-repeat', maximum.url);
+        await save('maximum-identical-repeat.json', { nativeZoomValue: endpoint.value, sameFixtureAndNativeCondition: true,
+          freshActualFileSelection: true, monitorOpened: repeated.opened, pixelVerdict: 'pending-pixel-inspection' });
+      } else await save('maximum-repeat-skipped.json', { reason: 'insufficient-actual-product-budget', requiredRemainingMs: 150000 });
+    } else await save('fresh-control-skipped.json', { reason: 'insufficient-actual-product-budget', requiredRemainingMs: 150000 });
     stage = 'restore-exact-original'; cleanupPhase = true; await ui.restore(); cleanupPhase = false;
-    const restoredObservation = { label: 'restored', nativeZoomValue: nativeOriginal.originalZoom, exactNativeRestorationVerified: true };
-    conditionObservations.push(restoredObservation);
-    if (productDeadline - Date.now() > 60000) {
-      stage = 'restored-working-control'; const restored = await ui.monitor('restored', original.url);
-      restoredObservation.monitorOpened = restored.opened;
-      if (original.opened && !restored.opened) throw new Error('Previously working original monitor failed after exact restoration');
-    }
-    await save('result.json', { status: 'pending-pixel-inspection', failureStage: null, productVerdict: null, originalMonitorOpened: original.opened,
-      originalMonitorActivationAttempted: original.actualMonitorActivationAttempted ?? true, originalStructuralObservation: originalStructuralError?.message ?? null,
-      maximumMonitorOpened: maximum.opened, testedRelease: 'official unchanged 1.18.2', device: 'Samsung Galaxy S23', android: '13.0',
-      reportedReleaseAndDeviceUnknown: true, conditionObservations,
-      roundConditions: [...new Set(conditionObservations.map(item => Number(item.nativeZoomValue)))], distinctNativePositionCount: new Set(conditionObservations.map(item => Number(item.nativeZoomValue))).size });
+    await save('result.json', { status: 'pending-pixel-inspection', failureStage: null, productVerdict: null,
+      maximumMonitorOpened: maximum.opened, maximumMonitorActivationAttempted: maximum.actualMonitorActivationAttempted ?? true,
+      freshNonmaxControlOpened: control?.opened ?? null, maximumRepeatOpened: repeated?.opened ?? null,
+      determinismRepetitions: repeated ? 1 : 0, exactNativeRestorationVerified: true,
+      testedRelease: 'official unchanged 1.18.2', device: 'Samsung Galaxy S23', android: '13.0', reportedReleaseAndDeviceUnknown: true,
+      conditionObservations, roundConditions: [...new Set(conditionObservations.map(item => Number(item.nativeZoomValue)))],
+      distinctNativePositionCount: new Set(conditionObservations.map(item => Number(item.nativeZoomValue))).size });
   }
 } catch (error) {
   await save(restoreOnly ? 'independent-restore-failure.json' : 'failure.json', { at: new Date().toISOString(), stage, error: String(error.message),

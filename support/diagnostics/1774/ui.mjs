@@ -297,6 +297,38 @@ export function createUi({ command, save, evidence, checkDeadline }) {
     await save('selected-fixture.json', { filename, pushedBytes: size, names, selection, snapshot: selected.snapshot, exactByteIdentityFromPullHash: true });
     await click('Send mode'); await click('Share via link');
   }
+  async function clearFixture() {
+    await activate(APP);
+    const share = await capture('before-clear-actual-share-page');
+    if (share.metadata.currentPackage !== APP || !share.nodes.some(node => node.package === APP && visible(node) && named(node, 'Share via link')) ||
+        share.nodes.some(node => node.package === APP && visible(node) && named(node, 'Close'))) throw new Error('Actual Share via link page not qualified for ordinary Back');
+    await back();
+    let send;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const screen = await capture(`clear-fixture-send-ready-${attempt}`);
+      const selected = screen.nodes.filter(node => node.package === APP && visible(node) && /Selection\nFiles: 1\n/.test(node['content-desc'] ?? ''));
+      if (selected.length > 1) throw new Error('Actual single-file Selection composite ambiguous');
+      if (selected.length === 1 && screen.metadata.currentPackage === APP) { send = { screen, selected: selected[0] }; break; }
+    }
+    if (!send) throw new Error('Actual single-file Selection composite unavailable after ordinary Back');
+    await touch(send.screen, send.selected, 'Actual one-file Selection composite');
+    const page = await capture('clear-fixture-actual-selection-page');
+    if (page.metadata.currentPackage !== APP || !page.nodes.some(node => node.package === APP && visible(node) && named(node, 'Selection')) ||
+        !page.nodes.some(node => node.package === APP && visible(node) && named(node, 'Delete all'))) throw new Error('Actual Selection page and Delete all not observed');
+    await click('Delete all');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const empty = await capture(`clear-fixture-empty-send-${attempt}`);
+      if (empty.metadata.currentPackage === APP && empty.nodes.some(node => node.package === APP && visible(node) && named(node, 'Selection')) &&
+          empty.nodes.some(node => node.package === APP && visible(node) && named(node, 'File') && node.clickable === 'true' && node.enabled === 'true') &&
+          !empty.nodes.some(node => node.package === APP && visible(node) && /Selection\nFiles: [1-9]/.test(node['content-desc'] ?? '')) &&
+          !empty.nodes.some(node => node.package === APP && visible(node) && named(node, 'Delete all'))) {
+        await save('fixture-selection-cleared.json', { snapshot: empty.snapshot, emptySendSelectionObserved: true,
+          ordinaryUiSequence: ['Back from Share via link', 'one-file Selection', 'Delete all'], diskFixtureDeletionRequested: false });
+        return;
+      }
+    }
+    throw new Error('Empty Send selection not observed after Delete all; no reselection');
+  }
   async function monitor(condition, expectedUrl) {
     await activate(APP);
     const screen = await capture(condition + '-link-card-before-monitor');
@@ -344,5 +376,5 @@ export function createUi({ command, save, evidence, checkDeadline }) {
     if (opened) await click('Close');
     return { url: value, opened };
   }
-  return { capture, originals, maximum, nonmaxControl, verifyFont, restore, selectFixture, monitor, activate };
+  return { capture, originals, maximum, nonmaxControl, verifyFont, restore, selectFixture, clearFixture, monitor, activate };
 }
