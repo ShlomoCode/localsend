@@ -8,24 +8,31 @@ import {createHash} from 'node:crypto';
 import {relay} from '../cloud_transport/relay.mjs';
 import shareScenario from './share-scenario.mjs';
 import {runTransportControls} from './stream-controls.mjs';
+import {runColdFileScenario,recordingPreflight,retainColdRecording} from './cold-file-scenario.mjs';
 
 // Drive the unmodified apps. The moderate control measures throughput; neither size proves 16GB behavior.
 const largeDiagnostic=process.env.LARGE_TRANSFER_DIAGNOSTIC==='1';
+const coldFileDiagnostic=process.env.COLD_FILE_DIAGNOSTIC==='1';
+assert(!(largeDiagnostic&&coldFileDiagnostic),'Diagnostic modes are mutually exclusive');
+assert(!coldFileDiagnostic||(process.env.SHARE_AFTER_CONTROL!=='1'&&process.env.MODERATE_TRANSFER_CONTROL!=='1'),'Cold File is incompatible with Share/moderate controls');
+const boundedDiagnostic=largeDiagnostic||coldFileDiagnostic;
+if(coldFileDiagnostic)assert(/^\d+$/.test(process.env.GITHUB_RUN_ID||'')&&/^\d+$/.test(process.env.GITHUB_RUN_ATTEMPT||''),'Cold File requires exact workflow run/attempt ownership');
+const ownedBuildName='issue3556-'+process.env.GITHUB_RUN_ID+(coldFileDiagnostic?'-attempt-'+process.env.GITHUB_RUN_ATTEMPT:'');
 const minute=60000,reserveBytes=2*1024*1024*1024;
 let controlBytes=(largeDiagnostic||process.env.MODERATE_TRANSFER_CONTROL==='1')?64*1024*1024:1048576;
 let controlName=controlBytes===1048576?'1 MiB':'64 MiB';
 let controlSizeLabel=controlBytes===1048576?'1.0 MB':'67.1 MB';
 const transportMode=process.env.RELAY_TRANSPORT||'legacy';
 assert(['legacy','stream','coalesced'].includes(transportMode),'Unknown diagnostic transport mode');
-if(transportMode!=='legacy')assert.equal(controlBytes,67108864,'Improved transport must run the exact 64 MiB original-app gate');
+if(!coldFileDiagnostic&&transportMode!=='legacy')assert.equal(controlBytes,67108864,'Improved transport must run the exact 64 MiB original-app gate');
 const here=path.dirname(fileURLToPath(import.meta.url));
 const output=path.resolve(process.env.TRANSFER_EVIDENCE_DIRECTORY||'evidence/windows-transfer');
 const windowsRoot=path.join(output,'windows');
 let windowsOutput=largeDiagnostic?path.join(windowsRoot,'moderate'):windowsRoot;
 mkdirSync(windowsOutput,{recursive:true});
-const required=['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','BS_LOCAL_ID','RELAY_TOKEN','RELAY_APP','HELPER_APP','BASELINE_APP'];
+const required=['BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','HELPER_APP','BASELINE_APP',...(coldFileDiagnostic?['COLD_JOB_DEADLINE_UTC']:['BS_LOCAL_ID','RELAY_TOKEN','RELAY_APP'])];
 for(const key of required) assert(process.env[key],key+' is required');
-const secrets=required.filter(k=>k!=='BS_LOCAL_ID').map(k=>process.env[k]);
+const secrets=required.filter(k=>!['BS_LOCAL_ID','COLD_JOB_DEADLINE_UTC'].includes(k)).map(k=>process.env[k]);
 const auth='Basic '+Buffer.from(process.env.BROWSERSTACK_USERNAME+':'+process.env.BROWSERSTACK_ACCESS_KEY).toString('base64');
 function redact(value){let s=String(value);for(const secret of [...secrets,auth])s=s.replaceAll(secret,'[redacted]');return s;}
 let artifactPrefix='';
@@ -47,23 +54,23 @@ let sessionCreationAttempted=false,sessionStart=null,phaseDeadline=Infinity,wdBu
 const androidSourceLimit=200,windowsObservationLimit=100;
 let windowsImagesRemaining=60,windowsObservationsRemaining=windowsObservationLimit,windowsLargeReceiverStarted=false;
 const sessionAge=()=>sessionStart===null?0:Date.now()-sessionStart;
-function remaining(){return largeDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+110*minute)-Date.now()):Infinity;}
+function remaining(){return boundedDiagnostic?Math.max(0,Math.min(phaseDeadline,sessionStart===null?Infinity:sessionStart+(coldFileDiagnostic?25:110)*minute)-Date.now()):Infinity;}
 function admit(){assert(!largeDiagnostic||sessionAge()<20*minute,'Large stage/controls/selection/Send admission exceeded session age 20 minutes');}
-function commandLimit(url){if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
+function commandLimit(url){if(coldFileDiagnostic&&url!=='/session')return 10000;if(url.endsWith('/source'))return 5*minute;if(/screenshot|current_package/.test(url))return minute;if(/context|orientation|attribute|rect|displayed|text|keyboard/.test(url))return 30000;return url==='/session'?5*minute:minute;}
 const physicalSockets=new Set(),physicalCases=[],physicalTrace=[];
-const r=relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
+const r=coldFileDiagnostic?null:relay({token:process.env.RELAY_TOKEN,reverseTargetPort:53317,transport:transportMode});
 async function wd(method,url,body,attempt=0,readDeadline=Infinity,terminalRead=false){
  const started=Date.now();
  assert(!wdBusy,'WebDriver commands must remain serial');
  const timeout=Math.floor(Math.min(commandLimit(url),remaining(),readDeadline-Date.now()));assert(timeout>0,'WebDriver phase deadline expired');
  if(method==='GET'&&url.endsWith('/source')){
-  assert(!largeDiagnostic||sourceCount<(terminalRead?androidSourceLimit:androidSourceLimit-4),'Android hierarchy read allocation exhausted');sourceCount++;
+  assert(!boundedDiagnostic||sourceCount<(terminalRead?androidSourceLimit:androidSourceLimit-4),'Android hierarchy read allocation exhausted');sourceCount++;
  }
  wdBusy=true;let response;
  try{
  response=await fetch('https://hub-cloud.browserstack.com/wd/hub'+url,{
   method,headers:{authorization:auth,'content-type':'application/json'},
-  body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(largeDiagnostic?timeout:(url==='/session'?300000:120000))});
+  body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(boundedDiagnostic?timeout:(url==='/session'?300000:120000))});
  const json=await response.json();
  // Never retain capabilities containing private uploaded-app references.
  appendFileSync(path.join(output,'wd-commands.jsonl'),redact(JSON.stringify({
@@ -112,7 +119,7 @@ async function recoverOwnedStartupSession(){
   assert(response.ok,'Owned startup lookup failed: '+response.status);return response.json();
  };
  const builds=await get('builds.json');
- const owned=builds.map(b=>b.automation_build).filter(b=>b.name==='issue3556-'+process.env.GITHUB_RUN_ID);
+ const owned=builds.map(b=>b.automation_build).filter(b=>b.name===ownedBuildName);
  assert(owned.length<=1,'Owned startup build identity is ambiguous');
  if(!owned.length)return;
  const sessions=(await get('builds/'+owned[0].hashed_id+'/sessions.json')).map(s=>s.automation_session);
@@ -124,9 +131,9 @@ async function recoverOwnedStartupSession(){
  }
 }
 async function snap(name,xml){
- const terminal=/android-finished|failure|transfer-error|hash-ready/.test(name);
+ const terminal=/android-finished|failure|transfer-error|hash-ready|cold-terminal/.test(name);
  const text=xml||await source(Infinity,terminal);save(name+'.xml',text);
- if(largeDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name:artifactName(name),utc:new Date().toISOString(),sourceOnly:true,reason:'Android image budget reserved or exhausted'});return text;}
+ if(boundedDiagnostic&&imageCount>=(terminal?60:56)){report.snapshots.push({name:artifactName(name),utc:new Date().toISOString(),sourceOnly:true,reason:'Android image budget reserved or exhausted'});return text;}
  imageCount++;const png=Buffer.from(await wd('GET',base()+'/screenshot'),'base64');
  writeFileSync(path.join(output,artifactName(name+'.png')),png);
  const pngValid=png.length>=24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
@@ -143,7 +150,7 @@ function nodes(xml){return [...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fro
  [...m[0].matchAll(/([\w.:-]+)=(["'])(.*?)\2/g)].map(a=>[a[1],decode(a[3])])));}
 function labels(xml){return nodes(xml).flatMap(n=>[n.text||'',n['content-desc']||'']);}
 async function waitFor(predicate,timeout,message,terminalRead=false){
- const end=Math.min(Date.now()+timeout,largeDiagnostic?phaseDeadline:Infinity);
+ const end=Math.min(Date.now()+timeout,boundedDiagnostic?phaseDeadline:Infinity);
  const poll=largeDiagnostic&&timeout>=3*minute?15000:1000;
  do {const xml=await source(end,terminalRead);if(predicate(xml))return xml;await sleep(Math.min(poll,Math.max(0,end-Date.now())));}while(Date.now()<end);
  throw Error(message);
@@ -399,21 +406,31 @@ async function addFavorite(){
  await snap('favorite-registered',registered);
 }
 try{
+ if(coldFileDiagnostic){
+  const provenance=JSON.parse(readFileSync(path.join(output,'original-android-apk.json'),'utf8'));
+  assert(provenance.release==='1.18.2'&&provenance.architecture==='arm64v8'&&provenance.sha256==='82ec3568fba2aa5295b9aae8b76f701d7a4703d86b9f8bad749472038fbaeab3'&&provenance.bytes>0,'Cold File requires verified unchanged original APK provenance before provider allocation');
+  report.originalApk=provenance;
+ }
  const planResponse=await fetch('https://api-cloud.browserstack.com/app-automate/plan.json',{headers:{authorization:auth},signal:AbortSignal.timeout(30000)});
  assert(planResponse.ok,'BrowserStack plan request failed');const plan=await planResponse.json();
  save('plan.json',{parallel_sessions_running:plan.parallel_sessions_running,parallel_sessions_max_allowed:plan.parallel_sessions_max_allowed});
  assert(Number.isFinite(plan.parallel_sessions_running)&&Number.isFinite(plan.parallel_sessions_max_allowed),'BrowserStack live capacity is unavailable');
  assert(plan.parallel_sessions_running<plan.parallel_sessions_max_allowed,'No live BrowserStack slot');
- await r.start();startedRelay=true;
- sessionCreationAttempted=true;sessionStart=Date.now();if(largeDiagnostic)phaseDeadline=sessionStart+20*minute;
+ if(!coldFileDiagnostic){await r.start();startedRelay=true;}
+ if(coldFileDiagnostic){
+  const deadline=Date.parse(process.env.COLD_JOB_DEADLINE_UTC);
+  assert(Number.isFinite(deadline)&&deadline-Date.now()>=30*minute,'Cold provider allocation requires 30 minutes remaining for owned cleanup and retention');
+  report.coldWorkflowBudget={deadlineUtc:new Date(deadline).toISOString(),remainingBeforePostMs:deadline-Date.now(),requiredRemainingMs:30*minute,sessionCleanupAgeMs:25*minute,retentionMs:5*minute};
+ }
+ sessionCreationAttempted=true;sessionStart=Date.now();if(boundedDiagnostic)phaseDeadline=sessionStart+(coldFileDiagnostic?10:20)*minute;
  report.sessionStartBeforePostUtc=new Date(sessionStart).toISOString();
  report.largeDeadlinePolicy=largeDiagnostic?{officialSessionMaxMinutes:120,admissionMinutes:20,transferSessionAgeMinutes:100,verificationAgeMinutes:105,cleanupAgeMinutes:110,observationsMax:300,imagesMax:120,androidImagesMax:60,androidHierarchyReadsMax:androidSourceLimit,windowsUiObservationsMax:windowsObservationLimit}:null;
  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{
   platformName:'Android','appium:deviceName':'Samsung Galaxy S20','appium:platformVersion':'10.0','appium:automationName':'UiAutomator2',
-  'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],
+  'appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,...(coldFileDiagnostic?[]:[process.env.RELAY_APP])],
   'appium:autoGrantPermissions':true,'appium:newCommandTimeout':1200,
-  'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,idleTimeout:300,projectName:'LocalSend bug sprint',
-   buildName:'issue3556-'+process.env.GITHUB_RUN_ID,sessionName:'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
+  'bstack:options':{...(coldFileDiagnostic?{local:false}:{local:true,localIdentifier:process.env.BS_LOCAL_ID}),idleTimeout:300,projectName:'LocalSend bug sprint',
+   buildName:ownedBuildName,sessionName:coldFileDiagnostic?'issue3556-S20-cold-File':'issue3556-S20-to-Windows-'+controlName+'-'+transportMode,debug:true,video:true,networkLogs:false}},
   firstMatch:[{}]}});
  session=created.sessionId;assert(session,'No BrowserStack session ID');save('session.json',{session,device:report.device,android:report.android});
  await wd('POST',base()+'/orientation',{orientation:'PORTRAIT'});
@@ -421,6 +438,11 @@ try{
  assert.equal(report.initialObservedOrientation,'PORTRAIT','The small transfer control requires initial portrait orientation');
  await wd('POST',base()+'/timeouts',{implicit:5000});
  await wd('POST',base()+'/appium/settings',{settings:{waitForIdleTimeout:1000,waitForSelectorTimeout:1000}});
+ if(coldFileDiagnostic){
+  report.coldRecording=await recordingPreflight({session,auth,save});
+  await runColdFileScenario({wd,base,source,snap,nodes,labels,touch,activate,save,report,sleep,sessionStart,
+   counters:()=>({sourceCount,imageCount}),setDeadline:value=>{phaseDeadline=value;}});
+ }else{
  report.scenario=largeDiagnostic?'Actual 64 MiB control followed by valid 16,000,000,000-byte MP4 Android File/Recent selection, real Send, Windows Accept/save and late Android/Windows hash verification':report.scenario;
  if(largeDiagnostic)report.boundaries[2]='One large attempt through reverse cloud relay does not establish shared-LAN behavior';
  for(const passBytes of (largeDiagnostic?[67108864,16000000000]:[controlBytes])){
@@ -619,13 +641,15 @@ try{
  if(transportMode==='legacy'&&process.env.SHARE_AFTER_CONTROL==='1'&&controlBytes===1048576){
   report.shareScenario=await shareScenario({session,wd,output});
  }
+ }
 }catch(error){
  report.status='incomplete';report.error=redact(error.stack||error);
- if(session&&(!largeDiagnostic||remaining()>=2*minute))await source(Date.now()+30000,true).then(xml=>snap('failure',xml)).catch(()=>{});
+ if(session&&(!boundedDiagnostic||remaining()>=(coldFileDiagnostic?30000:2*minute)))await source(Date.now()+30000,true).then(xml=>snap('failure',xml)).catch(()=>{});
  process.exitCode=1;
 }finally{
- if(largeDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+110*minute;
- if(largeDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.fixture3556'});}catch(error){report.cleanupErrors.push('Fixture helper terminate: '+redact(error.message));}
+ if(boundedDiagnostic&&sessionStart!==null)phaseDeadline=sessionStart+(coldFileDiagnostic?25:110)*minute;
+ if(coldFileDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.localsend_app'});}catch(error){report.cleanupErrors.push('Original terminate: '+redact(error.message));}
+ if(boundedDiagnostic&&session)try{await wd('POST',base()+'/appium/device/terminate_app',{appId:'org.localsend.fixture3556'});}catch(error){report.cleanupErrors.push('Fixture helper terminate: '+redact(error.message));}
  try{await stopPhysicalServer();}catch(error){report.cleanupErrors.push('Temporary control server stop: '+redact(error.message));process.exitCode=1;}
  try{if(receiver&&!receiverExit){
   writeFileSync(path.join(windowsOutput,'stop'),'stop');
@@ -645,7 +669,7 @@ try{
   budget.totalImages=(windowsLargeReceiverStarted?budget.moderateImages:0)+finalWindows.imageCount;budget.totalObservations=(windowsLargeReceiverStarted?budget.moderateObservations:0)+finalWindows.uiObservationCount;
   if(budget.totalImages>60||budget.totalObservations>windowsObservationLimit){report.cleanupErrors.push('Windows evidence exceeded combined session allocation');process.exitCode=1;}
  }
- report.androidEvidenceBudget={hierarchyReads:sourceCount,transferObservations:observationCount,images:imageCount,maxHierarchyReads:largeDiagnostic?androidSourceLimit:null,reservedTerminalReads:largeDiagnostic?4:null,maxImages:largeDiagnostic?60:null};
+ report.androidEvidenceBudget={hierarchyReads:sourceCount,transferObservations:observationCount,images:imageCount,maxHierarchyReads:boundedDiagnostic?androidSourceLimit:null,reservedTerminalReads:boundedDiagnostic?4:null,maxImages:boundedDiagnostic?60:null};
  report.receiverExit=receiverExit;report.finishedUtc=new Date().toISOString();
  for(const log of receiverLogs)log.end();
  if(!session&&sessionCreationAttempted){
@@ -660,9 +684,10 @@ try{
    try{await wd('DELETE',base());}catch(retryError){report.cleanupErrors.push('Owned session delete retry: '+redact(retryError.message));process.exitCode=1;}
   }
  }
+ if(coldFileDiagnostic&&session){try{await retainColdRecording({session,auth,save,output,report});}catch(error){report.status='incomplete';report.cleanupErrors.push('Continuous recording retention: '+redact(error.message));process.exitCode=1;}}
  if(startedRelay){try{await r.stop();}catch(error){report.cleanupErrors.push('Relay stop: '+redact(error.message));process.exitCode=1;}}
- save('reverse-physical-controls.json',report.physicalReverseControl||{status:'incomplete',scope:'Transport proof only; actual LocalSend transfer gate not passed',windows:physicalCases});
+ save('reverse-physical-controls.json',report.physicalReverseControl||{status:coldFileDiagnostic?'not-run-cold-selection-only':'incomplete',scope:'Transport proof only; actual LocalSend transfer gate not passed',windows:physicalCases});
  save('reverse-physical-trace.json',physicalTrace);
- save('relay-trace.json',r.trace);save('relay-final-status.json',r.status());save('results.json',report);
+ save('relay-trace.json',r?r.trace:[]);save('relay-final-status.json',r?r.status():{status:'not-run-cold-selection-only',constructed:false});save('results.json',report);
 }
 

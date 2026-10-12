@@ -6,13 +6,19 @@ param(
 )
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+$coldFileDiagnostic=$env:COLD_FILE_DIAGNOSTIC -eq '1'
 if(-not $EvidenceDirectory) { $EvidenceDirectory=Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'evidence/windows-transfer' }
 $EvidenceDirectory=[IO.Path]::GetFullPath($EvidenceDirectory)
 [void][IO.Directory]::CreateDirectory($EvidenceDirectory)
-foreach($name in @('BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','BS_LOCAL_ID','RELAY_TOKEN','FIXTURE_3556_APK','CLOUD_TRANSPORT_APK')) {
+$required=@('BROWSERSTACK_USERNAME','BROWSERSTACK_ACCESS_KEY','FIXTURE_3556_APK')
+if($coldFileDiagnostic){$required+=@('COLD_JOB_DEADLINE_UTC')}
+else{$required+=@('BS_LOCAL_ID','RELAY_TOKEN','CLOUD_TRANSPORT_APK')}
+foreach($name in $required) {
  if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Required process environment variable missing: $name" }
 }
-foreach($file in @($BrowserStackLocalPath,$env:FIXTURE_3556_APK,$env:CLOUD_TRANSPORT_APK)) {
+$requiredFiles=@($env:FIXTURE_3556_APK)
+if(-not $coldFileDiagnostic){$requiredFiles+=@($BrowserStackLocalPath,$env:CLOUD_TRANSPORT_APK)}
+foreach($file in $requiredFiles) {
  if(-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'A required BrowserStack Local executable or helper APK is missing.' }
 }
 $private=Join-Path ([IO.Path]::GetTempPath()) ('issue3556-transfer-'+[Guid]::NewGuid().ToString('N'))
@@ -42,44 +48,58 @@ function Upload-App {
  return [string]$response.app_url
 }
 try {
- $localLog=Join-Path $private 'local.log'
- $stdoutPath=Join-Path $private 'local.stdout.txt'; $stderrPath=Join-Path $private 'local.stderr.txt'
- $start=[Diagnostics.ProcessStartInfo]::new()
- $start.FileName=[IO.Path]::GetFullPath($BrowserStackLocalPath)
- $start.UseShellExecute=$false; $start.CreateNoWindow=$true
- $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
- foreach($argument in @('--key',$env:BROWSERSTACK_ACCESS_KEY,'--local-identifier',$env:BS_LOCAL_ID,'--force-local','--only-automate','--verbose','3','--log-file',$localLog)) {
-  [void]$start.ArgumentList.Add($argument)
- }
- $local=[Diagnostics.Process]::new(); $local.StartInfo=$start
- if(-not $local.Start()) { throw 'Could not start the owned BrowserStack Local process.' }
- $stdoutStream=[IO.FileStream]::new($stdoutPath,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite,1,[IO.FileOptions]::Asynchronous)
- $stderrStream=[IO.FileStream]::new($stderrPath,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite,1,[IO.FileOptions]::Asynchronous)
- $copyTasks=@($local.StandardOutput.BaseStream.CopyToAsync($stdoutStream),$local.StandardError.BaseStream.CopyToAsync($stderrStream))
- $deadline=[DateTime]::UtcNow.AddSeconds(120); $ready=$false
- do {
-  if($local.HasExited) { throw 'Owned BrowserStack Local exited before readiness; inspect redacted logs.' }
-  $text=''
-  foreach($log in @($localLog,$stdoutPath,$stderrPath)) {
-   if(Test-Path -LiteralPath $log) {
-    try {
-     $stream=[IO.File]::Open($log,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
-     $reader=[IO.StreamReader]::new($stream)
-     try { $text+=$reader.ReadToEnd() } finally { $reader.Dispose() }
-    } catch {}
-   }
+ if($coldFileDiagnostic){
+  foreach($module in @('windows-transfer-control.mjs','cold-file-scenario.mjs')){
+   & node --check (Join-Path $PSScriptRoot $module)
+   if($LASTEXITCODE -ne 0){throw "Syntax failed before provider upload: $module"}
   }
-  $ready=$text -match '(?i)You can now access your local|Local Testing successfully connected|BrowserStackLocal is connected|Local connection established|Connected to BrowserStack'
-  if(-not $ready) { Start-Sleep -Milliseconds 500 }
- } until($ready -or [DateTime]::UtcNow -ge $deadline)
- if(-not $ready) { throw 'Owned BrowserStack Local readiness exceeded 120 seconds.' }
- [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'local-ready.json'),(ConvertTo-Json @{
-  ownedProcessId=$local.Id; localIdentifier=$env:BS_LOCAL_ID; readyUtc=[DateTime]::UtcNow.ToString('o')
-  method='Foreground owned native process readiness message; same step lifetime'
- }),[Text.UTF8Encoding]::new($false))
+  if($env:LARGE_TRANSFER_DIAGNOSTIC -eq '1' -or $env:MODERATE_TRANSFER_CONTROL -eq '1' -or $env:SHARE_AFTER_CONTROL -eq '1'){throw 'Cold File rejects transfer and Share controls before provider upload.'}
+  [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'cold-workflow-binding.json'),(ConvertTo-Json @{
+   scenario='cold-file-onset'; fixtureOnly=$true; browserStackLocal=$false; preWindowTransferControl=$false
+   syntaxChecked=@('windows-transfer-control.mjs','cold-file-scenario.mjs'); sourceCommit=$env:GITHUB_SHA
+   cleanupAgeMinutes=25; artifactRetentionMinutes=5; workflowMinutes=45; deadlineUtc=$env:COLD_JOB_DEADLINE_UTC; requiredMinutesBeforeSessionPost=30
+   outcomeGate='First touch and full ten-minute onset coverage remain unverified until original decoded video frames align with native input/log evidence.'
+  }),[Text.UTF8Encoding]::new($false))
+ }else{
+  $localLog=Join-Path $private 'local.log'
+  $stdoutPath=Join-Path $private 'local.stdout.txt'; $stderrPath=Join-Path $private 'local.stderr.txt'
+  $start=[Diagnostics.ProcessStartInfo]::new()
+  $start.FileName=[IO.Path]::GetFullPath($BrowserStackLocalPath)
+  $start.UseShellExecute=$false; $start.CreateNoWindow=$true
+  $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+  foreach($argument in @('--key',$env:BROWSERSTACK_ACCESS_KEY,'--local-identifier',$env:BS_LOCAL_ID,'--force-local','--only-automate','--verbose','3','--log-file',$localLog)) {
+   [void]$start.ArgumentList.Add($argument)
+  }
+  $local=[Diagnostics.Process]::new(); $local.StartInfo=$start
+  if(-not $local.Start()) { throw 'Could not start the owned BrowserStack Local process.' }
+  $stdoutStream=[IO.FileStream]::new($stdoutPath,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite,1,[IO.FileOptions]::Asynchronous)
+  $stderrStream=[IO.FileStream]::new($stderrPath,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite,1,[IO.FileOptions]::Asynchronous)
+  $copyTasks=@($local.StandardOutput.BaseStream.CopyToAsync($stdoutStream),$local.StandardError.BaseStream.CopyToAsync($stderrStream))
+  $deadline=[DateTime]::UtcNow.AddSeconds(120); $ready=$false
+  do {
+   if($local.HasExited) { throw 'Owned BrowserStack Local exited before readiness; inspect redacted logs.' }
+   $text=''
+   foreach($log in @($localLog,$stdoutPath,$stderrPath)) {
+    if(Test-Path -LiteralPath $log) {
+     try {
+      $stream=[IO.File]::Open($log,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+      $reader=[IO.StreamReader]::new($stream)
+      try { $text+=$reader.ReadToEnd() } finally { $reader.Dispose() }
+     } catch {}
+    }
+   }
+   $ready=$text -match '(?i)You can now access your local|Local Testing successfully connected|BrowserStackLocal is connected|Local connection established|Connected to BrowserStack'
+   if(-not $ready) { Start-Sleep -Milliseconds 500 }
+  } until($ready -or [DateTime]::UtcNow -ge $deadline)
+  if(-not $ready) { throw 'Owned BrowserStack Local readiness exceeded 120 seconds.' }
+  [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'local-ready.json'),(ConvertTo-Json @{
+   ownedProcessId=$local.Id; localIdentifier=$env:BS_LOCAL_ID; readyUtc=[DateTime]::UtcNow.ToString('o')
+   method='Foreground owned native process readiness message; same step lifetime'
+  }),[Text.UTF8Encoding]::new($false))
+ }
  $env:HELPER_APP=Upload-App -ApkPath $env:FIXTURE_3556_APK -Label 'fixture'
- $env:RELAY_APP=Upload-App -ApkPath $env:CLOUD_TRANSPORT_APK -Label 'relay'
- if($env:RELAY_TRANSPORT -and $env:RELAY_TRANSPORT -ne 'legacy'){
+ if(-not $coldFileDiagnostic){$env:RELAY_APP=Upload-App -ApkPath $env:CLOUD_TRANSPORT_APK -Label 'relay'}
+ if($coldFileDiagnostic -or ($env:RELAY_TRANSPORT -and $env:RELAY_TRANSPORT -ne 'legacy')){
   $baselinePath=Join-Path $private 'original-1.18.2-arm64.apk'
   Invoke-WebRequest $BaselineUrl -OutFile $baselinePath -TimeoutSec 120
   $baselineHash=(Get-FileHash $baselinePath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -115,7 +135,7 @@ try {
  foreach($name in @('HELPER_APP','RELAY_APP','BASELINE_APP')) { [Environment]::SetEnvironmentVariable($name,$null,'Process') }
  if(Test-Path -LiteralPath $private) { Remove-Item -LiteralPath $private -Recurse -Force }
  # Remove this single-run capability APK after its private upload and session use.
- if(Test-Path -LiteralPath $env:CLOUD_TRANSPORT_APK) { Remove-Item -LiteralPath $env:CLOUD_TRANSPORT_APK -Force }
+ if($env:CLOUD_TRANSPORT_APK -and (Test-Path -LiteralPath $env:CLOUD_TRANSPORT_APK)) { Remove-Item -LiteralPath $env:CLOUD_TRANSPORT_APK -Force }
 }
 exit $exitCode
 

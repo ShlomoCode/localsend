@@ -10,6 +10,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+$coldFileDiagnostic=$env:COLD_FILE_DIAGNOSTIC -eq '1'
 $RepositoryRoot=[IO.Path]::GetFullPath($RepositoryRoot)
 $VideoSeedPath=[IO.Path]::GetFullPath($VideoSeedPath)
 if(-not $EvidenceDirectory) { $EvidenceDirectory=Join-Path $RepositoryRoot 'evidence/windows-helper-build' }
@@ -17,7 +18,7 @@ $EvidenceDirectory=[IO.Path]::GetFullPath($EvidenceDirectory)
 if(-not $AndroidSdkRoot) { $AndroidSdkRoot=$env:ANDROID_SDK_ROOT }
 if(-not $AndroidSdkRoot -or -not (Test-Path -LiteralPath $AndroidSdkRoot -PathType Container)) { throw 'Set ANDROID_HOME or pass -AndroidSdkRoot for the hosted Android SDK.' }
 if(-not $env:GITHUB_ENV) { throw 'Run this helper in GitHub Actions with GITHUB_ENV available.' }
-if([string]::IsNullOrWhiteSpace($env:RELAY_TOKEN)) { throw 'Provide RELAY_TOKEN through the job environment. A placeholder token is not accepted.' }
+if(-not $coldFileDiagnostic -and [string]::IsNullOrWhiteSpace($env:RELAY_TOKEN)) { throw 'Provide RELAY_TOKEN through the job environment. A placeholder token is not accepted.' }
 if(-not (Test-Path -LiteralPath $VideoSeedPath -PathType Leaf)) { throw 'Provide a valid MP4 seed through -VideoSeedPath.' }
 [void][IO.Directory]::CreateDirectory($EvidenceDirectory)
 function Invoke-Checked {
@@ -61,7 +62,7 @@ if(@($probe.streams | Where-Object codec_type -eq 'video').Count -eq 0 -or $prob
 [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'supplied-seed-probe.json'),$probeText,[Text.UTF8Encoding]::new($false))
 # Keep the capability-bearing config and APK outside all evidence upload directories.
 $fixtureTemp=Join-Path ([IO.Path]::GetTempPath()) ('fixture3556-'+[Guid]::NewGuid().ToString('N'))
-$relayTemp=Join-Path ([IO.Path]::GetTempPath()) ('cloudtransport-'+[Guid]::NewGuid().ToString('N'))
+$relayTemp=if($coldFileDiagnostic){$null}else{Join-Path ([IO.Path]::GetTempPath()) ('cloudtransport-'+[Guid]::NewGuid().ToString('N'))}
 function Build-Helper {
  param([string]$SourceDirectory,[string]$BuildDirectory,[int]$MinApi,[string]$ApkName,[string]$CertificateName)
  foreach($name in @('classes','dex','assets')) { [void][IO.Directory]::CreateDirectory((Join-Path $BuildDirectory $name)) }
@@ -87,7 +88,9 @@ function Build-Helper {
  Invoke-Checked $apksigner @('verify',$apk) 'Verify helper APK'
  return $apk
 }
-foreach($root in @($fixtureTemp,$relayTemp)) { [void][IO.Directory]::CreateDirectory((Join-Path $root 'assets')) }
+$buildRoots=@($fixtureTemp)
+if(-not $coldFileDiagnostic){$buildRoots+=$relayTemp}
+foreach($root in $buildRoots) { [void][IO.Directory]::CreateDirectory((Join-Path $root 'assets')) }
 $embeddedSeed=Join-Path $fixtureTemp 'assets/seed.mp4'
 if((Get-Item -LiteralPath $VideoSeedPath).Length -ge 1048560) {
  # A supplied 1 MiB MP4 needs a smaller playable seed before MainActivity adds its free box.
@@ -96,20 +99,26 @@ if((Get-Item -LiteralPath $VideoSeedPath).Length -ge 1048560) {
 if((Get-Item -LiteralPath $embeddedSeed).Length -ge 1048560) { throw 'Embedded MP4 seed leaves no room for the 16-byte free-box header in the 1 MiB fixture.' }
 Invoke-Checked $ffmpeg @('-hide_banner','-loglevel','error','-i',$embeddedSeed,'-map','0:v:0','-frames:v','1','-f','null','NUL') 'Decode embedded video seed'
 # JSON serialization handles token escaping without placing the token on a process command line.
-$configPath=Join-Path $relayTemp 'assets/config.json'
+$configPath=$null
 $transport=if($env:RELAY_TRANSPORT){$env:RELAY_TRANSPORT}else{'legacy'}
 if($transport -notin @('legacy','stream','coalesced')){throw 'Invalid explicit diagnostic relay transport.'}
 $peerAbsoluteMs=if($env:LARGE_TRANSFER_DIAGNOSTIC -eq '1'){90*60000}else{15*60000}
-[IO.File]::WriteAllText($configPath,(ConvertTo-Json -Compress @{ endpoint=$RelayEndpoint; token=$env:RELAY_TOKEN; transport=$transport; peerAbsoluteMs=$peerAbsoluteMs }),[Text.UTF8Encoding]::new($false))
+if(-not $coldFileDiagnostic){
+ $configPath=Join-Path $relayTemp 'assets/config.json'
+ [IO.File]::WriteAllText($configPath,(ConvertTo-Json -Compress @{ endpoint=$RelayEndpoint; token=$env:RELAY_TOKEN; transport=$transport; peerAbsoluteMs=$peerAbsoluteMs }),[Text.UTF8Encoding]::new($false))
+}
 try {
  $fixtureApk=Build-Helper (Join-Path $RepositoryRoot 'support/diagnose_3556/android') $fixtureTemp 29 'fixture3556-helper.apk' 'Issue3556 fixture helper'
- $relayApk=Build-Helper (Join-Path $RepositoryRoot 'support/cloud_transport/android') $relayTemp 26 'cloud-transport-helper.apk' 'Cloud diagnostic'
- foreach($name in @('unsigned.apk','aligned.apk','debug.jks')) {
-  $intermediate=Join-Path $relayTemp $name
-  if(Test-Path -LiteralPath $intermediate) { Remove-Item -LiteralPath $intermediate -Force }
+ if(-not $coldFileDiagnostic){
+  $relayApk=Build-Helper (Join-Path $RepositoryRoot 'support/cloud_transport/android') $relayTemp 26 'cloud-transport-helper.apk' 'Cloud diagnostic'
+  foreach($name in @('unsigned.apk','aligned.apk','debug.jks')) {
+   $intermediate=Join-Path $relayTemp $name
+   if(Test-Path -LiteralPath $intermediate) { Remove-Item -LiteralPath $intermediate -Force }
+  }
  }
  # These variables are private job-local paths, not artifact upload instructions.
- [IO.File]::AppendAllText($env:GITHUB_ENV,"FIXTURE_3556_APK=$fixtureApk"+[Environment]::NewLine+"CLOUD_TRANSPORT_APK=$relayApk"+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+ [IO.File]::AppendAllText($env:GITHUB_ENV,"FIXTURE_3556_APK=$fixtureApk"+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+ if(-not $coldFileDiagnostic){[IO.File]::AppendAllText($env:GITHUB_ENV,"CLOUD_TRANSPORT_APK=$relayApk"+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))}
  $safeReport=@{
   sdkPlatform=35; buildTools='35.0.0'; sourceCompatibility=8; fixtureMinApi=29; cloudTransportMinApi=26
   suppliedSeed=@{ bytes=(Get-Item $VideoSeedPath).Length; sha256=(Get-FileHash $VideoSeedPath -Algorithm SHA256).Hash }
@@ -119,14 +128,20 @@ try {
   diagnosticTransport=$transport
   fixtureGeneration='Existing MainActivity supplies legal MP4 free-box padding, including its 16GB fixture; this build does not change it.'
  }
+ if($coldFileDiagnostic){
+  $safeReport.cloudTransport='Not built; cold File selection needs the fixture helper only.'
+  $safeReport.cloudTransportMinApi=$null; $safeReport.diagnosticTransport='none'
+  $safeReport.coldFilePolicy=@{sourceCommit=$env:GITHUB_SHA;sessionCleanupAgeMinutes=25;retentionMinutes=5;workflowMinutes=45;noPreWindowControl=$true}
+ }
  [IO.File]::WriteAllText((Join-Path $EvidenceDirectory 'build.json'),(ConvertTo-Json $safeReport -Depth 5),[Text.UTF8Encoding]::new($false))
- Write-Host 'Both helper APKs built and verified. Private paths are available through GITHUB_ENV.'
+ if($coldFileDiagnostic){Write-Host 'Fixture helper APK built and verified for cold File onset.'}
+ else{Write-Host 'Both helper APKs built and verified. Private paths are available through GITHUB_ENV.'}
 } catch {
  # Remove all capability-bearing material if the paired build cannot finish.
- if(Test-Path -LiteralPath $relayTemp) { Remove-Item -LiteralPath $relayTemp -Recurse -Force }
+ if($relayTemp -and (Test-Path -LiteralPath $relayTemp)) { Remove-Item -LiteralPath $relayTemp -Recurse -Force }
  throw
 } finally {
  # The signed capability APK remains only in TEMP for direct upload to the private device service.
- if(Test-Path -LiteralPath $configPath) { Remove-Item -LiteralPath $configPath -Force }
+ if($configPath -and (Test-Path -LiteralPath $configPath)) { Remove-Item -LiteralPath $configPath -Force }
 }
 

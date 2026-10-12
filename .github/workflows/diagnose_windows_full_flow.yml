@@ -5,7 +5,7 @@ on:
       scenario:
         type: choice
         default: selection
-        options: [selection, windows-transfer-control, moderate-transfer-control, stream-moderate-control, large-transfer-diagnostic, syntax-only, direct-tcp-gate]
+        options: [selection, windows-transfer-control, moderate-transfer-control, stream-moderate-control, large-transfer-diagnostic, cold-file-onset, syntax-only, direct-tcp-gate]
 jobs:
   direct-tcp-gate:
     if: inputs.scenario == 'direct-tcp-gate'
@@ -48,7 +48,7 @@ jobs:
           name: issue3556-storage-evidence
           path: evidence/
   windows-transfer-control:
-    if: github.repository == 'ShlomoCode/localsend' && (inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic' || inputs.scenario == 'syntax-only')
+    if: github.repository == 'ShlomoCode/localsend' && (inputs.scenario == 'windows-transfer-control' || inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic' || inputs.scenario == 'cold-file-onset' || inputs.scenario == 'syntax-only')
     concurrency:
       group: issue3556-owned-diagnostics
       cancel-in-progress: false
@@ -58,11 +58,19 @@ jobs:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
       BS_LOCAL_ID: issue3556-${{ github.run_id }}-${{ github.run_attempt }}
-      SHARE_AFTER_CONTROL: '1'
+      SHARE_AFTER_CONTROL: ${{ inputs.scenario == 'cold-file-onset' && '0' || '1' }}
+      COLD_FILE_DIAGNOSTIC: ${{ inputs.scenario == 'cold-file-onset' && '1' || '0' }}
       MODERATE_TRANSFER_CONTROL: ${{ (inputs.scenario == 'moderate-transfer-control' || inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic') && '1' || '0' }}
       LARGE_TRANSFER_DIAGNOSTIC: ${{ inputs.scenario == 'large-transfer-diagnostic' && '1' || '0' }}
       RELAY_TRANSPORT: ${{ (inputs.scenario == 'stream-moderate-control' || inputs.scenario == 'large-transfer-diagnostic') && 'stream' || 'legacy' }}
     steps:
+      - name: Record cold workflow cleanup deadline
+        if: inputs.scenario == 'cold-file-onset'
+        shell: pwsh
+        run: |
+          # Keep a minute inside the 45-minute job timeout for runner overhead.
+          $deadline=[DateTime]::UtcNow.AddMinutes(44).ToString('o')
+          [IO.File]::AppendAllText($env:GITHUB_ENV,"COLD_JOB_DEADLINE_UTC=$deadline"+[Environment]::NewLine)
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
@@ -75,12 +83,14 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - name: Build separate paired diagnostic helpers
+      - name: ${{ inputs.scenario == 'cold-file-onset' && 'Build fixture helper for cold File onset' || 'Build separate paired diagnostic helpers' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force evidence | Out-Null
           node --check support/diagnose_3556/windows-transfer-control.mjs
           if($LASTEXITCODE -ne 0){throw 'Controller syntax failed'}
+          node --check support/diagnose_3556/cold-file-scenario.mjs
+          if($LASTEXITCODE -ne 0){throw 'Cold File scenario syntax failed'}
           node --check support/diagnose_3556/helper-restart-check.mjs
           if($LASTEXITCODE -ne 0){throw 'Helper restart check syntax failed'}
           node --check support/diagnose_3556/share-scenario.mjs
@@ -117,9 +127,12 @@ jobs:
           $seed=Join-Path $env:RUNNER_TEMP 'issue3556-seed.mp4'
           & $ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=10 -t 1 -c:v libx264 -pix_fmt yuv420p -movflags +faststart $seed
           if($LASTEXITCODE -ne 0){throw 'MP4 seed generation failed'}
-          node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");fs.writeFileSync(process.env.RUNNER_TEMP+"/relay-token",token);'
-          $env:RELAY_TOKEN=Get-Content (Join-Path $env:RUNNER_TEMP 'relay-token') -Raw
-          Remove-Item (Join-Path $env:RUNNER_TEMP 'relay-token')
+          if($env:COLD_FILE_DIAGNOSTIC -ne '1'){
+            node --input-type=module -e 'import fs from "node:fs";import {randomBytes} from "node:crypto";const token=randomBytes(24).toString("hex");console.log("::add-mask::"+token);fs.appendFileSync(process.env.GITHUB_ENV,"RELAY_TOKEN="+token+"\n");fs.writeFileSync(process.env.RUNNER_TEMP+"/relay-token",token);'
+            $env:RELAY_TOKEN=Get-Content (Join-Path $env:RUNNER_TEMP 'relay-token') -Raw
+            Remove-Item (Join-Path $env:RUNNER_TEMP 'relay-token')
+          }
+          [IO.File]::AppendAllText($env:GITHUB_PATH,(Split-Path $ffmpeg)+[Environment]::NewLine)
           ./support/diagnose_3556/windows-helper-build.ps1 -VideoSeedPath $seed -FfmpegPath $ffmpeg -FfprobePath $ffprobe
       - name: Synthetic streaming route, isolation and finite request limit over five minutes
         if: inputs.scenario == 'stream-moderate-control'
@@ -128,12 +141,14 @@ jobs:
           node support/diagnose_3556/relay-stream-check.mjs
           exit $LASTEXITCODE
       - name: Receiver hash receipt race negative control and candidate
+        if: inputs.scenario != 'cold-file-onset'
         shell: pwsh
         run: |
           git fetch --no-tags --depth=1 origin 1b14424098058239b003e5b8e1dabf843b687f51
           if($LASTEXITCODE -ne 0){throw 'Race negative control source fetch failed'}
           ./support/diagnose_3556/hash-receipt-check.ps1
       - name: Retired helper poll restart negative control and candidate
+        if: inputs.scenario != 'cold-file-onset'
         shell: pwsh
         run: |
           git fetch --no-tags --depth=1 origin a3c81bb623aaa1e4906b2788863c4298780da5ce
@@ -144,14 +159,16 @@ jobs:
           $env:NEGATIVE_RELAY_SOURCE=$oldSource
           node support/diagnose_3556/helper-restart-check.mjs
           if($LASTEXITCODE -ne 0){throw 'Helper restart component check failed'}
-      - name: Small real Android sender and Windows receiver control
+      - name: ${{ inputs.scenario == 'cold-file-onset' && 'Cold original File onset observation' || 'Small real Android sender and Windows receiver control' }}
         if: inputs.scenario != 'syntax-only'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force C:/tmp/bs-local-bin | Out-Null
-          Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile (Join-Path $env:RUNNER_TEMP 'bs-local.zip')
-          Expand-Archive (Join-Path $env:RUNNER_TEMP 'bs-local.zip') C:/tmp/bs-local-bin -Force
-          Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
+          if($env:COLD_FILE_DIAGNOSTIC -ne '1'){
+            New-Item -ItemType Directory -Force C:/tmp/bs-local-bin | Out-Null
+            Invoke-WebRequest https://local-downloads.browserstack.com/BrowserStackLocal-win32.zip -OutFile (Join-Path $env:RUNNER_TEMP 'bs-local.zip')
+            Expand-Archive (Join-Path $env:RUNNER_TEMP 'bs-local.zip') C:/tmp/bs-local-bin -Force
+            Get-FileHash C:/tmp/bs-local-bin/BrowserStackLocal.exe | ConvertTo-Json | Set-Content evidence/local-binary-hash.json
+          }
           ./support/diagnose_3556/windows-transfer-step.ps1
       - uses: actions/upload-artifact@v6
         if: always()
