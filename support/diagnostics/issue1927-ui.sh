@@ -189,7 +189,7 @@ desktop_entry_ready() {
 }
 wait_observed_transition() {
   local phrase=$1 label=$2 expected=$3 entry_kind=$4 result y observed attempt=0
-  local transition_deadline=$((SECONDS+65)) entry_observation_label
+  local transition_deadline=${5:-$((SECONDS+65))} entry_observation_label
   # Only called after one freshly qualified click. Animation/route/modal
   # frames may be unknown; observing them never authorizes another action.
   while [ "$SECONDS" -lt "$transition_deadline" ]; do

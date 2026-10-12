@@ -53,7 +53,7 @@ for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
   sed -i '/^[[:space:]]*deb.*cdrom:/s/^/# Live-media cdrom source disabled: /' "$source"
 done
 timeout --foreground 240 apt-get update
-timeout --foreground 600 apt-get install -y openssh-server xdotool imagemagick tesseract-ocr ffmpeg gcc pkg-config libx11-dev libxres-dev
+timeout --foreground 600 apt-get install -y openssh-server xdotool imagemagick tesseract-ocr ffmpeg gcc pkg-config libx11-dev libxres-dev gjs gir1.2-atspi-2.0 jq
 gcc -std=c11 -Wall -Wextra -Werror /home/mint/xres-owner.c -o /home/mint/xres-owner $(pkg-config --cflags --libs x11 xres)
 { pkg-config --modversion x11 xres; dpkg-query -W libxres1 libxres-dev libx11-6; sha256sum /home/mint/xres-owner.c /home/mint/xres-owner; } > /home/mint/evidence/xres-build-provenance.txt
 systemctl start ssh
@@ -103,14 +103,8 @@ start_xres_control initial
 { cinnamon --version; flatpak --version; loginctl list-sessions; } > evidence/desktop-identity.txt
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user --noninteractive -y flathub org.freedesktop.Platform/x86_64/26.08
-flatpak install --user --noninteractive -y ./baseline.flatpak
-EXPECTED_APP_COMMIT=$(flatpak info --user --show-commit org.localsend.localsend_app)
-[[ "$EXPECTED_APP_COMMIT" =~ ^[0-9a-f]{64}$ ]]
-printf '%s\n' "$EXPECTED_APP_COMMIT" > evidence/baseline-installed-app-commit.txt
-export EXPECTED_APP_COMMIT
 { dpkg-query -W '*xdg-desktop-portal*'; flatpak remote-info --user --log flathub org.localsend.localsend_app; } > evidence/portal-and-package-history.txt 2>&1
 gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop > evidence/portal-host-introspection.txt 2>&1 || true
-flatpak run --user --command=sh org.localsend.localsend_app -c 'command -v gdbus; gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop' > evidence/portal-sandbox-introspection.txt 2>&1 || true
 cp -a /usr/share/xdg-desktop-portal evidence/portal-backend-config
 session_environment() {
   local desktop_pid
@@ -129,37 +123,16 @@ relogin() {
   done
   return 1
 }
-# Use the unmodified exported launcher as a supported manual startup control.
+# Retained baseline receipt remains prior evidence; A–D need only the immutable
+# candidate. Do not repeat manual/native/full passing lifecycles or erase prefs.
 mkdir -p "$HOME/.config/autostart"
-cp "$HOME/.local/share/flatpak/exports/share/applications/org.localsend.localsend_app.desktop" "$HOME/.config/autostart/issue1927-manual-control.desktop"
-cp "$HOME/.config/autostart/issue1927-manual-control.desktop" evidence/manual-control.desktop
-relogin
-pgrep -x localsend > evidence/manual-login-app-pid.txt
-xdotool search --onlyvisible --name '^LocalSend$' > evidence/manual-login-window.txt
-import -window root evidence/manual-login.png
-flatpak kill org.localsend.localsend_app
-rm "$HOME/.config/autostart/issue1927-manual-control.desktop"
-EXISTING_DESKTOP=1 bash scenario.sh
-relogin
-{ loginctl list-sessions; flatpak ps --columns=instance,application,pid; pgrep -x localsend || true; } > evidence/app-generated-login-state.txt
-import -window root evidence/app-generated-login.png
-session_environment
-flatpak run --user org.localsend.localsend_app > evidence/post-login-app.log 2>&1 &
-sleep 8
-wid=$(xdotool search --onlyvisible --name '^LocalSend$' | head -n 1)
-stabilize_window
-xdotool mousemove --window "$wid" 105 211 click 1
-sleep 2
-import -window "$wid" evidence/post-login-settings.png
-flatpak kill org.localsend.localsend_app
-flatpak override --user --reset org.localsend.localsend_app
-flatpak uninstall --user --delete-data --noninteractive -y org.localsend.localsend_app
-rm -f "$HOME/.config/autostart/localsend_app.desktop" "$HOME/.config/autostart/org.localsend.localsend_app.desktop"
+printf 'pair=run38167715193; baseline_runtime=prior-retained-evidence; candidate=unchanged\n' > evidence/revocation-package-scope.txt
 flatpak install --user --noninteractive -y ./candidate.flatpak
 EXPECTED_APP_COMMIT=$(flatpak info --user --show-commit org.localsend.localsend_app)
 [[ "$EXPECTED_APP_COMMIT" =~ ^[0-9a-f]{64}$ ]]
 printf '%s\n' "$EXPECTED_APP_COMMIT" > evidence/candidate-installed-app-commit.txt
 export EXPECTED_APP_COMMIT
+flatpak run --user --command=sh org.localsend.localsend_app -c 'command -v gdbus; gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop' > evidence/portal-sandbox-introspection.txt 2>&1 || true
 flatpak override --user --show org.localsend.localsend_app > evidence/candidate-overrides.txt
 source /home/mint/portal-gui.sh
 GUEST
