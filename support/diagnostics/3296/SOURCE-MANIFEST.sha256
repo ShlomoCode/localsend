@@ -1,4 +1,4 @@
-3c2d0fe464dfd56ea5f3d62787ca50377846a3d89299ed7caab0a7cb9e5e4cb9  .github/workflows/diagnose3296.yml
+3c2d0fe464dfd56ea5f3d62787ca50377846a3d89299ed7caab0a7cb9e5e4cb9  .github/workflows/ci.yml
 47f107688319579a93722a000d65c41ce6eb8376b7593dd0c8697393e3991479  support/diagnostics/3296/README.md
 f8f15bf55961b9912eb2902ca369a0381366cc83a5096ec8531201db1c82ec14  support/diagnostics/3296/controls.cs
 3842b3f4525e566a7031ce16818ee3ba904ec93e17d833834036ba449b390239  support/diagnostics/3296/native.cs
