@@ -47,6 +47,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Prepare bounded cloud media validation tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180s bash -c 'sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg'
       - name: Retain exact original archives without rebuild or repackaging
         shell: bash
         run: |
