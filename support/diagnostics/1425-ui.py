@@ -8,6 +8,7 @@ DEST = Path('/home/receiver1425/Downloads')
 DISPLAYS = {'sender': ':81', 'receiver': ':82'}
 COUNTERS = {'sender': 0, 'receiver': 0}
 EVENTS = (OUT / 'inputs.jsonl').open('w')
+LATEST = {}
 
 def event(kind, **fields):
     item = {'wall_ns': time.time_ns(), 'monotonic_ns': time.monotonic_ns(), 'kind': kind, **fields}
@@ -22,20 +23,36 @@ def capture(role, stage):
     COUNTERS[role] += 1
     stem = OUT / ('%s-%04d-%s' % (role, COUNTERS[role], stage))
     command(role, 'scrot', str(stem) + '.png')
-    command(role, 'convert', str(stem) + '.png', '-colorspace', 'Gray', '-resize', '200%', '-threshold', '70%', '-negate', str(stem) + '-ocr.png')
-    ocr = subprocess.run(['tesseract', str(stem) + '-ocr.png', 'stdout', '--psm', '11', 'tsv'],
-                         env={**os.environ, 'DISPLAY': DISPLAYS[role]}, text=True, capture_output=True, check=True)
-    raw = ocr.stdout
-    Path(str(stem) + '-ocr.log').write_text(ocr.stderr)
-    (Path(str(stem) + '.tsv')).write_text(raw)
-    rows = list(csv.DictReader(io.StringIO(raw), delimiter='\t', quoting=csv.QUOTE_NONE))
+    LATEST[role]=str(stem)
+    native={}
+    try:
+        wid=command(role,'xdotool','getactivewindow').strip()
+        native={'window':wid,'name':command(role,'xdotool','getwindowname',wid).strip(),
+                'geometry':command(role,'xdotool','getwindowgeometry','--shell',wid),
+                'pid':command(role,'xdotool','getwindowpid',wid).strip()}
+    except subprocess.CalledProcessError as e:
+        native={'unavailable':str(e)}
+    Path(str(stem)+'-native-window.json').write_text(json.dumps(native,indent=2))
     words = []
-    for row in rows:
-        if row.get('text', '').strip() and float(row['conf']) >= 45:
-            words.append({'text': row['text'].strip(), 'x': int(row['left']) / 2,
-                          'y': int(row['top']) / 2, 'w': int(row['width']) / 2,
-                          'h': int(row['height']) / 2, 'conf': float(row['conf'])})
-    event('screen', role=role, stem=str(stem), words=words)
+    # Full-screen PSM11 omits small left-navigation labels in original retained wide-home pixels.
+    # Keep those original pixels and separately OCR the observed navigation/footer regions.
+    modes=[('full', ['-colorspace','Gray','-resize','200%','-threshold','70%','-negate'],2,0,0,11),
+           ('nav', ['-crop','256x250+0+100','+repage','-resize','300%'],3,0,100,6),
+           ('footer', ['-crop','600x400+500+400','+repage','-resize','300%'],3,500,400,6)]
+    for name,filters,scale,offset_x,offset_y,psm in modes:
+        variant=str(stem)+'-ocr-'+name+'.png'
+        command(role,'convert',str(stem)+'.png',*filters,variant)
+        ocr=subprocess.run(['tesseract',variant,'stdout','--psm',str(psm),'tsv'],
+                           env={**os.environ,'DISPLAY':DISPLAYS[role]},text=True,capture_output=True,check=True)
+        Path(str(stem)+'-ocr-'+name+'.log').write_text(ocr.stderr)
+        Path(str(stem)+'-'+name+'.tsv').write_text(ocr.stdout)
+        rows=list(csv.DictReader(io.StringIO(ocr.stdout),delimiter='\t',quoting=csv.QUOTE_NONE))
+        for row in rows:
+            if row.get('text','').strip() and float(row['conf'])>=45:
+                words.append({'text':row['text'].strip(),'x':int(row['left'])/scale+offset_x,
+                              'y':int(row['top'])/scale+offset_y,'w':int(row['width'])/scale,
+                              'h':int(row['height'])/scale,'conf':float(row['conf']),'ocr_region':name})
+    event('screen', role=role, stem=str(stem), native_window=native, words=words)
     return words
 
 def locate(role, label, stage, timeout=25, bottom=False):
@@ -51,7 +68,13 @@ def locate(role, label, stage, timeout=25, bottom=False):
         time.sleep(.4)
 
 def click(role, point, label):
-    event('click', role=role, label=label, x=point[0], y=point[1])
+    wid=command(role,'xdotool','getactivewindow').strip()
+    pid=command(role,'xdotool','getwindowpid',wid).strip()
+    uid=subprocess.check_output(['ps','-o','uid=','-p',pid],text=True).strip()
+    expected_uid=subprocess.check_output(['id','-u',role+'1425'],text=True).strip()
+    if uid!=expected_uid: raise RuntimeError('Foreground input target belongs to unexpected uid: '+uid)
+    event('click', role=role, label=label, x=point[0], y=point[1], source_frame=LATEST.get(role),
+          native_window=wid,native_pid=pid,native_uid=uid,geometry=command(role,'xdotool','getwindowgeometry','--shell',wid))
     command(role, 'xdotool', 'mousemove', '--sync', str(round(point[0])), str(round(point[1])), 'click', '1')
     time.sleep(.4)
 
