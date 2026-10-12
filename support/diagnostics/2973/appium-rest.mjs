@@ -386,12 +386,27 @@ if (mode === 'create') {
     await openNativePreference('Display', 'android-settings', 'Settings');
     await capture('display-original');
     await openNativePreference('Screen zoom', 'display-before-zoom', 'Display');
-    const zoom = await capture('screen-zoom-original');
+    async function captureNativeTarget(heading, label, resource) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const screen = await capture(`${label}-${attempt}`);
+        if (!describeOriginalSettingsScreen(screen, heading).subpageIdentityVerified) continue;
+        const sliders = screen.nodes.filter(node => node.package === 'com.android.settings' && node.class === 'android.widget.SeekBar' &&
+          node['resource-id'] === resource && node.displayed === 'true' && node.enabled === 'true');
+        if (sliders.length !== 1) continue;
+        const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(sliders[0].bounds ?? '');
+        if (!bounds) continue;
+        const [x1, y1, x2, y2] = bounds.slice(1).map(Number);
+        const { value: viewport } = await request('GET', prefix + '/window/rect');
+        if (Number.isFinite(viewport.width) && Number.isFinite(viewport.height) && x2 > x1 && y2 > y1 && x1 >= 0 && y1 >= 0 && x2 <= viewport.width && y2 <= viewport.height) return screen;
+      }
+      throw new Error(`Native ${heading} heading/slider readiness unavailable after three original captures`);
+    }
+    const zoom = await captureNativeTarget('Screen zoom', 'screen-zoom-original', 'com.android.settings:id/seek_bar');
     const originalControls = { screenZoom: describeOriginalSettingsScreen(zoom, 'Screen zoom') };
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
     await back();
     await openNativePreference('Font size and style', 'display-before-font', 'Display');
-    const font = await capture('font-size-original');
+    const font = await captureNativeTarget('Font size and style', 'font-size-original', 'com.android.settings:id/font_size_seek_bar');
     originalControls.fontSize = describeOriginalSettingsScreen(font, 'Font size and style');
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
     const identitiesVerified = originalControls.screenZoom.subpageIdentityVerified && originalControls.fontSize.subpageIdentityVerified;

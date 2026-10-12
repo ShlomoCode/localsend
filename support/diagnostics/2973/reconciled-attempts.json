@@ -77,5 +77,14 @@
     "classification": "harness-before-picker",
     "androidSettingsChanged": false,
     "resolution": "Appium 1.22 rejected mobile activateApp at the baseline activation smoke before any setting input. Exact native originals retained, no extremes mutation state created, controller restorationRequired false, DELETE session 200 and independent cleanup done/unresolved false. Version-era official docs specify POST appium/device/activate_app with appId; corrected route preserves baseline smoke/readiness and all trial/restoration gates."
+  },
+  {
+    "runId": "38253954529",
+    "headSha": "266e21dde5ad08bba5dc0998fe5d6ef02091322e",
+    "sessionId": "07ce895a4683e9455637fa2da4214b5b8f35a809",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "androidSettingsChanged": false,
+    "resolution": "Actual Font navigation touch completed; original final screenshot captures slide animation from Display to Font size while paired source still exposes Display with no Font heading/slider. Failure before calibration/activation, no extremes-state or value input. Provider done and independent cleanup unresolved false. Correction bounds original target capture readiness to three retained captures with exact native heading/slider and current viewport bounds, no extra UI input."
   }
 ]
