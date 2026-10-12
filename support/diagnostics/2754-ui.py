@@ -250,6 +250,39 @@ def capture_observer_policy_phase():
         result=bounded_run(deadline,"tesseract",str(path),"stdout","--psm","11","tsv")
         path.with_suffix(".tsv").write_text(result.stdout)
         rows=list(csv.DictReader(io.StringIO(result.stdout),delimiter="\t"))
+        titles=[r for r in rows if r["text"].lower().strip()=="type" and float(r["conf"])>=90]
+        messages=[r for r in rows if r["text"].lower().strip()=="message" and float(r["conf"])>=90]
+        if len(titles)==1 and len(messages)==1:
+            title=titles[0]; message=messages[0]
+            if all(title[key]==message[key] for key in ("block_num","par_num","line_num")):
+                # Full-frame PSM11 omits the visible buttons beside the Mint
+                # taskbar. Read the same saved modal, anchored to its title.
+                left=int(title["left"])-24; top=int(title["top"])-32
+                width=280; height=190; scale=2
+                header=path.read_bytes()[:24]
+                image_width=int.from_bytes(header[16:20],"big"); image_height=int.from_bytes(header[20:24],"big")
+                if (header[:8]!=b"\x89PNG\r\n\x1a\n" or header[12:16]!=b"IHDR" or left<0 or top<0
+                        or left+width>image_width or top+height>image_height):
+                    raise RuntimeError("Native policy modal crop outside original saved frame")
+                crop=out/(name+"-modal.png")
+                bounded_run(deadline,"ffmpeg","-nostdin","-v","error","-y","-i",str(path),
+                            "-vf",f"crop={width}:{height}:{left}:{top},scale={width*scale}:{height*scale}:flags=lanczos",
+                            "-frames:v","1",str(crop))
+                cropped=bounded_run(deadline,"tesseract",str(crop),"stdout","--psm","6","tsv")
+                crop.with_suffix(".tsv").write_text(cropped.stdout)
+                crop_rows=list(csv.DictReader(io.StringIO(cropped.stdout),delimiter="\t"))
+                # Keep original positive title evidence so cropped OCR cannot
+                # turn a still-visible modal into a dismissal. Use crop rows
+                # for buttons/marker and root coordinates for real Cancel.
+                rows=[r for r in rows if r in (title,message) or not
+                      (left<=int(r["left"])<left+width and top<=int(r["top"])<top+height)]
+                for row in crop_rows:
+                    row["left"]=str(round(left+int(row["left"])/scale))
+                    row["top"]=str(round(top+int(row["top"])/scale))
+                    row["width"]=str(round(int(row["width"])/scale))
+                    row["height"]=str(round(int(row["height"])/scale))
+                    rows.append(row)
+                log("policy-native-saved-modal-crop",file=path.name,crop_file=crop.name,x=left,y=top,width=width,height=height,scale=scale)
         focus=bounded_run(deadline,"xdotool","getwindowfocus").stdout.strip()
         owner=bounded_run(deadline,"xdotool","getwindowpid",focus).stdout.strip()
         if owner!=str(app.pid) or focus!=w[-1]:
