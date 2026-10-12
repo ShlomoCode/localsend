@@ -171,21 +171,14 @@ if (mode === 'create') {
     }
     await byLabel('Add 2 Apps', 'two-apps-selected');
     const added = await capture('send-two-actual-apps-added');
-    if (chosen.some(app => !added.source.includes(app.label))) throw new Error('Send does not expose both chosen actual app labels after Add');
-    await writeFile(resolve(evidence, 'default-control-verdict.json'), JSON.stringify({ multipleSwitchEnabledByVisibleTouch: true, actualApps: chosen, add2AppsCompleted: true, sendLabelsObserved: true }, null, 2));
-    // The X is unlabeled in this released app. Locate it only in the live Selection header,
-    // retaining the full original screenshot/source and exact native bounds for review.
-    const selection = added.nodes.filter(node => (node['content-desc'] ?? node.text) === 'Selection');
-    if (selection.length !== 1) throw new Error('Selection header not uniquely observable; no guessed clear input');
-    const headerBounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(selection[0].bounds ?? '');
-    if (!headerBounds) throw new Error('Selection header bounds absent');
-    const [hx1, hy1, hx2, hy2] = headerBounds.slice(1).map(Number);
-    const clearTargets = added.nodes.filter(node => {
-      const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(node.bounds ?? '');
-      if (!bounds || node.class !== 'android.widget.Button' || node.clickable !== 'true' || node.displayed !== 'true') return false;
-      const [x1,y1,x2,y2] = bounds.slice(1).map(Number);
-      return x1 > hx2 && y1 < hy2 && y2 > hy1;
-    });
+    // Normal Send displays the count and app icons, not file-name semantics.
+    const selection = added.nodes.filter(node => node['content-desc']?.startsWith('Selection\nFiles: 2\n') && node.displayed === 'true');
+    if (selection.length !== 1) throw new Error('Send does not expose one observed two-file Selection card after Add');
+    await writeFile(resolve(evidence, 'default-control-verdict.json'), JSON.stringify({ multipleSwitchEnabledByVisibleTouch: true, actualApps: chosen, add2AppsCompleted: true, sendFileCount: 2, matchingIconsRequireOriginalScreenshotInspection: true }, null, 2));
+    // The original screenshot establishes the X. Native ancestry identifies its
+    // sole unlabeled Button inside the current, semantically identified card.
+    const cardIndex = added.nodes.indexOf(selection[0]);
+    const clearTargets = added.nodes.filter(node => node.parentIndex === cardIndex && node.class === 'android.widget.Button' && node.clickable === 'true' && node.displayed === 'true' && !node['content-desc'] && !node.text);
     if (clearTargets.length !== 1) throw new Error('Selection clear button not unique in current visible header');
     await touch(clearTargets[0], 'Observed Selection header clear X');
     const restoredSend = await capture('send-original-selection-restored');

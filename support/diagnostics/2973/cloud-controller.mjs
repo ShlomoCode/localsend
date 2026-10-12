@@ -86,7 +86,7 @@ async function enforcePriorAttemptHold() {
   const reconciled = JSON.parse(await readFile(resolve(root, 'reconciled-attempts.json'), 'utf8'));
   for (const run of prior) {
     if (run.status === 'completed' && run.conclusion === 'success') continue;
-    const resolution = reconciled.find(item => String(item.runId) === String(run.id) && item.headSha === run.head_sha && item.classification === 'harness-before-picker' && item.terminalStatus === 'done');
+    const resolution = reconciled.find(item => String(item.runId) === String(run.id) && item.headSha === run.head_sha && ['harness-before-picker', 'harness-after-add'].includes(item.classification) && item.terminalStatus === 'done');
     if (!resolution || run.status !== 'completed' || run.conclusion !== 'failure') throw new Error('Prior 2973 Actions attempt is unresolved or unsuccessful; hold allocation until root reconciles its cleanup');
     const terminal = await api(`/app-automate/sessions/${encodeURIComponent(resolution.sessionId)}.json`);
     if (terminal.automation_session?.status !== resolution.terminalStatus) throw new Error('Reconciled prior session no longer has its verified terminal status');

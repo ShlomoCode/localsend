@@ -22,5 +22,15 @@
     "terminalStatus": "done",
     "classification": "harness-before-picker",
     "resolution": "Owner inspected original final Send screenshot/XML after successful native horizontal scroll: real released picker label is App, not Apps. No picker or Android settings input occurred. Independent cleanup done. Exact observed-label correction reviewed under delegated routine authority."
+  },
+  {
+    "runId": "38206109990",
+    "headSha": "fca34d879dbe421b5c99157a6a5af522535300b6",
+    "sessionId": "9cf6229fbe47eaa87a44c2c49ad458f5ec003b66",
+    "terminalStatus": "done",
+    "classification": "harness-after-add",
+    "originalAppStateRestoration": "unverified-session-retired",
+    "androidSettingsChanged": false,
+    "resolution": "Actual switch, two real app selections, Add and Send Files 2 succeeded. Root accepted direct original rows/icons/count evidence. Harness wrongly required file-name semantics on icon-only Send. Session ended done; original temporary app selection restoration remains explicitly unverified. Next fresh session must prove empty initial selection before replay and restore through original Selection X."
   }
 ]
