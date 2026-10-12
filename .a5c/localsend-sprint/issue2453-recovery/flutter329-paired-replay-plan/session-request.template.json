@@ -1,0 +1,22 @@
+{
+  "capabilities": {
+    "alwaysMatch": {
+      "platformName": "iOS",
+      "appium:automationName": "XCUITest",
+      "appium:deviceName": "iPhone 16 Pro",
+      "appium:platformVersion": "18.6",
+      "appium:app": "<EXACT_DEFAULT_UPLOAD_APP_URL>",
+      "appium:newCommandTimeout": 600,
+      "bstack:options": {
+        "projectName": "LocalSend bug sprint",
+        "buildName": "Issue2453 retained 3.29 paired orientation",
+        "sessionName": "2453 default then separate same-device single rotation",
+        "midSessionInstallApps": ["<EXACT_CANDIDATE_UPLOAD_APP_URL>"],
+        "debug": true,
+        "video": true,
+        "deviceLogs": true,
+        "networkLogs": false
+      }
+    }
+  }
+}

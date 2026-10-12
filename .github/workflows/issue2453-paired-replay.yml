@@ -1,0 +1,68 @@
+# Source-only proposal. Do not copy into .github/workflows or dispatch until
+# the root reviews this final packet and supplies fresh coordination admission.
+name: Issue 2453 retained paired replay
+on:
+  workflow_dispatch:
+    inputs:
+      root_admission_base64:
+        description: Fresh root/sibling admission JSON bound to source SHA/ref and dispatch nonce
+        type: string
+        required: true
+      dispatch_nonce:
+        description: Root-generated unique nonce matching the admission receipt
+        type: string
+        required: true
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: issue2453-paired-device
+  cancel-in-progress: false
+jobs:
+  paired-replay:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      LS2453_INPUT_DIR: ${{ github.workspace }}/retained-inputs
+      LS2453_OUTPUT_DIR: ${{ github.workspace }}/paired-evidence
+      LS2453_ADMISSION_FILE: ${{ github.workspace }}/root-admission.json
+      ROOT_ADMISSION_BASE64: ${{ inputs.root_admission_base64 }}
+      LS2453_DISPATCH_NONCE: ${{ inputs.dispatch_nonce }}
+    steps:
+      - name: Start shared job deadline before checkout and artifact preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'LS2453_STARTED_MS=%s\n' "$(date +%s%3N)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Retain exact original archives without rebuild or repackaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$LS2453_INPUT_DIR" "$LS2453_OUTPUT_DIR"
+          gh api /repos/ShlomoCode/localsend/actions/artifacts/11719532258/zip > "$LS2453_INPUT_DIR/default.zip"
+          gh api /repos/ShlomoCode/localsend/actions/artifacts/11720814570/zip > "$LS2453_INPUT_DIR/candidate.zip"
+          printf '%s' "$ROOT_ADMISSION_BASE64" | base64 --decode > "$LS2453_ADMISSION_FILE"
+          chmod 600 "$LS2453_ADMISSION_FILE"
+      - name: One admitted device, shared scenario deadline, final cleanup reserve
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .a5c/localsend-sprint/issue2453-recovery/flutter329-paired-replay-plan/pair-coordinator.mjs
+      - name: Preserve successful and blocked phases
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2453-retained-paired-${{ github.run_id }}
+          path: paired-evidence/
+          retention-days: 14
+          if-no-files-found: error
