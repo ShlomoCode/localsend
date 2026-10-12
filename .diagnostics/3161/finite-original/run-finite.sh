@@ -42,6 +42,60 @@ input() {
   capture "$1"
 }
 observe() { guest 18 "$1-observe" 'timeout --signal=TERM --kill-after=1s 16s bash /home/probe/finite-source/observe-guest.sh' > "$target/$1-observe.txt"; }
+recording() {
+  local label=$1
+  # Failure leaves this receipt incomplete and exits through ordinary cleanup.
+  printf 'RECORDING_STATUS=incomplete\n' > "$target/$label-recording-status.txt"
+  step 4 "$label-recording" bash -c '
+    set -euo pipefail
+    out=$1; label=$2; progress=$3
+    pid=$(cat /tmp/localsend-vm/video.pid)
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]]
+    kill -0 "$pid"
+    raw=$(cat "/proc/$pid/stat")
+    ticks=$(printf "%s\n" "$raw" | awk '\''{sub(/^.*\) /, ""); print $20}'\'')
+    state=$(printf "%s\n" "$raw" | awk '\''{sub(/^.*\) /, ""); print $1}'\'')
+    case "$state" in Z|X|T|t) exit 1 ;; esac
+    exe=$(readlink "/proc/$pid/exe")
+    test "${exe##*/}" = ffmpeg
+    identity="$pid $ticks $exe"
+    if test -f "$out/video-identity.txt"; then
+      test "$identity" = "$(cat "$out/video-identity.txt")"
+    fi
+    if test -f "$out/$label-capture-completed"; then sleep 1; fi
+    # Bind the copied completed batch to one stable file metadata sample.
+    # A later partial write must not freshen an older accepted completed frame.
+    metadata=$(stat -c "%d:%i:%s:%y:%z|%y" "$progress")
+    cp "$progress" "$out/$label-video-progress.txt"
+    test "$metadata" = "$(stat -c "%d:%i:%s:%y:%z|%y" "$progress")"
+    test "$(tail -n 1 "$out/$label-video-progress.txt")" = progress=continue
+    test "$(tail -c 1 "$out/$label-video-progress.txt" | od -An -tu1 | tr -d " ")" = 10
+    sample_ns=$(date -d "${metadata##*|}" +%s%N)
+    now_ns=$(date +%s%N)
+    age_ns=$((now_ns-sample_ns))
+    test "$age_ns" -ge 0 && test "$age_ns" -le 2000000000
+    printf "PROGRESS_METADATA=%s SAMPLE_NS=%s AGE_NS=%s\n" "$metadata" "$sample_ns" "$age_ns"
+    if test -f "$out/$label-capture-completed"; then
+      marker_ns=$(date -d "$(stat -c %y "$out/$label-capture-completed")" +%s%N)
+      test "$sample_ns" -gt "$marker_ns"
+      printf "CAPTURE_MARKER_NS=%s\n" "$marker_ns"
+    fi
+    frame=$(awk -F= '\''$1=="frame" {f=$2} $1=="progress" {if($2=="end") exit 2; completed=f} END {if(completed !~ /^[0-9]+$/ || completed<=0) exit 1; print completed}'\'' "$out/$label-video-progress.txt")
+    previous=0
+    if test -f "$out/video-last-frame.txt"; then previous=$(cat "$out/video-last-frame.txt"); fi
+    test "$frame" -gt "$previous"
+    # Bracket the progress read with the original recorder process identity.
+    final_raw=$(cat "/proc/$pid/stat")
+    test "$ticks" = "$(printf "%s\n" "$final_raw" | awk '\''{sub(/^.*\) /, ""); print $20}'\'')"
+    final_state=$(printf "%s\n" "$final_raw" | awk '\''{sub(/^.*\) /, ""); print $1}'\'')
+    case "$final_state" in Z|X|T|t) exit 1 ;; esac
+    kill -0 "$pid"
+    printf "%s\n" "$identity" > "$out/video-identity.txt"
+    printf "%s\n" "$frame" > "$out/video-last-frame.txt"
+    printf "VIDEO_PID=%s START_TICKS=%s STATE=%s FINAL_STATE=%s FRAME=%s PREVIOUS_FRAME=%s UTC=%s UPTIME=%s\n" "$pid" "$ticks" "$state" "$final_state" "$frame" "$previous" "$(date -u +%FT%T.%N)" "$(cut -d" " -f1 /proc/uptime)"
+  ' bash "$target" "$label" "$GITHUB_WORKSPACE/evidence/vm/video-progress.txt" > "$target/$label-recording.txt"
+  printf 'RECORDING_STATUS=advancing\n' > "$target/$label-recording-status.txt"
+}
 zoom_state() {
   local expected=$1 actual
   actual=$(guest 5 "zoom-require-$expected" '. /home/probe/session-env; timeout --kill-after=1s 3s gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled')
@@ -138,6 +192,9 @@ step 3 gtk-render sleep 2
 guest 12 gtk-focused '. /home/probe/session-env; timeout --kill-after=1s 10s python3 /home/probe/finite-source/display-session.py editor /home/probe/evidence/finite-original' > "$target/gtk-focus.txt"
 input gtk-end key ctrl+End
 zoom_state false
+recording gtk-before-on-ready
+step 1 recording-readiness-interval sleep 1
+recording gtk-before-on-advancing
 input gtk-zoom-on key alt+Super_L+8
 zoom_state true
 input gtk-left key Left
@@ -157,6 +214,7 @@ input receive-initial-off click 1
 locate Send send
 read -r sx sy < "$target/send-coordinate.txt"
 input send-position mousemove "$sx" "$sy"
+recording send-before-on
 input send-zoom-on key alt+Super_L+8
 zoom_state true
 input send-zoom-click click 1
@@ -167,9 +225,30 @@ zoom_state false
 locate Receive receive
 read -r rx ry < "$target/receive-coordinate.txt"
 input receive-position mousemove "$rx" "$ry"
+# Admit the complete selected terminal sequence before enabling Zoom. The
+# unchanged absolute input stop still gates every individual operation.
+budget 145
+printf 'HELD_OBSERVATION=incomplete PRODUCT_RESULT=requires-raw-review\n' > "$target/held-observation-status.txt"
+recording receive-before-on
 input receive-zoom-on key alt+Super_L+8
 zoom_state true
-input receive-zoom-click click 1
-guest 12 original-receive-focused '. /home/probe/session-env; timeout --kill-after=1s 10s python3 /home/probe/finite-source/display-session.py app-check /home/probe/evidence/finite-original' > "$target/app-receive-identity.txt"
-observe receive-on
+step 2 receive-zoom-click xdotool click 1
+step 13 receive-on-hold sleep 12
+# Capture precedes passive SSH observations so the terminal image is timed
+# from the actual click, before any cleanup or potential prompt focus change.
+capture receive-on-terminal
+step 1 receive-on-terminal-marker touch "$target/receive-on-terminal-capture-completed"
+zoom_state true
+observe receive-on-terminal
+step 2 receive-on-passive-complete grep -qx 'OBSERVATION_FAILURES=0 INFERENCE=inconclusive' "$target/receive-on-terminal-observe.txt"
+recording receive-on-terminal
+step 2 receive-zoom-off xdotool key alt+Super_L+8
+step 6 receive-off-recovery-hold sleep 5
+capture receive-off-terminal
+step 1 receive-off-terminal-marker touch "$target/receive-off-terminal-capture-completed"
+zoom_state false
+observe receive-off-terminal
+step 2 receive-off-passive-complete grep -qx 'OBSERVATION_FAILURES=0 INFERENCE=inconclusive' "$target/receive-off-terminal-observe.txt"
+recording receive-off-terminal
+printf 'HELD_OBSERVATION=complete PRODUCT_RESULT=requires-raw-review\n' > "$target/held-observation-status.txt"
 # EXIT closes input and immediately requests saved-baseline restoration.
