@@ -1,0 +1,151 @@
+name: Issue 2453 retained artifact verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/issue2453-investigation]
+    paths: [.github/workflows/issue2453-verify-artifact.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: issue2453-ios
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Verify immutable build and artifact provenance
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            fs.mkdirSync('evidence', {recursive: true});
+            const expected = [
+              {kind: 'baseline', run: 38185684847, artifact: 11719532258, head: '20aec76d5f175130035ce3b5b752e3c763708228', conclusion: 'success', digest: 'sha256:287f6442bd70cd7eb2e8ed9f1e301a17b4cf7da9da4fca87d44ec3414ad221ee'},
+              {kind: 'candidate', run: 38191446249, artifact: 11720814570, head: '42e7cc192a5a09c6647993fb202d2c13ad9ffae9', conclusion: 'failure', digest: 'sha256:83ea5195796cbf4749c12817ea54c8de9aa6b559a12baf6bb67b92ff0bbb2d1a'},
+            ];
+            for (const item of expected) {
+              const {data: run} = await github.rest.actions.getWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: item.run});
+              const {data: artifact} = await github.rest.actions.getArtifact({owner: context.repo.owner, repo: context.repo.repo, artifact_id: item.artifact});
+              if (run.status !== 'completed' || run.conclusion !== item.conclusion || run.event !== 'workflow_dispatch' || run.path !== '.github/workflows/issue2453-ios.yml' || run.head_sha !== item.head) throw new Error(`${item.kind} run provenance mismatch`);
+              if (artifact.expired || artifact.digest !== item.digest || artifact.workflow_run.id !== item.run || artifact.workflow_run.head_sha !== item.head || artifact.name !== `issue2453-ios-1.17-${item.run}`) throw new Error(`${item.kind} artifact provenance mismatch`);
+              const {data: jobs} = await github.rest.actions.listJobsForWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: item.run});
+              if (jobs.jobs.length !== 1 || jobs.jobs[0].name !== 'build') throw new Error('Unexpected build job set');
+              if (item.kind === 'candidate') {
+                const steps = jobs.jobs[0].steps;
+                for (const name of ['Verify exact SDK and protected historical dependency inputs', 'Build uninstrumented unsigned device app', 'Package the normal device artifact', 'Retain build and admission evidence']) {
+                  if (steps.find(step => step.name === name)?.conclusion !== 'success') throw new Error(`Candidate product/evidence step did not pass: ${name}`);
+                }
+                const failed = steps.filter(step => step.conclusion === 'failure');
+                if (failed.length !== 1 || failed[0].name !== 'Preserve original App debug symbols with exact bundle UUID') throw new Error('Candidate failure is not confined to symbol collection');
+              }
+              fs.writeFileSync(`evidence/${item.kind}-provenance.json`, JSON.stringify({...item, originalConclusion: run.conclusion, steps: jobs.jobs[0].steps}, null, 2));
+            }
+
+      - name: Download and hash the original artifact archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/ShlomoCode/localsend/actions/artifacts/11719532258/zip > baseline.zip
+          gh api repos/ShlomoCode/localsend/actions/artifacts/11720814570/zip > candidate.zip
+          test "$(shasum -a 256 baseline.zip | awk '{print $1}')" = 287f6442bd70cd7eb2e8ed9f1e301a17b4cf7da9da4fca87d44ec3414ad221ee
+          test "$(shasum -a 256 candidate.zip | awk '{print $1}')" = 83ea5195796cbf4749c12817ea54c8de9aa6b559a12baf6bb67b92ff0bbb2d1a
+          shasum -a 256 baseline.zip candidate.zip > evidence/archive.sha256
+          mkdir baseline candidate
+          unzip -q baseline.zip -d baseline
+          unzip -q candidate.zip -d candidate
+
+      - name: Recheck every retained source and toolchain comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat baseline/harness-commit.txt)" = 20aec76d5f175130035ce3b5b752e3c763708228
+          test "$(cat candidate/harness-commit.txt)" = 42e7cc192a5a09c6647993fb202d2c13ad9ffae9
+          test "$(cat candidate/comparison-run-id.txt)" = 38185684847
+          test "$(cat baseline/thread-mode.txt)" = default
+          test "$(cat candidate/thread-mode.txt)" = separate
+          for kind in baseline candidate; do
+            test "$(cat "$kind/source-commit.txt")" = 7f21d1f9082a43803e05c37f021912e012145aa5
+            test "$(cat "$kind/selected-sdk.txt")" = 3.29.0
+            test "$(cat "$kind/renderer.txt")" = impeller
+            test ! -s "$kind/source-status-before.txt"
+          done
+          for file in flutter-machine.json flutter.txt cocoapods.txt xcode.txt runner.txt sdk-input.patch sdk-resolution-drift.json protected-inputs.json paired-source-diff.patch locks-after/pubspec.lock locks-after/Podfile.lock locks-after.sha256; do
+            cmp "baseline/$file" "candidate/$file"
+            shasum -a 256 "baseline/$file" "candidate/$file" >> evidence/paired-input.sha256
+          done
+          ruby -rjson <<'RUBY'
+          sdk = JSON.parse(File.read('candidate/flutter-machine.json'))
+          abort 'Wrong SDK revision' unless sdk['frameworkVersion'] == '3.29.0' && sdk['frameworkRevision'] == '35c388afb57ef061d06a39b537336c87e0e3d1b1' && sdk['engineRevision'] == 'f73bfc4522dd0bc87bbcdb4bb3088082755c5e87'
+          RUBY
+          printf '%s\n' 'Full retained source, locks, solver drift and toolchain comparisons passed.' > evidence/input-parity.txt
+
+      - name: Verify original IPA, actual bundle plists and retained App symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(shasum -a 256 baseline/localsend-1.17.0-unsigned-device.ipa | awk '{print $1}')" = cc980b30402309c9461d3885f3d262bd2c77d135a0dfaaf41b45813bd7cd0411
+          test "$(shasum -a 256 candidate/localsend-1.17.0-unsigned-device.ipa | awk '{print $1}')" = 5b11c2cd7a4eebf1b971063e6d9f82b710eca8b63b453dea9ed5dce880e90f32
+          shasum -a 256 baseline/localsend-1.17.0-unsigned-device.ipa candidate/localsend-1.17.0-unsigned-device.ipa > evidence/ipa.sha256
+          mkdir baseline-ipa candidate-ipa
+          unzip -q baseline/localsend-1.17.0-unsigned-device.ipa -d baseline-ipa
+          unzip -q candidate/localsend-1.17.0-unsigned-device.ipa -d candidate-ipa
+          for kind in baseline candidate; do
+            app="$kind-ipa/Payload/Runner.app"
+            test "$(lipo -archs "$app/Runner")" = arm64
+            test "$(plutil -extract CFBundleShortVersionString raw "$app/Info.plist")" = 1.17.0
+            test "$(plutil -extract CFBundleVersion raw "$app/Info.plist")" = 58
+            plutil -convert json -o "evidence/$kind-actual-bundle.json" "$app/Info.plist"
+            plutil -convert json -o "evidence/$kind-retained-bundle.json" "$kind/final-bundle-info.plist"
+            plutil -convert json -o "evidence/$kind-source.json" "$kind/final-source-info.plist"
+            for binary in "$app/Runner" "$app/Frameworks/Flutter.framework/Flutter" "$app/Frameworks/App.framework/App"; do
+              xcrun dwarfdump --uuid "$binary" >> "evidence/$kind-binary-uuids.txt"
+            done
+            (cd "$app" && find . -type f -print | LC_ALL=C sort) > "evidence/$kind-package-files.txt"
+            (cd "$app" && find . -type f -exec shasum -a 256 {} \; | LC_ALL=C sort) > "evidence/$kind-package.sha256"
+          done
+          cmp evidence/baseline-package-files.txt evidence/candidate-package-files.txt
+          ruby -rjson <<'RUBY'
+          %w[baseline candidate].each do |kind|
+            actual = JSON.parse(File.read("evidence/#{kind}-actual-bundle.json"))
+            retained = JSON.parse(File.read("evidence/#{kind}-retained-bundle.json"))
+            abort "Actual #{kind} bundle differs from retained plist" unless actual == retained
+          end
+          %w[source actual-bundle].each do |kind|
+            baseline = JSON.parse(File.read("evidence/baseline-#{kind}.json"))
+            candidate = JSON.parse(File.read("evidence/candidate-#{kind}.json"))
+            abort 'Default thread override present' if baseline.key?('FLTEnableMergedPlatformUIThread')
+            abort 'Separate thread override is not false' unless candidate.delete('FLTEnableMergedPlatformUIThread') == false
+            abort "Unexpected #{kind} semantic drift" unless baseline == candidate
+          end
+          RUBY
+          binary=candidate-ipa/Payload/Runner.app/Frameworks/App.framework/App
+          dwarf=candidate/symbols/App.framework.dSYM/Contents/Resources/DWARF/App
+          test "$(lipo -archs "$binary")" = arm64
+          test "$(lipo -archs "$dwarf")" = arm64
+          xcrun dwarfdump --uuid "$binary" > evidence/app-binary-uuid.txt
+          xcrun dwarfdump --uuid "$dwarf" > evidence/app-dwarf-uuid.txt
+          for record in evidence/app-binary-uuid.txt evidence/app-dwarf-uuid.txt; do
+            test "$(awk '$1 == "UUID:" && $3 == "(arm64)" {print $2}' "$record")" = C071CAA3-EFCF-3F59-AEFA-C4E6A2DB2850
+          done
+          test "$(shasum -a 256 "$dwarf" | awk '{print $1}')" = f9856125f2a4f42fa2fb0e21d50bb493cde8c8498ce37dcb4196981dbb45ed35
+          shasum -a 256 "$dwarf" > evidence/app-dwarf.sha256
+          cp candidate/symbols/original-dsym-path.txt evidence/original-dsym-path.txt
+          printf '%s\n' 'Original candidate IPA and retained App DWARF UUID/arm64 match. Original build run remains a collection failure. No rebuild, app execution or device condition occurred.' > evidence/verification-scope.txt
+
+      - name: Retain artifact verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2453-retained-verification-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
+          if-no-files-found: error
