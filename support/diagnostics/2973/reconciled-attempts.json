@@ -41,5 +41,14 @@
     "classification": "harness-before-picker",
     "androidSettingsChanged": false,
     "resolution": "Original Settings screenshot and native package node show inline Version: 1.17.0 (583) with LocalSend, rather than an About button. No native Android settings input occurred. Independent cleanup unresolved false and provider done. Focused correction uses this actual visible inline version identity and stops before an unobserved final swipe."
+  },
+  {
+    "runId": "38208275976",
+    "headSha": "7d2c18479f13de793ff5c752d19ce07bc1de7703",
+    "sessionId": "a0665cea4c186279c721e432d29d815a4aba7226",
+    "terminalStatus": "done",
+    "classification": "harness-before-picker",
+    "androidSettingsChanged": false,
+    "resolution": "Original screenshot shows Samsung Settings top while paired source still contains only prior systemui shade and no native Settings nodes. Display is not in screenshot viewport. No setting controls touched. Independent cleanup unresolved false and provider done. Correction waits for observed native package and uses at most two observed native-list swipes with retained results, not guessed coordinates or idle-setting changes."
   }
 ]

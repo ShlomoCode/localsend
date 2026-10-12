@@ -234,9 +234,45 @@ if (mode === 'create') {
       if (gears.length === 1) { await touch(gears[0], 'native Settings gear'); break; }
       if (attempt === 1) throw new Error('Native Settings gear not observable; no guessed input');
     }
-    await byLabel('Display', 'android-settings');
+    async function openNativePreference(label, snapshotLabel, parentHeading) {
+      let swipes = 0;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const screen = await capture(`${snapshotLabel}-${attempt}`);
+        // A real navigation can complete between source and screenshot. Retain and recapture stale source without input.
+        if (!screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true')) continue;
+        if (!describeOriginalSettingsScreen(screen, parentHeading).subpageIdentityVerified) continue;
+        const matches = screen.nodes.filter(node => node.package === 'com.android.settings' && node.displayed === 'true' &&
+          (node.text === label || node['content-desc'] === label));
+        const targets = [...new Set(matches.map(node => {
+          let target = node;
+          while (target.clickable !== 'true' && target.parentIndex !== null) target = screen.nodes[target.parentIndex];
+          return target;
+        }).filter(node => node.package === 'com.android.settings' && node.clickable === 'true' && node.enabled === 'true' && node.displayed === 'true'))];
+        if (targets.length === 1) { await touch(targets[0], `Native Settings ${label}`); return; }
+        if (targets.length > 1) throw new Error(`Native Settings ${label} identity ambiguous`);
+        if (attempt === 3 || swipes === 2) break;
+        if (screen.nodes.some(node => node.package === 'com.android.settings' && node.displayed === 'true' && /SeekBar|Slider/.test(node.class ?? ''))) continue;
+        const lists = screen.nodes.filter(node => node.package === 'com.android.settings' && node.scrollable === 'true' && node.enabled === 'true' &&
+          node.displayed === 'true' && /ScrollView|RecyclerView|ListView/.test(node.class ?? ''));
+        if (lists.length !== 1) throw new Error(`Native Settings ${label} list not uniquely observable; no guessed swipe`);
+        const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(lists[0].bounds ?? '');
+        if (!bounds) throw new Error('Observed native Settings list has no bounds');
+        const [x1, y1, x2, y2] = bounds.slice(1).map(Number);
+        const { value: viewport } = await request('GET', prefix + '/window/rect');
+        if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || x2 <= x1 || y2 <= y1 || x1 < 0 || y1 < 0 || x2 > viewport.width || y2 > viewport.height) throw new Error('Native Settings list is not fully inside current viewport');
+        const x = Math.floor((x1 + x2) / 2), y = Math.floor(y1 + (y2 - y1) * 0.8), endY = Math.floor(y1 + (y2 - y1) * 0.3);
+        events.push({ label: `Scroll observed native Settings list toward ${label}`, nativeNode: lists[0], x, y, endY, at: new Date().toISOString() });
+        await writeFile(resolve(evidence, 'observation-native-targets.json'), JSON.stringify(events, null, 2));
+        await request('POST', prefix + '/actions', { actions: [{ type: 'pointer', id: 'touch', parameters: { pointerType: 'touch' }, actions: [
+          { type: 'pointerMove', duration: 0, x, y }, { type: 'pointerDown', button: 0 }, { type: 'pointerMove', duration: 600, x, y: endY }, { type: 'pointerUp', button: 0 },
+        ] }] });
+        swipes++;
+      }
+      throw new Error(`Native Settings ${label} unavailable after bounded package readiness and observed list navigation`);
+    }
+    await openNativePreference('Display', 'android-settings', 'Settings');
     await capture('display-original');
-    await byLabel('Screen zoom', 'display-before-zoom');
+    await openNativePreference('Screen zoom', 'display-before-zoom', 'Display');
     function describeOriginalSettingsScreen(screen, heading) {
       const headings = screen.nodes.filter(node => node.displayed === 'true' && (node.text === heading || node['content-desc'] === heading));
       const toolbarHeadings = headings.filter(node => {
@@ -259,7 +295,7 @@ if (mode === 'create') {
     const originalControls = { screenZoom: describeOriginalSettingsScreen(zoom, 'Screen zoom') };
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
     await back();
-    await byLabel('Font size and style', 'display-before-font');
+    await openNativePreference('Font size and style', 'display-before-font', 'Display');
     const font = await capture('font-size-original');
     originalControls.fontSize = describeOriginalSettingsScreen(font, 'Font size and style');
     await writeFile(resolve(evidence, 'original-native-settings-controls.json'), JSON.stringify(originalControls, null, 2));
