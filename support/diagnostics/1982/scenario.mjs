@@ -46,8 +46,11 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
  function processIdentity(value){
   const output=typeof value==='string'?value:value?.stdout??value?.result??value?.output;
   assert.equal(typeof output,'string','Current process dump is unavailable');
-  assert(output.startsWith('ACTIVITY MANAGER RUNNING PROCESSES'),'Unexpected process dump format');
-  const lines=output.split(/\r?\n/);
+  const allLines=output.split(/\r?\n/);
+  const sections=allLines.map((line,index)=>line==='ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)'?index:-1).filter(index=>index>=0);
+  assert.equal(sections.length,1,'Exactly one current running-process section is required from the full package dump');
+  const nextSection=allLines.findIndex((line,index)=>index>sections[0]&&line.startsWith('ACTIVITY MANAGER '));
+  const lines=allLines.slice(sections[0]+1,nextSection<0?undefined:nextSection);
   const records=[];
   for(let i=0;i<lines.length;i++){
    const header=lines[i].match(/^  \*APP\* UID (\d+) ProcessRecord\{([a-f0-9]+) ([1-9]\d*):org\.localsend\.localsend_app\/(u\d+a\d+)\}$/);
@@ -71,7 +74,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
  async function identity(expected,end=hardEnd){
   const packageName=await call('GET','/appium/device/current_package',undefined,end);
   const activity=await call('GET','/appium/device/current_activity',undefined,end);
-  const rawProcess=await shell('dumpsys activity -p '+APP+' processes',end);
+  const rawProcess=await shell('dumpsys activity -p '+APP,end);
   record('native-process-dump',{expected,rawProcess});
   const observedProcess=processIdentity(rawProcess);
   const pid=observedProcess.pid;
@@ -121,7 +124,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
   try{save(stage+'-logcat-chunk',await call('POST','/log',{type:'logcat'}));}
   catch(error){record('native-logcat-unavailable',{stage,error:String(error)});}
 
-  for(const command of ['dumpsys activity -p '+APP+' activities','dumpsys activity -p '+APP+' processes']){
+  for(const command of ['dumpsys activity -p '+APP+' activities','dumpsys activity -p '+APP]){
    await shell(command);
   }
   const observed=stamp();

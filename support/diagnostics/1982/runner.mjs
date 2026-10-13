@@ -144,6 +144,8 @@ try {
   assert(versions.length===1||appiumLogs.length===0,'Nonempty live version log has missing or ambiguous creation record');
   if(versions.length===1)assert.deepEqual(versions[0].slice(1),['2.15.0','4.0.1'],'Unexpected live Appium or driver version');
   writeFileSync('evidence/automation-version-pending.json',JSON.stringify({session,buildId,state:'PENDING_FINAL_VERSION',liveVersion:versions[0]?.slice(1)??null,liveBytes:Buffer.byteLength(appiumLogs),observedUtc:new Date().toISOString(),productAcceptanceAllowed:false},null,2));
+  const executorControl=await wd('POST', '/session/'+session+'/execute/sync', {script:'browserstack_executor: '+JSON.stringify({action:'adbShell',arguments:{command:'getprop ro.system.build.version.sdk'}}),args:[]});
+  writeFileSync('evidence/executor-getprop-control.json',JSON.stringify({session,command:'getprop ro.system.build.version.sdk',observedUtc:new Date().toISOString(),requestCompleted:true,raw:safe(executorControl)},null,2));
   await helperClick('Inspect LocalSend APK');
   let inspection;
   const inspectionDeadline = Date.now() + 30_000;
