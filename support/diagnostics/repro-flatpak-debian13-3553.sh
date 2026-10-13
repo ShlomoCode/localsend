@@ -42,12 +42,16 @@ if ! runuser -u probe -- unshare --user --map-root-user true; then
 fi
 
 if [[ "${PROBE_ONLY:-0}" == 1 ]]; then
-  test -s /evidence/cache-snapshots/brave-1.99.20.tar.gz
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-katex
   dpkg-query -W -f='${Package} ${Version}\n' fonts-katex > /evidence/native-probe-fonts-katex-package.txt
+  curl --fail --location --retry 3 \
+    https://github.com/brave/brave-browser/releases/download/v1.99.20/brave-origin-nightly_1.99.20_amd64.deb \
+    -o /tmp/brave-origin-nightly_1.99.20_amd64.deb
+  sha256sum /tmp/brave-origin-nightly_1.99.20_amd64.deb > /evidence/native-probe-brave-sha256.txt
+  DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/brave-origin-nightly_1.99.20_amd64.deb
   runuser -u probe -- env \
     HOME=/home/probe USER=probe LOGNAME=probe \
-    XDG_RUNTIME_DIR=/run/user/1000 XDG_CURRENT_DESKTOP=OPENBOX XDG_SESSION_TYPE=x11 \
+    XDG_RUNTIME_DIR=/run/user/1000 XDG_CURRENT_DESKTOP=OPENBOX XDG_SESSION_TYPE=x11 REGENERATE_BRAVE=1 \
     dbus-run-session -- bash -c '
       set -Eeuo pipefail
       flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo

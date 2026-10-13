@@ -15,19 +15,23 @@ case_fc_list() {
 }
 
 printf 'case\texit_code\toutput_lines\n' > "$out/summary.tsv"
-rm -rf "$host_cache"
-mkdir -p "$host_cache"
-tar -xzf /evidence/cache-snapshots/brave-1.99.20.tar.gz -C "$host_cache"
-case_fc_list brave_cache
-rm -rf "$host_cache"
-mkdir -p "$host_cache"
-case_fc_list empty_cache
+if [[ "${REGENERATE_BRAVE:-0}" != 1 ]]; then
+  rm -rf "$host_cache"
+  mkdir -p "$host_cache"
+  tar -xzf /evidence/cache-snapshots/brave-1.99.20.tar.gz -C "$host_cache"
+  case_fc_list brave_cache
+  rm -rf "$host_cache"
+  mkdir -p "$host_cache"
+  case_fc_list empty_cache
+fi
 
 # Re-run the released app with the captured host cache and record a bounded
 # sample of fontconfig getters from its live main thread.
 rm -rf "$host_cache" "$app_cache"
 mkdir -p "$host_cache"
-tar -xzf /evidence/cache-snapshots/brave-1.99.20.tar.gz -C "$host_cache"
+if [[ "${REGENERATE_BRAVE:-0}" != 1 ]]; then
+  tar -xzf /evidence/cache-snapshots/brave-1.99.20.tar.gz -C "$host_cache"
+fi
 export DISPLAY=:98
 Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp > "$out/xvfb.log" 2>&1 &
 xvfb_pid=$!
@@ -43,6 +47,38 @@ cleanup() {
 }
 trap cleanup EXIT
 sleep 3
+if [[ "${REGENERATE_BRAVE:-0}" == 1 ]]; then
+  cat > "$out/font-cache-prime.html" <<'HTML'
+<!doctype html><meta charset="utf-8"><title>LocalSend startup check</title><style>body{font:24px sans-serif}p{font-family:serif}</style>
+<h1>LocalSend startup check</h1><p>Brave host fontconfig cache priming with KaTeX: abcdefghijklmnopqrstuvwxyz 0123456789 ∑ ∫ π</p>
+<style>@font-face{font-family:CacheProbe;src:url("file:///usr/share/fonts/truetype/katex/KaTeX_AMS-Regular.woff")} .cache-probe{font-family:CacheProbe}</style><p class="cache-probe">KaTeX WOFF font cache probe: abc123 ∑∫π</p>
+HTML
+  profile="$out/brave-profile"
+  mkdir -p "$profile"
+  setsid /usr/bin/brave-origin-nightly --no-first-run --no-default-browser-check --disable-background-networking \
+    --user-data-dir="$profile" --window-size=1000,700 "file://$out/font-cache-prime.html" \
+    > "$out/brave.stdout.txt" 2> "$out/brave.stderr.txt" &
+  brave_group=$!
+  brave_window=""
+  for ((i=0; i<20; i++)); do
+    brave_window=$(xdotool search --onlyvisible --name 'LocalSend startup check' 2>/dev/null | sed -n '1p' || true)
+    [[ -n "$brave_window" ]] && break
+    onboarding=$(xdotool search --onlyvisible --name '^Brave Origin$' 2>/dev/null | sed -n '1p' || true)
+    if [[ -n "$onboarding" ]]; then xdotool mousemove --window "$onboarding" 265 520 click 1; fi
+    sleep 1
+  done
+  test -n "$brave_window"
+  sleep 8
+  kill -TERM -- "-$brave_group" 2>/dev/null || true
+  sleep 2
+  kill -KILL -- "-$brave_group" 2>/dev/null || true
+  wait "$brave_group" 2>/dev/null || true
+  rm -rf "$profile"
+  find "$host_cache" -maxdepth 1 -type f -name '*cache-12' -exec sha256sum {} + > "$out/brave-cache-sha256.txt"
+  find "$host_cache" -maxdepth 1 -type f -name '*cache-12' -exec sh -c 'for f do strings "$f" | grep -Ei "katex.*woff2?" || true; done' sh {} + > "$out/brave-katex-records.txt"
+  test -s "$out/brave-katex-records.txt"
+  tar -czf "$out/brave-cache.tar.gz" -C "$host_cache" .
+fi
 setsid flatpak run --user org.localsend.localsend_app > "$out/flatpak.stdout.txt" 2> "$out/flatpak.stderr.txt" &
 app_group=$!
 app_pid=""

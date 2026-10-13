@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   debian13:
@@ -18,17 +17,6 @@ jobs:
       - name: Prepare evidence directory
         run: |
           mkdir -p reproduction/debian13
-          chmod 0777 reproduction/debian13
-      - name: Restore the authentic Brave cache from the completed reproduction
-        uses: actions/download-artifact@v4
-        with:
-          name: localsend-3553-debian13
-          run-id: 38336545210
-          github-token: ${{ github.token }}
-          path: reproduction/debian13
-      - name: Prepare a fresh probe output directory
-        run: |
-          rm -rf reproduction/debian13/native-probe
           chmod 0777 reproduction/debian13
       - name: Allow Flatpak user namespaces on the disposable runner
         run: |
