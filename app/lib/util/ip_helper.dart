@@ -4,8 +4,8 @@ extension StringIpExt on String {
   String get visualId => split('.').last;
 
   String withPort(int port) {
-    final host = contains(':') ? '[$this]' : this;
-    return '$host:$port';
+    final isIpv6 = contains(':');
+    return isIpv6 ? '[$this]:$port' : '$this:$port';
   }
 }
 
