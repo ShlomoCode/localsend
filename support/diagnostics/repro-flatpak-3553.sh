@@ -197,10 +197,31 @@ launch_case() {
 }
 
 wait_for_window() {
-  local label="$1" i window
+  local label="$1" i window origin_window geometry width height
   for ((i=0; i<60; i++)); do
     window=$(xdotool search --onlyvisible --name 'LocalSend startup check' 2>/dev/null | sed -n '1p' || true)
     if [[ -n "$window" ]]; then return 0; fi
+    if [[ "$i" == 5 ]]; then
+      origin_window=$(xdotool search --onlyvisible --class '[Bb]rave-origin-nightly' 2>/dev/null | sed -n '1p' || true)
+      if [[ -n "$origin_window" ]]; then
+        import -window root "$OUT/brave-$label-before-onboarding.png" 2>/dev/null || true
+        geometry=$(xdotool getwindowgeometry --shell "$origin_window" 2>/dev/null || true)
+        width=$(printf '%s\n' "$geometry" | sed -n 's/^WIDTH=//p')
+        height=$(printf '%s\n' "$geometry" | sed -n 's/^HEIGHT=//p')
+        if [[ "$width" =~ ^[0-9]+$ && "$height" =~ ^[0-9]+$ ]]; then
+          printf 'Origin first-run free option: window=%s width=%s height=%s click=%s,%s\n' "$origin_window" "$width" "$height" "$((width/2))" "$((height-80))" > "$OUT/brave-$label-onboarding-action.txt"
+          xdotool windowactivate --sync "$origin_window" 2>/dev/null || true
+          xdotool mousemove --window "$origin_window" "$((width/2))" "$((height-80))" click 1 2>/dev/null || true
+        fi
+      fi
+    fi
+    if [[ "$i" == 20 && -n "${origin_window:-}" ]]; then
+      xdotool windowactivate --sync "$origin_window" 2>/dev/null || true
+      xdotool key --clearmodifiers ctrl+l || true
+      xdotool type --clearmodifiers --delay 1 "file://$OUT/font-cache-prime.html" || true
+      xdotool key Return || true
+      echo 'Navigated to the local font page after Origin onboarding.' >> "$OUT/brave-$label-onboarding-action.txt"
+    fi
     sleep 1
   done
   ps -eLo pid,tid,ppid,pgid,stat,pcpu,comm,args --sort=-pcpu > "$OUT/brave-$label-processes.txt" 2>&1 || true
@@ -355,7 +376,7 @@ for version in 1.99.20; do
   profile="$TMP/brave-profile-$version"
   cache_manifest "$OUT/cache-snapshots/before-brave-$version"
   mkdir -p "$profile"
-  setsid "$brave_exe" --no-first-run --no-default-browser-check --disable-background-networking --ozone-platform=x11 \
+  setsid "$brave_exe" --no-first-run --no-default-browser-check --disable-background-networking --ozone-platform=x11 --password-store=basic \
     --user-data-dir="$profile" --window-size=1000,700 "file://$OUT/font-cache-prime.html" >"$OUT/brave-$version.stdout.txt" 2>"$OUT/brave-$version.stderr.txt" &
   brave_pid=$!; GROUP_PIDS+=("$brave_pid")
   if ! wait_for_window "$version"; then
