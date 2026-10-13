@@ -80,10 +80,23 @@ function Type-Control($App,$Control,$Text,[long]$Hwnd=0) {
  Click-Control $App $Control $Hwnd
  $h=Assert-App $App $Hwnd
  if([Issue3456Native]::GetForegroundWindow().ToInt64() -ne $h){throw "ENV_BLOCK: foreground stolen before keys"}
- # Clipboard Unicode paste is native user input; the picker must read the exact path back.
+ # The same real Edit must own keyboard focus before each native chord.
  [Clipboard3536]::SetText($Text)
- Write-Event keys @{App=$App;Hwnd=$h;Control=$Control;Text=$Text;Method="Ctrl+A, Unicode clipboard, Ctrl+V"}
- [System.Windows.Forms.SendKeys]::SendWait("^a^v");Start-Sleep -Milliseconds 300
+ foreach($key in @(0x41,0x56)){
+  $end=[DateTime]::UtcNow.AddSeconds(3);$focused=@()
+  do{
+   $focused=@(Snapshot $App $h|Where-Object {$_.Pid -eq $App.Id -and $_.Type -eq $Control.Type -and $_.Name -ceq $Control.Name -and $_.Enabled -and $_.KeyboardFocus -and $_.Left -eq $Control.Left -and $_.Top -eq $Control.Top -and $_.Right -eq $Control.Right -and $_.Bottom -eq $Control.Bottom})
+   if($focused.Count -eq 1){break};Start-Sleep -Milliseconds 100
+  }while([DateTime]::UtcNow -lt $end)
+  Write-Event keyboardFocus @{App=$App;Hwnd=$h;Control=$Control;Focused=$focused;Key=$key}
+  if($focused.Count -ne 1){Save-Desktop "$script:Stage-edit-focus-block";throw 'ENV_BLOCK: exact live Edit keyboard focus unavailable'}
+  Check-Budget
+  $input=[Keyboard3536]::ControlChord($h,[UInt16]$key)
+  Write-Event keys @{App=$App;Hwnd=$h;Control=$focused[0];Text=$Text;Method='Native SendInput Ctrl+A then Ctrl+V with Unicode clipboard';Input=$input}
+  if($input.Status -ne 'INSERTED' -or $input.Inserted -ne $input.Expected){throw 'ENV_BLOCK: native chord input was blocked or incomplete'}
+  Start-Sleep -Milliseconds 150
+ }
+ Start-Sleep -Milliseconds 300
 }
 function Save-RecorderReceipt {$script:RecorderReceipt|ConvertTo-Json -Depth 8|Set-Content (Join-Path $Evidence "recorder-$script:ClipName.json") -Encoding UTF8}
 function Start-Clip($Name) {

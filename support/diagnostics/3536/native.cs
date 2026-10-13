@@ -58,3 +58,32 @@ public static class Volume3536 {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool GetVolumeInformation(string root,StringBuilder volume,int size,out uint serial,out uint maximum,out uint flags,StringBuilder fs,int fsSize);
  public static string Info(){uint serial,max,flags;var volume=new StringBuilder(260);var fs=new StringBuilder(260);if(!GetVolumeInformation("C:\\",volume,260,out serial,out max,out flags,fs,260))throw new System.ComponentModel.Win32Exception();if(fs.ToString()!="NTFS" || max<116)throw new Exception("Native volume/component prerequisite failed");return "FileSystem="+fs+";MaximumComponentUnits="+max+";Serial="+serial+";Flags="+flags;}
 }
+public sealed class KeyInput3536Receipt {
+ public int InputSize, LastError, ReleaseLastError; public uint Expected, Inserted, ReleaseExpected, ReleaseInserted; public long Foreground;
+ public string Status; public ushort Key;
+}
+public static class Keyboard3536 {
+ // This diagnostic deliberately selects native AMD64 PowerShell and validates INPUT size.
+ [StructLayout(LayoutKind.Explicit,Size=40)] struct Input {
+  [FieldOffset(0)] public uint Type;
+  [FieldOffset(8)] public ushort VirtualKey;
+  [FieldOffset(10)] public ushort Scan;
+  [FieldOffset(12)] public uint Flags;
+  [FieldOffset(16)] public uint Time;
+  [FieldOffset(24)] public UIntPtr Extra;
+ }
+ [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,Input[] inputs,int size);
+ [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+ static Input Key(ushort key,bool up){return new Input{Type=1,VirtualKey=key,Flags=up?2u:0u};}
+ public static KeyInput3536Receipt ControlChord(long hwnd,ushort key){
+  var r=new KeyInput3536Receipt{InputSize=Marshal.SizeOf(typeof(Input)),Expected=4,Key=key,Foreground=Issue3456Native.GetForegroundWindow().ToInt64(),Status="PRECONDITION_BLOCK"};
+  if(IntPtr.Size!=8 || r.InputSize!=40)throw new Exception("ENV_BLOCK: selected AMD64 INPUT layout unavailable");
+  if(key!=0x41 && key!=0x56)throw new Exception("ENV_BLOCK: unsupported diagnostic chord");
+  if(r.Foreground!=hwnd || (GetAsyncKeyState(key)&0x8000)!=0)return r;
+  foreach(int modifier in new int[]{0x10,0x11,0x12,0x5b,0x5c})if((GetAsyncKeyState(modifier)&0x8000)!=0)return r;
+  r.Inserted=SendInput(4,new Input[]{Key(0x11,false),Key(key,false),Key(key,true),Key(0x11,true)},r.InputSize);
+  r.LastError=Marshal.GetLastWin32Error();r.Status=r.Inserted==r.Expected?"INSERTED":"PARTIAL_OR_BLOCKED";
+  if(r.Inserted!=r.Expected){r.ReleaseExpected=2;r.ReleaseInserted=SendInput(2,new Input[]{Key(key,true),Key(0x11,true)},r.InputSize);r.ReleaseLastError=Marshal.GetLastWin32Error();}
+  return r;
+ }
+}
