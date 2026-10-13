@@ -23,7 +23,7 @@ function Assert-App($App,[long]$Hwnd=0) {
 }
 function Focus-App($App,[long]$Hwnd=0) {
  $h=Assert-App $App $Hwnd
- [Issue3456Native]::ShowWindow([IntPtr]$h,9)|Out-Null;[Issue3456Native]::SetForegroundWindow([IntPtr]$h)|Out-Null
+ if([Tray3166Native]::Iconic([IntPtr]$h)){[Issue3456Native]::ShowWindow([IntPtr]$h,9)|Out-Null};[Issue3456Native]::SetForegroundWindow([IntPtr]$h)|Out-Null
  if([Issue3456Native]::GetForegroundWindow().ToInt64() -ne $h){throw "ENV_BLOCK: owned foreground unavailable"}
  Write-Event foreground @{App=$App;Hwnd=$h};return $h
 }

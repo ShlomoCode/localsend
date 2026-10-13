@@ -150,7 +150,7 @@ try{
  $script:CompletedConditions+=@{Name='fresh-profile';Outcomes=$outcomes;Failure=$failed.Count -gt 0}
  if(-not $failed.Count -and ($script:RoundProductEnd-[DateTime]::UtcNow).TotalSeconds -ge 30){
   $script:Stage='autostart-screenshot-configuration';$script:ProductStarted=$false
-  $script:ProductEnd=$script:RoundProductEnd
+  $script:ProductEnd=[DateTime]::UtcNow.AddSeconds(90);if($script:ProductEnd -gt $script:RoundProductEnd){$script:ProductEnd=$script:RoundProductEnd}
   $start=AutoStart-Receipt $script:App autostart-original
   if($start.Value){throw 'ENV_BLOCK: pre-existing LocalSend startup registration unowned'}
   $script:AutoStartOwned=$true
