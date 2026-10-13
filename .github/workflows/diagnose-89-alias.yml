@@ -1,0 +1,47 @@
+name: Diagnose Windows alias 89
+on:
+  workflow_dispatch:
+    inputs:
+      frozen_head:
+        description: Root-approved immutable source head
+        required: true
+      lease_id:
+        description: Fresh coordinator runtime lease
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-89-alias
+  cancel-in-progress: false
+jobs:
+  alias:
+    runs-on: windows-2022
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require admitted source and lease identity
+        shell: pwsh
+        env:
+          FROZEN_HEAD: ${{ inputs.frozen_head }}
+          LEASE_ID: ${{ inputs.lease_id }}
+        run: |
+          if ($env:FROZEN_HEAD -cne $env:GITHUB_SHA -or $env:LEASE_ID -notmatch '\S') { throw 'Source/lease admission mismatch' }
+          New-Item -ItemType Directory C:\e89 | Out-Null
+          @{SourceHead=$env:GITHUB_SHA;Lease=$env:LEASE_ID;StartedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content C:\e89\admission.json
+      - name: Native unchanged-release control and Unicode scenarios
+        shell: powershell
+        run: |
+          $started=[DateTime]::UtcNow
+          & support\diagnostics\89\supervise.ps1 -Evidence C:\e89 -StartedUtc $started
+          exit $LASTEXITCODE
+      - name: Retain exact process cleanup and raw evidence
+        if: always()
+        shell: powershell
+        run: |
+          & support\diagnostics\89\retain.ps1 -Evidence C:\e89
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue89-native-${{ github.run_id }}
+          path: C:\e89
+          retention-days: 30
