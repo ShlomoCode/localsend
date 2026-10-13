@@ -11,6 +11,16 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   fontconfig xvfb openbox xdotool x11-utils imagemagick \
   iproute2 procps gdb strace file
 
+# The official Brave Origin Nightly package depends on Brave's signed keyring.
+# Use Brave's release repository only for that dependency; the browser binary
+# itself remains the exact release asset downloaded by the common experiment.
+curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+  https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources \
+  https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends brave-keyring
+
 useradd --create-home --shell /bin/bash probe
 printf 'probe ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/90-probe
 chmod 0440 /etc/sudoers.d/90-probe

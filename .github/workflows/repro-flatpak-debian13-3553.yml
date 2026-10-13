@@ -18,9 +18,15 @@ jobs:
         run: |
           mkdir -p reproduction/debian13
           chmod 0777 reproduction/debian13
+      - name: Allow Flatpak user namespaces on the disposable runner
+        run: |
+          sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Run released app and Flatpak inside Debian 13
         run: |
-          docker run --rm --privileged --security-opt seccomp=unconfined \
+          docker run --rm --privileged --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
             --shm-size=1g \
             -v "$PWD:/repo:ro" \
             -v "$PWD/reproduction/debian13:/evidence" \
