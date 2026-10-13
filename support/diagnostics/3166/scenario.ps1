@@ -14,13 +14,14 @@ function Shell {
  if($p.ProcessName -ne 'explorer'){throw 'ENV_BLOCK: Shell_TrayWnd not owned by Explorer'}
  return [pscustomobject]@{Id=$p.Id;Path=$p.Path;StartUtc=$p.StartTime.ToUniversalTime().ToString('o');Hwnd=$r.Handle;Root=$r}
 }
-function Shell-Click($Control,[switch]$Right){
+function Shell-Click($Control,[switch]$Right,[DateTime]$InputDeadline=[DateTime]::MaxValue){
  Check-Budget;$root=@([Controls3536]::Roots()|Where-Object {$_.Pid -eq $Control.Pid -and $_.ClassName -in @('Shell_TrayWnd','NotifyIconOverflowWindow','#32768')})
  $matches=@();foreach($r in $root){$matches+=@([Controls3536]::Snapshot($r.Handle,$r.Pid)|Where-Object {$_.Name -eq $Control.Name -and $_.Type -eq $Control.Type -and $_.Left -eq $Control.Left -and $_.Top -eq $Control.Top -and $_.Right -eq $Control.Right -and $_.Bottom -eq $Control.Bottom})}
  if($matches.Count -ne 1 -or -not $Control.Enabled){throw 'ENV_BLOCK: shell input live binding absent/ambiguous'}
  $x=[int](($Control.Left+$Control.Right)/2);$y=[int](($Control.Top+$Control.Bottom)/2)
  if(-not [Issue3456Native]::SetCursorPos($x,$y)){throw 'ENV_BLOCK: shell cursor failed'}
  Write-Event shellMouse @{Target=$Control;X=$x;Y=$y;Right=[bool]$Right}
+ Check-Budget;if([DateTime]::UtcNow -ge $InputDeadline){throw 'ENV_BLOCK: explicit shell input deadline'}
  if($Right){[Issue3456Native]::mouse_event(8,0,0,0,[UIntPtr]::Zero);[Issue3456Native]::mouse_event(16,0,0,0,[UIntPtr]::Zero)}else{[Issue3456Native]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Issue3456Native]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
  Start-Sleep -Milliseconds 300
 }
@@ -127,6 +128,7 @@ function Restart-Control($Manager,$OldShell){
   # This exact candidate must qualify in the fresh visible tree; it was outside the original viewport.
   $rows=@($visibleRows|Where-Object Name -CEQ 'Process: Windows Explorer')
   Json @{Shell=$actualShell;Manager=$Manager;Page=$page;List=$list;VisibleRows=$visibleRows;Rows=$rows;Tree=$tree} "actual-explorer-page-$page";Save-Desktop "actual-explorer-page-$page"
+  Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Explorer row collection/retention deadline'}
   if($rows.Count -gt 1){throw 'ENV_BLOCK: exact Explorer Processes row ambiguous'}
   if($rows.Count -eq 1){Json @{Shell=$actualShell;Rows=$rows;Tree=$tree} actual-explorer-row;break}
   $signature=($visibleRows|ForEach-Object {"$($_.Name)|$($_.Top)|$($_.Bottom)"}) -join "`n"
@@ -135,18 +137,19 @@ function Restart-Control($Manager,$OldShell){
   if($scroll.Count -ne 1){throw 'ENV_BLOCK: unique live Processes vertical scrollbar unavailable'};$bar=$scroll[0]
   $down=@($tree|Where-Object {$_.Name -ceq 'Page down' -and $_.Type -eq 50000 -and $_.Enabled -and $_.Pid -eq $Manager.Id -and $_.Left -ge $bar.Left -and $_.Right -le $bar.Right -and $_.Top -ge $bar.Top -and $_.Bottom -le $bar.Bottom})
   if($down.Count -ne 1){throw 'ENV_BLOCK: supported live Processes Page down unavailable'}
-  Click-Control $Manager $down[0]
+  Click-Control $Manager $down[0] -InputDeadline $end -CheckCompletion
  }
  if($rows.Count -ne 1){throw 'ENV_BLOCK: exact visible native Windows Explorer Processes row unavailable'}
  Save-RowPixels $rows[0] actual-explorer-row-pixels
- Click-Control $Manager $rows[0];$tree=@(Snapshot $Manager);$buttons=@($tree|Where-Object {$_.Name -eq 'Restart' -and $_.Type -eq 50000 -and $_.Enabled})
- if($buttons.Count -eq 1){return [pscustomobject]@{Control=$buttons[0];Root=$Manager;Route='actual selected Explorer Restart button'}}
+ Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Explorer row pixels deadline'}
+ Click-Control $Manager $rows[0] -InputDeadline $end -CheckCompletion;$tree=@(Snapshot $Manager);Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Restart control collection deadline'};$buttons=@($tree|Where-Object {$_.Name -eq 'Restart' -and $_.Type -eq 50000 -and $_.Enabled})
+ if($buttons.Count -eq 1){return [pscustomobject]@{Control=$buttons[0];Root=$Manager;Route='actual selected Explorer Restart button';InputDeadline=$end}}
  if($buttons.Count -gt 1){throw 'ENV_BLOCK: ambiguous Restart button'}
  # The alternate route is the selected row's actual context menu. No process restart API is used.
- $null=Focus-App $Manager;Write-Event keys @{Method='Shift+F10';SelectedRow=$rows[0];Owner=$Manager};[System.Windows.Forms.SendKeys]::SendWait('+{F10}');Start-Sleep -Milliseconds 300
+ $null=Focus-App $Manager;Write-Event keys @{Method='Shift+F10';SelectedRow=$rows[0];Owner=$Manager};Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Restart context input deadline'};[System.Windows.Forms.SendKeys]::SendWait('+{F10}');Start-Sleep -Milliseconds 300
  $menus=@([Controls3536]::Roots()|Where-Object {$_.ClassName -eq '#32768' -and $_.Pid -eq $Manager.Id});$items=@()
- foreach($r in $menus){$items+=@([Controls3536]::Snapshot($r.Handle,$r.Pid)|Where-Object {$_.Name -eq 'Restart' -and $_.Type -eq 50011 -and $_.Enabled}|ForEach-Object {[pscustomobject]@{Control=$_;Root=[pscustomobject]@{Id=$Manager.Id;Path=$Manager.Path;StartUtc=$Manager.StartUtc;Hwnd=$r.Handle};Route='actual Explorer context menu Restart'}})}
- Desktop-Snapshot actual-restart-menu|Out-Null;if($items.Count -ne 1){throw 'ENV_BLOCK: actual Explorer Restart button and menu unavailable'};return $items[0]
+ foreach($r in $menus){$items+=@([Controls3536]::Snapshot($r.Handle,$r.Pid)|Where-Object {$_.Name -eq 'Restart' -and $_.Type -eq 50011 -and $_.Enabled}|ForEach-Object {[pscustomobject]@{Control=$_;Root=[pscustomobject]@{Id=$Manager.Id;Path=$Manager.Path;StartUtc=$Manager.StartUtc;Hwnd=$r.Handle};Route='actual Explorer context menu Restart';InputDeadline=$end}})}
+ Desktop-Snapshot actual-restart-menu|Out-Null;Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Restart menu collection/retention deadline'};if($items.Count -ne 1){throw 'ENV_BLOCK: actual Explorer Restart button and menu unavailable'};return $items[0]
 }
 try {
  . (Join-Path $PSScriptRoot ui.ps1)
@@ -190,7 +193,7 @@ try {
  $restart=Restart-Control $manager $oldShell;Json $restart actual-restart-control;Desktop-Snapshot restart-before|Out-Null
  $capture=Test-Path (Join-Path $Evidence capture-qualified.json)
  if($capture){try{Start-Clip actual-explorer-restart}catch{Json @{Status='RECORDER_BLOCK';Error="$_"} recorder-block}}
- try {if($restart.Control.Type -eq 50011){Shell-Click $restart.Control}else{Click-Control $restart.Root $restart.Control};$script:Triggered=$true;Write-Event actualRestart @{Route=$restart.Route;OldShell=$oldShell;App=$script:App};Start-Sleep -Seconds 2;Desktop-Snapshot restart-during|Out-Null;Start-Sleep -Seconds 3}finally{try{Stop-Clip}catch{Json @{Status='RECORDER_BLOCK';Error="$_"} recorder-stop-block}}
+ try {if($restart.Control.Type -eq 50011){Shell-Click $restart.Control -InputDeadline $restart.InputDeadline}else{Click-Control $restart.Root $restart.Control -InputDeadline $restart.InputDeadline};$script:Triggered=$true;Write-Event actualRestart @{Route=$restart.Route;OldShell=$oldShell;App=$script:App};Check-Budget;if([DateTime]::UtcNow -ge $restart.InputDeadline){throw 'ENV_BLOCK: Restart input completion deadline'};Start-Sleep -Seconds 2;Desktop-Snapshot restart-during|Out-Null;Start-Sleep -Seconds 3}finally{try{Stop-Clip}catch{Json @{Status='RECORDER_BLOCK';Error="$_"} recorder-stop-block}}
  $end=[DateTime]::UtcNow.AddSeconds(20);$newShell=$null
  do{Check-Budget;$null=Alive $script:App;try{$candidate=Shell;if($candidate.Id -ne $oldShell.Id -or $candidate.StartUtc -ne $oldShell.StartUtc){$newShell=$candidate;break}}catch{Write-Event shellWait @{Error="$_"}};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
  Desktop-Snapshot restart-after|Out-Null

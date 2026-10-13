@@ -38,7 +38,7 @@ function Find-Control($App,$Name,[int]$Type=0,[long]$Hwnd=0,[int]$Seconds=10) {
  if($a.Count -gt 1){throw "ENV_BLOCK: ambiguous named control $Name"};if($a.Count -eq 1){return $a[0]};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
  Save-Desktop "$script:Stage-missing-control";throw "ENV_BLOCK: unavailable named control $Name"
 }
-function Click-Control($App,$Control,[long]$Hwnd=0) {
+function Click-Control($App,$Control,[long]$Hwnd=0,[DateTime]$InputDeadline=[DateTime]::MaxValue,[switch]$CheckCompletion) {
  $h=Focus-App $App $Hwnd
  if($Control.Pid -ne $App.Id){throw "ENV_BLOCK: click ownership mismatch"}
  $live=@(Snapshot $App $h|Where-Object {$_.Name -eq $Control.Name -and $_.Type -eq $Control.Type -and $_.Left -eq $Control.Left -and $_.Top -eq $Control.Top -and $_.Right -eq $Control.Right -and $_.Bottom -eq $Control.Bottom})
@@ -47,7 +47,9 @@ function Click-Control($App,$Control,[long]$Hwnd=0) {
  if(-not [Issue3456Native]::SetCursorPos($x,$y)){throw "ENV_BLOCK: cursor input failed"}
  if([Issue3456Native]::GetForegroundWindow().ToInt64() -ne $h){throw "ENV_BLOCK: foreground stolen before mouse"}
  Write-Event mouse @{App=$App;Hwnd=$h;Control=$Control;X=$x;Y=$y}
+ Check-Budget;if([DateTime]::UtcNow -ge $InputDeadline){throw 'ENV_BLOCK: explicit native input deadline'}
  [Issue3456Native]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[Issue3456Native]::mouse_event(4,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 300
+ if($CheckCompletion){Check-Budget;if([DateTime]::UtcNow -ge $InputDeadline){throw 'ENV_BLOCK: explicit native input completion deadline'}}
 }
 function Click-Name($App,$Name,[int]$Type=0) {Click-Control $App (Find-Control $App $Name $Type)}
 function Type-Control($App,$Control,$Text,[long]$Hwnd=0) {
