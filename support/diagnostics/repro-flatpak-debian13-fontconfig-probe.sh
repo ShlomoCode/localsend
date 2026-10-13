@@ -62,6 +62,10 @@ printf '%s\n' "$app_pid" > "$out/localsend.pid"
 sleep 4
 sudo awk '{print $14, $15}' "/proc/$app_pid/task/$app_pid/stat" > "$out/main-thread-cpu-before.txt"
 sudo cat "/proc/$app_pid/maps" > "$out/maps.txt"
+if ! grep -q '/run/host/user-fonts-cache/618c72fff80b36cd78c680959a9b3971-le64.cache-12' "$out/maps.txt"; then
+  echo 'The known causal Brave KaTeX cache is not mapped; getter trace would be invalid.' >&2
+  exit 12
+fi
 # GDB cannot resolve sandbox paths through /proc/PID/exe across Flatpak's PID
 # namespace. Use the verified fontconfig ELF offsets and its offset-zero mapping.
 fontconfig_base=$(awk '$6 == "/usr/lib/x86_64-linux-gnu/libfontconfig.so.1.17.0" && $3 == "00000000" {split($1, range, "-"); print "0x" range[1]; exit}' "$out/maps.txt")

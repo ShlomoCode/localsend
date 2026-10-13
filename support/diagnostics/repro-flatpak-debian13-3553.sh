@@ -43,6 +43,8 @@ fi
 
 if [[ "${PROBE_ONLY:-0}" == 1 ]]; then
   test -s /evidence/cache-snapshots/brave-1.99.20.tar.gz
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-katex
+  dpkg-query -W -f='${Package} ${Version}\n' fonts-katex > /evidence/native-probe-fonts-katex-package.txt
   runuser -u probe -- env \
     HOME=/home/probe USER=probe LOGNAME=probe \
     XDG_RUNTIME_DIR=/run/user/1000 XDG_CURRENT_DESKTOP=OPENBOX XDG_SESSION_TYPE=x11 \
