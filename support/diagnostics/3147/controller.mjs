@@ -14,23 +14,28 @@ const json=f=>JSON.parse(readFileSync(f,"utf8"));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let session,owned,actionDeadline,deviceDeadline,conditionDeadline,uncertain=false,stage="preflight",n=0;
 const report={status:"not-started",productVerdict:null,handlerQualification:"unknown",nativeBuild:"unknown",oneUI:"unknown",installedVersion:"unknown",observations:[],boundaries:["Galaxy S22 differs from reported A21s", "Android12 does not establish OneUI4.1", "Original numerical release and installation source unknown", "Passing current release cannot resolve historical report"]};
-async function request(method,p,body,{provider=false,cleanup=false}={}) {
+function acceptWithin(limit=Math.min(actionDeadline,conditionDeadline??Infinity)) {
+ assert(Number.isFinite(limit)&&Date.now()<limit,"Late response or capture: condition remains ambiguous");
+}
+async function request(method,p,body,{provider=false,cleanup=false,fileTrigger=false}={}) {
+ const serialized=body===undefined?undefined:JSON.stringify(body),at=Date.now();
+ if(fileTrigger){conditionDeadline=Math.min(actionDeadline,at+10000);report.fileTriggerStartUtc=new Date(at).toISOString();}
  const limit=cleanup?Math.min(deviceDeadline,Date.parse(process.env.ISSUE3147_JOB_DEADLINE_UTC)-180000):Math.min(actionDeadline,conditionDeadline??Infinity);
  assert(Date.now()<limit,"Absolute request deadline reached");
- const at=Date.now(),url=(provider?"https://api-cloud.browserstack.com":"https://hub-cloud.browserstack.com/wd/hub")+p;
+ const url=(provider?"https://api-cloud.browserstack.com":"https://hub-cloud.browserstack.com/wd/hub")+p;
  try {
-  const r=await fetch(url,{method,headers:{authorization:auth,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1,Math.min(p==="/session"?90000:10000,limit-at)))});
+  const r=await fetch(url,{method,headers:{authorization:auth,"content-type":"application/json"},body:serialized,signal:AbortSignal.timeout(Math.max(1,Math.min(p==="/session"?90000:10000,limit-at)))});
   const text=await r.text();assert(Buffer.byteLength(text)<16*1024*1024,"Response retention bound");
   const j=JSON.parse(text);
   if(p==="/session"&&method==="POST") {
    const id=j.value?.sessionId??j.sessionId;
    if(typeof id==="string"&&/^[\w-]+$/.test(id)){session=id;owned.session=id;save("ownership.json",owned);}
   }
-  appendFileSync(path.join(out,"commands.jsonl"),safe(JSON.stringify({at:new Date(at).toISOString(),stage,method,path:p,status:r.status,elapsedMs:Date.now()-at,error:j.value?.error}))+"\n");
-  assert(r.ok&&!j.value?.error,"Remote response failed: "+r.status+" "+(j.value?.error??""));return j;
+  appendFileSync(path.join(out,"commands.jsonl"),safe(JSON.stringify({at:new Date(at).toISOString(),stage,method,path:p,status:r.status,elapsedMs:Date.now()-at,late:Date.now()>=limit,error:j.value?.error}))+"\n");
+  assert(r.ok&&!j.value?.error,"Remote response failed: "+r.status+" "+(j.value?.error??""));acceptWithin(limit);return j;
  }catch(e){if(method==="POST"&&p!=="/session")uncertain=true;throw e;}
 }
-const wd=async(m,p,b)=>{assert(session,"Owned handle required");assert(m!=="POST"||!uncertain,"Uncertain input prohibits further input");return (await request(m,"/session/"+session+p,b)).value;};
+const wd=async(m,p,b,options)=>{assert(session,"Owned handle required");assert(m!=="POST"||!uncertain,"Uncertain input prohibits further input");return (await request(m,"/session/"+session+p,b,options)).value;};
 const decode=s=>s.replace(/&quot;/g,"\"").replace(/&apos;/g,"\u0027").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">");
 const nodes=xml=>[...xml.matchAll(/<[^/!?][^>]*>/g)].map(m=>Object.fromEntries([...m[0].matchAll(/([\w.:-]+)=(["\u0027])([\s\S]*?)\2/g)].map(a=>[a[1],decode(a[3])])));
 const label=x=>x["content-desc"]||x.text||"";
@@ -40,9 +45,9 @@ async function snapshot(name) {
  const pkg=await wd("GET","/appium/device/current_package"),appState=await wd("POST","/appium/device/app_state",{appId:APP});
  save(name+".xml",xml);writeFileSync(path.join(out,name+".png"),png);
  const state={xml,pkg,appState,width:png.readUInt32BE(16),height:png.readUInt32BE(20)};
- save(name+".json",{utc:new Date().toISOString(),pkg,appState,width:state.width,height:state.height,pngSha256:hash(png),xmlSha256:hash(xml)});return state;
+ save(name+".json",{utc:new Date().toISOString(),pkg,appState,width:state.width,height:state.height,pngSha256:hash(png),xmlSha256:hash(xml)});acceptWithin();return state;
 }
-async function tap(text,expected=APP) {
+async function tap(text,expected=APP,fileTrigger=false) {
  const name="input-"+(++n),a=await snapshot(name+"-before"),b=await wd("GET","/source");
  assert(a.pkg===expected,"Unexpected foreground before "+text);
  const find=x=>nodes(x).filter(v=>label(v)===text&&v.package===expected&&v.enabled==="true"&&v.bounds);
@@ -51,33 +56,46 @@ async function tap(text,expected=APP) {
  const [x1,y1,x2,y2]=bounds.slice(1).map(Number);assert(x2>x1&&y2>y1&&x1>=0&&y1>=0&&x2<=a.width&&y2<=a.height,"Control outside PNG");
  assert(await wd("GET","/appium/device/current_package")===expected,"Foreground changed before input");
  save(name+"-binding.json",{text,pkg:expected,bounds:last[0].bounds,utc:new Date().toISOString()});
- await wd("POST","/actions",{actions:[{type:"pointer",id:"finger3147",parameters:{pointerType:"touch"},actions:[{type:"pointerMove",duration:0,origin:"viewport",x:Math.floor((x1+x2)/2),y:Math.floor((y1+y2)/2)},{type:"pointerDown",button:0},{type:"pause",duration:100},{type:"pointerUp",button:0}]}]});
+ acceptWithin();
+ await wd("POST","/actions",{actions:[{type:"pointer",id:"finger3147",parameters:{pointerType:"touch"},actions:[{type:"pointerMove",duration:0,origin:"viewport",x:Math.floor((x1+x2)/2),y:Math.floor((y1+y2)/2)},{type:"pointerDown",button:0},{type:"pause",duration:100},{type:"pointerUp",button:0}]}]},{fileTrigger});
 }
 async function nativePackage(name) {
  const body={script:"browserstack_executor: "+JSON.stringify({action:"adbShell",arguments:{command:"dumpsys package "+name}}),args:[]};
  const reply=await wd("POST","/execute/sync",body);
  save("native-package-"+name+".json",{command:body,reply,utc:new Date().toISOString()});
- return typeof reply==="string"?reply:JSON.stringify(reply);
+ acceptWithin();return typeof reply==="string"&&reply.trim()?reply:"";
 }
-function registeredDocumentHandler(text) {
- // Require all intent tokens within one printed filter, plus an ordinary enabled User0 installation.
- const enabled=/User 0:[^\n]*installed=true[^\n]*hidden=false[^\n]*enabled=[01](?:\s|$)/.test(text)&&!/User 0:[^\n]*suspended=true/.test(text);
+function registeredDocumentHandler(text,packageName) {
+ // Missing default activity state stays unknown. Accept only an explicit User0 component-enable override.
+ const lines=text.split(/\r?\n/),users=lines.map((line,index)=>({line,index,match:line.match(/^(\s*)User 0:/)})).filter(x=>x.match);
+ if(users.length!==1)return false;
+ const user=users[0],indent=user.match[1].length;
+ if(!/\binstalled=true\b/.test(user.line)||!/\bhidden=false\b/.test(user.line)||!/\bsuspended=false\b/.test(user.line)||!/\benabled=[01](?:\s|$)/.test(user.line))return false;
+ const section=[];
+ for(let i=user.index+1;i<lines.length;i++){if(lines[i].trim()&&lines[i].match(/^\s*/)[0].length<=indent)break;section.push(lines[i]);}
+ const component=token=>{const parts=token.split("/");if(parts.length>2||parts.length===2&&parts[0]!==packageName)return null;const value=parts.at(-1);return /^[\w.$]+$/.test(value)?value.startsWith(".")?packageName+value:value:null;};
+ const membership=kind=>{const headings=section.map((line,index)=>({line,index,match:line.match(/^(\s*)(enabledComponents|disabledComponents):\s*$/) })).filter(x=>x.match&&x.match[2]===kind);if(headings.length>1)return null;if(!headings.length)return new Set();const h=headings[0],values=new Set();for(let i=h.index+1;i<section.length;i++){if(section[i].trim()&&section[i].match(/^\s*/)[0].length<=h.match[1].length)break;const token=section[i].trim();if(!token)continue;const value=component(token);if(!value)return null;values.add(value);}return values;};
+ const enabled=membership("enabledComponents"),disabled=membership("disabledComponents");if(!enabled?.size||!disabled)return false;
  const filters=text.split(/(?=^\s*[a-f0-9]+\s+[\w.]+\/[\w.$]+\s+filter\s)/m);
- return enabled&&filters.slice(1).some(block=>/Action: "android.intent.action.OPEN_DOCUMENT"/.test(block)&&/Category: "android.intent.category.OPENABLE"/.test(block)&&/(?:StaticType|Type): "?\*\/\*"?/.test(block));
+ const candidates=filters.slice(1).map(block=>{
+  const owner=block.match(/^\s*[a-f0-9]+\s+([\w.]+\/[\w.$]+)\s+filter\s/m)?.[1],activity=owner?component(owner):null;
+  return activity&&enabled.has(activity)&&!disabled.has(activity)&&/^\s*Action: "android.intent.action.OPEN_DOCUMENT"\s*$/m.test(block)&&/^\s*Category: "android.intent.category.OPENABLE"\s*$/m.test(block)&&/^\s*(?:StaticType|Type): (?:"\*\/\*"|\*\/\*)\s*$/m.test(block)?activity:null;
+ });
+ const qualified=[...new Set(candidates.filter(Boolean))];return qualified.length===1?qualified[0]:null;
 }
 async function ready(name,timeout=10000) {
  const end=Math.min(actionDeadline,Date.now()+timeout);let s;
- do{s=await snapshot(name+"-"+Date.now());if(s.pkg===APP&&s.appState===4&&nodes(s.xml).some(x=>label(x)==="Send")&&nodes(s.xml).some(x=>label(x)==="Receive"))return s;await sleep(250);}while(Date.now()<end);
+ do{s=await snapshot(name+"-"+Date.now());if(s.pkg===APP&&s.appState===4&&nodes(s.xml).some(x=>label(x)==="Send")&&nodes(s.xml).some(x=>label(x)==="Receive")){acceptWithin();return s;}await sleep(250);}while(Date.now()<end);
  throw Error("Responsive ordinary app home not qualified");
 }
 async function fileObservation(name) {
- await tap("Receive");await tap("Send");await tap("File");const end=Math.min(actionDeadline,Date.now()+10000);conditionDeadline=end;let result;const finish=value=>{conditionDeadline=null;return value;};
+ await tap("Receive");await tap("Send");await tap("File",APP,true);const end=conditionDeadline;let result;const finish=value=>{conditionDeadline=null;return value;};
  do {
   const s=await snapshot(name+"-"+Date.now());
   const picker=["com.google.android.documentsui","com.android.documentsui"].includes(s.pkg)&&nodes(s.xml).some(x=>x.package===s.pkg&&x.bounds);
   const crashDialog=nodes(s.xml).some(x=>/LocalSend closed|LocalSend keeps stopping|LocalSend has stopped/i.test(label(x)));
   const launcher=/launcher|nexuslauncher|touchwiz/i.test(s.pkg);
-  result={utc:new Date().toISOString(),pkg:s.pkg,appState:s.appState,pickerCandidate:picker,crashDialog,launcher};report.observations.push(result);save("result.json",report);
+  acceptWithin();result={utc:new Date().toISOString(),pkg:s.pkg,appState:s.appState,pickerCandidate:picker,crashDialog,launcher};report.observations.push(result);save("result.json",report);acceptWithin();
   if(picker){report.handlerQualification="observed real document picker, original PNG inspection pending";return finish("picker-observed");}
   if(crashDialog||launcher&&s.appState<=2)return finish("crash-symptom-observed");
   await sleep(Math.min(250,Math.max(0,end-Date.now())));
@@ -110,15 +128,16 @@ try {
  const version=packageDump.match(/versionName=([^\s]+)/)?.[1];assert(version==="1.18.2","Native installed APK version unavailable or differs");report.installedVersion=version;
  const propsBody={script:"browserstack_executor: "+JSON.stringify({action:"adbShell",arguments:{command:"getprop ro.bootimage.build.fingerprint"}}),args:[]};
  const props=await wd("POST","/execute/sync",propsBody);save("native-build-properties.json",{command:propsBody,reply:props});
- report.nativeBuild="Retained exact native bootimage fingerprint; OneUI remains unknown";
- let handlerQualified=false;
+ const fingerprint=typeof props==="string"?props.trim():"";acceptWithin();
+ report.nativeBuild=/^[^\s:/]+\/[^\s:/]+\/[^\s:]+:\d+(?:\.\d+)*\/[^\s:/]+\/[^\s:]+:(?:user|userdebug|eng)\/[^\s:/]+$/.test(fingerprint)?fingerprint:"unknown";
+ const handlerCandidates=[];
  for(const handler of ["com.android.documentsui","com.google.android.documentsui"]) {
   const installed=await wd("POST","/appium/device/is_app_installed",{appId:handler});
   save("handler-installed-"+handler+".json",{handler,installed});
-  if(installed===true){const dump=await nativePackage(handler);handlerQualified ||= registeredDocumentHandler(dump);}
+  if(installed===true){const dump=await nativePackage(handler);const component=registeredDocumentHandler(dump,handler);if(component)handlerCandidates.push({package:handler,component});}
  }
- report.handlerQualification=handlerQualified?"Enabled installed User0 package registers exact OPEN_DOCUMENT/OPENABLE/* filter; native reply and PNG audit pending":"unknown: exact native handler filter not qualified";
- save("native-qualification.json",{device:metadata.device,android:metadata.os_version,oneUI:"unknown until native reply inspected",installedVersion:version,handlerQualified,normalPackageAndProviderIdentity:true});
+ acceptWithin();const handlerQualified=handlerCandidates.length===1;report.documentHandler=handlerQualified?handlerCandidates[0]:null;report.handlerQualification=handlerQualified?"Enabled installed User0 package registers exact OPEN_DOCUMENT/OPENABLE/* filter; native reply and PNG audit pending":"unknown: exact native handler filter not qualified";
+ save("native-qualification.json",{device:metadata.device,android:metadata.os_version,oneUI:"unknown until native reply inspected",installedVersion:version,handlerQualified,documentHandler:report.documentHandler,normalPackageAndProviderIdentity:true});
  stage="ordinary-home-control";await ready("home");await tap("Send");await tap("Media");
  // Handle only an observed Android permission dialog through its native Allow resource.
  let media=await snapshot("media-open");

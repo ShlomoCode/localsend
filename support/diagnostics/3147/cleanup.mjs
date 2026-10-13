@@ -8,7 +8,7 @@ const deadline=Math.min(Date.now()+100000,Date.parse(process.env.ISSUE3147_JOB_D
 async function api(route,method="GET",hub=false) {
  assert(deadline>Date.now(),"Cleanup reserve expired");
  const r=await fetch((hub?"https://hub-cloud.browserstack.com/wd/hub":"https://api-cloud.browserstack.com/app-automate")+route,{method,headers:{authorization:"Basic "+Buffer.from(user+":"+key).toString("base64")},signal:AbortSignal.timeout(Math.min(10000,deadline-Date.now()))});
- const data=await r.json();assert(r.ok||(method==="DELETE"&&r.status===404&&/invalid session|terminated/i.test(JSON.stringify(data))),"Cleanup HTTP "+r.status);return data;
+ const data=await r.json();assert(Date.now()<deadline,"Late cleanup response: terminal ownership remains unconfirmed");assert(r.ok||(method==="DELETE"&&r.status===404&&/invalid session|terminated/i.test(JSON.stringify(data))),"Cleanup HTTP "+r.status);return data;
 }
 try {
  assert(process.env.GITHUB_ACTIONS==="true"&&process.env.GITHUB_REPOSITORY==="ShlomoCode/localsend"&&process.env.GITHUB_RUN_ATTEMPT==="1"&&user&&key,"Exact fork cleanup only");
@@ -32,6 +32,6 @@ try {
   await api("/session/"+id,"DELETE",true);
  }
  const after=(await api("/sessions/"+id+".json")).automation_session;
- assert(after?.hashed_id===id&&terminal.includes(after.status),"Owned session nonterminal: preserve hold");report.status="exact-owned-session-terminal";report.providerStatus=after.status;
+ assert(after?.hashed_id===id&&terminal.includes(after.status),"Owned session nonterminal: preserve hold");assert(Date.now()<deadline,"Late terminal receipt: preserve hold");report.status="exact-owned-session-terminal";report.providerStatus=after.status;
 }catch(e){report.status="cleanup-needs-attention";report.errors.push(String(e.message).replaceAll(user||"UNSET_USER","[redacted]").replaceAll(key||"UNSET_KEY","[redacted]"));process.exitCode=1;}
 report.finishedUtc=new Date().toISOString();save();
