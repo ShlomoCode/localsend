@@ -198,11 +198,24 @@ launch_case() {
 
 wait_for_window() {
   local label="$1" i window
-  for ((i=0; i<20; i++)); do
+  for ((i=0; i<60; i++)); do
     window=$(xdotool search --onlyvisible --name 'LocalSend startup check' 2>/dev/null | sed -n '1p' || true)
     if [[ -n "$window" ]]; then return 0; fi
     sleep 1
   done
+  ps -eLo pid,tid,ppid,pgid,stat,pcpu,comm,args --sort=-pcpu > "$OUT/brave-$label-processes.txt" 2>&1 || true
+  xwininfo -root -tree > "$OUT/brave-$label-window-tree.txt" 2>&1 || true
+  { xdotool search --onlyvisible --name '.*' 2>/dev/null || true; } | while read -r wid; do
+    xprop -id "$wid" WM_NAME WM_CLASS _NET_WM_PID 2>/dev/null || true
+  done > "$OUT/brave-$label-windows.txt"
+  import -window root "$OUT/brave-$label-no-window.png" 2>&1 || true
+  if ! kill -0 "$brave_pid" 2>/dev/null; then
+    local launcher_exit=0
+    wait "$brave_pid" 2>/dev/null || launcher_exit=$?
+    printf 'exit=%s\n' "$launcher_exit" > "$OUT/brave-$label-launcher-result.txt"
+  else
+    echo running > "$OUT/brave-$label-launcher-result.txt"
+  fi
   echo "Brave window did not appear for $label" | tee -a "$OUT/infrastructure-failures.txt"
   return 1
 }
@@ -337,11 +350,12 @@ for version in 1.99.20; do
   brave_exe=$(awk '/\/bin\/brave.*nightly/ {print; exit}' "$OUT/brave-package-files.txt")
   [[ -n "$brave_exe" && -x "$brave_exe" ]] || { echo 'Official Brave Origin Nightly executable not found.' | tee -a "$OUT/infrastructure-failures.txt"; exit 10; }
   printf '%s\n' "$brave_exe" > "$OUT/brave-executable.txt"
+  "$brave_exe" --version > "$OUT/brave-$version-executable-version.txt" 2>&1 || true
   rm -f "$brave_deb"
   profile="$TMP/brave-profile-$version"
   cache_manifest "$OUT/cache-snapshots/before-brave-$version"
   mkdir -p "$profile"
-  setsid "$brave_exe" --no-first-run --no-default-browser-check --disable-background-networking \
+  setsid "$brave_exe" --no-first-run --no-default-browser-check --disable-background-networking --ozone-platform=x11 \
     --user-data-dir="$profile" --window-size=1000,700 "file://$OUT/font-cache-prime.html" >"$OUT/brave-$version.stdout.txt" 2>"$OUT/brave-$version.stderr.txt" &
   brave_pid=$!; GROUP_PIDS+=("$brave_pid")
   if ! wait_for_window "$version"; then
