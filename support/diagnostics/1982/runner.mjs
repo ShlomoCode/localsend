@@ -141,9 +141,9 @@ try {
   const appiumLogs=await logsResponse.text();
   writeFileSync('evidence/appium-version-original.log',safe(appiumLogs));
   const versions=[...appiumLogs.matchAll(/Appium v([0-9.]+) creating new AndroidUiautomator2Driver \(v([0-9.]+)\) session/g)];
-  assert.equal(versions.length,1,'Appium version record missing or ambiguous; stop before product input');
-  assert.deepEqual(versions[0].slice(1),['2.15.0','4.0.1'],'Unexpected Appium or driver version');
-  writeFileSync('evidence/automation-version-qualified.json',JSON.stringify({session,buildId,appiumVersion:versions[0][1],driverVersion:versions[0][2],observedUtc:new Date().toISOString()},null,2));
+  assert(versions.length===1||appiumLogs.length===0,'Nonempty live version log has missing or ambiguous creation record');
+  if(versions.length===1)assert.deepEqual(versions[0].slice(1),['2.15.0','4.0.1'],'Unexpected live Appium or driver version');
+  writeFileSync('evidence/automation-version-pending.json',JSON.stringify({session,buildId,state:'PENDING_FINAL_VERSION',liveVersion:versions[0]?.slice(1)??null,liveBytes:Buffer.byteLength(appiumLogs),observedUtc:new Date().toISOString(),productAcceptanceAllowed:false},null,2));
   await helperClick('Inspect LocalSend APK');
   let inspection;
   const inspectionDeadline = Date.now() + 30_000;

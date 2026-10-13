@@ -233,7 +233,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
    if(receiverError||receiverFinished)break;
    await sleep(250);
   }}catch(error){observationError=String(error);}
-  save(stage+'-partial-outcome',{stage,receiverError,receiverFinished,observationError,source,...stamp()});
+  save(stage+'-partial-outcome',{productAcceptanceAllowed:false,environmentVersionQualification:'PENDING_FINAL_VERSION',stage,receiverError,receiverFinished,observationError,source,...stamp()});
   // Signal independently observed sender outcome before any saved-file or
   // receive-Finished assertion can throw, including receive observation expiry.
   writeFileSync(`evidence/1982-${stage}-observe`,'Read actual sender outcome independently of receiver Finished and saved bytes.\n');
@@ -241,7 +241,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
   catch(error){record('saved-file-unavailable',{stage,path:directory+'/'+input.name,error:String(error)});}
   if(saved)writeFileSync(`evidence/1982-${stage}-saved.txt`,saved);
   const sender=await observeSender(stage,Math.min(hardEnd,Date.now()+10000));
-  const outcome={stage,receiverError,receiverFinished,observationError,sender,path:directory+'/'+input.name,expectedSha256:sha(expected),savedSha256:saved?sha(saved):null,byteExact:saved?.equals(expected)??false,transport:transportStatus(),originalReceiverPid:originalPid,session};
+  const outcome={productAcceptanceAllowed:false,environmentVersionQualification:'PENDING_FINAL_VERSION',stage,receiverError,receiverFinished,observationError,sender,path:directory+'/'+input.name,expectedSha256:sha(expected),savedSha256:saved?sha(saved):null,byteExact:saved?.equals(expected)??false,transport:transportStatus(),originalReceiverPid:originalPid,session};
   save(stage+'-result',outcome);record('arm-outcome',outcome);
   assert(outcome.byteExact&&receiverFinished&&sender.senderFinished&&!receiverError&&!sender.senderError,'Actual app outcome failed; stop and report original evidence, without resending');
   await waitMarker('1982-'+stage+'-sender-completed',Math.min(hardEnd,Date.now()+10000));
@@ -302,7 +302,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
   const interarmRequestDeltaMs=timings.length===2?Math.abs(timings[0].actualPendingMs-timings[1].actualPendingMs):null;
   const matchedPairValid=timings.length===2&&timings.every(t=>t.timingValid)&&interarmRequestDeltaMs<=250;
   assert(matchedPairValid,'Observed Accept intervals do not qualify the selected matched pair');
-  save('summary',{completedStages:['qualification','ordinary','picker'],matchedPairValid,interarmRequestDeltaMs,timings,targetPendingMs:20000,approvedRequestRangeMs:[20000,20250],approvedInterarmDeltaMs:250,pickerReturnDeadlineMs:15000,repeatedPair:false,immediateRetry:false,originalReceiverPid:originalPid,session,transport:transportStatus()});
+  save('summary',{productAcceptanceAllowed:false,environmentVersionQualification:'PENDING_FINAL_VERSION',completedStages:['qualification','ordinary','picker'],matchedPairValid,interarmRequestDeltaMs,timings,targetPendingMs:20000,approvedRequestRangeMs:[20000,20250],approvedInterarmDeltaMs:250,pickerReturnDeadlineMs:15000,repeatedPair:false,immediateRetry:false,originalReceiverPid:originalPid,session,transport:transportStatus()});
  }catch(error){
   firstError=String(error);
   // Preserve the sender's actual endpoint/native state even when picker setup,
@@ -310,7 +310,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
   let sender=null,senderObservationError=null;
   try{sender=await observeSender(currentStage,Math.min(hardEnd,Date.now()+10000));}
   catch(observationError){senderObservationError=String(observationError);}
-  save('abort-observation',{stage:currentStage,error:firstError,sender,senderObservationError,...stamp()});
+  save('abort-observation',{productAcceptanceAllowed:false,environmentVersionQualification:'PENDING_FINAL_VERSION',stage:currentStage,error:firstError,sender,senderObservationError,...stamp()});
   writeFileSync('evidence/1982-abort',String(error));record('stop',{error:String(error)});throw error;
  }finally{
   writeFileSync('evidence/1982-final-cleanup','All product arms ended; identity-checked owned cleanup permitted.\n');
