@@ -117,7 +117,7 @@ try {
  assert(Date.parse(lease.expiresAt)>Date.now(),"Lease expired before create");
  owned={issue:3147,runId:process.env.GITHUB_RUN_ID,runAttempt:"1",head:process.env.GITHUB_SHA,buildName:`issue3147-${process.env.GITHUB_RUN_ID}-attempt-1`,session:null,creationAttempted:true,deviceDeadlineUtc:new Date(deviceDeadline).toISOString()};
  writeFileSync(path.join(out,"ownership.json"),JSON.stringify(owned,null,2),{flag:"wx"});stage="one-session-create";
- await request("POST","/session",{capabilities:{alwaysMatch:{platformName:"Android","appium:automationName":"UiAutomator2","appium:deviceName":"Samsung Galaxy S22","appium:platformVersion":"12.0","appium:app":app,"appium:orientation":"PORTRAIT","bstack:options":{projectName:"LocalSend3147 short observation",buildName:owned.buildName,sessionName:"official1182-native-file-launch",video:true,debug:true,networkLogs:false,idleTimeout:60}}}});
+ await request("POST","/session",{capabilities:{alwaysMatch:{platformName:"Android","appium:automationName":"UiAutomator2","appium:deviceName":"Samsung Galaxy S22","appium:platformVersion":"12.0","appium:app":app,"appium:orientation":"PORTRAIT","bstack:options":{projectName:"LocalSend3147 short observation",buildName:owned.buildName,sessionName:"official1182-native-file-launch",video:true,debug:true,networkLogs:false,idleTimeout:60,resignApp:false}}}});
  assert(session,"Uncertain creation; reconcile unique build, never POST again");
  const metadata=(await request("GET",`/app-automate/sessions/${session}.json`,undefined,{provider:true})).automation_session;
  assert(metadata?.hashed_id===session&&metadata.device==="Samsung Galaxy S22"&&metadata.os?.toLowerCase()==="android"&&["12","12.0"].includes(String(metadata.os_version)),"Actual device identity mismatch");
