@@ -14,13 +14,21 @@ function Rail($App){
  if($rails[0].Left -ne $rails[1].Left -or $rails[1].Left -ne $rails[2].Left -or $rails[0].Right -ne $rails[1].Right -or $rails[1].Right -ne $rails[2].Right -or $rails[0].Bottom -gt $rails[1].Top -or $rails[1].Bottom -gt $rails[2].Top){throw 'ENV_BLOCK: all-three rail geometry is not aligned/ordered'}
  Json @{Client=$views[0];Rails=$rails;Tree=$tree} "$script:Stage-rail-binding";return [pscustomobject]@{View=$views[0];Items=$rails;Tree=$tree}
 }
-function Receive-Rows($App){
+function Receive-Rows($App,[switch]$AllowIncomplete){
  $rail=Rail $App;$groups=@($rail.Tree|Where-Object {$_.Name -ceq $receiveName -and $_.Type -eq 50026 -and $_.Pid -eq $App.Id})
  if($groups.Count -ne 1){throw 'ENV_BLOCK: exact release Receive composite missing'};$g=$groups[0]
  if(-not (Inside $g $rail.View) -or $g.Left -lt $rail.Items[2].Right){throw 'ENV_BLOCK: complete Receive section not visible outside navigation'}
  $checks=@($rail.Tree|Where-Object {$_.Type -eq 50002 -and (Inside $_ $g)}|Sort-Object Top)
  $buttons=@($rail.Tree|Where-Object {$_.Type -eq 50000 -and (Inside $_ $g)})
- if($checks.Count -ne 5 -or $buttons.Count -ne 1){throw 'ENV_BLOCK: complete release Receive row control count differs'}
+ if(@($checks+$buttons|Where-Object {-not $_.Enabled -or $_.Pid -ne $App.Id}).Count -gt 0 -or @($checks|Where-Object {$_.Toggle -notin @(0,1)}).Count -gt 0){throw 'ENV_BLOCK: partial Receive control ownership/state invalid'}
+ if($checks.Count -gt 5 -or $buttons.Count -gt 1){throw 'ENV_BLOCK: ambiguous release Receive control count'}
+ $edgeClipped=@($checks+$buttons|Where-Object {$_.Top -le $rail.View.Top -or $_.Bottom -ge $rail.View.Bottom}).Count -gt 0
+ if($checks.Count -ne 5 -or $buttons.Count -ne 1 -or $edgeClipped){
+  if(-not $AllowIncomplete){throw 'ENV_BLOCK: complete release Receive row control count differs'}
+  $binding=[pscustomobject]@{Status='INCOMPLETE';Composite=$g;Client=$rail.View;Rails=$rail.Items;SwitchCount=$checks.Count;ButtonCount=$buttons.Count;EdgeClipped=$edgeClipped;Rows=@();Tree=$rail.Tree}
+  Json $binding "$script:Stage-receive-incomplete";return $binding
+ }
+ if($buttons[0].Right-$buttons[0].Left -le $checks[0].Right-$checks[0].Left){throw 'ENV_BLOCK: Receive destination geometry differs from wide release button'}
  $ordered=@($checks+$buttons|Sort-Object Top);$labels=@('Quick Save','Quick Save for "Favorites"','Require PIN','Save to folder','Auto Finish','Save to history');$rows=@()
  for($i=0;$i -lt 6;$i++){$c=$ordered[$i]
   if(-not $c.Enabled -or $c.Pid -ne $App.Id -or ($i -eq 3 -and $c.Type -ne 50000) -or ($i -ne 3 -and ($c.Type -ne 50002 -or $c.Toggle -notin @(0,1)))){throw 'ENV_BLOCK: Receive row type/state/ownership invalid'}
@@ -29,7 +37,7 @@ function Receive-Rows($App){
   $top=if($i -eq 0){$g.Top}else{[int](($ordered[$i-1].Bottom+$c.Top)/2)};$bottom=if($i -eq 5){$g.Bottom}else{[int](($c.Bottom+$ordered[$i+1].Top)/2)}
   $rows+=[pscustomobject]@{Label=$labels[$i];Ordinal=$i;Control=$c;Row=[pscustomobject]@{Left=$g.Left;Right=$g.Right;Top=$top;Bottom=$bottom}}
  }
- Json @{Contract='v1.18.2 Receive, no advanced/gallery row';Composite=$g;Rows=$rows;Tree=$rail.Tree} "$script:Stage-receive-binding";return $rows
+ $binding=[pscustomobject]@{Status='COMPLETE';Contract='v1.18.2 Receive, no advanced/gallery row';Composite=$g;Client=$rail.View;Rails=$rail.Items;Rows=$rows;Tree=$rail.Tree};Json $binding "$script:Stage-receive-binding";return $binding
 }
 function Pixels($B,$Name){
  Check-Budget;$screen=[System.Windows.Forms.SystemInformation]::VirtualScreen;if(-not (Inside $B $screen)){throw 'ENV_BLOCK: crop outside desktop'}
@@ -37,7 +45,7 @@ function Pixels($B,$Name){
  try{$g.CopyFromScreen([Drawing.Point]::new($B.Left,$B.Top),[Drawing.Point]::Empty,$size);$bitmap.Save((Join-Path $Evidence "$Name.png"),[Drawing.Imaging.ImageFormat]::Png)}finally{$g.Dispose();$bitmap.Dispose()};Json $B "$Name-bounds"
 }
 function Read-Setting($Key,$Default){$p=Get-Content $script:App.Profile -Raw -Encoding UTF8|ConvertFrom-Json;$prop=$p.PSObject.Properties[$Key];return [pscustomobject]@{Present=$null -ne $prop;Value=if($prop){$prop.Value}else{$Default};ProfileSha256=(Get-FileHash $script:App.Profile).Hash}}
-function Observe($Label,$Key,$Default,$Name){$rows=@(Receive-Rows $script:App);$r=@($rows|Where-Object Label -ceq $Label);if($r.Count -ne 1){throw 'ENV_BLOCK: row ambiguous'};$setting=Read-Setting $Key $Default;Save-Desktop $Name;Pixels $r[0].Row "$Name-row";Json @{Row=$r[0];Setting=$setting;ObservedOnly=$true} "$Name-readback";return [pscustomobject]@{Row=$r[0];Setting=$setting}}
+function Observe($Label,$Key,$Default,$Name){$binding=Receive-Rows $script:App;$r=@($binding.Rows|Where-Object Label -ceq $Label);if($r.Count -ne 1){throw 'ENV_BLOCK: row ambiguous'};$setting=Read-Setting $Key $Default;Save-Desktop $Name;Pixels $r[0].Row "$Name-row";Json @{Row=$r[0];Setting=$setting;ObservedOnly=$true} "$Name-readback";return [pscustomobject]@{Row=$r[0];Setting=$setting}}
 function Dialog-Controls([int]$Seconds=5){
  $end=[DateTime]::UtcNow.AddSeconds($Seconds);do{Check-Budget;$tree=@(Snapshot $script:App);$title=@($tree|Where-Object Name -ceq 'Enter PIN');$edit=@($tree|Where-Object {$_.Type -eq 50004 -and $_.Enabled});$confirm=@($tree|Where-Object {$_.Name -ceq 'Confirm' -and $_.Type -eq 50000 -and $_.Enabled});$cancel=@($tree|Where-Object {$_.Name -ceq 'Cancel' -and $_.Type -eq 50000 -and $_.Enabled})
   if($title.Count -eq 1 -and $edit.Count -eq 1 -and $confirm.Count -eq 1 -and $cancel.Count -eq 1){Json @{Title=$title[0];Edit=$edit[0];Confirm=$confirm[0];Cancel=$cancel[0];Tree=$tree} "$script:Stage-dialog-binding";return [pscustomobject]@{Edit=$edit[0];Confirm=$confirm[0];Cancel=$cancel[0]}}
@@ -57,12 +65,13 @@ try{
  $end=[DateTime]::UtcNow.AddSeconds(5);do{$tree=@(Snapshot $script:App);if(@($tree|Where-Object Name -ceq "General`nTheme`nColor`nLanguage`nMinimize to the System Tray/Menu Bar when closing`nAutostart after login`nAnimations").Count -eq 1){break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $end)
  Save-Desktop settings-page;if(@($tree|Where-Object Name -ceq "General`nTheme`nColor`nLanguage`nMinimize to the System Tray/Menu Bar when closing`nAutostart after login`nAnimations").Count -ne 1){throw 'ENV_BLOCK: actual Settings click did not qualify Settings page'}
  $script:Stage='receive-visibility';for($attempt=0;$attempt -lt 12;$attempt++){
-  $rail=Rail $script:App;$groups=@($rail.Tree|Where-Object {$_.Name -ceq $receiveName -and $_.Type -eq 50026});if($groups.Count -eq 1 -and (Inside $groups[0] $rail.View)){break}
-  $h=Focus-App $script:App;$x=[int](($rail.Items[2].Right+$rail.View.Right)/2);$y=[int](($rail.View.Top+$rail.View.Bottom)/2)
+  $binding=Receive-Rows $script:App -AllowIncomplete;Save-Desktop "receive-scroll-$attempt-before";Pixels $binding.Composite "receive-scroll-$attempt-section";Json $binding "receive-scroll-$attempt-binding"
+  if($binding.Status -eq 'COMPLETE'){break}
+  $h=Focus-App $script:App;$live=Receive-Rows $script:App -AllowIncomplete;if($live.Status -eq 'COMPLETE'){break};$x=[int](($live.Rails[2].Right+$live.Client.Right)/2);$y=[int](($live.Client.Top+$live.Client.Bottom)/2)
   if(-not [Issue3456Native]::SetCursorPos($x,$y)){throw 'ENV_BLOCK: scroll cursor failed'};if([Issue3456Native]::GetForegroundWindow().ToInt64() -ne $h){throw 'ENV_BLOCK: scroll foreground lost'}
-  Write-Event wheel @{Client=$rail.View;Rails=$rail.Items;X=$x;Y=$y;Delta=-120};[Issue3456Native]::mouse_event(0x800,0,0,4294967176,[UIntPtr]::Zero);Start-Sleep -Milliseconds 200
+  Write-Event wheel @{Client=$live.Client;Rails=$live.Rails;X=$x;Y=$y;Delta=-120};[Issue3456Native]::mouse_event(0x800,0,0,4294967176,[UIntPtr]::Zero);Start-Sleep -Milliseconds 200;Save-Desktop "receive-scroll-$attempt-after";$afterBinding=Receive-Rows $script:App -AllowIncomplete;Json $afterBinding "receive-scroll-$attempt-after-binding"
  }
- $rows=@(Receive-Rows $script:App);Save-Desktop receive-qualified
+ $binding=Receive-Rows $script:App;$rows=@($binding.Rows);Save-Desktop receive-qualified
  $script:ProductStarted=[DateTime]::UtcNow;$productEnd=$script:ProductStarted.AddSeconds(120);if($productEnd -lt $Deadline){$Deadline=$productEnd}
  $script:Stage='ordinary-control';$before=Observe 'Auto Finish' 'flutter.ls_auto_finish' $false ordinary-before;$initial=[bool]$before.Setting.Value
  if(($before.Row.Control.Toggle -eq 1) -ne $initial){throw 'ENV_BLOCK: ordinary initial readback mismatch'}
