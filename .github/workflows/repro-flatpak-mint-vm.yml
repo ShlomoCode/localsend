@@ -2,9 +2,6 @@ name: LocalSend Flatpak reproduction in Linux Mint VM
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/repro-flatpak-fontcache-3553
 
 permissions:
   contents: read
@@ -13,7 +10,7 @@ jobs:
   mint-vm:
     if: github.repository == 'ShlomoCode/localsend'
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - name: Install VM host tools

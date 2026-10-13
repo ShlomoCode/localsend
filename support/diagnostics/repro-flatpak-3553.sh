@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Diagnostic reproduction for LocalSend 1.18.2 with host fontconfig caches.
+# Diagnostic reproduction for LocalSend 1.18.2 with Brave Origin Nightly 1.99.20 and KaTeX fonts.
 REPO_ROOT="${GITHUB_WORKSPACE:-$PWD}"
 OUT="${OUT:-$REPO_ROOT/evidence}"
 TMP="${RUNNER_TEMP:-/tmp}"
@@ -58,20 +58,6 @@ save_app_cache() {
   tar -czf "$1" -C "$app_cache_dir" .
 }
 
-reset_app_cache() {
-  save_app_cache "$OUT/app-cache-before-$1.tar.gz"
-  rm -rf "$app_cache_dir"
-  mkdir -p "$app_cache_dir"
-}
-
-restore_app_cache() {
-  rm -rf "$app_cache_dir"
-  mkdir -p "$app_cache_dir"
-  if [[ "$suspect_cache_state" == warm ]]; then
-    tar -xzf "$OUT/app-cache-before-warm-$suspect_version.tar.gz" -C "$app_cache_dir"
-  fi
-}
-
 restore_brave_cache() {
   rm -rf "$cache_dir"
   mkdir -p "$cache_dir"
@@ -82,6 +68,11 @@ restore_baseline() {
   rm -rf "$cache_dir"
   mkdir -p "$(dirname "$cache_dir")"
   cp -a "$baseline" "$cache_dir"
+}
+
+reset_fresh_app_font_cache() {
+  rm -rf "$app_cache_dir/fontconfig"
+  mkdir -p "$app_cache_dir"
 }
 
 find_localsend_pid() {
@@ -119,6 +110,9 @@ capture_case() {
   done > "$dir/windows.txt"
   import -window root "$dir/screenshot.png" 2>&1 || true
   ss -ltnp > "$dir/listeners.txt" 2>&1 || true
+  if [[ "${TRACE_MAIN_THREAD:-0}" == 1 ]] && command -v strace >/dev/null 2>&1; then
+    sudo timeout 8s strace -f -tt -T -p "$pid" -o "$dir/main-thread.strace" 2>&1 || true
+  fi
   sudo timeout 8s gdb -q -batch -ex 'set debuginfod enabled off' -ex 'set pagination off' -ex "set sysroot /proc/$pid/root" -ex "attach $pid" -ex 'thread apply all bt' -ex detach > "$dir/gdb.txt" 2>&1 || true
   printf '%s' "$pct"
 }
@@ -127,6 +121,7 @@ launch_case() {
   local label="$1" command="$2" dir="$OUT/$1" pid app_pid result cpu windows port elapsed=0
   mkdir -p "$dir"
   echo "=== CASE $label ==="
+  reset_fresh_app_font_cache
   # A new session gives each case a private process group for bounded cleanup.
   setsid bash -c "$command" >"$dir/stdout.txt" 2>"$dir/stderr.txt" &
   pid=$!
@@ -204,7 +199,7 @@ launch_case() {
 wait_for_window() {
   local label="$1" i window
   for ((i=0; i<20; i++)); do
-    window=$(xdotool search --onlyvisible --class '[Bb]rave-browser' 2>/dev/null | sed -n '1p' || true)
+    window=$(xdotool search --onlyvisible --name 'LocalSend startup check' 2>/dev/null | sed -n '1p' || true)
     if [[ -n "$window" ]]; then return 0; fi
     sleep 1
   done
@@ -221,6 +216,7 @@ environment() {
     cat /etc/os-release
     dpkg-query -W -f='${Package} ${Version}\n' flatpak fontconfig xvfb openbox dbus-x11 imagemagick xdotool gdb strace 2>/dev/null || true
     fc-cache --version 2>&1 || true
+    timeout 10s fc-cat "$cache_dir"/*cache-12 > "$OUT/host-fc-cat.txt" 2>&1 || true
     flatpak --version 2>&1 || true
     flatpak --user info org.localsend.localsend_app 2>&1 || true
     flatpak --user info --show-runtime org.localsend.localsend_app 2>&1 || true
@@ -235,7 +231,7 @@ environment() {
 printf 'case\tresult\tpid\tmain_thread_cpu_percent\tevidence_dir\n' > "$OUT/summary.tsv"
 cat > "$OUT/font-cache-prime.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><style>body{font:24px sans-serif}p{font-family:serif}</style>
-<h1>LocalSend font cache reproduction</h1><p>Brave host fontconfig cache priming: abcdefghijklmnopqrstuvwxyz 0123456789</p>
+<h1>LocalSend startup check</h1><p>Brave host fontconfig cache priming with KaTeX: abcdefghijklmnopqrstuvwxyz 0123456789 ∑ ∫ π</p>
 HTML
 
 echo 'Fetching and installing the official LocalSend 1.18.2 deb.'
@@ -301,6 +297,10 @@ esac
 
 flatpak run --user --command=sh org.localsend.localsend_app -c 'printf "XDG_CACHE_HOME=%s FONTCONFIG_FILE=%s\n" "$XDG_CACHE_HOME" "$FONTCONFIG_FILE"; cat /etc/fonts/conf.d/50-flatpak.conf; ls -l /run/host/user-fonts-cache' > "$OUT/flatpak-fontconfig-host-cache.txt" 2>&1
 flatpak run --user --command=sh org.localsend.localsend_app -c 'find /run/host/user-fonts /run/host/fonts -type f 2>/dev/null | sort' > "$OUT/flatpak-host-font-inventory.txt" 2>&1 || true
+flatpak run --user --command=sh org.localsend.localsend_app -c 'find /run/host/user-fonts /run/host/fonts -type f \( -iname "*.woff" -o -iname "*.woff2" \) -print 2>/dev/null | sort' > "$OUT/flatpak-woff-inventory.txt" 2>&1 || true
+flatpak run --user --command=sh org.localsend.localsend_app -c 'grep -R "user-fonts-cache\|fonts-katex\|woff" /etc/fonts/conf.d /etc/fonts/conf.avail 2>/dev/null' > "$OUT/flatpak-fontcache-mapping.txt" 2>&1 || true
+find "$cache_dir" -maxdepth 1 -type f -name '*cache-12' -exec sha256sum {} + > "$OUT/host-fontcache-sha256.txt" 2>&1 || true
+find "$cache_dir" -maxdepth 1 -type f -name '*cache-12' -exec sh -c 'for f do strings "$f" | grep -E "user-fonts-cache|fonts-katex|\.woff2?" || true; done' sh {} + > "$OUT/host-fontcache-paths.txt" 2>&1 || true
 
 launch_case clean_deb "$deb_exe"
 if ! awk -F '\t' '$1=="clean_deb" && $2=="started" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
@@ -309,25 +309,39 @@ if ! awk -F '\t' '$1=="clean_deb" && $2=="started" {found=1} END {exit !found}' 
 fi
 
 launch_case clean_flatpak 'flatpak run --user org.localsend.localsend_app'
-save_app_cache "$OUT/app-cache-warm-baseline.tar.gz"
-suspect_version=""
-suspect_cache_state=""
+if ! awk -F '\t' '$1=="clean_flatpak" && $2=="started" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
+  echo 'Known-working Flatpak control did not start; repair the GUI harness first.' | tee -a "$OUT/infrastructure-failures.txt"
+  exit 7
+fi
 
-for version in 1.96.61 1.96.59; do
+# Install the supported distro font package only after the clean controls.
+sudo apt-get install -y fonts-katex
+dpkg-query -W -f='${Package} ${Version}\n' fonts-katex > "$OUT/fonts-katex-package.txt"
+dpkg-query -L fonts-katex | grep -Ei '\.woff2?$' > "$OUT/fonts-katex-woff-files.txt" || true
+test -s "$OUT/fonts-katex-woff-files.txt" || { echo 'fonts-katex provided no WOFF files.' | tee -a "$OUT/infrastructure-failures.txt"; exit 9; }
+while IFS= read -r font; do test -s "$font" || { echo "Missing KaTeX font: $font" | tee -a "$OUT/infrastructure-failures.txt"; exit 9; }; done < "$OUT/fonts-katex-woff-files.txt"
+prime_font=$(sed -n '1p' "$OUT/fonts-katex-woff-files.txt")
+printf '<style>@font-face{font-family:CacheProbe;src:url("file://%s")} .cache-probe{font-family:CacheProbe}</style><p class="cache-probe">KaTeX WOFF font cache probe: abc123 ∑∫π</p>\n' "$prime_font" >> "$OUT/font-cache-prime.html"
+fc-cache -f > "$OUT/host-fc-cache-after-katex.txt" 2>&1
+fc-list : file | sort > "$OUT/host-font-inventory-after-katex.txt"
+
+for version in 1.99.20; do
   restore_baseline
-  rm -rf "$app_cache_dir"
-  mkdir -p "$app_cache_dir"
-  tar -xzf "$OUT/app-cache-warm-baseline.tar.gz" -C "$app_cache_dir"
-  brave_deb="$TMP/brave-browser_${version}_amd64.deb"
-  curl --fail --location --retry 3 "https://github.com/brave/brave-browser/releases/download/v${version}/brave-browser_${version}_amd64.deb" -o "$brave_deb"
+  brave_deb="$TMP/brave-origin-nightly_${version}_amd64.deb"
+  curl --fail --location --retry 3 "https://github.com/brave/brave-browser/releases/download/v${version}/brave-origin-nightly_${version}_amd64.deb" -o "$brave_deb"
   sha256sum "$brave_deb" >> "$OUT/brave-deb-sha256.txt"
-  sudo apt-get install -y --allow-downgrades "$brave_deb"
-  dpkg-query -W -f='${Package} ${Version}\n' brave-browser >> "$OUT/brave-package-versions.txt" 2>&1 || true
+  brave_package=$(dpkg-deb -f "$brave_deb" Package)
+  sudo apt-get install -y "$brave_deb"
+  dpkg-query -W -f='${Package} ${Version}\n' "$brave_package" >> "$OUT/brave-package-versions.txt"
+  dpkg-query -L "$brave_package" > "$OUT/brave-package-files.txt"
+  brave_exe=$(awk '/\/bin\/brave.*nightly/ {print; exit}' "$OUT/brave-package-files.txt")
+  [[ -n "$brave_exe" && -x "$brave_exe" ]] || { echo 'Official Brave Origin Nightly executable not found.' | tee -a "$OUT/infrastructure-failures.txt"; exit 10; }
+  printf '%s\n' "$brave_exe" > "$OUT/brave-executable.txt"
   rm -f "$brave_deb"
   profile="$TMP/brave-profile-$version"
   cache_manifest "$OUT/cache-snapshots/before-brave-$version"
   mkdir -p "$profile"
-  setsid brave-browser --no-first-run --no-default-browser-check --disable-background-networking \
+  setsid "$brave_exe" --no-first-run --no-default-browser-check --disable-background-networking \
     --user-data-dir="$profile" --window-size=1000,700 "file://$OUT/font-cache-prime.html" >"$OUT/brave-$version.stdout.txt" 2>"$OUT/brave-$version.stderr.txt" &
   brave_pid=$!; GROUP_PIDS+=("$brave_pid")
   if ! wait_for_window "$version"; then
@@ -343,54 +357,32 @@ for version in 1.96.61 1.96.59; do
   untrack_group "$brave_pid"
 
   # Brave writes its normal host cache in place; no cache bytes are fabricated.
-  if ! find "$cache_dir" -maxdepth 1 -name '*cache-12' -type f -print -quit | grep -q .; then
+  if ! find "$cache_dir" -maxdepth 1 -name '*cache-12' -type f -print -quit | grep . >/dev/null; then
     echo "Brave $version did not generate host fontconfig cache files" | tee -a "$OUT/infrastructure-failures.txt"
     exit 4
   fi
   cache_manifest "$OUT/cache-snapshots/brave-$version"
-  save_app_cache "$OUT/app-cache-before-warm-$version.tar.gz"
+  timeout 10s fc-cat "$cache_dir"/*cache-12 > "$OUT/cache-snapshots/brave-$version-fc-cat.txt" 2>&1 || true
+  if ! grep -i -E 'katex.*woff2?' "$OUT/cache-snapshots/brave-$version-fc-cat.txt" > "$OUT/cache-snapshots/brave-$version-katex-records.txt"; then
+    echo 'Generated cache lacks a KaTeX WOFF record; this run cannot test the suspected record.' | tee -a "$OUT/infrastructure-failures.txt"
+    exit 11
+  fi
   launch_case "flatpak_after_brave_$version" 'flatpak run --user org.localsend.localsend_app'
-  if awk -F '\t' -v label="flatpak_after_brave_$version" '$1==label && $2=="hang_candidate" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
-    suspect_version="$version"
-    suspect_cache_state=warm
-  fi
-  restore_brave_cache "$version"
-  reset_app_cache "cold-$version"
-  launch_case "flatpak_cold_cache_after_brave_$version" 'flatpak run --user org.localsend.localsend_app'
-  if awk -F '\t' -v label="flatpak_cold_cache_after_brave_$version" '$1==label && $2=="hang_candidate" {found=1} END {exit !found}' "$OUT/summary.tsv"; then
-    suspect_version="$version"
-    suspect_cache_state=cold
-  fi
   launch_case "deb_after_brave_$version" "$deb_exe"
-  cache_snapshot="$OUT/cache-snapshots/active-$version"
-  cache_manifest "$cache_snapshot"
-  restore_baseline
-done
-
-if [[ -n "$suspect_version" ]]; then
-  # Move generated cache aside as one unit, test empty, then restore the exact bytes.
-  printf 'version=%s app_cache=%s\n' "$suspect_version" "$suspect_cache_state" > "$OUT/suspect.txt"
-  restore_brave_cache "$suspect_version"
-  restore_app_cache
+  restore_brave_cache "$version"
   launch_case flatpak_suspect_repeat 'flatpak run --user org.localsend.localsend_app'
-  cache_manifest "$OUT/cache-snapshots/retry-suspect"
   moved="$OUT/cache-snapshots/moved-aside"
   rm -rf "$moved"
   mv "$cache_dir" "$moved"
   mkdir -p "$cache_dir"
-  restore_app_cache
   launch_case flatpak_after_cache_moved 'flatpak run --user org.localsend.localsend_app'
   rm -rf "$cache_dir"
   mkdir -p "$cache_dir"
   cp -a "$moved"/. "$cache_dir/"
   cache_manifest "$OUT/cache-snapshots/restored"
-  restore_app_cache
   launch_case flatpak_after_cache_restore 'flatpak run --user org.localsend.localsend_app'
-  restore_brave_cache "$suspect_version"
-  restore_app_cache
-  launch_case flatpak_after_cache_restore_repeat 'flatpak run --user org.localsend.localsend_app'
   restore_baseline
-fi
+done
 
 environment
 if grep -q 'infrastructure_failure' "$OUT/summary.tsv"; then
