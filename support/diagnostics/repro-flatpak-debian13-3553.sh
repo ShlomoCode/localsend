@@ -48,3 +48,22 @@ runuser -u probe -- env \
   EXPECTED_APP_COMMIT=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c \
   EXPECTED_RUNTIME_COMMIT=92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df \
   dbus-run-session -- bash /repo/support/diagnostics/repro-flatpak-3553.sh
+
+# Preserve the exact runtime ELFs used by the captured main-thread PCs.
+mkdir -p /evidence/native-symbols
+for library in libfontconfig.so.1.17.0 libc.so.6; do
+  source_file=$(find /home/probe/.local/share/flatpak/runtime/org.freedesktop.Platform \
+    -type f -name "$library" -print -quit)
+  test -n "$source_file"
+  cp "$source_file" "/evidence/native-symbols/$library"
+  readelf -n "$source_file" > "/evidence/native-symbols/$library.notes.txt"
+  nm -D --numeric-sort "$source_file" > "/evidence/native-symbols/$library.dynamic-symbols.txt"
+done
+objdump -d -M intel --start-address=0x2d3d0 --stop-address=0x2d520 \
+  /evidence/native-symbols/libfontconfig.so.1.17.0 > /evidence/native-symbols/fontconfig-caller-disassembly.txt
+objdump -d -M intel --start-address=0x180d80 --stop-address=0x180f00 \
+  /evidence/native-symbols/libc.so.6 > /evidence/native-symbols/libc-hot-disassembly.txt
+
+runuser -u probe -- env \
+  HOME=/home/probe USER=probe LOGNAME=probe XDG_RUNTIME_DIR=/run/user/1000 \
+  dbus-run-session -- bash /repo/support/diagnostics/repro-flatpak-debian13-fontconfig-probe.sh
