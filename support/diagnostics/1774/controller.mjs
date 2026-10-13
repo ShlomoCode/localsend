@@ -15,7 +15,7 @@ const username = process.env.BROWSERSTACK_USERNAME, key = process.env.BROWSERSTA
 const app = process.env.BASELINE_APP;
 const runId = process.env.GITHUB_RUN_ID, runAttempt = process.env.GITHUB_RUN_ATTEMPT;
 let session = null, deadline = Infinity, deviceHardDeadline = Infinity, productDeadline = Infinity, stage = 'preflight', cleanupPhase = false;
-let ownership = null;
+let ownership = null, uncertainInput = null;
 function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, item]) =>
@@ -76,9 +76,17 @@ async function request(method, path, body, provider = false) {
   if (!response.ok || result.value?.error || result.parseError) throw Object.assign(new Error(`Remote ${method} ${path} failed with status ${response.status}: ${result.value?.error ?? 'response unavailable'}`), { definitiveResponse: !response.ok || Boolean(result.value?.error) });
   return result;
 }
-const command = (method, path, body) => {
+const command = async (method, path, body) => {
   if (!session) throw new Error('No owned session');
-  return request(method, `/session/${encodeURIComponent(session)}${path}`, body);
+  if (method === 'POST' && uncertainInput) throw new Error('Uncertain prior native input; no further mutating request');
+  try { return await request(method, `/session/${encodeURIComponent(session)}${path}`, body); }
+  catch (error) {
+    if (method === 'POST' && !error.definitiveResponse) {
+      uncertainInput = { at: new Date().toISOString(), stage, method, path, session, error: String(error.message) };
+      await save('native-input-uncertainty.json', uncertainInput);
+    }
+    throw error;
+  }
 };
 async function readJson(file) { return JSON.parse(await readFile(file, 'utf8')); }
 async function preflight() {
@@ -109,6 +117,7 @@ async function preflight() {
 }
 await mkdir(evidence, { recursive: true });
 await mkdir(output, { recursive: true });
+uncertainInput = await readJson(resolve(output, 'native-input-uncertainty.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
 const ui = createUi({ command, save, evidence, checkDeadline });
 try {
   if (restoreOnly) {
@@ -120,7 +129,20 @@ try {
     deadline = Date.parse(ownership.nativeDeadlineUtc);
     if (!Number.isFinite(deadline) || !Number.isFinite(deviceHardDeadline) || deadline >= deviceHardDeadline) throw new Error('Original device/native deadlines unavailable');
     cleanupPhase = true; stage = 'independent-native-restore';
-    await save('independent-native-restoration.json', await ui.restore());
+    let nativeRestored;
+    try {
+      const restored = await ui.restore();
+      await save('independent-native-restoration.json', restored);
+      nativeRestored = restored.restored === true || restored.mutationRecorded === false;
+    } catch (error) {
+      await save('independent-orientation-restoration.json', { restored: false, skipped: true, reason: 'Native font/zoom restoration failed; preserve current orientation' });
+      throw error;
+    }
+    if (!nativeRestored) {
+      await save('independent-orientation-restoration.json', { restored: false, skipped: true, reason: 'Native font/zoom restoration receipt did not qualify; preserve current orientation' });
+      throw new Error('Native restoration must qualify before orientation restoration');
+    }
+    await save('independent-orientation-restoration.json', await ui.restoreOrientation());
   } else {
     const start = Date.now(), jobDeadline = Date.parse(process.env.ISSUE1774_JOB_DEADLINE_UTC);
     if (!Number.isFinite(jobDeadline)) throw new Error("Actual 20-minute job deadline unavailable");
@@ -221,8 +243,20 @@ try {
 } finally {
   if (session && !restoreOnly) {
     cleanupPhase = true;
-    try { stage = 'finally-native-restoration'; await save('finally-native-restoration.json', await ui.restore()); }
-    catch (error) { await save('native-restoration-failure.json', { stage, error: String(error.message), restored: false }); process.exitCode = 1; }
+    let nativeRestored = false;
+    try {
+      stage = 'finally-native-restoration';
+      const restored = await ui.restore();
+      await save('finally-native-restoration.json', restored);
+      nativeRestored = restored.restored === true || restored.mutationRecorded === false;
+    } catch (error) { await save('native-restoration-failure.json', { stage, error: String(error.message), restored: false }); process.exitCode = 1; }
+    if (nativeRestored) {
+      try { stage = 'finally-orientation-restoration'; await save('finally-orientation-restoration.json', await ui.restoreOrientation()); }
+      catch (error) { await save('orientation-restoration-failure.json', { stage, error: String(error.message), restored: false }); process.exitCode = 1; }
+    } else {
+      await save('finally-orientation-restoration.json', { restored: false, skipped: true, reason: 'Native font/zoom restoration did not qualify; preserve current orientation' });
+      process.exitCode = 1;
+    }
     // Exact-session DELETE remains required if the action deadline expired.
     // This does not authorize any further device input after that deadline.
     try {

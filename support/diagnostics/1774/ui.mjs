@@ -46,6 +46,9 @@ export function createUi({ command, save, evidence, checkDeadline }) {
   let serial = 0;
   const statePath = resolve(evidence, 'native-state.json');
   let state = null;
+  const orientationPath = resolve(evidence, 'native-orientation-state.json');
+  let orientationState = null;
+  const persistOrientation = () => save('native-orientation-state.json', orientationState);
   async function persist() { await save('native-state.json', state); }
   async function capture(label) {
     checkDeadline();
@@ -154,8 +157,62 @@ export function createUi({ command, save, evidence, checkDeadline }) {
       throw new Error('Reported portrait geometry unavailable before native Settings navigation');
     }
   }
+  function requireLandscape(screen) {
+    const m = screen.metadata, rect = m.windowRect;
+    if (m.currentPackage !== SETTINGS || m.orientation !== 'LANDSCAPE' || ![1, 3].includes(m.sourceRotation) || m.imageWidth <= m.imageHeight ||
+        !['x', 'y', 'width', 'height'].every(key => Number.isFinite(rect?.[key])) || rect.height <= 0 || rect.width <= rect.height) {
+      throw new Error('Original native Settings landscape geometry unavailable');
+    }
+  }
+  async function preparePortrait(before) {
+    requireLandscape(before);
+    orientationState.correctionAttempted = true;
+    orientationState.pending = { target: 'PORTRAIT', at: new Date().toISOString(), before: before.metadata };
+    orientationState.restored = false; await persistOrientation();
+    // The caller permits one supported foreground correction for this run.
+    await command('POST', '/orientation', { orientation: 'PORTRAIT' });
+    const after = await capture('settings-foreground-portrait-after-one-request');
+    requirePortrait(after);
+    if (after.metadata.currentPackage !== SETTINGS) throw new Error('Settings foreground lost after orientation request');
+    orientationState.pending = null; await persistOrientation();
+  }
+  async function restoreOrientation() {
+    orientationState ??= JSON.parse(await readFile(orientationPath, 'utf8').catch(error => { if (error.code === 'ENOENT') return 'null'; throw error; }));
+    if (!orientationState) return { mutationRecorded: false };
+    if (orientationState.version !== 1 || !['PORTRAIT', 'LANDSCAPE'].includes(orientationState.original?.orientation)) throw new Error('Durable original Settings orientation unavailable');
+    const original = orientationState.original;
+    let current = await capture('restore-original-settings-orientation-before');
+    if (current.metadata.currentPackage !== SETTINGS) throw new Error('Settings foreground unavailable for orientation restoration');
+    if (current.metadata.orientation === 'PORTRAIT') requirePortrait(current); else requireLandscape(current);
+    if (current.metadata.orientation !== original.orientation) {
+      if (orientationState.pending || orientationState.restorationAttempted) throw new Error('Orientation restoration already attempted or uncertain; no further input');
+      orientationState.restorationAttempted = true;
+      orientationState.pending = { target: original.orientation, at: new Date().toISOString(), restoring: true };
+      await persistOrientation();
+      await command('POST', '/orientation', { orientation: original.orientation });
+      current = await capture('restored-original-settings-orientation-after-one-request');
+    }
+    const m = current.metadata;
+    if (m.currentPackage !== SETTINGS || m.orientation !== original.orientation || m.sourceRotation !== original.sourceRotation ||
+        m.imageWidth !== original.imageWidth || m.imageHeight !== original.imageHeight || JSON.stringify(m.windowRect) !== JSON.stringify(original.windowRect)) {
+      throw new Error('Original Settings orientation/geometry restoration unproved');
+    }
+    orientationState.pending = null; orientationState.restored = true; orientationState.restoredAt = new Date().toISOString();
+    await persistOrientation(); return orientationState;
+  }
   async function settingsPage(name) {
-    requirePortrait(await activate(SETTINGS));
+    orientationState ??= JSON.parse(await readFile(orientationPath, 'utf8').catch(error => { if (error.code === 'ENOENT') return 'null'; throw error; }));
+    if (orientationState?.pending) throw new Error('Uncertain orientation mutation; no further native navigation');
+    const foreground = await activate(SETTINGS);
+    if (foreground.metadata.orientation === 'PORTRAIT') requirePortrait(foreground); else requireLandscape(foreground);
+    if (!orientationState) {
+      orientationState = { version: 1, original: foreground.metadata, pending: null, correctionAttempted: false, restored: true };
+      await persistOrientation();
+    }
+    if (foreground.metadata.orientation === 'LANDSCAPE') {
+      if (orientationState.correctionAttempted) throw new Error('Settings lost Portrait after the sole correction; no rotation retry');
+      await preparePortrait(foreground);
+    }
     for (let step = 0; step < 4; step++) {
       const screen = await capture(`settings-page-${name}-${step}`);
       requirePortrait(screen);
@@ -386,5 +443,5 @@ export function createUi({ command, save, evidence, checkDeadline }) {
     if (opened) await click('Close');
     return { url: value, opened };
   }
-  return { capture, originals, maximum, nonmaxControl, verifyFont, restore, selectFixture, clearFixture, monitor, activate };
+  return { capture, originals, maximum, nonmaxControl, verifyFont, restore, restoreOrientation, selectFixture, clearFixture, monitor, activate };
 }
