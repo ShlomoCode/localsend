@@ -21,7 +21,11 @@ function Settled-Receive($App){
   $sample=[pscustomobject]@{NativeScope='exact Receive element.FindAll(Descendants)';Client=$rail.View;Rails=$rail.Items;Section=$section;FullTree=$rail.Tree}
   $script:SectionObservation++;$receipt="$script:Stage-section-$script:SectionObservation";Write-Event uia-section $sample;Json $sample $receipt;Save-Desktop $receipt
   $signature=@{Client=$rail.View;Rails=$rail.Items;Section=$section}|ConvertTo-Json -Depth 16 -Compress
-  if($null -ne $previous -and $signature -ceq $previous){return [pscustomobject]@{Rail=$rail;Section=$section;StableSamples=2}}
+  Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Receive sample completed after five-second settle deadline'}
+  if($null -ne $previous -and $signature -ceq $previous){
+   Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: Receive stable acceptance after five-second settle deadline'}
+   return [pscustomobject]@{Rail=$rail;Section=$section;StableSamples=2}
+  }
   $previous=$signature;Start-Sleep -Milliseconds 200
  }while([DateTime]::UtcNow -lt $end)
  throw 'ENV_BLOCK: Receive ancestry/geometry did not settle within five seconds'
