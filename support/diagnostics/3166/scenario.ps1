@@ -104,9 +104,41 @@ function Restart-Control($Manager,$OldShell){
  $processTab=@($tree|Where-Object {$_.Name -eq 'Processes' -and $_.Type -eq 50019});if($processTab.Count -eq 1){Click-Control $Manager $processTab[0];$tree=@(Snapshot $Manager)}
  $explorers=@(Get-Process explorer -ErrorAction SilentlyContinue)
  if($explorers.Count -ne 1 -or $explorers[0].Id -ne $OldShell.Id){throw 'ENV_BLOCK: Explorer row cannot be uniquely mapped to shell PID'}
- $rows=@($tree|Where-Object {$_.Name -eq 'Windows Explorer' -and $_.Type -in @(50029,50007)})
- Json @{Shell=$OldShell;Rows=$rows;Tree=$tree} actual-explorer-row
- if($rows.Count -ne 1){Save-Desktop task-manager-row-missing;throw 'ENV_BLOCK: unique native Windows Explorer Processes row unavailable'}
+ # Maximize through the actual caption so list rows and the Restart control can fit the desktop.
+ $max=@($tree|Where-Object {$_.Name -ceq 'Maximize' -and $_.Type -eq 50000 -and $_.Enabled -and $_.Pid -eq $Manager.Id})
+ if($max.Count -ne 1){throw 'ENV_BLOCK: actual Task Manager Maximize unavailable'}
+ Click-Control $Manager $max[0]
+ $end=[DateTime]::UtcNow.AddSeconds(5);do{Check-Budget;$null=Assert-App $Manager;if([Tray3166Native]::Zoomed([IntPtr]$Manager.Hwnd)){break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $end)
+ if(-not [Tray3166Native]::Zoomed([IntPtr]$Manager.Hwnd)){throw 'ENV_BLOCK: ordinary Task Manager maximize did not complete'}
+ $previous=$null;$rows=@();$end=[DateTime]::UtcNow.AddSeconds(60)
+ for($page=0;$page -le 12;$page++){
+  Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: bounded Explorer row navigation deadline'}
+  $null=Alive $script:App;if([Tray3166Native]::Visible([IntPtr]$script:App.Hwnd)){throw 'ENV_BLOCK: hidden app precondition lost during Processes navigation'}
+  $actualShell=Shell;if($actualShell.Id -ne $OldShell.Id -or $actualShell.StartUtc -ne $OldShell.StartUtc){throw 'ENV_BLOCK: Explorer changed before ordinary Restart'}
+  $explorers=@(Get-Process explorer -ErrorAction SilentlyContinue);if($explorers.Count -ne 1 -or $explorers[0].Id -ne $OldShell.Id){throw 'ENV_BLOCK: unique shell process mapping lost'}
+  $tree=@(Snapshot $Manager);$lists=@($tree|Where-Object {$_.Name -ceq 'List of items' -and $_.ClassName -ceq 'TmScrollViewer' -and $_.Type -eq 50028 -and $_.Enabled -and $_.Pid -eq $Manager.Id})
+  $tabs=@($tree|Where-Object {$_.Name -ceq 'Processes' -and $_.Type -eq 50019 -and $_.Enabled -and $_.Pid -eq $Manager.Id})
+  if($lists.Count -ne 1 -or $tabs.Count -ne 1){throw 'ENV_BLOCK: exact Task Manager Processes list unavailable'}
+  $list=$lists[0];$screen=[System.Windows.Forms.SystemInformation]::VirtualScreen
+  if($list.Left -lt $screen.Left -or $list.Top -lt $screen.Top -or $list.Right -gt $screen.Right -or $list.Bottom -gt $screen.Bottom){throw 'ENV_BLOCK: Processes viewport clipped outside desktop'}
+  $inside={param($c) $c.Left -ge $list.Left -and $c.Right -le $list.Right -and $c.Top -ge $list.Top -and $c.Bottom -le $list.Bottom}
+  $visibleRows=@($tree|Where-Object {$_.ClassName -ceq 'TmViewItemSelector' -and $_.Type -eq 50024 -and $_.Enabled -and $_.Pid -eq $Manager.Id -and (& $inside $_)})
+  if($visibleRows.Count -eq 0){throw 'ENV_BLOCK: native Processes row contract unavailable'}
+  # This exact candidate must qualify in the fresh visible tree; it was outside the original viewport.
+  $rows=@($visibleRows|Where-Object Name -CEQ 'Process: Windows Explorer')
+  Json @{Shell=$actualShell;Manager=$Manager;Page=$page;List=$list;VisibleRows=$visibleRows;Rows=$rows;Tree=$tree} "actual-explorer-page-$page";Save-Desktop "actual-explorer-page-$page"
+  if($rows.Count -gt 1){throw 'ENV_BLOCK: exact Explorer Processes row ambiguous'}
+  if($rows.Count -eq 1){Json @{Shell=$actualShell;Rows=$rows;Tree=$tree} actual-explorer-row;break}
+  $signature=($visibleRows|ForEach-Object {"$($_.Name)|$($_.Top)|$($_.Bottom)"}) -join "`n"
+  if($signature -ceq $previous -or $page -eq 12){throw 'ENV_BLOCK: exact visible Explorer row unreachable within bounded native pages'};$previous=$signature
+  $scroll=@($tree|Where-Object {$_.Name -ceq 'Vertical' -and $_.ClassName -ceq 'CCVScrollBar' -and $_.Type -eq 50014 -and $_.Enabled -and $_.Pid -eq $Manager.Id -and (& $inside $_)})
+  if($scroll.Count -ne 1){throw 'ENV_BLOCK: unique live Processes vertical scrollbar unavailable'};$bar=$scroll[0]
+  $down=@($tree|Where-Object {$_.Name -ceq 'Page down' -and $_.Type -eq 50000 -and $_.Enabled -and $_.Pid -eq $Manager.Id -and $_.Left -ge $bar.Left -and $_.Right -le $bar.Right -and $_.Top -ge $bar.Top -and $_.Bottom -le $bar.Bottom})
+  if($down.Count -ne 1){throw 'ENV_BLOCK: supported live Processes Page down unavailable'}
+  Click-Control $Manager $down[0]
+ }
+ if($rows.Count -ne 1){throw 'ENV_BLOCK: exact visible native Windows Explorer Processes row unavailable'}
+ Save-RowPixels $rows[0] actual-explorer-row-pixels
  Click-Control $Manager $rows[0];$tree=@(Snapshot $Manager);$buttons=@($tree|Where-Object {$_.Name -eq 'Restart' -and $_.Type -eq 50000 -and $_.Enabled})
  if($buttons.Count -eq 1){return [pscustomobject]@{Control=$buttons[0];Root=$Manager;Route='actual selected Explorer Restart button'}}
  if($buttons.Count -gt 1){throw 'ENV_BLOCK: ambiguous Restart button'}
