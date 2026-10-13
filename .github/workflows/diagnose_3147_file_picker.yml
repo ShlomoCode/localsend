@@ -1,0 +1,50 @@
+name: Issue 3147 admitted native File observation
+on:
+  push:
+    branches: [codex/diagnose-3147-file-picker]
+permissions:
+  contents: read
+concurrency:
+  group: issue3147-owned-native-observation
+  cancel-in-progress: false
+jobs:
+  native-observation:
+    if: >-
+      github.repository == 'ShlomoCode/localsend' &&
+      vars.ISSUE3147_ADMITTED_HEAD == github.sha &&
+      contains(github.event.head_commit.message, '[issue3147-admitted]') &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
+      BASELINE_APP: ${{ secrets.ISSUE3147_BASELINE_APP }}
+      ISSUE3147_LEASE_JSON: ${{ vars.ISSUE3147_LEASE_JSON }}
+    steps:
+      - name: Record absolute deadline before preparation
+        run: |
+          printf "ISSUE3147_JOB_DEADLINE_UTC=%s\n" "$(date -u -d '+20 minutes' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require runner recording inspection tools
+        run: |
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Observe unchanged APK through real native controls
+        timeout-minutes: 14
+        run: node support/diagnostics/3147/controller.mjs
+      - name: Reconcile and delete only the owned session
+        if: always()
+        timeout-minutes: 2
+        run: node support/diagnostics/3147/cleanup.mjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        timeout-minutes: 3
+        with:
+          name: issue3147-native-observation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/issue3147/
+          compression-level: 0
+          if-no-files-found: warn
