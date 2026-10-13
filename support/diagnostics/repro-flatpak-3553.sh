@@ -197,12 +197,12 @@ launch_case() {
 }
 
 wait_for_window() {
-  local label="$1" i window origin_window geometry width height
+  local label="$1" i window origin_window geometry width height onboarding_clicked=0 navigated=0
   for ((i=0; i<60; i++)); do
     window=$(xdotool search --onlyvisible --name 'LocalSend startup check' 2>/dev/null | sed -n '1p' || true)
     if [[ -n "$window" ]]; then return 0; fi
-    if [[ "$i" == 5 ]]; then
-      origin_window=$(xdotool search --onlyvisible --class '[Bb]rave-origin-nightly' 2>/dev/null | sed -n '1p' || true)
+    if ((i >= 3 && onboarding_clicked == 0)); then
+      origin_window=$(xdotool search --onlyvisible --name '^Brave Origin$' 2>/dev/null | sed -n '1p' || true)
       if [[ -n "$origin_window" ]]; then
         import -window root "$OUT/brave-$label-before-onboarding.png" 2>/dev/null || true
         geometry=$(xdotool getwindowgeometry --shell "$origin_window" 2>/dev/null || true)
@@ -212,15 +212,17 @@ wait_for_window() {
           printf 'Origin first-run free option: window=%s width=%s height=%s click=%s,%s\n' "$origin_window" "$width" "$height" "$((width/2))" "$((height-80))" > "$OUT/brave-$label-onboarding-action.txt"
           xdotool windowactivate --sync "$origin_window" 2>/dev/null || true
           xdotool mousemove --window "$origin_window" "$((width/2))" "$((height-80))" click 1 2>/dev/null || true
+          onboarding_clicked=1
         fi
       fi
     fi
-    if [[ "$i" == 20 && -n "${origin_window:-}" ]]; then
+    if ((i >= 20 && onboarding_clicked == 1 && navigated == 0)); then
       xdotool windowactivate --sync "$origin_window" 2>/dev/null || true
       xdotool key --clearmodifiers ctrl+l || true
       xdotool type --clearmodifiers --delay 1 "file://$OUT/font-cache-prime.html" || true
       xdotool key Return || true
       echo 'Navigated to the local font page after Origin onboarding.' >> "$OUT/brave-$label-onboarding-action.txt"
+      navigated=1
     fi
     sleep 1
   done
