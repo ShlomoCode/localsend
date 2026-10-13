@@ -197,10 +197,18 @@ launch_case() {
 }
 
 wait_for_window() {
-  local label="$1" i window
+  local label="$1" i window onboarding onboarding_clicked=0
   for ((i=0; i<20; i++)); do
     window=$(xdotool search --onlyvisible --name 'LocalSend startup check' 2>/dev/null | sed -n '1p' || true)
     if [[ -n "$window" ]]; then return 0; fi
+    if [[ "$onboarding_clicked" -eq 0 ]]; then
+      onboarding=$(xdotool search --onlyvisible --name '^Brave Origin$' 2>/dev/null | sed -n '1p' || true)
+      if [[ -n "$onboarding" ]]; then
+        echo 'Dismissing the official Brave Origin first-launch choice.'
+        xdotool mousemove --window "$onboarding" 265 520 click 1
+        onboarding_clicked=1
+      fi
+    fi
     sleep 1
   done
   echo "Brave window did not appear for $label" | tee -a "$OUT/infrastructure-failures.txt"
