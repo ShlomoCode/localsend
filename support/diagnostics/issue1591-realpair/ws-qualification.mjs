@@ -61,8 +61,8 @@ export async function runWebSocketQualification({wd, save, redact, auth, token, 
   // These snapshots precede the first field input, so screenshots cannot expose
   // the relay token. Retain the original XML through the existing redactor.
   let setupSnapshot=0;
-  const snapshot = async (phase,until) => {
-    const source=await setupWd('GET',prefix()+'/source',undefined,3000,until);
+  const snapshot = async (phase,until,sourceMaximum=3000) => {
+    const source=await setupWd('GET',prefix()+'/source',undefined,sourceMaximum,until);
     const name='ws-setup-'+phase+'-'+(++setupSnapshot);
     save(name+'.xml',source);
     const screenshot=await setupWd('GET',prefix()+'/screenshot',undefined,3000,until);
@@ -90,9 +90,10 @@ export async function runWebSocketQualification({wd, save, redact, auth, token, 
     const until=Math.min(setupDeadline,performance.now()+5000);
     const permissionXPath='//XCUIElementTypeAlert[.//XCUIElementTypeStaticText[normalize-space(@name)=\''+alertTitle+'\'] and '+
       './/XCUIElementTypeButton[@name="Don’t Allow"]]//XCUIElementTypeButton[@name="Allow"]';
-    let allowed=false;
+    let allowed=false, sourceReads=0;
     while(true) {
-      const source=await snapshot(allowed?'receiver-after-permission':'receiver-startup',until);
+      // Retain the first XML within the same gate; later reads keep their cap.
+      const source=await snapshot(allowed?'receiver-after-permission':'receiver-startup',until,++sourceReads===1?4500:3000);
       if(/<XCUIElementTypeAlert\b/.test(source)) {
         observedPermission(source);
         if(allowed) {

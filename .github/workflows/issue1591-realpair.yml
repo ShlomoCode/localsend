@@ -36,7 +36,7 @@ jobs:
   realpair:
     if: github.repository == 'ShlomoCode/localsend'
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 20
     env:
       BROWSERSTACK_USERNAME: ${{ secrets.BS_SPRINT_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BS_SPRINT_ACCESS_KEY }}
