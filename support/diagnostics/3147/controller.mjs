@@ -122,7 +122,7 @@ try {
  const metadata=(await request("GET",`/app-automate/sessions/${session}.json`,undefined,{provider:true})).automation_session;
  assert(metadata?.hashed_id===session&&metadata.device==="Samsung Galaxy S22"&&metadata.os?.toLowerCase()==="android"&&["12","12.0"].includes(String(metadata.os_version)),"Actual device identity mismatch");
  save("native-qualification.json",{device:metadata.device,android:metadata.os_version,oneUI:"unknown",nativeBuild:"unknown",installedVersion:"provenance-bound 1.18.2; native package readback unavailable",handlerBeforeFile:"unknown",providerDeviceIdentity:true});
- assert(await wd("POST","/appium/device/is_app_installed",{appId:APP})===true,"Normal installation unavailable");
+ assert(await wd("POST","/appium/device/app_installed",{appId:APP})===true,"Normal installation unavailable");
  stage="read-only-native-package-qualification";
  const packageDump=await nativePackage(APP);
  const version=packageDump.match(/versionName=([^\s]+)/)?.[1];assert(version==="1.18.2","Native installed APK version unavailable or differs");report.installedVersion=version;
@@ -132,7 +132,7 @@ try {
  report.nativeBuild=/^[^\s:/]+\/[^\s:/]+\/[^\s:]+:\d+(?:\.\d+)*\/[^\s:/]+\/[^\s:]+:(?:user|userdebug|eng)\/[^\s:/]+$/.test(fingerprint)?fingerprint:"unknown";
  const handlerCandidates=[];
  for(const handler of ["com.android.documentsui","com.google.android.documentsui"]) {
-  const installed=await wd("POST","/appium/device/is_app_installed",{appId:handler});
+  const installed=await wd("POST","/appium/device/app_installed",{appId:handler});
   save("handler-installed-"+handler+".json",{handler,installed});
   if(installed===true){const dump=await nativePackage(handler);const component=registeredDocumentHandler(dump,handler);if(component)handlerCandidates.push({package:handler,component});}
  }
