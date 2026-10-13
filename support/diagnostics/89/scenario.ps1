@@ -67,12 +67,19 @@ function Edit-Alias([string]$Expected,[string]$Target){
  $script:QualifiedInput=$true;Observe "$script:Stage-paste-qualified"
  Click-Name $script:App Confirm 50000
  try{Stop-Clip}catch{Json @{Status='RECORDER_BLOCK';Error="$_"} "$script:Stage-recorder-stop-block"}
+ $closedEnd=[DateTime]::UtcNow.AddSeconds(5)
+ do{Check-Budget;$remaining=@(Snapshot $script:App|Where-Object {$_.Type -eq 50004 -or ($_.Name -ceq 'Confirm' -and $_.Type -eq 50000)});if($remaining.Count -eq 0){break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $closedEnd)
+ if($remaining.Count -ne 0){throw 'ENV_BLOCK: ordinary alias Confirm closure not qualified'}
  $end=[DateTime]::UtcNow.AddSeconds(8);$persisted=$false
  do{Check-Budget;$null=Assert-App $script:App;$p=Get-Content $script:App.Profile -Raw -Encoding UTF8|ConvertFrom-Json;if($p.'flutter.ls_alias' -ceq $Target){$persisted=$true;break};Start-Sleep -Milliseconds 200}while([DateTime]::UtcNow -lt $end)
  Json @{Persisted=$persisted;Actual=$p.'flutter.ls_alias';Expected=$Target;Path=$script:App.Profile} "$script:Stage-persisted"
  if(-not $persisted){throw 'PRODUCT_FAILURE: qualified alias did not persist'}
  $nav=Find-SettingsNavigation $script:App
- $receive=Find-Control $script:App "Receive`nTab 1 of 3" 50020;Click-Control $script:App $receive;Find-Control $script:App "Send`nTab 2 of 3" 50020|Out-Null
+ $receive=Find-Control $script:App "Receive`nTab 1 of 3" 50020;Click-Control $script:App $receive
+ $null=Find-Control $script:App 'Receive via link' 50000
+ $receiveTree=@(Snapshot $script:App)
+ if(@($receiveTree|Where-Object {$_.Name -ceq $Target -and $_.Type -eq 50000}).Count -ne 0){throw 'ENV_BLOCK: Settings alias button persists after Receive input'}
+ Observe "$script:Stage-receive-transition"
  Click-Control $script:App (Find-SettingsNavigation $script:App);$null=Bind-Alias $Target;Observe "$script:Stage-same-pid-responsive"
  $before=$script:App;Stop-Owned $before
  $script:App=Launch-App app 53089 C:\s89 (Join-Path $PSScriptRoot scenario.ps1) -PreserveProfile
