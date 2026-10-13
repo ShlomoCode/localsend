@@ -133,11 +133,12 @@ function Restart-Control($Manager,$OldShell){
   if($rows.Count -eq 1){Json @{Shell=$actualShell;Rows=$rows;Tree=$tree} actual-explorer-row;break}
   $signature=($visibleRows|ForEach-Object {"$($_.Name)|$($_.Top)|$($_.Bottom)"}) -join "`n"
   if($signature -ceq $previous -or $page -eq 12){throw 'ENV_BLOCK: exact visible Explorer row unreachable within bounded native pages'};$previous=$signature
-  $scroll=@($tree|Where-Object {$_.Name -ceq 'Vertical' -and $_.ClassName -ceq 'CCVScrollBar' -and $_.Type -eq 50014 -and $_.Enabled -and $_.Pid -eq $Manager.Id -and (& $inside $_)})
-  if($scroll.Count -ne 1){throw 'ENV_BLOCK: unique live Processes vertical scrollbar unavailable'};$bar=$scroll[0]
-  $down=@($tree|Where-Object {$_.Name -ceq 'Page down' -and $_.Type -eq 50000 -and $_.Enabled -and $_.Pid -eq $Manager.Id -and $_.Left -ge $bar.Left -and $_.Right -le $bar.Right -and $_.Top -ge $bar.Top -and $_.Bottom -le $bar.Bottom})
-  if($down.Count -ne 1){throw 'ENV_BLOCK: supported live Processes Page down unavailable'}
-  Click-Control $Manager $down[0] -InputDeadline $end -CheckCompletion
+
+  $null=Focus-App $Manager;Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: native Processes scroll deadline'}
+  $scrollReceipt=[Controls3536]::ScrollProcessPage($Manager.Hwnd,$Manager.Id,$list,$end,$Deadline)
+  Json $scrollReceipt "actual-explorer-scroll-$page"
+  Check-Budget;if([DateTime]::UtcNow -ge $end){throw 'ENV_BLOCK: native Processes scroll completion/retention deadline'}
+  if(-not $scrollReceipt.Completed -or $scrollReceipt.Error){throw 'ENV_BLOCK: exact native Processes ScrollPattern unavailable/failed'}
  }
  if($rows.Count -ne 1){throw 'ENV_BLOCK: exact visible native Windows Explorer Processes row unavailable'}
  Save-RowPixels $rows[0] actual-explorer-row-pixels
