@@ -2,7 +2,7 @@ param([Parameter(Mandatory)][string]$Evidence,[Parameter(Mandatory)][DateTime]$D
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot prelaunch.ps1)
 if($PrelaunchPhase){Run-PrelaunchPhase}
-$script:Recorder=$null;$script:Outcome='NONE';$script:ProductStarted=$null
+$script:Recorder=$null;$script:Outcome='NONE';$script:ProductStarted=$null;$script:SectionObservation=0
 $receiveName=@('Receive','Quick Save','Quick Save for "Favorites"','Require PIN','Save to folder','Auto Finish','Save to history') -join "`n"
 function Inside($C,$B){return $C.Left -ge $B.Left -and $C.Right -le $B.Right -and $C.Top -ge $B.Top -and $C.Bottom -le $B.Bottom}
 function Rail($App){
@@ -14,18 +14,32 @@ function Rail($App){
  if($rails[0].Left -ne $rails[1].Left -or $rails[1].Left -ne $rails[2].Left -or $rails[0].Right -ne $rails[1].Right -or $rails[1].Right -ne $rails[2].Right -or $rails[0].Bottom -gt $rails[1].Top -or $rails[1].Bottom -gt $rails[2].Top){throw 'ENV_BLOCK: all-three rail geometry is not aligned/ordered'}
  Json @{Client=$views[0];Rails=$rails;Tree=$tree} "$script:Stage-rail-binding";return [pscustomobject]@{View=$views[0];Items=$rails;Tree=$tree}
 }
+function Settled-Receive($App){
+ $end=[DateTime]::UtcNow.AddSeconds(5);$previous=$null
+ do{
+  Check-Budget;$rail=Rail $App;$h=Assert-App $App;$section=[Controls3536]::SnapshotSection($h,$App.Id,$receiveName,50026)
+  $sample=[pscustomobject]@{NativeScope='exact Receive element.FindAll(Descendants)';Client=$rail.View;Rails=$rail.Items;Section=$section;FullTree=$rail.Tree}
+  $script:SectionObservation++;$receipt="$script:Stage-section-$script:SectionObservation";Write-Event uia-section $sample;Json $sample $receipt;Save-Desktop $receipt
+  $signature=@{Client=$rail.View;Rails=$rail.Items;Section=$section}|ConvertTo-Json -Depth 16 -Compress
+  if($null -ne $previous -and $signature -ceq $previous){return [pscustomobject]@{Rail=$rail;Section=$section;StableSamples=2}}
+  $previous=$signature;Start-Sleep -Milliseconds 200
+ }while([DateTime]::UtcNow -lt $end)
+ throw 'ENV_BLOCK: Receive ancestry/geometry did not settle within five seconds'
+}
 function Receive-Rows($App,[switch]$AllowIncomplete){
- $rail=Rail $App;$groups=@($rail.Tree|Where-Object {$_.Name -ceq $receiveName -and $_.Type -eq 50026 -and $_.Pid -eq $App.Id})
- if($groups.Count -ne 1){throw 'ENV_BLOCK: exact release Receive composite missing'};$g=$groups[0]
+ $settled=Settled-Receive $App;$rail=$settled.Rail;$g=$settled.Section.Group
+ if(-not $g.Enabled -or $g.Name -cne $receiveName -or $g.Type -ne 50026 -or $g.Pid -ne $App.Id){throw 'ENV_BLOCK: exact release Receive ancestry identity invalid'}
  if(-not (Inside $g $rail.View) -or $g.Left -lt $rail.Items[2].Right){throw 'ENV_BLOCK: complete Receive section not visible outside navigation'}
- $checks=@($rail.Tree|Where-Object {$_.Type -eq 50002 -and (Inside $_ $g)}|Sort-Object Top)
- $buttons=@($rail.Tree|Where-Object {$_.Type -eq 50000 -and (Inside $_ $g)})
+ $checks=@($settled.Section.Descendants|Where-Object Type -eq 50002|Sort-Object Top)
+ $buttons=@($settled.Section.Descendants|Where-Object Type -eq 50000)
+ if($checks.Count -eq 0 -and $buttons.Count -eq 0){throw 'ENV_BLOCK: native Receive ancestry has no visible row controls; no wheel or product input permitted'}
+ if(@($checks+$buttons|Where-Object {-not (Inside $_ $g) -or -not (Inside $_ $rail.View)}).Count -gt 0){throw 'ENV_BLOCK: Receive ancestry descendants outside owned section/client'}
  if(@($checks+$buttons|Where-Object {-not $_.Enabled -or $_.Pid -ne $App.Id}).Count -gt 0 -or @($checks|Where-Object {$_.Toggle -notin @(0,1)}).Count -gt 0){throw 'ENV_BLOCK: partial Receive control ownership/state invalid'}
  if($checks.Count -gt 5 -or $buttons.Count -gt 1){throw 'ENV_BLOCK: ambiguous release Receive control count'}
  $edgeClipped=@($checks+$buttons|Where-Object {$_.Top -le $rail.View.Top -or $_.Bottom -ge $rail.View.Bottom}).Count -gt 0
  if($checks.Count -ne 5 -or $buttons.Count -ne 1 -or $edgeClipped){
   if(-not $AllowIncomplete){throw 'ENV_BLOCK: complete release Receive row control count differs'}
-  $binding=[pscustomobject]@{Status='INCOMPLETE';Composite=$g;Client=$rail.View;Rails=$rail.Items;SwitchCount=$checks.Count;ButtonCount=$buttons.Count;EdgeClipped=$edgeClipped;Rows=@();Tree=$rail.Tree}
+  $binding=[pscustomobject]@{Status='INCOMPLETE';NativeScope=$settled.Section;StableSamples=$settled.StableSamples;Composite=$g;Client=$rail.View;Rails=$rail.Items;SwitchCount=$checks.Count;ButtonCount=$buttons.Count;EdgeClipped=$edgeClipped;Rows=@();Tree=$rail.Tree}
   Json $binding "$script:Stage-receive-incomplete";return $binding
  }
  if($buttons[0].Right-$buttons[0].Left -le $checks[0].Right-$checks[0].Left){throw 'ENV_BLOCK: Receive destination geometry differs from wide release button'}
@@ -37,7 +51,7 @@ function Receive-Rows($App,[switch]$AllowIncomplete){
   $top=if($i -eq 0){$g.Top}else{[int](($ordered[$i-1].Bottom+$c.Top)/2)};$bottom=if($i -eq 5){$g.Bottom}else{[int](($c.Bottom+$ordered[$i+1].Top)/2)}
   $rows+=[pscustomobject]@{Label=$labels[$i];Ordinal=$i;Control=$c;Row=[pscustomobject]@{Left=$g.Left;Right=$g.Right;Top=$top;Bottom=$bottom}}
  }
- $binding=[pscustomobject]@{Status='COMPLETE';Contract='v1.18.2 Receive, no advanced/gallery row';Composite=$g;Client=$rail.View;Rails=$rail.Items;Rows=$rows;Tree=$rail.Tree};Json $binding "$script:Stage-receive-binding";return $binding
+ $binding=[pscustomobject]@{Status='COMPLETE';NativeScope=$settled.Section;StableSamples=$settled.StableSamples;Contract='v1.18.2 Receive, no advanced/gallery row';Composite=$g;Client=$rail.View;Rails=$rail.Items;Rows=$rows;Tree=$rail.Tree};Json $binding "$script:Stage-receive-binding";return $binding
 }
 function Pixels($B,$Name){
  Check-Budget;$screen=[System.Windows.Forms.SystemInformation]::VirtualScreen;if(-not (Inside $B $screen)){throw 'ENV_BLOCK: crop outside desktop'}
