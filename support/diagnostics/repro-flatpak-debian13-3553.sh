@@ -41,6 +41,24 @@ if ! runuser -u probe -- unshare --user --map-root-user true; then
   exit 20
 fi
 
+if [[ "${PROBE_ONLY:-0}" == 1 ]]; then
+  test -s /evidence/cache-snapshots/brave-1.99.20.tar.gz
+  runuser -u probe -- env \
+    HOME=/home/probe USER=probe LOGNAME=probe \
+    XDG_RUNTIME_DIR=/run/user/1000 XDG_CURRENT_DESKTOP=OPENBOX XDG_SESSION_TYPE=x11 \
+    dbus-run-session -- bash -c '
+      set -Eeuo pipefail
+      flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      flatpak install --user --noninteractive -y flathub org.localsend.localsend_app
+      flatpak update --user --noninteractive -y --commit=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c org.localsend.localsend_app
+      flatpak update --user --noninteractive -y --commit=92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df org.freedesktop.Platform/x86_64/26.08
+      test "$(flatpak info --user --show-commit org.localsend.localsend_app)" = a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c
+      test "$(flatpak info --user --show-commit org.freedesktop.Platform/x86_64/26.08)" = 92659297ffdb4f9f14dd1562bd919b48160b0dc42c99653dcfc0688096af41df
+      bash /repo/support/diagnostics/repro-flatpak-debian13-fontconfig-probe.sh
+    '
+  exit 0
+fi
+
 runuser -u probe -- env \
   HOME=/home/probe USER=probe LOGNAME=probe \
   XDG_RUNTIME_DIR=/run/user/1000 XDG_CURRENT_DESKTOP=OPENBOX XDG_SESSION_TYPE=x11 \

@@ -61,6 +61,22 @@ test -n "$app_pid"
 printf '%s\n' "$app_pid" > "$out/localsend.pid"
 sleep 4
 sudo awk '{print $14, $15}' "/proc/$app_pid/task/$app_pid/stat" > "$out/main-thread-cpu-before.txt"
+sudo cat "/proc/$app_pid/maps" > "$out/maps.txt"
+# GDB cannot resolve sandbox paths through /proc/PID/exe across Flatpak's PID
+# namespace. Use the verified fontconfig ELF offsets and its offset-zero mapping.
+fontconfig_base=$(awk '$6 == "/usr/lib/x86_64-linux-gnu/libfontconfig.so.1.17.0" && $3 == "00000000" {split($1, range, "-"); print "0x" range[1]; exit}' "$out/maps.txt")
+test -n "$fontconfig_base"
+printf -v string_entry '0x%x' "$((fontconfig_base + 0x3e200))"
+printf -v string_return '0x%x' "$((fontconfig_base + 0x3e274))"
+printf -v charset_entry '0x%x' "$((fontconfig_base + 0x3e440))"
+printf -v charset_return '0x%x' "$((fontconfig_base + 0x3e4b4))"
+printf 'base=%s string=%s string_return=%s charset=%s charset_return=%s\n' \
+  "$fontconfig_base" "$string_entry" "$string_return" "$charset_entry" "$charset_return" > "$out/breakpoint-addresses.txt"
+flutter_library=$(find "$HOME/.local/share/flatpak/app/org.localsend.localsend_app" -type f -name libflutter_linux_gtk.so -print -quit)
+if [[ -n "$flutter_library" ]]; then
+  cp "$flutter_library" "$out/libflutter_linux_gtk.so"
+  readelf -n "$flutter_library" > "$out/libflutter.notes.txt"
+fi
 cat > "$out/trace.gdb" <<GDB
 set debuginfod enabled off
 set pagination off
@@ -71,7 +87,7 @@ set logging enabled on
 attach $app_pid
 set \$str_count = 0
 set \$char_count = 0
-break FcPatternGetString
+break *$string_entry
 commands
   silent
   set \$str_count = \$str_count + 1
@@ -84,13 +100,13 @@ commands
   end
   continue
 end
-break *(FcPatternGetString+0x74)
+break *$string_return
 commands
   silent
   printf "STRING return object=%s index=%d result=%d caller=%p\\n", (char *)\$rbx, \$r14d, \$eax, *(void **)(\$rbp+8)
   continue
 end
-break FcPatternGetCharSet
+break *$charset_entry
 commands
   silent
   set \$char_count = \$char_count + 1
@@ -103,7 +119,7 @@ commands
   end
   continue
 end
-break *(FcPatternGetCharSet+0x74)
+break *$charset_return
 commands
   silent
   printf "CHARSET return object=%s index=%d result=%d caller=%p\\n", (char *)\$rbx, \$r14d, \$eax, *(void **)(\$rbp+8)
