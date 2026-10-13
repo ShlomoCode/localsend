@@ -1,12 +1,8 @@
 name: Issue 3441 admitted native keyboard observation
 on:
-  workflow_dispatch:
-    inputs:
-      admitted:
-        description: Coordinator admitted one 20-minute job and one Samsung S23 Android 13 session
-        type: boolean
-        default: false
-        required: true
+  push:
+    branches:
+      - codex/diagnose-3441-transfer
 permissions:
   contents: read
 concurrency:
@@ -14,7 +10,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   keyboard-source:
-    if: github.repository == 'ShlomoCode/localsend' && inputs.admitted == true
+    if: >-
+      github.repository == 'ShlomoCode/localsend' &&
+      vars.ISSUE3441_ADMITTED_HEAD == github.sha &&
+      contains(github.event.head_commit.message, '[issue3441-admitted]')
     runs-on: macos-15
     timeout-minutes: 20
     env:
