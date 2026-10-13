@@ -110,7 +110,7 @@ capture_case() {
   done > "$dir/windows.txt"
   import -window root "$dir/screenshot.png" 2>&1 || true
   ss -ltnp > "$dir/listeners.txt" 2>&1 || true
-  if [[ "${TRACE_MAIN_THREAD:-0}" == 1 ]] && command -v strace >/dev/null 2>&1; then
+  if awk -v p="$pct" 'BEGIN {exit !(p>=80)}' && command -v strace >/dev/null 2>&1; then
     sudo timeout 8s strace -f -tt -T -p "$pid" -o "$dir/main-thread.strace" 2>&1 || true
   fi
   sudo timeout 8s gdb -q -batch -ex 'set debuginfod enabled off' -ex 'set pagination off' -ex "set sysroot /proc/$pid/root" -ex "attach $pid" -ex 'thread apply all bt' -ex detach > "$dir/gdb.txt" 2>&1 || true
@@ -230,7 +230,7 @@ environment() {
 
 printf 'case\tresult\tpid\tmain_thread_cpu_percent\tevidence_dir\n' > "$OUT/summary.tsv"
 cat > "$OUT/font-cache-prime.html" <<'HTML'
-<!doctype html><meta charset="utf-8"><style>body{font:24px sans-serif}p{font-family:serif}</style>
+<!doctype html><meta charset="utf-8"><title>LocalSend startup check</title><style>body{font:24px sans-serif}p{font-family:serif}</style>
 <h1>LocalSend startup check</h1><p>Brave host fontconfig cache priming with KaTeX: abcdefghijklmnopqrstuvwxyz 0123456789 ∑ ∫ π</p>
 HTML
 
@@ -362,8 +362,10 @@ for version in 1.99.20; do
     exit 4
   fi
   cache_manifest "$OUT/cache-snapshots/brave-$version"
-  timeout 10s fc-cat "$cache_dir"/*cache-12 > "$OUT/cache-snapshots/brave-$version-fc-cat.txt" 2>&1 || true
-  if ! grep -i -E 'katex.*woff2?' "$OUT/cache-snapshots/brave-$version-fc-cat.txt" > "$OUT/cache-snapshots/brave-$version-katex-records.txt"; then
+  find "$cache_dir" -maxdepth 1 -type f -name '*cache-12' -exec sh -c 'for f do strings "$f" | grep -Ei "katex.*woff2?" || true; done' sh {} + > "$OUT/cache-snapshots/brave-$version-katex-records.txt" 2>&1
+  flatpak run --user --command=sh org.localsend.localsend_app -c 'find /run/host/user-fonts-cache -maxdepth 1 -type f -name "*cache-12" -exec sha256sum {} +; cat /proc/self/mountinfo' > "$OUT/cache-snapshots/brave-$version-sandbox-cache-and-mounts.txt" 2>&1 || true
+  flatpak run --user --command=sh org.localsend.localsend_app -c 'timeout 10s fc-cat /run/host/user-fonts-cache/*cache-12' > "$OUT/cache-snapshots/brave-$version-runtime-fc-cat.txt" 2>&1 || true
+  if [[ ! -s "$OUT/cache-snapshots/brave-$version-katex-records.txt" ]]; then
     echo 'Generated cache lacks a KaTeX WOFF record; this run cannot test the suspected record.' | tee -a "$OUT/infrastructure-failures.txt"
     exit 11
   fi
