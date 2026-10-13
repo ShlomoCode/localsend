@@ -316,7 +316,10 @@ qualified_app_pid() {
   identity_command instances flatpak ps --columns=instance,application,pid > "$OUT/$identity_label-instances.txt" || return 1
   identity_command topology ps -u "$uid" -o pid=,ppid=,uid=,comm= > "$OUT/$identity_label-topology.txt" || return 1
   rows=$(identity_command instance-filter awk '$2=="org.localsend.localsend_app" {print $1,$3}' "$OUT/$identity_label-instances.txt") || return 1
-  [ -n "$rows" ] || return 1
+  if [ -z "$rows" ]; then
+    printf 'empty_instance_observation=SUCCESS\nexamined_rows=0 unique_qualified_leaves=0\n' >> "$OUT/$identity_label-instance-selection.txt" || return 2
+    return 1
+  fi
   while read -r instance anchor; do
     [[ "$instance" =~ ^[0-9]+$ && "$anchor" =~ ^[0-9]+$ ]] || return 1
     row_count=$((row_count+1))
