@@ -420,6 +420,34 @@ for version in 1.99.20; do
   cp -a "$moved"/. "$cache_dir/"
   cache_manifest "$OUT/cache-snapshots/restored"
   launch_case flatpak_after_cache_restore 'flatpak run --user org.localsend.localsend_app'
+
+  # Isolate the genuine Brave cache whose contents name KaTeX WOFF fonts.
+  restore_brave_cache "$version"
+  declare -a katex_cache_files=()
+  for cache_file in "$cache_dir"/*cache-12; do
+    [[ -f "$cache_file" ]] || continue
+    if strings "$cache_file" | grep -E 'KaTeX_[^[:space:]]+\.woff2?' > /dev/null; then
+      katex_cache_files+=("$cache_file")
+    fi
+  done
+  if [[ ${#katex_cache_files[@]} -ne 1 ]]; then
+    printf 'Expected one Brave cache with KaTeX WOFF records, found %s\n' "${#katex_cache_files[@]}" | tee -a "$OUT/infrastructure-failures.txt"
+    exit 12
+  fi
+  katex_cache="${katex_cache_files[0]}"
+  printf '%s\n' "$katex_cache" > "$OUT/cache-snapshots/isolated-katex-cache-path.txt"
+  sha256sum "$katex_cache" > "$OUT/cache-snapshots/isolated-katex-cache-before.sha256"
+  moved_katex_cache="$OUT/cache-snapshots/$(basename "$katex_cache").moved"
+  mv "$katex_cache" "$moved_katex_cache"
+  cache_manifest "$OUT/cache-snapshots/without-katex-cache"
+  launch_case flatpak_without_katex_cache 'flatpak run --user org.localsend.localsend_app'
+  mv "$moved_katex_cache" "$katex_cache"
+  sha256sum "$katex_cache" > "$OUT/cache-snapshots/isolated-katex-cache-after.sha256"
+  before_sha=$(cut -d' ' -f1 "$OUT/cache-snapshots/isolated-katex-cache-before.sha256")
+  after_sha=$(cut -d' ' -f1 "$OUT/cache-snapshots/isolated-katex-cache-after.sha256")
+  [[ "$before_sha" == "$after_sha" ]] || { echo 'KaTeX cache bytes changed during the move/restore comparison.' | tee -a "$OUT/infrastructure-failures.txt"; exit 13; }
+  cache_manifest "$OUT/cache-snapshots/katex-cache-restored"
+  launch_case flatpak_katex_cache_restored 'flatpak run --user org.localsend.localsend_app'
   restore_baseline
 done
 
