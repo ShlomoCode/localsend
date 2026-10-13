@@ -55,3 +55,9 @@ before reviewing original speech and pixels. A missing speech record blocks the
 comparison. A complete named control/real operation is only non-reproduction for
 this selected artifact/OS/NVDA condition. No repetition is run on an unreviewed
 candidate. Source preparation does not authorize dispatch, publication or a fix.
+
+## Round 2 source preparation
+
+Each download, hash, extraction, discovery, PE check, and signature observation runs in a separately supervised PowerShell child. Original stdout, stderr, invocation, phase, exit, and identity receipts are retained. Downloads and hashes remain mandatory. Signature metadata contains primitive fields only; a timed-out signature is supplementary UNKNOWN only after exact original-child exit and absence are confirmed. The first artifact sequence shares a 240-second ceiling; runtime metadata shares 40 seconds. The setup phase has six minutes within the unchanged absolute 15-minute scenario and 20-minute Actions job.
+
+Settings navigation uses the complete exact three-item English release labels, supported control types, process ownership, and client bounds qualified in diagnostic 3317. The Notepad speech control, actual keyboard gestures, Quick Save state comparison, original speech logs, finite clip, and environment exclusions remain required.

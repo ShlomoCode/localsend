@@ -1,8 +1,25 @@
-param([Parameter(Mandatory)][string]$Evidence,[Parameter(Mandatory)][DateTime]$Deadline)
+param([Parameter(Mandatory)][string]$Evidence,[Parameter(Mandatory)][DateTime]$Deadline,[string]$PrelaunchPhase,[string]$PhaseContext,[string]$PhaseTag)
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot process.ps1)
+. (Join-Path $PSScriptRoot prelaunch.ps1)
+if($PrelaunchPhase){Run-PrelaunchPhase}
 $script:Stage='setup';$script:Owned=@();$script:Speech=@();$script:ControlQualified=$false
 Start-Transcript (Join-Path $Evidence scenario-original.txt)
 function Json($Data,$Name){$Data|ConvertTo-Json -Depth 16|Set-Content (Join-Path $Evidence "$Name.json") -Encoding UTF8}
+function Find-SettingsNavigation($App){
+ $tree=@(Snapshot $App);$views=@($tree|Where-Object ClassName -eq FLUTTERVIEW)
+ if($views.Count -ne 1){throw 'ENV_BLOCK: unique Flutter client unavailable'}
+ $view=$views[0];$rail=@()
+ foreach($name in @("Receive`nTab 1 of 3","Send`nTab 2 of 3","Settings`nTab 3 of 3")){
+  $matches=@($tree|Where-Object {$_.Name -eq $name -and $_.Type -in @(50000,50019,50020) -and $_.Enabled -and $_.Pid -eq $App.Id})
+  if($matches.Count -ne 1){throw 'ENV_BLOCK: complete unique three-item navigation unavailable'}
+  $c=$matches[0]
+  if($c.Right -le $c.Left -or $c.Bottom -le $c.Top -or $c.Left -lt $view.Left -or $c.Right -gt $view.Right -or $c.Top -lt $view.Top -or $c.Bottom -gt $view.Bottom){throw 'ENV_BLOCK: navigation bounds outside live client'}
+  $rail+=$c
+ }
+ Json @{View=$view;AllThree=$rail;SupportedRenderedTextType=50020} "$script:Stage-navigation-binding"
+ return $rail[2]
+}
 function Launch-Owned($Path,$Arguments=''){
  Check-Budget
  $launch=@{FilePath=$Path;WorkingDirectory=(Split-Path $Path);PassThru=$true}
@@ -82,7 +99,7 @@ function Stop-Owned($App){
  }
 }
 try{
- $script:PhaseDeadline=$Deadline.AddMinutes(-11)
+ $script:PhaseDeadline=$Deadline.AddMinutes(-9)
  . (Join-Path $PSScriptRoot ui.ps1)
  $os=Get-CimInstance Win32_OperatingSystem
  Json @{OS=$os|Select-Object Caption,Version,BuildNumber,OSArchitecture;RunnerImage=$env:ImageVersion;Session=(Get-Process -Id $PID).SessionId;Desktop=[System.Windows.Forms.SystemInformation]::VirtualScreen;Difference='Selected Server 2022 x64 differs from reported Windows 10/11. Original numeric app/NVDA versions unknown. Android not tested.'} environment
@@ -91,13 +108,22 @@ try{
  Save-Desktop input-desktop
  New-Item -ItemType Directory -Force C:\s3296,C:\s3296\nvda-profile|Out-Null
  $archive=Join-Path $Evidence LocalSend-1.18.2-windows-x86-64.zip
- Invoke-WebRequest 'https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.zip' -UseBasicParsing -OutFile $archive -TimeoutSec 60
- Json @{Sha256=(Get-FileHash $archive).Hash;Path=$archive} release-archive
- if((Get-FileHash $archive).Hash -ne '737aab1829d901e1d798cddd1e5fdc06ba9dfcc9ea50cfe3805e047005d5e71a'){throw 'ENV_BLOCK: official app archive hash mismatch'}
+ $script:PrelaunchDeadline=[DateTime]::UtcNow.AddSeconds(240);if($script:PrelaunchDeadline -gt $script:PhaseDeadline){$script:PrelaunchDeadline=$script:PhaseDeadline}
+ $appContext=@{Path=$archive;Url='https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-windows-x86-64.zip';ExpectedHash='737aab1829d901e1d798cddd1e5fdc06ba9dfcc9ea50cfe3805e047005d5e71a';Directory='C:\s3296\app'}
+ Artifact-Phase download $appContext app-download 70|Out-Null
+ $appHash=Artifact-Phase hash $appContext app-archive-hash 10;Json $appHash release-archive
  $launcher=Join-Path $Evidence nvda_2025.3.3.exe
- Invoke-WebRequest 'https://download.nvaccess.org/releases/2025.3.3/nvda_2025.3.3.exe' -UseBasicParsing -OutFile $launcher -TimeoutSec 60
- Json @{Path=$launcher;Size=(Get-Item $launcher).Length;Sha256=(Get-FileHash $launcher).Hash;Signature=Get-AuthenticodeSignature $launcher|Select-Object Status,StatusMessage,SignerCertificate} nvda-launcher
- if((Get-FileHash $launcher).Hash -ne '15b5e9864032565e7f895e4d80d767f180db0ec264e892240e675c426cfca921'){throw 'ENV_BLOCK: official NVDA launcher hash mismatch'}
+ $nvdaContext=@{Path=$launcher;Url='https://download.nvaccess.org/releases/2025.3.3/nvda_2025.3.3.exe';ExpectedHash='15b5e9864032565e7f895e4d80d767f180db0ec264e892240e675c426cfca921'}
+ Artifact-Phase download $nvdaContext nvda-download 70|Out-Null
+ $nvdaHash=Artifact-Phase hash $nvdaContext nvda-launcher-hash 10
+ $nvdaSignature=Artifact-Phase signature $nvdaContext nvda-launcher-signature 15
+ Json @{Path=$launcher;Sha256=$nvdaHash.Sha256;Signature=$nvdaSignature} nvda-launcher
+ Artifact-Phase extract $appContext app-extract 40|Out-Null
+ $found=Artifact-Phase discover $appContext app-discover 5;$exe=$found.Exe
+ $exeContext=@{Path=$exe};$pe=Artifact-Phase pe $exeContext app-pe 10
+ $exeHash=Artifact-Phase hash $exeContext app-executable-hash 10
+ $exeSignature=Artifact-Phase signature $exeContext app-signature 15
+ Json @{Path=$exe;Sha256=$exeHash.Sha256;Version=@{FileVersion=$pe.FileVersion;ProductVersion=$pe.ProductVersion};Machine=$pe.Machine;Signature=$exeSignature} app-artifact
  # Documented official portable creation; child exit is observed through cached handle.
  $install=Start-Process $launcher -ArgumentList '--create-portable-silent --portable-path C:\s3296\nvda --log-file C:\e3296\nvda-portable-setup.log' -PassThru
  $setupReceipt=New-ExitReceipt $install 'nvda-portable-setup' $launcher;$start=$install.StartTime.ToUniversalTime().ToString('o');$actual=$install.Path
@@ -107,7 +133,9 @@ try{
  Complete-ExitReceipt $install $setupReceipt $wait
  if($setupReceipt.Status -ne 'EXIT_ZERO'){throw 'ENV_BLOCK: portable setup exact exit not zero'}
  $nvdaExe='C:\s3296\nvda\nvda.exe';$script:NvdaLog=Join-Path $Evidence nvda-runtime-original.log
- Json @{Path=$nvdaExe;Sha256=(Get-FileHash $nvdaExe).Hash;Version=(Get-Item $nvdaExe).VersionInfo|Select-Object FileVersion,ProductVersion;Signature=Get-AuthenticodeSignature $nvdaExe|Select-Object Status,StatusMessage} nvda-runtime-artifact
+ $script:PrelaunchDeadline=[DateTime]::UtcNow.AddSeconds(40);if($script:PrelaunchDeadline -gt $script:PhaseDeadline){$script:PrelaunchDeadline=$script:PhaseDeadline}
+ $runtimeContext=@{Path=$nvdaExe};$runtimeHash=Artifact-Phase hash $runtimeContext nvda-runtime-hash 10;$runtimeSignature=Artifact-Phase signature $runtimeContext nvda-runtime-signature 15
+ Json @{Path=$nvdaExe;Sha256=$runtimeHash.Sha256;Signature=$runtimeSignature} nvda-runtime-artifact
  $script:Nvda=Launch-Owned $nvdaExe "--config-path C:\s3296\nvda-profile --log-file $script:NvdaLog --log-level 12"
  Start-Sleep -Seconds 4
  if(([IO.File]::ReadAllText($script:NvdaLog)) -notmatch '2025\.3\.3'){throw 'ENV_BLOCK: actual NVDA log version absent'}
@@ -126,20 +154,13 @@ try{
  if($named -notmatch '(?i)(file|new|open)' -or $named -notmatch '(?i)menu'){throw 'ENV_BLOCK: authentic named menu speech control absent'}
  Keys $notepad '{ESC}';$script:ControlQualified=$true
  $script:Stage='app-sighted-control';$script:PhaseDeadline=$Deadline.AddMinutes(-4)
- Expand-Archive -LiteralPath $archive -DestinationPath C:\s3296\app
- $exe=@(Get-ChildItem C:\s3296\app -Filter localsend_app.exe -Recurse|Select-Object -ExpandProperty FullName)
- if($exe.Count -ne 1){throw 'ENV_BLOCK: official executable ambiguous'};$exe=$exe[0]
- $version=(Get-Item $exe).VersionInfo
- $stream=[IO.File]::OpenRead($exe);try{$reader=[IO.BinaryReader]::new($stream);$stream.Position=0x3c;$pe=$reader.ReadInt32();$stream.Position=$pe+4;$machine=$reader.ReadUInt16()}finally{$stream.Dispose()}
- Json @{Path=$exe;Sha256=(Get-FileHash $exe).Hash;Version=$version|Select-Object FileVersion,ProductVersion;Machine=$machine;Signature=Get-AuthenticodeSignature $exe|Select-Object Status,StatusMessage} app-artifact
- if($machine -ne 0x8664 -or $version.ProductVersion -notmatch '^1\.18\.2(?:\D|$)'){throw 'ENV_BLOCK: selected app PE/version mismatch'}
  $script:Profile=Join-Path (Split-Path $exe) settings.json
  if(Test-Path $script:Profile){Profile-Receipt archive-original-settings|Out-Null}else{Json @{Path=$script:Profile;Exists=$false} archive-original-settings}
  # Ordinary release portable profile, English only, fresh isolated settings; app bytes unchanged.
  $settings=@{'flutter.ls_locale'='en';'flutter.ls_whats_new'='1.18.2'}
  [IO.File]::WriteAllText($script:Profile,($settings|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
  Profile-Receipt profile-source-before-launch|Out-Null
- $app=Launch-Owned $exe;Window-Owned $app;[Issue3456Native]::ShowWindow([IntPtr]$app.Hwnd,3)|Out-Null;Write-Event maximize @{App=$app};Click-Name $app Settings
+ $app=Launch-Owned $exe;Window-Owned $app;[Issue3456Native]::ShowWindow([IntPtr]$app.Hwnd,3)|Out-Null;Write-Event maximize @{App=$app};Click-Control $app (Find-SettingsNavigation $app)
  Save-Desktop settings-before;Profile-Receipt settings-original|Out-Null
  $map=Quick-Map $app;$originalToggle=$null;$oppositeToggle=$null
  if($map.Toggle -eq 0 -or $map.Toggle -eq 1){$originalToggle=$map.Toggle;$oppositeToggle=1-$originalToggle}
@@ -147,12 +168,12 @@ try{
  Click-Control $app $map;Dismiss-Notice $app;Read-State $app $oppositeToggle sighted-opposite|Out-Null
  $map=Quick-Map $app;Click-Control $app $map;Dismiss-Notice $app;Read-State $app $originalToggle sighted-restored|Out-Null
  # Re-enter with real keyboard navigation after native focus of the Settings tab.
- Click-Name $app Receive
+ Click-Name $app "Receive`nTab 1 of 3"
  $reentered=$false
  for($navigation=1;$navigation -le 12;$navigation++){
   Keys $app '{TAB}';$navFocus=@(Snapshot $app|Where-Object Focused)
   Write-Event settingsKeyboardReentry @{Step=$navigation;Focus=$navFocus}
-  if($navFocus.Count -eq 1 -and $navFocus[0].Name -eq 'Settings'){Keys $app ' ';$reentered=$true;break}
+  if($navFocus.Count -eq 1 -and $navFocus[0].Name -eq "Settings`nTab 3 of 3"){Keys $app ' ';$reentered=$true;break}
  }
  if(-not $reentered){throw 'ENV_BLOCK: Settings tab not reached by bounded actual keyboard navigation'}
  if(@(Snapshot $app|Where-Object Name -eq 'Quick Save').Count -ne 1){throw 'ENV_BLOCK: bounded keyboard Settings re-entry absent'}

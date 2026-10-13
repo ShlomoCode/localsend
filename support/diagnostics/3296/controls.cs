@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Issue3536.UIA;
 public sealed class Control3536 {
- public string Name, Value, ClassName, AutomationId, RuntimeId; public bool Focused; public int Toggle; public int Type, Pid, Left,Top,Right,Bottom; public long Handle;
+ public string Name, Value, ClassName, AutomationId, RuntimeId; public bool Focused, Enabled; public int Toggle; public int Type, Pid, Left,Top,Right,Bottom; public long Handle;
 }
 public static class Controls3536 {
  static int ToggleState(IUIAutomationElement e){object value=e.GetCurrentPropertyValue(30086);return value is int?(int)value:-1;}
@@ -18,7 +18,7 @@ public static class Controls3536 {
    var r=e.CurrentBoundingRectangle; if(r.right<=r.left || r.bottom<=r.top) continue;
    if(e.CurrentProcessId!=pid) throw new Exception("UIA descendant ownership differs");
    object v=e.GetCurrentPropertyValue(30045);
-   list.Add(new Control3536 {Name=e.CurrentName,Value=v is string?(string)v:null,ClassName=e.CurrentClassName,Type=e.CurrentControlType,Pid=e.CurrentProcessId,Left=r.left,Top=r.top,Right=r.right,Bottom=r.bottom,Handle=e.CurrentNativeWindowHandle.ToInt64(),AutomationId=e.CurrentAutomationId,RuntimeId=string.Join("-",e.GetRuntimeId()),Focused=Convert.ToBoolean(e.GetCurrentPropertyValue(30008)),Toggle=ToggleState(e)});
+   list.Add(new Control3536 {Name=e.CurrentName,Value=v is string?(string)v:null,ClassName=e.CurrentClassName,Type=e.CurrentControlType,Pid=e.CurrentProcessId,Left=r.left,Top=r.top,Right=r.right,Bottom=r.bottom,Handle=e.CurrentNativeWindowHandle.ToInt64(),AutomationId=e.CurrentAutomationId,RuntimeId=string.Join("-",e.GetRuntimeId()),Focused=Convert.ToBoolean(e.GetCurrentPropertyValue(30008)),Enabled=Convert.ToBoolean(e.GetCurrentPropertyValue(30010)),Toggle=ToggleState(e)});
   } return list.ToArray();
  }
  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback,IntPtr data);
