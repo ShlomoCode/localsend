@@ -204,6 +204,11 @@ wait_for_window() {
     sleep 1
   done
   echo "Brave window did not appear for $label" | tee -a "$OUT/infrastructure-failures.txt"
+  ps -eLo pid,tid,ppid,pgid,stat,pcpu,comm,args --sort=-pcpu > "$OUT/brave-$label-processes.txt" 2>&1 || true
+  { xdotool search --onlyvisible --name '.*' 2>/dev/null || true; } | while read -r wid; do
+    xprop -id "$wid" WM_NAME WM_CLASS _NET_WM_PID 2>/dev/null || true
+  done > "$OUT/brave-$label-windows.txt"
+  import -window root "$OUT/brave-$label-no-window.png" 2>&1 || true
   return 1
 }
 
