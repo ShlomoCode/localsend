@@ -129,6 +129,21 @@ try {
   allocation.returnedUtc = new Date().toISOString();
   writeFileSync('evidence/allocation-intent.json', JSON.stringify(allocation, null, 2));
   writeFileSync('evidence/browserstack-session.json', JSON.stringify({session, device:'Samsung Galaxy S21', os:'Android 11.0', source:expectedSource}, null, 2));
+  // Requesting a version is not evidence of which server/driver handled this session.
+  const sessionResponse=await fetch('https://api.browserstack.com/app-automate/sessions/'+session+'.json',{headers:{authorization:auth},signal:AbortSignal.timeout(15000)});
+  assert(sessionResponse.ok,'Provider session metadata unavailable for version qualification');
+  const providerSession=(await sessionResponse.json()).automation_session;
+  assert.equal(providerSession.hashed_id,session,'Provider metadata belongs to another session');
+  const buildId=providerSession.build_hashed_id;
+  assert(/^[a-f0-9]{40}$/.test(buildId),'Provider build identity missing');
+  const logsResponse=await fetch('https://api.browserstack.com/app-automate/builds/'+buildId+'/sessions/'+session+'/appiumlogs',{headers:{authorization:auth},signal:AbortSignal.timeout(15000)});
+  assert(logsResponse.ok,'Original live Appium version record unavailable');
+  const appiumLogs=await logsResponse.text();
+  writeFileSync('evidence/appium-version-original.log',safe(appiumLogs));
+  const versions=[...appiumLogs.matchAll(/Appium v([0-9.]+) creating new AndroidUiautomator2Driver \(v([0-9.]+)\) session/g)];
+  assert.equal(versions.length,1,'Appium version record missing or ambiguous; stop before product input');
+  assert.deepEqual(versions[0].slice(1),['2.15.0','4.0.1'],'Unexpected Appium or driver version');
+  writeFileSync('evidence/automation-version-qualified.json',JSON.stringify({session,buildId,appiumVersion:versions[0][1],driverVersion:versions[0][2],observedUtc:new Date().toISOString()},null,2));
   await helperClick('Inspect LocalSend APK');
   let inspection;
   const inspectionDeadline = Date.now() + 30_000;

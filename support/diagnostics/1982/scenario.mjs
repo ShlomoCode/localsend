@@ -15,7 +15,7 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
  mkdirSync('evidence',{recursive:true});
  const prefix=`/session/${session}`;
  const events=[];
- let sequence=0,originalPid=null,desktop=null,proxy=null,currentStage=null,firstError=null;
+ let sequence=0,originalPid=null,originalProcess=null,desktop=null,proxy=null,currentStage=null,firstError=null;
  const timings=[];
  const sockets=new Set();
  const hardEnd=Math.min(budgetDeadline??Infinity,Date.now()+25*60*1000);
@@ -43,18 +43,41 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
    record('read-only-native-command',{command,started,result});return result;
   }catch(error){record('read-only-native-unavailable',{command,started,error:String(error)});return {unavailable:String(error)};}
  }
- function pidValue(value){
+ function processIdentity(value){
   const output=typeof value==='string'?value:value?.stdout??value?.result??value?.output;
-  return typeof output==='string'&&/^\s*\d+\s*$/.test(output)?output.trim():null;
+  assert.equal(typeof output,'string','Current process dump is unavailable');
+  assert(output.startsWith('ACTIVITY MANAGER RUNNING PROCESSES'),'Unexpected process dump format');
+  const lines=output.split(/\r?\n/);
+  const records=[];
+  for(let i=0;i<lines.length;i++){
+   const header=lines[i].match(/^  \*APP\* UID (\d+) ProcessRecord\{([a-f0-9]+) ([1-9]\d*):org\.localsend\.localsend_app\/(u\d+a\d+)\}$/);
+   if(!header){
+    assert(!/^  \*APP\*.*:org\.localsend\.localsend_app\//.test(lines[i]),'Unbound or malformed main-process record does not qualify');
+    continue;
+   }
+   const body=[];
+   for(let j=i+1;j<lines.length&&/^    /.test(lines[j]);j++)body.push(lines[j]);
+   const details=body.join('\n');
+   const pid=details.match(/^    pid=([1-9]\d*) starting=false$/m);
+   const thread=details.match(/^    thread=(android\.app\.IApplicationThread\$Stub\$Proxy@[a-f0-9]+)$/m);
+   const packages=details.match(/^    packageList=\{([^}]+)\}$/m);
+   assert(pid&&pid[1]===header[3]&&thread&&packages?.[1].split(', ').includes(APP),'Process record is not a current bound LocalSend process');
+   assert(!/killed=true|killedByAm=true|waitingToKill=(?!null)(\S+)/.test(details),'LocalSend process is terminating');
+   records.push({uid:header[1],recordId:header[2],pid:header[3],user:header[4],thread:thread[1]});
+  }
+  assert.equal(records.length,1,'Exactly one current LocalSend process is required; historical or ambiguous records do not qualify');
+  return records[0];
  }
  async function identity(expected,end=hardEnd){
   const packageName=await call('GET','/appium/device/current_package',undefined,end);
   const activity=await call('GET','/appium/device/current_activity',undefined,end);
-  const rawPid=await shell('pidof '+APP,end);
-  const pid=pidValue(rawPid);
-  record('native-identity',{expected,packageName,activity,pid,rawPid});
-  assert(pid,'Original receiver PID is unavailable; cannot qualify native input');
-  if(originalPid===null)originalPid=pid;
+  const rawProcess=await shell('dumpsys activity -p '+APP+' processes',end);
+  record('native-process-dump',{expected,rawProcess});
+  const observedProcess=processIdentity(rawProcess);
+  const pid=observedProcess.pid;
+  record('native-identity',{expected,packageName,activity,pid,observedProcess});
+  if(originalPid===null){originalPid=pid;originalProcess=observedProcess;}
+  assert.deepEqual(observedProcess,originalProcess,'Original receiver process identity changed; preserve evidence and stop');
   assert.equal(pid,originalPid,'Original receiver process changed; preserve evidence and stop');
   const expectedPackage=expected==='app'?packageName===APP:expected==='permission'?/^com\.(google\.)?android\.permissioncontroller$/.test(packageName):/^com\.(google\.)?android\.documentsui$/.test(packageName);
   assert(expectedPackage,'Native foreground package does not match requested action');
@@ -95,7 +118,10 @@ export default async function({session,wd,senderHost,senderPort,transportStatus,
   }
  }
  async function probes(stage){
-  for(const command of ['pidof '+APP,'dumpsys activity activities','dumpsys activity processes','ss -tnp','logcat -d -v epoch -t 250']){
+  try{save(stage+'-logcat-chunk',await call('POST','/log',{type:'logcat'}));}
+  catch(error){record('native-logcat-unavailable',{stage,error:String(error)});}
+
+  for(const command of ['dumpsys activity -p '+APP+' activities','dumpsys activity -p '+APP+' processes']){
    await shell(command);
   }
   const observed=stamp();
