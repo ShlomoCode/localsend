@@ -3,7 +3,9 @@
 set -euo pipefail
 test -n "${GITHUB_RUN_ID:?Actions required}"
 test -n "${GITHUB_ENV:?Actions environment required}"
-test -n "${RELAY_TOKEN:?Private transport token required}"
+if test "${ISSUE3441_KEYBOARD_SOURCE_PROBE:-}" != 1; then
+  test -n "${RELAY_TOKEN:?Private transport token required}"
+fi
 test -d "${FIXTURE_DIRECTORY:?Fixture directory required}"
 test -f "$FIXTURE_DIRECTORY/manifest.json"
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
@@ -29,6 +31,10 @@ build() {
 mkdir -p "$private_root/fixture/assets" "$private_root/relay/assets"
 cp "$FIXTURE_DIRECTORY"/* "$private_root/fixture/assets/"
 build "$here/android" "$private_root/fixture" 'Issue3441 fixture helper'
+if test "${ISSUE3441_KEYBOARD_SOURCE_PROBE:-}" = 1; then
+  node "$here/upload-helpers.mjs" "$private_root/fixture/helper.apk"
+  exit 0
+fi
 # Private token/config and token-bearing transport APK never enter evidence folders.
 node --input-type=module - "$private_root/relay/assets/config.json" <<'JS'
 import {writeFileSync} from 'node:fs';

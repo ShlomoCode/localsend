@@ -16,7 +16,8 @@ const secrets=[username,key,auth,process.env.RELAY_TOKEN,process.env.BASELINE_AP
 const redact=value=>{let text=String(value);for(const secret of secrets)text=text.replaceAll(secret,'[redacted]');return text.replace(/bs:\/\/[a-f0-9]+/gi,'[redacted app reference]');};
 const report={runId,runAttempt:attempt,buildName,startedUtc:new Date().toISOString(),session:null,tunnel:null,privateDirectories:[],errors:[]};
 const hardDeadline=Date.parse(process.env.ISSUE3441_JOB_DEADLINE_UTC);
-const deadline=Math.min(Date.now()+110000,Number.isFinite(hardDeadline)?hardDeadline-6*60000:Infinity);
+const keyboardProbe=process.env.ISSUE3441_KEYBOARD_SOURCE_PROBE==='1';
+const deadline=Math.min(Date.now()+(keyboardProbe?50000:110000),Number.isFinite(hardDeadline)?hardDeadline-(keyboardProbe?3:6)*60000:Infinity);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const save=()=>writeFileSync(path.join(output,'android-independent-cleanup.json'),redact(JSON.stringify(report,null,2)));
 let ownership;

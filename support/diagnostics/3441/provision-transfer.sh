@@ -4,11 +4,13 @@ test "${GITHUB_ACTIONS:-}" = true
 test "${GITHUB_REPOSITORY:-}" = ShlomoCode/localsend
 test "${ISSUE3441_ADMITTED:-}" = 1
 mkdir -p evidence/issue3441 "$RUNNER_TEMP/issue3441"
+if test "${ISSUE3441_KEYBOARD_SOURCE_PROBE:-}" != 1; then
 # BrowserStack documents an Intel binary; use Apple's supported Rosetta on ARM64.
 if ! arch -x86_64 /usr/bin/true; then
   sudo softwareupdate --install-rosetta --agree-to-license
 fi
 arch -x86_64 /usr/bin/true
+fi
 download() {
   local url="$1" target="$2" status
   status=$(curl --silent --show-error --location --retry 3 --output "$target" --write-out '%{http_code}' "$url")
@@ -17,6 +19,7 @@ download() {
   fi
   test "$status" = 200
 }
+if test "${ISSUE3441_KEYBOARD_SOURCE_PROBE:-}" != 1; then
 download https://local-downloads.browserstack.com/BrowserStackLocal-darwin-x64.zip "$RUNNER_TEMP/issue3441/browserstack-local.zip"
 test "$(shasum -a 256 "$RUNNER_TEMP/issue3441/browserstack-local.zip" | cut -d ' ' -f 1)" = bb293eeeeec062f97b380a0de077a2e5aea48b288b4bb654f8274ee6483b2d4d
 unzip -q "$RUNNER_TEMP/issue3441/browserstack-local.zip" -d "$RUNNER_TEMP/issue3441/browserstack-local"
@@ -27,6 +30,7 @@ file "$binary" > evidence/issue3441/browserstack-local-tools.txt
 shasum -a 256 "$RUNNER_TEMP/issue3441/browserstack-local.zip" "$binary" >> evidence/issue3441/browserstack-local-tools.txt
 "$binary" --version >> evidence/issue3441/browserstack-local-tools.txt 2>&1
 printf 'BROWSERSTACK_LOCAL_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
+fi
 sdk="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 test -d "$sdk"
 printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk" "$sdk" >> "$GITHUB_ENV"

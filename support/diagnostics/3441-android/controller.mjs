@@ -16,11 +16,13 @@ const elementId=e=>e['element-6066-11e4-a52e-4f735466cecf']||e.ELEMENT;
 
 export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  assert(process.env.GITHUB_RUN_ID&&process.env.ISSUE3441_ADMITTED==='1','Require explicit fork cloud transfer admission');
+ const keyboardProbe=process.env.ISSUE3441_KEYBOARD_SOURCE_PROBE==='1';
+ assert(!keyboardProbe||process.env.GITHUB_ACTIONS==='true'&&process.env.GITHUB_REPOSITORY==='ShlomoCode/localsend','Keyboard probe requires the admitted fork Actions runner');
  const username=process.env.BROWSERSTACK_USERNAME||process.env.BS_SPRINT_USERNAME,key=process.env.BROWSERSTACK_ACCESS_KEY||process.env.BS_SPRINT_ACCESS_KEY;
- for(const name of ['HELPER_APP','BASELINE_APP','RELAY_APP','BS_LOCAL_ID','RELAY_TOKEN','BROWSERSTACK_LOCAL_BINARY','ISSUE3441_JOB_DEADLINE_UTC'])assert(process.env[name],name+' required');
+ for(const name of ['HELPER_APP','BASELINE_APP','BS_LOCAL_ID','ISSUE3441_JOB_DEADLINE_UTC',...keyboardProbe?[]:['RELAY_APP','RELAY_TOKEN','BROWSERSTACK_LOCAL_BINARY']])assert(process.env[name],name+' required');
  assert(username&&key,'BrowserStack credentials required');
  mkdirSync(output,{recursive:true});
- const secrets=[username,key,username+':'+key,Buffer.from(username+':'+key).toString('base64'),process.env.RELAY_TOKEN,process.env.HELPER_APP,process.env.BASELINE_APP,process.env.RELAY_APP];
+ const secrets=[username,key,username+':'+key,Buffer.from(username+':'+key).toString('base64'),process.env.RELAY_TOKEN,process.env.HELPER_APP,process.env.BASELINE_APP,process.env.RELAY_APP].filter(Boolean);
  const redact=value=>{let text=String(value);for(const secret of secrets)text=text.replaceAll(secret,'[redacted]');return text.replace(/bs:\/\/[a-f0-9]+/gi,'[redacted app reference]');};
  const save=(name,value)=>writeFileSync(path.join(output,name),redact(typeof value==='string'?value:JSON.stringify(value,null,2)));
  const auth='Basic '+Buffer.from(username+':'+key).toString('base64');
@@ -41,14 +43,14 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  const report={status:'preparing',startedUtc:new Date().toISOString(),cases:[],actions:[],cleanupErrors:[],boundaries:['Samsung S23 Android13 differs from original Samsung model unspecified','Actual OneUI version requires native evidence','macOS15 cloud arm64 differs from reported M1 macOS12.7.6','Opaque reverse TLS cloud route differs from reported LAN','Generated207 media differ from unavailable original media; reported69 first save was approximate']};
  let session,tunnel,tunnelExited,tunnelExitPromise,sourceReads=0,screenshots=0,createAttempted=false,cleaning=false;
  const started=Date.now(),jobDeadline=Date.parse(process.env.ISSUE3441_JOB_DEADLINE_UTC);
- assert(Number.isFinite(jobDeadline)&&jobDeadline-started>=20*60000,'Require actual job deadline with20minutesremaining before allocation');
+ assert(Number.isFinite(jobDeadline)&&jobDeadline-started>=(keyboardProbe?10:20)*60000,'Insufficient actual job time before allocation');
  assert(/^\d+$/.test(process.env.GITHUB_RUN_ID)&&/^\d+$/.test(process.env.GITHUB_RUN_ATTEMPT),'Run and attempt must be numeric');
- const deadline=jobDeadline-10*60000,cleanupDeadline=jobDeadline-8*60000,buildName='issue3441-'+process.env.GITHUB_RUN_ID+'-attempt-'+process.env.GITHUB_RUN_ATTEMPT;
+ const deadline=jobDeadline-(keyboardProbe?6:10)*60000,cleanupDeadline=jobDeadline-(keyboardProbe?4:8)*60000,buildName='issue3441-'+process.env.GITHUB_RUN_ID+'-attempt-'+process.env.GITHUB_RUN_ATTEMPT;
  const privatePrefix=buildName+'-';
  const ownership={runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,buildName,localIdentifier:process.env.BS_LOCAL_ID,creationAttempted:false,session:null,tunnel:null};
  const persistOwnership=()=>{const target=path.join(output,'android-ownership.json');writeFileSync(target+'.tmp',JSON.stringify(ownership,null,2));renameSync(target+'.tmp',target);};
  persistOwnership();
- report.budget={totalMaximumMinutes:45,scenarioMaximumMinutes:35,controllerCleanupMinutes:2,externalCleanupAndUploadReservedMinutes:8,remainingJobMs:jobDeadline-started,scenarioDeadlineUtc:new Date(deadline).toISOString(),cleanupDeadlineUtc:new Date(cleanupDeadline).toISOString()};
+ report.budget={totalMaximumMinutes:keyboardProbe?20:45,scenarioMaximumMinutes:keyboardProbe?14:35,controllerCleanupMinutes:2,externalCleanupAndUploadReservedMinutes:keyboardProbe?4:8,remainingJobMs:jobDeadline-started,scenarioDeadlineUtc:new Date(deadline).toISOString(),cleanupDeadlineUtc:new Date(cleanupDeadline).toISOString()};
  report.stages=[];
  const stage=(name,detail={})=>{report.stages.push({name,utc:new Date().toISOString(),ageMs:Date.now()-started,scenarioRemainingMs:Math.max(0,deadline-Date.now()),sourceReads,screenshots,...detail});save('android-stage-budget.json',report.stages);};
  const base=()=>'/session/'+session;
@@ -164,6 +166,43 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  async function configureFavorite(){
   await click('Favorites');await click('Add');
   await snap('favorite-dialog-open-raw');
+  if(process.env.ISSUE3441_KEYBOARD_SOURCE_PROBE==='1') {
+   // Appium1.22.0 pins UiAutomator2 1.69.0/server4.24.0, whose
+   // enableMultiWindows setting includes interactive IME windows in XML.
+   // This observation stops before any keyboard or field action.
+   const probeStartedUtc=new Date().toISOString();
+   const before=await wd('GET',base()+'/appium/settings');
+   save('favorite-source-settings-before.json',before);
+   assert(typeof before.enableMultiWindows==='boolean','Original multi-window setting must be observable before mutation');
+   await wd('POST',base()+'/appium/settings',{settings:{enableMultiWindows:true}});
+   const after=await wd('GET',base()+'/appium/settings');
+   save('favorite-source-settings-after.json',after);
+   assert(after.enableMultiWindows===true,'Provider did not confirm multi-window source setting');
+   const xml=await source(),observed=nodes(xml);
+   const pixels=await snap('favorite-multiwindow-observation',xml);
+   const packages=[...new Set(observed.map(n=>n.package).filter(Boolean))];
+   const ime=observed.filter(n=>n.package==='com.samsung.android.honeyboard'&&n.displayed==='true'&&n.bounds)
+    .map(n=>({package:n.package,class:n.class,resourceId:n['resource-id'],label:label(n),bounds:n.bounds}));
+   const receipt={probeStartedUtc,utc:new Date().toISOString(),session,buildName,sourceHead:process.env.GITHUB_SHA,packages,pixels,ime,
+    sourceSha256:createHash('sha256').update(xml).digest('hex'),
+    pngSha256:createHash('sha256').update(readFileSync(path.join(output,'favorite-multiwindow-observation.png'))).digest('hex'),
+    dialogPresent:observed.some(n=>n.package===original&&label(n)==='Add to favorites'),
+    qualification:'Pending independent inspection of original PNG and actual IME bounds. Missing IME nodes do not prove a hidden keyboard.',
+    keyboardActions:0,sendActions:0,probeSettingsPosts:1,restoreSettingsPosts:0};
+   save('favorite-multiwindow-qualification.json',receipt);
+   // Restore only after the setting POST, readback, XML and PNG all completed.
+   // An ambiguous POST or incomplete observation exits before this mutation;
+   // the existing ownership-checked session DELETE remains mandatory.
+   if(before.enableMultiWindows!==after.enableMultiWindows) {
+    receipt.restoreSettingsPosts=1;save('favorite-multiwindow-qualification.json',receipt);
+    await wd('POST',base()+'/appium/settings',{settings:{enableMultiWindows:before.enableMultiWindows}});
+    const restored=await wd('GET',base()+'/appium/settings');
+    save('favorite-source-settings-restored.json',restored);
+    assert(restored.enableMultiWindows===before.enableMultiWindows,'Original multi-window setting restoration unconfirmed');
+   }
+   receipt.restoreConfirmed=true;save('favorite-multiwindow-qualification.json',receipt);
+   return receipt;
+  }
   const keyboardShown=()=>wd('POST',base()+'/execute/sync',{script:'mobile: isKeyboardShown',args:[]});
   async function visibleFields(reason) {
    const shown=await keyboardShown();assert(typeof shown==='boolean','Keyboard visibility must be observable');
@@ -265,6 +304,7 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
  try {
   const capacity=await api('plan.json');save('capacity-before-creation.json',{running:capacity.parallel_sessions_running,max:capacity.parallel_sessions_max_allowed});
   assert(capacity.parallel_sessions_running<Math.min(5,capacity.parallel_sessions_max_allowed),'No shared BrowserStack capacity');
+  if(!keyboardProbe) {
   assert(existsSync(process.env.BROWSERSTACK_LOCAL_BINARY),'Cloud BrowserStackLocal binary missing');
   let localOutput='';tunnel=spawn(process.env.BROWSERSTACK_LOCAL_BINARY,['--key',key,'--local-identifier',process.env.BS_LOCAL_ID,'--only-automate'],{stdio:['ignore','pipe','pipe']});
   for(const stream of [tunnel.stdout,tunnel.stderr])stream.on('data',chunk=>{localOutput=(localOutput+redact(chunk.toString())).slice(-30000);});
@@ -277,9 +317,12 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   const localDeadline=Date.now()+60000;while(!/You can now access your local server/.test(localOutput)){assert(tunnelExited===undefined&&Date.now()<localDeadline,'BrowserStackLocal readiness not reached');await sleep(500);}
   save('local-tunnel-ready.txt',localOutput);
   stage('local-tunnel-ready');
+  }
+  // The async capacity lookup must not consume the allocation reserve.
+  assert(!keyboardProbe||Date.now()<jobDeadline-10*60000,"Keyboard probe allocation cutoff expired after capacity observation");
   createAttempted=true;ownership.creationAttempted=true;persistOwnership();
-  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:automationName':'UiAutomator2','appium:deviceName':'Samsung Galaxy S23','appium:platformVersion':'13.0','appium:app':process.env.HELPER_APP,'appium:otherApps':[process.env.BASELINE_APP,process.env.RELAY_APP],'appium:autoGrantPermissions':false,'appium:newCommandTimeout':300,'bstack:options':{local:true,localIdentifier:process.env.BS_LOCAL_ID,projectName:'LocalSend bug sprint',buildName,sessionName:'issue3441 original Media207+retry73',debug:true,video:true,networkLogs:false}},firstMatch:[{}]}});
-  session=created.sessionId;assert(session,'Owned session ID missing');ownership.session=session;persistOwnership();save('session.json',{session,buildName});
+  const created=await wd('POST','/session',{capabilities:{alwaysMatch:{platformName:'Android','appium:automationName':'UiAutomator2','appium:deviceName':'Samsung Galaxy S23','appium:platformVersion':'13.0','appium:app':process.env.HELPER_APP,'appium:otherApps':keyboardProbe?[process.env.BASELINE_APP]:[process.env.BASELINE_APP,process.env.RELAY_APP],'appium:autoGrantPermissions':false,'appium:newCommandTimeout':300,'bstack:options':{local:!keyboardProbe,...keyboardProbe?{appiumVersion:'1.22.0'}:{localIdentifier:process.env.BS_LOCAL_ID},projectName:'LocalSend bug sprint',buildName,sessionName:keyboardProbe?'issue3441 native keyboard source observation':'issue3441 original Media207+retry73',debug:true,video:true,networkLogs:false}},firstMatch:[{}]}});
+  session=created.sessionId;assert(session,'Owned session ID missing');ownership.session=session;persistOwnership();save('session.json',{session,buildName,requestedAppiumVersion:keyboardProbe?'1.22.0':null,returnedAppiumVersion:created.capabilities?.appiumVersion||created.capabilities?.['appium:appiumVersion']||null});
   stage('owned-session-created');
   await activate(fixture);
   await click('Stage and verify all fixtures');
@@ -292,6 +335,16 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   for(const item of actual.files){const expected=files.get(item.name);assert(expected&&item.bytes===expected.bytes&&item.sha256===expected.sha256&&item.decodedWidth>0&&item.decodedHeight>0,'Native source hash/decode mismatch');}
   await snap('source-fixtures-verified',staged);
   stage('all208-native-readback-hash-and-decode-complete');
+  if(keyboardProbe) {
+   stage('keyboard-probe-control-picker-start');
+   await click('Expose control album');await wait(xml=>xml.includes('FIXTURE_CASE_READY')&&xml.includes('control'));
+   await activate(original);await click('Send\nTab 2 of 3');
+   report.probeSelection=await selectMedia(cases[0]);
+   report.keyboardObservation=await configureFavorite();
+   report.status='completed-keyboard-source-observation';
+   report.productExperiments=0;stage('keyboard-probe-stopped-before-dismissal-and-send');
+   return report;
+  }
   await activate(transport);await click('Relay from LocalSend');
   let observedRelay;
   const relayReady=await wait(xml=>nodes(xml).some(n=>{
