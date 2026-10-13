@@ -38,10 +38,36 @@ function Find-Control($App,$Name,[int]$Type=0,[long]$Hwnd=0,[int]$Seconds=10) {
  if($a.Count -gt 1){throw "ENV_BLOCK: ambiguous named control $Name"};if($a.Count -eq 1){return $a[0]};Start-Sleep -Milliseconds 250}while([DateTime]::UtcNow -lt $end)
  Save-Desktop "$script:Stage-missing-control";throw "ENV_BLOCK: unavailable named control $Name"
 }
+function Find-Navigation($App,[ValidateSet('Receive','Send','Settings')][string]$Tab) {
+ $end=[DateTime]::UtcNow.AddSeconds(10)
+ do {
+  $tree=@(Snapshot $App);$views=@($tree|Where-Object {$_.ClassName -eq 'FLUTTERVIEW' -and $_.Pid -eq $App.Id})
+  $rail=@()
+  if($views.Count -eq 1){
+   $view=$views[0]
+   foreach($name in @("Receive`nTab 1 of 3","Send`nTab 2 of 3","Settings`nTab 3 of 3")){
+    $matches=@($tree|Where-Object {$_.Name -ceq $name -and $_.Type -eq 50000 -and $_.Enabled -and $_.Pid -eq $App.Id})
+    if($matches.Count -gt 1){throw 'ENV_BLOCK: ambiguous native navigation button'}
+    if($matches.Count -eq 1){
+     $c=$matches[0]
+     if($c.Left -lt $view.Left -or $c.Right -gt $view.Right -or $c.Top -lt $view.Top -or $c.Bottom -gt $view.Bottom){throw 'ENV_BLOCK: navigation bounds outside live Flutter client'}
+     $rail+=$c
+    }
+   }
+  }
+  if($rail.Count -eq 3){
+   Write-Event navigationBinding @{App=$App;View=$view;AllThree=$rail;Requested=$Tab;ExactRenderedNames=$true;Type=50000}
+   $index=@('Receive','Send','Settings').IndexOf($Tab);return $rail[$index]
+  }
+  Start-Sleep -Milliseconds 250
+ }while([DateTime]::UtcNow -lt $end)
+ Save-Desktop "$script:Stage-missing-navigation";throw 'ENV_BLOCK: complete unique three-button navigation unavailable'
+}
+function Click-Navigation($App,[ValidateSet('Receive','Send','Settings')][string]$Tab) {Click-Control $App (Find-Navigation $App $Tab)}
 function Click-Control($App,$Control,[long]$Hwnd=0) {
  $h=Focus-App $App $Hwnd
- if($Control.Pid -ne $App.Id){throw "ENV_BLOCK: click ownership mismatch"}
- $live=@(Snapshot $App $h|Where-Object {$_.Name -eq $Control.Name -and $_.Type -eq $Control.Type -and $_.Left -eq $Control.Left -and $_.Top -eq $Control.Top -and $_.Right -eq $Control.Right -and $_.Bottom -eq $Control.Bottom})
+ if($Control.Pid -ne $App.Id -or -not $Control.Enabled){throw "ENV_BLOCK: click ownership mismatch"}
+ $live=@(Snapshot $App $h|Where-Object {$_.Name -ceq $Control.Name -and $_.Type -eq $Control.Type -and $_.Enabled -and $_.Left -eq $Control.Left -and $_.Top -eq $Control.Top -and $_.Right -eq $Control.Right -and $_.Bottom -eq $Control.Bottom})
  if($live.Count -ne 1){throw "ENV_BLOCK: live uniquely bound input target changed"}
  $x=[int](($Control.Left+$Control.Right)/2);$y=[int](($Control.Top+$Control.Bottom)/2)
  if(-not [Issue3456Native]::SetCursorPos($x,$y)){throw "ENV_BLOCK: cursor input failed"}

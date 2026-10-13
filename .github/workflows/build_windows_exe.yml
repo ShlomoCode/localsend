@@ -15,7 +15,7 @@ jobs:
   official-pair:
     if: github.repository == 'ShlomoCode/localsend' && github.ref == 'refs/heads/codex/diagnose-3536-round1' && inputs.confirmation == 'RUN-3536-OFFICIAL-PAIR'
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - name: Start absolute task clock
         timeout-minutes: 1
@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         timeout-minutes: 2
       - name: Run untouched official applications through native UI
-        timeout-minutes: 19
+        timeout-minutes: 14
         shell: powershell
         run: |
           & support/diagnostics/3536/supervise.ps1 -Evidence $env:DIAG_EVIDENCE -StartedUtc ([DateTime]$env:DIAG_STARTED_UTC)

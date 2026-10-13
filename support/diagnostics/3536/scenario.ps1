@@ -126,14 +126,14 @@ function Launch-App($Role,$Port,$Destination){
  if($p.MainWindowHandle -eq 0){throw "ENV_BLOCK: owned app HWND absent"}
  if($p.Path -ne $exe){throw "ENV_BLOCK: actual executable path differs from launch receipt"}
  $a.Hwnd=$p.MainWindowHandle.ToInt64();Json $script:Owned owned-apps;Focus-App $a|Out-Null;Save-Desktop "$Role-launched"
- Find-Control $a Receive|Out-Null
+ Find-Navigation $a Receive|Out-Null
  $end=[DateTime]::UtcNow.AddSeconds(20)
  do{$listen=@(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue|Where-Object OwningProcess -eq $a.Id);if($listen){break};Check-Budget;Start-Sleep -Milliseconds 300}while([DateTime]::UtcNow -lt $end)
  Json $listen "$Role-listening";if(-not $listen){throw "ENV_BLOCK: assigned port not owned by actual app"}
  return $a
 }
 function Add-Favorite($App){
- Click-Name $App Send;Click-Name $App Favorites;Click-Name $App Add
+ Click-Navigation $App Send;Click-Name $App Favorites;Click-Name $App Add
  Find-Control $App "Add to favorites"|Out-Null
  $tree=@(Snapshot $App);$fields=@($tree|Where-Object Type -eq 50004|Sort-Object Top)
  $labels=@("Device name","IP Address","Port")
@@ -171,7 +171,7 @@ function Transfer($Kind,$Destination){
  if($r.CertificateHash -eq $script:SenderIdentity){throw "ENV_BLOCK: independent app identities not established"}
  if($Kind -eq "english"){Add-Favorite $script:Sender}
  $name=if($Kind -eq "english"){$script:Fixture.english}else{$script:Fixture.japanese}
- Click-Name $script:Sender Send
+ Click-Navigation $script:Sender Send
  Pick-File $script:Sender (Join-Path "C:\s3536\s" $name)
  Click-Name $script:Sender Favorites
  Start-Clip "$Kind-send-accept"

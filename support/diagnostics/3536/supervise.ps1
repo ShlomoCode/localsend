@@ -1,7 +1,7 @@
 param([Parameter(Mandatory)] [string]$Evidence, [Parameter(Mandatory)] [DateTime]$StartedUtc)
 $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force $Evidence | Out-Null
-$deadline = $StartedUtc.ToUniversalTime().AddMinutes(19)
+$deadline = $StartedUtc.ToUniversalTime().AddMinutes(14)
 Start-Transcript (Join-Path $Evidence supervisor-original.txt)
 function New-ExitReceipt($Process, $Name, $ExpectedPath) {
     try { $cachedHandle = $Process.Handle; $handleError = $null }
@@ -43,7 +43,7 @@ function Wait-ToolExit($Process, $Receipt, $Milliseconds) {
     if ($Receipt.Status -eq "EXIT_NONZERO") { throw "ENV_BLOCK: $($Receipt.Name) exited with exact code $($Receipt.ExitCodeValue)" }
 }
 try {
-    # Tool setup remains inside the 19-minute absolute task budget.
+    # Tool setup remains inside the 14-minute absolute task budget.
     if (-not (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue)) {
         $setupDeadline = [DateTime]::UtcNow.AddSeconds(90)
         if ($setupDeadline -gt $deadline) { $setupDeadline = $deadline }
@@ -130,7 +130,7 @@ try {
             $cleanupStatus = if ($workerReceipt.WaitBoolean -eq $true -and $workerReceipt.HasExited -eq $true -and $workerReceipt.ExitCodeType -eq "System.Int32" -and -not $workerReceipt.ExitCodeIsNull) { "ORIGINAL_WORKER_EXIT_CONFIRMED" } else { "UNKNOWN" }
             @{ Status = $cleanupStatus; HistoricalWorker1568 = "UNVERIFIED: this new observation does not establish historical cleanup"; Process = $workerReceipt; ObservedUtc = [DateTime]::UtcNow.ToString("o"); Errors = $cleanupErrors; FinalIdentity = if ($liveWorker) { $liveWorker | Select-Object Id,Path,StartTime } else { $null } } |
                 ConvertTo-Json -Depth 10 | Set-Content (Join-Path $Evidence worker-cleanup-final.json) -Encoding UTF8
-            [ordered]@{ Status = "ENV_BLOCK"; Error = "19-minute absolute task budget exhausted; at least five minutes of cleanup/upload reserve retained"; ProductVerdict = "NONE" } |
+            [ordered]@{ Status = "ENV_BLOCK"; Error = "14-minute absolute task budget exhausted; at least five minutes of cleanup/upload reserve retained"; ProductVerdict = "NONE" } |
                 ConvertTo-Json | Set-Content (Join-Path $Evidence supervisor-timeout.json)
             exit 2
         }
