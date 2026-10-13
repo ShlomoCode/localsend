@@ -169,7 +169,8 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
   if(process.env.ISSUE3441_KEYBOARD_SOURCE_PROBE==='1') {
    // Appium1.22.0 pins UiAutomator2 1.69.0/server4.24.0, whose
    // enableMultiWindows setting includes interactive IME windows in XML.
-   // This observation stops before any keyboard or field action.
+   // The observation-only path stops here; the separately admitted dismissal
+   // path may issue one native Back after fresh positive keyboard evidence.
    const probeStartedUtc=new Date().toISOString();
    const before=await wd('GET',base()+'/appium/settings');
    save('favorite-source-settings-before.json',before);
@@ -190,6 +191,46 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
     qualification:'Pending independent inspection of original PNG and actual IME bounds. Missing IME nodes do not prove a hidden keyboard.',
     keyboardActions:0,sendActions:0,probeSettingsPosts:1,restoreSettingsPosts:0};
    save('favorite-multiwindow-qualification.json',receipt);
+   if(process.env.ISSUE3441_KEYBOARD_DISMISS_PROBE==='1') {
+    const state=await settledUi(original);
+    const picture=await snap('favorite-back-before',state.xml);
+    const finalXml=await source();save('favorite-back-before-final.xml',finalXml);
+    assert(await wd('GET',base()+'/appium/device/current_package')===original,'Original favorite app must remain active before Back');
+    const signatures=[];
+    for(const sample of [state.xml,finalXml]) {
+     const current=nodes(sample),fullImage={width:picture.width,height:picture.height};
+     const title=current.filter(n=>n.package===original&&label(n)==='Add to favorites'&&n.displayed==='true'&&n.bounds);
+     const fields=current.filter(n=>n.package===original&&n.class==='android.widget.EditText'&&n.enabled==='true'&&n.displayed==='true'&&n.bounds).sort((a,b)=>rect(a).y-rect(b).y);
+     const keyboard=current.filter(n=>n.package==='com.samsung.android.honeyboard'&&n['resource-id']==='com.samsung.android.honeyboard:id/layout_honeyboard'&&n.displayed==='true'&&n.bounds);
+     const back=current.filter(n=>n.package==='com.android.systemui'&&n['resource-id']==='com.android.systemui:id/back'&&label(n)==='Back'&&n.enabled==='true'&&n.displayed==='true'&&n.clickable==='true'&&n.bounds);
+     assert(title.length===1&&fields.length===2&&fields[1].focused==='true','Expected favorite dialog with autofocus and clipped Port before single Back');
+     assert(keyboard.length===1&&inBounds(rect(keyboard[0]),fullImage),'Positive native Samsung IME window required before single Back');
+     assert(back.length===1&&inBounds(rect(back[0]),fullImage),'Unique live SystemUI Back must fit the full PNG before its ordinary key action');
+     const keys=['1','q','Enter'].map(text=>current.filter(n=>n.package==='com.samsung.android.honeyboard'&&label(n)===text&&n.displayed==='true'&&n.bounds));
+     assert(keys.every(matches=>matches.length>=1&&matches.every(n=>inBounds(rect(n),fullImage))),'Positive displayed keyboard keys required before single Back');
+     signatures.push(JSON.stringify({title:title[0].bounds,fields:fields.map(n=>({bounds:n.bounds,focused:n.focused})),keyboard:keyboard[0].bounds,back:back[0].bounds,keys:keys.map(matches=>matches.map(n=>n.bounds))}));
+    }
+    assert(signatures[0]===signatures[1]&&picture.width===state.geometry.width&&picture.height>=state.geometry.height,'Pictured dialog and fresh native keyboard layout must agree');
+    receipt.keyboardActions=1;receipt.backAttemptUtc=new Date().toISOString();save('favorite-multiwindow-qualification.json',receipt);
+    report.actions.push({utc:receipt.backAttemptUtc,reason:'One native Back after positive Samsung IME and favorite dialog',keycode:4,preActionXml:'favorite-back-before-final.xml',preActionScreenshot:'favorite-back-before.png'});
+    await wd('POST',base()+'/appium/device/press_keycode',{keycode:4});
+    const post=await settledUi(original,n=>n.package===original&&label(n)==='Add to favorites');
+    const postNodes=nodes(post.xml),fields=postNodes.filter(n=>n.package===original&&n.class==='android.widget.EditText'&&n.enabled==='true'&&n.displayed==='true'&&n.bounds).sort((a,b)=>rect(a).y-rect(b).y);
+    const postPicture=await snap('favorite-back-after',post.xml);
+    assert(postPicture.width===post.geometry.width&&postPicture.height>=post.geometry.height&&postPicture.width<postPicture.height,'Post-Back PNG must agree with observed portrait geometry');
+    assert(fields.length===3&&fields.every(n=>inBounds(rect(n),post.geometry)),'After one Back the original dialog must expose all three complete fields');
+    for(const [i,text] of ['Device name','IP Address','Port'].entries()) {
+     const labels=postNodes.filter(n=>n.package===original&&label(n)===text&&n.displayed==='true'&&n.bounds);
+     assert(labels.length===1&&inBounds(rect(labels[0]),post.geometry)&&rect(labels[0]).y+rect(labels[0]).height<=rect(fields[i]).y,'After Back favorite field label/order mismatch');
+    }
+    receipt.afterBack={utc:new Date().toISOString(),dialogPresent:true,fields:fields.map(n=>({bounds:n.bounds,text:n.text,focused:n.focused})),pixels:postPicture,
+     displayedIMENodes:postNodes.filter(n=>n.package==='com.samsung.android.honeyboard'&&n.displayed==='true').length,
+     sourceSha256:createHash('sha256').update(post.xml).digest('hex'),pngSha256:createHash('sha256').update(readFileSync(path.join(output,'favorite-back-after.png'))).digest('hex'),
+     qualification:'Positive complete dialog/Port fields retained. Keyboard absence requires independent original PNG inspection; missing IME nodes alone do not prove it.'};
+    save('favorite-multiwindow-qualification.json',receipt);
+    // Native absence is necessary; the independent full PNG/dialog gate is still required.
+    assert(receipt.afterBack.displayedIMENodes===0,'Displayed Samsung IME remains after one Back; do not repeat the action');
+   }
    // Restore only after the setting POST, readback, XML and PNG all completed.
    // An ambiguous POST or incomplete observation exits before this mutation;
    // the existing ownership-checked session DELETE remains mandatory.
@@ -341,8 +382,8 @@ export async function runAndroidSender({output,fixtureDirectory,receiver}) {
    await activate(original);await click('Send\nTab 2 of 3');
    report.probeSelection=await selectMedia(cases[0]);
    report.keyboardObservation=await configureFavorite();
-   report.status='completed-keyboard-source-observation';
-   report.productExperiments=0;stage('keyboard-probe-stopped-before-dismissal-and-send');
+   report.status=process.env.ISSUE3441_KEYBOARD_DISMISS_PROBE==='1'?'completed-single-back-source-observation':'completed-keyboard-source-observation';
+   report.productExperiments=0;stage(process.env.ISSUE3441_KEYBOARD_DISMISS_PROBE==='1'?'single-back-probe-stopped-before-field-input-and-send':'keyboard-probe-stopped-before-dismissal-and-send');
    return report;
   }
   await activate(transport);await click('Relay from LocalSend');
