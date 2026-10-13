@@ -209,9 +209,9 @@ wait_for_window() {
         width=$(printf '%s\n' "$geometry" | sed -n 's/^WIDTH=//p')
         height=$(printf '%s\n' "$geometry" | sed -n 's/^HEIGHT=//p')
         if [[ "$width" =~ ^[0-9]+$ && "$height" =~ ^[0-9]+$ ]]; then
-          printf 'Origin first-run free option: window=%s width=%s height=%s click=%s,%s\n' "$origin_window" "$width" "$height" "$((width/2))" "$((height-80))" > "$OUT/brave-$label-onboarding-action.txt"
+          printf 'Origin first-run free option: window=%s width=%s height=%s click=%s,%s\n' "$origin_window" "$width" "$height" "$((width/2))" "$((height-112))" > "$OUT/brave-$label-onboarding-action.txt"
           xdotool windowactivate --sync "$origin_window" 2>/dev/null || true
-          xdotool mousemove --window "$origin_window" "$((width/2))" "$((height-80))" click 1 2>/dev/null || true
+          xdotool mousemove --window "$origin_window" "$((width/2))" "$((height-112))" click 1 2>/dev/null || true
           onboarding_clicked=1
         fi
       fi
