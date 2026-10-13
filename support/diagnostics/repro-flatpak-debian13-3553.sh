@@ -43,7 +43,6 @@ fi
 
 runuser -u probe -- env \
   HOME=/home/probe USER=probe LOGNAME=probe \
-  G_MESSAGES_DEBUG=all \
   XDG_RUNTIME_DIR=/run/user/1000 XDG_CURRENT_DESKTOP=OPENBOX XDG_SESSION_TYPE=x11 \
   GITHUB_WORKSPACE=/repo OUT=/evidence GUI_MODE=virtual \
   EXPECTED_APP_COMMIT=a7a6bc3f9debbbfd90c2e8874a83a5606db10b53dffc187449b0684991e7740c \
