@@ -139,15 +139,38 @@ function Assert-OwnedAbsent($App){
  $live=Get-Process -Id $App.Id -ErrorAction SilentlyContinue
  if($live -and $live.Path -eq $App.Path -and $live.StartTime.ToUniversalTime().ToString("o") -eq $App.StartUtc){throw "ENV_BLOCK: exact owned process survives; profile reuse prohibited"}
 }
-function Stop-Owned($App){
- if(-not $App){return};$receipt=@{App=$App;GraceWait=$null;ForceWait=$null;HasExited=$null;OwnedAbsent=$false;Status="UNKNOWN";Errors=@()}
+function Stop-Owned($App,[switch]$RequireGraceful){
+ if(-not $App){return}
+ $attempt=[Guid]::NewGuid().ToString('N');$receiptPath=Join-Path $Evidence "stop-$($App.Id)-$attempt.json"
+ $receipt=@{App=$App;Attempt=$attempt;ReceiptPath=$receiptPath;RequireGraceful=[bool]$RequireGraceful;StartedUtc=[DateTime]::UtcNow.ToString('o');CompletedUtc=$null;CloseRequested=$null;HandleAcquired=$false;GraceWait=$null;ForceWait=$null;HasExited=$null;ExitCodeType=$null;ExitCodeValue=$null;OwnedAbsent=$false;Status='UNKNOWN';Errors=@()}
  try{
   $p=Get-Process -Id $App.Id -ErrorAction SilentlyContinue
-  if($p -and $p.Path -eq $App.Path -and $p.StartTime.ToUniversalTime().ToString("o") -eq $App.StartUtc){
-   $null=$p.Handle;$p.CloseMainWindow()|Out-Null;$receipt.GraceWait=$p.WaitForExit(3000)
-   if(-not $receipt.GraceWait){$p.Kill();$receipt.ForceWait=$p.WaitForExit(3000)}
+  $same=$p -and $p.Path -eq $App.Path -and $p.StartTime.ToUniversalTime().ToString('o') -eq $App.StartUtc
+  if($same){
+   $h=$p.Handle;$receipt.HandleAcquired=$h -ne [IntPtr]::Zero
+   if(-not $receipt.HandleAcquired){throw 'ENV_BLOCK: stop original process handle unavailable'}
+   $receipt.CloseRequested=$p.CloseMainWindow()
+   if($RequireGraceful -and -not $receipt.CloseRequested){throw 'ENV_BLOCK: ordinary close request not accepted; no replay launch'}
+   $receipt.GraceWait=$p.WaitForExit(3000)
+   if(-not $receipt.GraceWait){
+    if($RequireGraceful){throw 'ENV_BLOCK: ordinary close did not exit within deadline; no replay launch'}
+    # Forced termination is available only to failure/final cleanup callers.
+    $p.Kill();$receipt.ForceWait=$p.WaitForExit(3000)
+   }
    $receipt.HasExited=$p.HasExited
-  }
-  Assert-OwnedAbsent $App;$receipt.OwnedAbsent=$true;$receipt.Status="OWNED_ABSENT"
- }catch{$receipt.Errors+="$_";throw}finally{Json $receipt "cleanup-$($App.Id)"}
+   if($receipt.HasExited){$code=$p.ExitCode;if($null -ne $code){$receipt.ExitCodeType=$code.GetType().FullName;$receipt.ExitCodeValue=$code}}
+  }elseif($RequireGraceful){throw 'ENV_BLOCK: exact process absent before ordinary close; no replay launch'}
+  Assert-OwnedAbsent $App;$receipt.OwnedAbsent=$true
+  if($RequireGraceful){
+   if($receipt.CloseRequested -ne $true -or $receipt.GraceWait -ne $true -or $receipt.HasExited -ne $true -or $receipt.ExitCodeType -ne 'System.Int32' -or $receipt.ExitCodeValue -ne 0 -or $null -ne $receipt.ForceWait){throw 'ENV_BLOCK: exact normal exit zero not proven; no replay launch'}
+   $receipt.Status='GRACEFUL_EXIT_ZERO'
+  }else{$receipt.Status='OWNED_ABSENT'}
+ }catch{$receipt.Status='STOP_FAILED';$receipt.Errors+="$_";throw}finally{
+  $receipt.CompletedUtc=[DateTime]::UtcNow.ToString('o')
+  # CreateNew prevents final cleanup or a repeated PID from overwriting this attempt.
+  $file=[IO.File]::Open($receiptPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+  $writer=[IO.StreamWriter]::new($file,[Text.UTF8Encoding]::new($false))
+  try{$writer.Write(($receipt|ConvertTo-Json -Depth 16))}finally{$writer.Dispose()}
+ }
+ return [pscustomobject]$receipt
 }

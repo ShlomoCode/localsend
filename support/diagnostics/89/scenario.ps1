@@ -81,10 +81,11 @@ function Edit-Alias([string]$Expected,[string]$Target){
  if(@($receiveTree|Where-Object {$_.Name -ceq $Target -and $_.Type -eq 50000}).Count -ne 0){throw 'ENV_BLOCK: Settings alias button persists after Receive input'}
  Observe "$script:Stage-receive-transition"
  Click-Control $script:App (Find-SettingsNavigation $script:App);$null=Bind-Alias $Target;Observe "$script:Stage-same-pid-responsive"
- $before=$script:App;Stop-Owned $before
+ $before=$script:App;$normalStop=Stop-Owned $before -RequireGraceful
+ if($normalStop.Status -ne 'GRACEFUL_EXIT_ZERO'){throw 'ENV_BLOCK: relaunch requires exact graceful exit zero receipt'}
  $script:App=Launch-App app 53089 C:\s89 (Join-Path $PSScriptRoot scenario.ps1) -PreserveProfile
  Settings;$null=Bind-Alias $Target;Observe "$script:Stage-relaunch-persisted"
- $script:Results+=@{Condition=$script:Stage;Target=$Target;Units=Codes $Target;Before=$before;After=$script:App;PasteQualified=$true;SamePidResponsive=$true;PersistedRelaunch=$true;Status='CURRENT_RELEASE_NON_REPRODUCTION'}
+ $script:Results+=@{Condition=$script:Stage;Target=$Target;Units=Codes $Target;Before=$before;NormalStop=$normalStop;After=$script:App;PasteQualified=$true;SamePidResponsive=$true;PersistedRelaunch=$true;Status='CURRENT_RELEASE_NON_REPRODUCTION'}
  Json $script:Results conditions
 }
 try{
@@ -110,4 +111,4 @@ try{Observe "$script:Stage-exception"}catch{Json @{Error="$_";App=$script:App;Ob
  $_|Format-List * -Force|Out-File (Join-Path $Evidence scenario-original-error.txt)
  $product=$script:QualifiedInput -and ("$_" -like 'PRODUCT_FAILURE:*')
  Json @{Status=if($product){'CURRENT_RELEASE_FAILURE_NEEDS_REVIEW'}else{'ENV_BLOCK'};Error="$_";Stage=$script:Stage;QualifiedInput=$script:QualifiedInput;CompletedConditions=$script:Results;ProductExperiments=$script:Results.Count;HistoricalOutcome='UNRESOLVED'} final-result;exit 2
-}finally{try{Stop-Clip}catch{};foreach($a in $script:Owned){try{Stop-Owned $a}catch{Json @{App=$a;Error="$_"} "cleanup-error-$($a.Id)"}};Stop-Transcript}
+}finally{try{Stop-Clip}catch{};foreach($a in $script:Owned){try{Stop-Owned $a|Out-Null}catch{Json @{App=$a;Error="$_"} "cleanup-error-$($a.Id)"}};Stop-Transcript}
