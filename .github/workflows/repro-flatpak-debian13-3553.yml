@@ -1,0 +1,39 @@
+name: Reproduce LocalSend 3553 on Debian 13
+
+on:
+  push:
+    branches: [codex/repro-flatpak-debian13-3553]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debian13:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare evidence directory
+        run: |
+          mkdir -p reproduction/debian13
+          chmod 0777 reproduction/debian13
+      - name: Run released app and Flatpak inside Debian 13
+        run: |
+          docker run --rm --privileged --security-opt seccomp=unconfined \
+            --shm-size=1g \
+            -v "$PWD:/repo:ro" \
+            -v "$PWD/reproduction/debian13:/evidence" \
+            debian:13 bash /repo/support/diagnostics/repro-flatpak-debian13-3553.sh
+      - name: Show per-case outcomes
+        if: always()
+        run: |
+          cat reproduction/debian13/summary.tsv 2>/dev/null || true
+          cat reproduction/debian13/infrastructure-failures.txt 2>/dev/null || true
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: localsend-3553-debian13
+          path: reproduction/debian13/
+          if-no-files-found: error
