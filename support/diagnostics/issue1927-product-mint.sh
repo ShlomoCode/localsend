@@ -21,7 +21,7 @@ owned_qemu() {
   [[ $(process_ticks "$QEMU_PID") == "$QEMU_TICKS" && $(cat "/proc/$QEMU_PID/comm") == qemu-system-x86* ]]
 }
 collect() {
-  local result=$? collected=not_attempted
+  local result=$? collected=not_attempted observed_ticks observed_rc
   trap - EXIT; trap '' TERM INT
   set +e
   if [[ -f /tmp/issue1927-mint/id ]]; then
@@ -30,10 +30,38 @@ collect() {
   fi
   printf 'harness_exit=%s\nguest_collect_exit=%s\n' "$result" "$collected" > evidence/cloud/result.txt
   if owned_qemu; then
-    sudo kill -TERM "$QEMU_PID"
+    printf 'pid=%s start=%s signal=TERM\n' "$QEMU_PID" "$QEMU_TICKS" > evidence/cloud/qemu-cleanup.txt
+    sudo kill -TERM "$QEMU_PID"; printf 'term_exit=%s\n' "$?" >> evidence/cloud/qemu-cleanup.txt
     for attempt in 1 2 3 4 5; do owned_qemu || break; sleep 1; done
-    if owned_qemu; then sudo kill -KILL "$QEMU_PID"; fi
+    if owned_qemu; then
+      sudo kill -KILL "$QEMU_PID"; printf 'kill_exit=%s\n' "$?" >> evidence/cloud/qemu-cleanup.txt
+      for attempt in 1 2 3 4 5; do owned_qemu || break; sleep .1; done
+    fi
   fi
+  if [[ -z $QEMU_PID || -z $QEMU_TICKS ]]; then
+    printf 'owned_vm_started=false\n' >> evidence/cloud/qemu-cleanup.txt
+  elif [[ ! -e /proc/$QEMU_PID/stat ]]; then
+    printf 'owned_vm_absent=true pid=%s start=%s\n' "$QEMU_PID" "$QEMU_TICKS" >> evidence/cloud/qemu-cleanup.txt
+  else
+    cat "/proc/$QEMU_PID/stat" > evidence/cloud/qemu-cleanup-final-stat.txt
+    observed_rc=0
+    observed_ticks=$(process_ticks "$QEMU_PID") || observed_rc=$?
+    printf 'final_start_read_exit=%s observed_start=%s\n' "$observed_rc" "$observed_ticks" >> evidence/cloud/qemu-cleanup.txt
+    if [[ $observed_rc != 0 || ! $observed_ticks =~ ^[0-9]+$ ]]; then
+      if [[ ! -e /proc/$QEMU_PID/stat ]]; then
+        printf 'owned_vm_absent=true reason=disappeared_after_read\n' >> evidence/cloud/qemu-cleanup.txt
+      else
+        printf 'owned_vm_absent=UNKNOWN reason=start_read_failed\n' >> evidence/cloud/qemu-cleanup.txt
+        result=40
+      fi
+    elif [[ $observed_ticks != "$QEMU_TICKS" ]]; then
+      printf 'owned_vm_absent=true reason=pid_reused observed_start=%s\n' "$observed_ticks" >> evidence/cloud/qemu-cleanup.txt
+    else
+      printf 'owned_vm_absent=false observed_start=%s\n' "$observed_ticks" >> evidence/cloud/qemu-cleanup.txt
+      result=40
+    fi
+  fi
+  printf 'final_exit=%s\n' "$result" >> evidence/cloud/qemu-cleanup.txt
   exit "$result"
 }
 trap collect EXIT

@@ -223,20 +223,58 @@ owned_launch() {
   printf '%s launcher_pid=%s start=%s command=' "$(date -u --iso-8601=ns)" "$launcher_pid" "$launcher_ticks" >> "$OUT/launchers.txt"
   printf '%q ' "$@" >> "$OUT/launchers.txt"; printf '\n' >> "$OUT/launchers.txt"
 }
+foreground_observation() {
+  local label=$1 active_hex active
+  run xprop -root _NET_ACTIVE_WINDOW > "$OUT/$label-active-before.txt" || return 2
+  active_hex=$(run awk '{print $NF}' "$OUT/$label-active-before.txt") || return 2
+  [[ $active_hex =~ ^0x[0-9a-fA-F]+$ ]] || return 2
+  active=$(printf '%d' "$active_hex") || return 2
+  [[ $active == "$wid" ]] || return 1
+  run xdotool getwindowgeometry --shell "$wid" > "$OUT/$label-foreground-geometry.txt" || return 2
+  run import -window root "$OUT/$label-foreground-root.png" || return 2
+  run import -window "$wid" "$OUT/$label-foreground-client.png" || return 2
+  run xprop -root _NET_ACTIVE_WINDOW > "$OUT/$label-active-after.txt" || return 2
+  active_hex=$(run awk '{print $NF}' "$OUT/$label-active-after.txt") || return 2
+  [[ $active_hex =~ ^0x[0-9a-fA-F]+$ ]] || return 2
+  active=$(printf '%d' "$active_hex") || return 2
+  [[ $active == "$wid" ]] || return 1
+  # Native focus alone does not prove complete paint or lack of obscuration.
+  # Root must inspect these full originals before accepting condition 3.
+  printf 'native_foreground_observed=true window=%s active_before_after=%s full_render_visual_acceptance=PENDING\n' "$wid" "$active" > "$OUT/$label-foreground-result.txt"
+}
 await_visible() {
-  local label=$1 attempt=0 result=0
+  local label=$1 prior=${2:-} attempt=0 result pid probe windows foreground_rc
   while ((SECONDS<PHASE_DEADLINE)); do
-    attempt=$((attempt+1)); result=0
-    run xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/$label-visible-$attempt.txt" 2> "$OUT/$label-visible-$attempt.stderr" || result=$?
-    [[ ! -s $OUT/$label-visible-$attempt.stderr ]]
-    if [[ $result == 0 ]]; then
-      wid=$(run cat "$OUT/$label-visible-$attempt.txt"); [[ $wid =~ ^[0-9]+$ ]]
-      phase_sleep 1
-      wait_rendered_application "$label"
-      visible_identity "$label"
-      return
+    attempt=$((attempt+1)); result=0; probe="$label-observation-$attempt"
+    pid=$(qualified_app_pid "$probe" "$PHASE_DEADLINE") || result=$?
+    printf 'qualification_exit=%s\n' "$result" > "$OUT/$probe-qualification-result.txt"
+    if [[ $result != 0 ]]; then
+      # Wait only for a fully recorded zero-leaf observation. Incomplete
+      # qualification or contradictory process evidence stops the condition.
+      [[ $result == 1 ]]
+      run grep -Eq '^examined_rows=[0-9]+ unique_qualified_leaves=0$' "$OUT/$probe-instance-selection.txt"
+      phase_sleep .2; continue
     fi
-    [[ $result == 1 ]]; phase_sleep .5
+    [[ -z $prior ]] || cmp "$OUT/$prior-process-identity.txt" "$OUT/$probe-process-identity.txt"
+    local identity_label=$probe transition_deadline=$PHASE_DEADLINE
+    owned_window_rows "$probe" "$pid" > "$OUT/$probe-attributes.txt"
+    windows=$(run awk '$3==2 {print $1}' "$OUT/$probe-attributes.txt")
+    run import -window root "$OUT/$probe-desktop.png"
+    if [[ -z $windows ]]; then phase_sleep .2; continue; fi
+    [[ $windows =~ ^[0-9]+$ ]]
+    wid=$windows
+    run import -window "$wid" "$OUT/$probe-window.png"
+    wait_rendered_application "$label"
+    visible_identity "$label"
+    [[ -z $prior ]] || cmp "$OUT/$prior-process-identity.txt" "$OUT/$label-process-identity.txt"
+    if [[ -n $prior ]]; then
+      foreground_rc=0
+      foreground_observation "$probe" || foreground_rc=$?
+      printf 'foreground_exit=%s\n' "$foreground_rc" > "$OUT/$probe-foreground-query-result.txt"
+      if [[ $foreground_rc == 1 ]]; then phase_sleep .2; continue; fi
+      [[ $foreground_rc == 0 ]]
+    fi
+    return
   done
   return 124
 }
@@ -400,13 +438,19 @@ observe_state baseline-reopened OBSERVE
 close_app baseline-login-close
 relogin baseline-login
 login_absence baseline-login
+# Repeat the unchanged failing login independently, without changing bytes.
+run sha256sum "$ENTRY" > "$OUT/baseline-before-repeat-entry.sha256"
+relogin baseline-login-repeat
+login_absence baseline-login-repeat
+run sha256sum "$ENTRY" > "$OUT/baseline-after-repeat-entry.sha256"
+cmp "$OUT/baseline-before-repeat-entry.sha256" "$OUT/baseline-after-repeat-entry.sha256"
 # Positive harness control: the unchanged exported desktop launcher must work.
 run cat "$HOME/.local/share/flatpak/exports/share/applications/$APP.desktop" > "$OUT/baseline-exported-launcher.desktop"
 owned_launch baseline-exported gtk-launch "$APP"
 await_visible baseline-exported
 open_settings baseline-exported
 close_app baseline-exported
-condition_pass 'baseline enable writes exact legacy Exec; reopen state observed; real-login absent; exported launcher qualifies harness'
+condition_pass 'baseline enable writes exact legacy Exec; reopen state observed; two independent real-logins absent; exported launcher qualifies harness'
 current_condition=2-candidate-visible
 # Package change requires the previous qualified app to have actually exited.
 no_instance candidate-package-change
@@ -441,21 +485,23 @@ relogin candidate-hidden-login
 phase_sleep 5
 hidden_pid=$(qualified_app_pid candidate-hidden-login "$PHASE_DEADLINE")
 actual_argv candidate-hidden-login ON
-hidden_query_result=0
-run xdotool search --onlyvisible --name '^LocalSend$' > "$OUT/candidate-hidden-login-visible.txt" 2> "$OUT/candidate-hidden-login-visible.stderr" || hidden_query_result=$?
-[[ $hidden_query_result == 1 ]]
-[[ ! -s $OUT/candidate-hidden-login-visible.stderr && ! -s $OUT/candidate-hidden-login-visible.txt ]]
+identity_label=candidate-hidden-login; transition_deadline=$PHASE_DEADLINE
+xres_negative_controls "$hidden_pid"
+owned_window_rows candidate-hidden-login "$hidden_pid" > "$OUT/candidate-hidden-login-attributes.txt"
+run grep -Eq 'owned_client_ranges=[1-9][0-9]* expected_pid=' "$OUT/candidate-hidden-login-owned-windows.stderr"
+run awk '$3==2 {visible++} END {exit visible>0}' "$OUT/candidate-hidden-login-attributes.txt"
+run import -window root "$OUT/candidate-hidden-login-hidden-desktop.png"
 entry_read candidate-hidden-login ON
 owned_launch candidate-hidden-foreground flatpak run --user --command=/app/localsend_app "$APP"
 # This activation must complete before counting the resident instance rows.
 wait "$launcher_pid"
 launcher_pid= launcher_ticks=
-await_visible candidate-hidden-foreground
+await_visible candidate-hidden-foreground candidate-hidden-login
 cmp "$OUT/candidate-hidden-login-process-identity.txt" "$OUT/candidate-hidden-foreground-process-identity.txt"
 actual_argv candidate-hidden-foreground ON
 open_settings candidate-hidden-foreground
 observe_state candidate-hidden-foreground ON ON
-condition_pass 'hidden update/reopen/login; foreground retains same actual app leaf/instance/start'
+printf '%s condition=%s OBSERVED_PENDING_VISUAL=hidden update/reopen/login; launcher active owned client retains same app leaf/instance/start; root full-render inspection required\n' "$(date -u --iso-8601=ns)" "$current_condition" >> "$OUT/verdicts.txt"
 current_condition=4-candidate-disable
 click_switch candidate-disable 'Autostart after login' ON OFF host-absent
 close_app candidate-disable-close

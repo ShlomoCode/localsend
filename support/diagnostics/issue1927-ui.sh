@@ -89,7 +89,7 @@ observe_navigation_rail() {
 wait_rendered_application() {
   # Replace the existing eight-second startup sleep with read-only observation.
   # Rendered navigation proves a mature app shell, not ownership or Settings.
-  local identity_label=$1 transition_deadline=$((SECONDS+8)) attempt=0 label
+  local identity_label=$1 transition_deadline=$((SECONDS+8)) attempt=0 label dimensions
   while [ "$SECONDS" -lt "$transition_deadline" ]; do
     attempt=$((attempt+1))
     label="$identity_label-mature-attempt-$attempt"
@@ -97,6 +97,14 @@ wait_rendered_application() {
     identity_command "properties-$attempt" xprop -id "$wid" WM_CLASS _NET_WM_PID > "$OUT/$label-properties.txt" || return 1
     # Bootstrap may already have an owner; this observation grants no input.
     identity_command "bootstrap-owner-$attempt" /home/mint/xres-owner "$wid" > "$OUT/$label-owner.txt" || return 1
+    dimensions=$(identity_command "dimensions-$attempt" identify -format '%wx%h' "$OUT/$label.png") || return 1
+    printf '%s\n' "$dimensions" > "$OUT/$label-dimensions.txt"
+    # These are the complete native layouts in the retained paired run.
+    # A small partly painted transition window does not authorize input.
+    if [ "$dimensions" != 900x600 ] && [ "$dimensions" != 1000x700 ]; then
+      sleep .2
+      continue
+    fi
     # Retained mature 900/1000px renders place these labels in this crop.
     # Exclude icons and body headings; full-frame OCR duplicates/misreads them.
     identity_command "navigation-crop-$attempt" convert "$OUT/$label.png" -crop 170x170+70+90 +repage "$OUT/$label-navigation.png" || return 1
@@ -425,7 +433,47 @@ xres_negative_controls() {
   result=0
   identity_command destroyed-window /home/mint/xres-owner "$XRES_CONTROL_DESTROYED" > "$OUT/$identity_label-destroyed-owner.txt" || result=$?
   printf 'destroyed-window-result=%s expected=3\n' "$result" >> "$OUT/$identity_label-identity-observer.txt"
-  [ "$result" = 3 ]
+  [ "$result" = 3 ] || return 1
+  identity_command mapped-control /home/mint/xres-owner --state "$XRES_CONTROL_WINDOW" "$XRES_CONTROL_PID" > "$OUT/$identity_label-mapped-control.txt" || return 1
+  identity_command mapped-state awk '$3==2 {ok=1} END {exit !ok}' "$OUT/$identity_label-mapped-control.txt" || return 1
+  identity_command unmapped-control /home/mint/xres-owner --state "$XRES_CONTROL_UNMAPPED" "$XRES_CONTROL_PID" > "$OUT/$identity_label-unmapped-control.txt" || return 1
+  identity_command unmapped-state awk '$3==0 {ok=1} END {exit !ok}' "$OUT/$identity_label-unmapped-control.txt" || return 1
+  result=0
+  identity_command unrelated-state /home/mint/xres-owner --state "$XRES_CONTROL_WINDOW" "$pid" > "$OUT/$identity_label-unrelated-state.txt" || result=$?
+  [ "$result" = 6 ] || return 1
+  result=0
+  identity_command destroyed-state /home/mint/xres-owner --state "$XRES_CONTROL_DESTROYED" "$XRES_CONTROL_PID" > "$OUT/$identity_label-destroyed-state.txt" || result=$?
+  printf 'state-destroyed-resource=%s exit=%s expected=3\n' "$XRES_CONTROL_DESTROYED" "$result" >> "$OUT/$identity_label-identity-observer.txt"
+  [ "$result" = 3 ] || return 1
+  xres_selection_controls "$pid"
+}
+selection_control_query() {
+  local name=$1 expected=$2 expected_result=$3 mode=$4 resource=${5:-} result=0 prefix
+  prefix="$OUT/$identity_label-selection-$name"
+  if [ -n "$resource" ]; then
+    run_ui_observer /home/mint/xres-owner "$mode" "$expected" "$resource" > "$prefix.txt" 2> "$prefix.stderr" || result=$?
+  else
+    run_ui_observer /home/mint/xres-owner "$mode" "$expected" > "$prefix.txt" 2> "$prefix.stderr" || result=$?
+  fi
+  printf 'mode=%s pid=%s resource=%s exit=%s expected_exit=%s\n' "$mode" "$expected" "$resource" "$result" "$expected_result" > "$prefix-result.txt"
+  [ "$result" = "$expected_result" ]
+}
+xres_selection_controls() {
+  local app_pid=$1 prefix="$OUT/$identity_label-selection"
+  # This positive control enters the production EWMH collection route.
+  selection_control_query managed "$XRES_CONTROL_PID" 0 --owned-windows || return 1
+  identity_command managed-selection awk -v window="$XRES_CONTROL_MANAGED" -v pid="$XRES_CONTROL_PID" 'NF!=7 || $1!=window || $2!=pid || $3!=2 {bad=1} END {exit bad || NR!=1}' "$prefix-managed.txt" || return 1
+  # Fixed diagnostic lists feed the same selection/filter/attribute code;
+  # no root property or product window is changed by these discriminators.
+  selection_control_query unmapped "$XRES_CONTROL_PID" 0 --owned-control "$XRES_CONTROL_UNMAPPED" || return 1
+  identity_command unmapped-selection awk -v window="$XRES_CONTROL_UNMAPPED" 'NF!=7 || $1!=window || $3!=0 {bad=1} END {exit bad || NR!=1}' "$prefix-unmapped.txt" || return 1
+  selection_control_query unrelated "$app_pid" 1 --owned-control "$XRES_CONTROL_MANAGED" || return 1
+  [ ! -s "$prefix-unrelated.txt" ] || return 1
+  selection_control_query destroyed-unrelated "$app_pid" 1 --owned-control "$XRES_CONTROL_DESTROYED" || return 1
+  [ ! -s "$prefix-destroyed-unrelated.txt" ] || return 1
+  identity_command unrelated-no-attribute-error awk '/^x_error=/ {bad=1} END {exit bad}' "$prefix-destroyed-unrelated.stderr" || return 1
+  selection_control_query destroyed-owned "$XRES_CONTROL_PID" 3 --owned-control "$XRES_CONTROL_DESTROYED" || return 1
+  identity_command owned-destroyed-error awk -v resource="$XRES_CONTROL_DESTROYED" '/^x_error=3 / && index($0,"resource=" resource " ") {found=1} END {exit !found}' "$prefix-destroyed-owned.stderr" || return 1
 }
 start_xres_control() {
   local identity_label="xres-control-${1}" transition_deadline=$((SECONDS+8)) fixture_report
@@ -435,19 +483,37 @@ start_xres_control() {
   XRES_CONTROL_PID=$!
   while [ "$SECONDS" -lt "$transition_deadline" ] && [ ! -s "$OUT/$identity_label.txt" ]; do sleep .1; done
   fixture_report=$(identity_command fixture-report cat "$OUT/$identity_label.txt") || return 1
-  [[ "$fixture_report" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] || return 1
+  [[ "$fixture_report" =~ ^[0-9]+\ [0-9]+\ [0-9]+\ [0-9]+\ [0-9]+$ ]] || return 1
   local reported_pid
-  read -r XRES_CONTROL_WINDOW reported_pid XRES_CONTROL_DESTROYED <<< "$fixture_report"
+  read -r XRES_CONTROL_WINDOW reported_pid XRES_CONTROL_DESTROYED XRES_CONTROL_UNMAPPED XRES_CONTROL_MANAGED <<< "$fixture_report"
   [ "$reported_pid" = "$XRES_CONTROL_PID" ] || return 1
-  export XRES_CONTROL_PID XRES_CONTROL_WINDOW XRES_CONTROL_DESTROYED
+  export XRES_CONTROL_PID XRES_CONTROL_WINDOW XRES_CONTROL_DESTROYED XRES_CONTROL_UNMAPPED XRES_CONTROL_MANAGED
   xres_host_namespace || return 1
   xres_query_matches "$XRES_CONTROL_WINDOW" "$XRES_CONTROL_PID" || return 1
   [ "$SECONDS" -lt "$transition_deadline" ]
 }
+owned_window_rows() {
+  local label=$1 pid=$2 expected_ticks before_ticks after_ticks expected_inode actual_inode result=0
+  expected_ticks=$(identity_command owned-qualified-start awk -v pid="$pid" '$3==pid {print $4}' "$OUT/$label-process-identity.txt") || return 2
+  expected_inode=$(identity_command owned-qualified-inode cat "$OUT/$label-executable-identity.txt") || return 2
+  before_ticks=$(identity_command owned-start-before sudo -n awk '{sub(/^.*\) /,"");print $20}' "/proc/$pid/stat") || return 2
+  [ "$before_ticks" = "$expected_ticks" ] || return 2
+  xres_host_namespace || return 2
+  run_ui_observer /home/mint/xres-owner --owned-windows "$pid" > "$OUT/$label-owned-windows.txt" 2> "$OUT/$label-owned-windows.stderr" || result=$?
+  printf 'command=xres-owner --owned-windows %s exit=%s expected_start=%s\n' "$pid" "$result" "$expected_ticks" > "$OUT/$label-owned-windows-result.txt"
+  after_ticks=$(identity_command owned-start-after sudo -n awk '{sub(/^.*\) /,"");print $20}' "/proc/$pid/stat") || return 2
+  actual_inode=$(identity_command owned-inode-after sudo -n stat -Lc '%d:%i' "/proc/$pid/exe") || return 2
+  [ "$before_ticks" = "$after_ticks" ] && [ "$actual_inode" = "$expected_inode" ] || return 2
+  # Empty managed-client observation is allowed; X errors stop the condition.
+  [ "$result" = 0 ] || [ "$result" = 1 ] || return "$result"
+  [ "$result" != 1 ] || [ ! -s "$OUT/$label-owned-windows.txt" ] || return 2
+  cat "$OUT/$label-owned-windows.txt"
+}
 qualified_visible_window() {
   local identity_label=$1 pid=$2 transition_deadline=$((SECONDS+8)) windows expected_ticks actual_ticks actual_inode expected_inode uid
   if [ -n "${3:-}" ] && [ "$3" -lt "$transition_deadline" ]; then transition_deadline=$3; fi
-  windows=$(identity_command windows xdotool search --onlyvisible --name '^LocalSend$') || return 1
+  owned_window_rows "$identity_label" "$pid" > "$OUT/$identity_label-owned-observation.txt" || return 1
+  windows=$(identity_command mapped-windows awk '$3==2 {print $1}' "$OUT/$identity_label-owned-observation.txt") || return 1
   [[ "$windows" =~ ^[0-9]+$ ]] || return 1
   identity_command window-properties xprop -id "$windows" WM_CLASS _NET_WM_PID > "$OUT/$identity_label-window-properties.txt" || return 1
   identity_command window-class grep -Fq '"org.localsend.localsend_app"' "$OUT/$identity_label-window-properties.txt" || return 1
