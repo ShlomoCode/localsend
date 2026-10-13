@@ -9,7 +9,7 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   ca-certificates curl sudo dbus dbus-user-session dbus-x11 flatpak \
   fontconfig xvfb openbox xdotool x11-utils imagemagick \
-  iproute2 procps gdb strace file libegl1 libgles2
+  iproute2 procps gdb strace file binutils libegl1 libgles2
 
 # The official Brave Origin Nightly package depends on Brave's signed keyring.
 # Use Brave's release repository only for that dependency; the browser binary

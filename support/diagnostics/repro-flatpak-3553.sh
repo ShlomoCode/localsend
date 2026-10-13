@@ -111,7 +111,7 @@ capture_case() {
   import -window root "$dir/screenshot.png" 2>&1 || true
   ss -ltnp > "$dir/listeners.txt" 2>&1 || true
   if awk -v p="$pct" 'BEGIN {exit !(p>=80)}' && command -v strace >/dev/null 2>&1; then
-    sudo timeout 8s strace -f -tt -T -p "$pid" -o "$dir/main-thread.strace" 2>&1 || true
+    sudo timeout 8s strace -f -tt -T -p "$pid" -o "$dir/main-thread.strace" > "$dir/strace-attach.txt" 2>&1 || true
   fi
   sudo timeout 8s gdb -q -batch -ex 'set debuginfod enabled off' -ex 'set pagination off' -ex "set sysroot /proc/$pid/root" -ex "attach $pid" -ex 'thread apply all bt' -ex detach > "$dir/gdb.txt" 2>&1 || true
   printf '%s' "$pct"
