@@ -10,16 +10,8 @@ class TaskbarHelper {
   static final _isWindows = checkPlatform([TargetPlatform.windows]);
   static final _isMacos = checkPlatform([TargetPlatform.macOS]);
   static int? _lastProgressPercent;
-  static int? _pendingProgressPercent;
-  static Future<void>? _progressUpdate;
 
   static Future<void> clearProgressBar() async {
-    _pendingProgressPercent = null;
-    try {
-      await _progressUpdate;
-    } catch (_) {
-      // Clearing the taskbar still needs to run after a failed update.
-    }
     _lastProgressPercent = null;
     if (_isWindows) {
       await WindowsTaskbar.setProgressMode(TaskbarProgressMode.noProgress);
@@ -29,62 +21,33 @@ class TaskbarHelper {
   }
 
   static Future<void> setProgressBar(int progress, int total) async {
-    if (total <= 0 || total == double.maxFinite.toInt()) {
-      _pendingProgressPercent = null;
+    // Scale down to 0-100 range because Windows Taskbar only supports 32-bit integers
+    // This ensures that files with a size of 2^32 bytes or greater can still be displayed correctly
+    if (total > 0 && total != double.maxFinite.toInt()) {
+      final (digestedProgress, digestedTotal) = _scaleRange(progress, total);
+      if (_lastProgressPercent == digestedProgress) {
+        return;
+      }
+      _lastProgressPercent = digestedProgress;
+      try {
+        if (_isWindows) {
+          await WindowsTaskbar.setProgress(digestedProgress, digestedTotal);
+        } else if (_isMacos) {
+          await updateDockProgress(digestedProgress / digestedTotal);
+        }
+      } catch (_) {
+        _lastProgressPercent = null;
+        rethrow;
+      }
+    } else {
       _lastProgressPercent = null;
       if (_isWindows) {
-        await setProgressBarMode(TaskbarProgressMode.indeterminate);
+        await WindowsTaskbar.setProgressMode(TaskbarProgressMode.indeterminate);
       }
-      return;
-    }
-
-    if (!_isWindows && !_isMacos) {
-      return;
-    }
-
-    // Both taskbar APIs display a percentage. Skip chunk updates until it changes.
-    // Scaling also keeps Windows values within its 32-bit progress range.
-    final (percent, _) = _scaleRange(progress, total);
-    if (_progressUpdate == null && _lastProgressPercent == percent) {
-      return;
-    }
-
-    // ProgressPage does not await this call. Keep only the latest requested
-    // percentage while a native update is in flight, and share its result.
-    _pendingProgressPercent = percent;
-    return _progressUpdate ??= _flushProgress();
-  }
-
-  static Future<void> _flushProgress() async {
-    try {
-      while (_pendingProgressPercent != null) {
-        final percent = _pendingProgressPercent!;
-        _pendingProgressPercent = null;
-        if (_lastProgressPercent == percent) {
-          continue;
-        }
-        if (_isWindows) {
-          await WindowsTaskbar.setProgress(percent, 100);
-        } else {
-          await updateDockProgress(percent / 100);
-        }
-        _lastProgressPercent = percent;
-      }
-    } catch (_) {
-      _pendingProgressPercent = null;
-      rethrow;
-    } finally {
-      _progressUpdate = null;
     }
   }
 
   static Future<void> setProgressBarMode(int mode) async {
-    _pendingProgressPercent = null;
-    try {
-      await _progressUpdate;
-    } catch (_) {
-      // A mode change supersedes a failed progress update.
-    }
     _lastProgressPercent = null;
     if (_isWindows) {
       await WindowsTaskbar.setProgressMode(mode);
