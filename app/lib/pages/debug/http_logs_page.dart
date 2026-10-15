@@ -31,7 +31,7 @@ class HttpLogsPage extends StatelessWidget {
                       ),
                     );
                     if (context.mounted) {
-                      context.showSnackBar('Copied all logs to clipboard!');
+                      context.showSnackBar('Copied HTTP logs to clipboard');
                     }
                   },
           ),

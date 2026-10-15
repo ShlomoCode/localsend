@@ -33,7 +33,7 @@ class DiscoveryDebugPage extends StatelessWidget {
                       ),
                     );
                     if (context.mounted) {
-                      context.showSnackBar('Copied all logs to clipboard!');
+                      context.showSnackBar('Copied discovery logs to clipboard');
                     }
                   },
           ),

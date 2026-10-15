@@ -46,7 +46,7 @@ void main() {
         '[${DateFormat.Hms().format(logs[0].timestamp)}] First entry\n'
         '[${DateFormat.Hms().format(logs[1].timestamp)}] Second entry\nwith details',
       );
-      expect(find.text('Copied all logs to clipboard!'), findsOneWidget);
+      expect(find.text(discovery ? 'Copied discovery logs to clipboard' : 'Copied HTTP logs to clipboard'), findsOneWidget);
 
       await tester.tap(find.text('Clear'));
       await tester.pump();
