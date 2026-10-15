@@ -181,9 +181,7 @@ class MainActivity : FlutterActivity() {
 
         try {
             MediaScannerConnection.scanFile(applicationContext, arrayOf(path), null) { _, uri ->
-                runOnUiThread {
-                    result.success(uri != null)
-                }
+                result.success(uri != null)
             }
         } catch (e: Exception) {
             result.error("SCAN_FAILED", e.message ?: "Failed to scan file", null)
