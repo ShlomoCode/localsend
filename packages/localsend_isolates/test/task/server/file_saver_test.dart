@@ -27,7 +27,7 @@ void main() {
     }
   });
 
-  testWidgets('awaits Android media scan when saving directly to a file path', (tester) async {
+  testWidgets('waits for Android media scan to complete', (tester) async {
     final file = File(p.join(tempDir.path, 'received.txt'))..writeAsStringSync('received');
     final scan = Completer<bool>();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) {
