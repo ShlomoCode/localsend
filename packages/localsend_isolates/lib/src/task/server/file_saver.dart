@@ -112,16 +112,16 @@ Future<FileSaveTarget> reopenFileSaveTarget(FileSaveTarget target) async {
   );
 }
 
-/// Publishes a completed Android file after its native writer has closed.
-Future<void> publishSavedFileAndroid({required String path}) async {
+/// Scans a saved Android file after its native writer has closed.
+Future<void> scanSavedFileAndroid({required String path}) async {
   try {
     if (!await android_channel.scanFileAndroid(path: path)) {
-      _logger.warning('Android could not publish the completed file: $path');
+      _logger.warning('Android could not scan the saved file: $path');
     }
   } catch (e, st) {
     // The bytes are already saved; a metadata failure must not discard them
     // or report the completed transfer as a failed write.
-    _logger.warning('Could not publish the completed file: $path', e, st);
+    _logger.warning('Could not scan the saved file: $path', e, st);
   }
 }
 

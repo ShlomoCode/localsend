@@ -719,7 +719,7 @@ Future<void> _handleFileUpload({
       filePath = target.displayPath;
       final path = target.path;
       if (Platform.isAndroid && path != null) {
-        await publishSavedFileAndroid(path: path);
+        await scanSavedFileAndroid(path: path);
       }
     }
 

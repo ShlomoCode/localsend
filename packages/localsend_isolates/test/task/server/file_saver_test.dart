@@ -27,7 +27,7 @@ void main() {
     }
   });
 
-  testWidgets('awaits Android publication before completing a plain-path save', (tester) async {
+  testWidgets('awaits Android media scan before completing a plain-path save', (tester) async {
     final file = File(p.join(tempDir.path, 'received.txt'))..writeAsStringSync('received');
     final scan = Completer<bool>();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) {
@@ -36,13 +36,13 @@ void main() {
       return scan.future;
     });
     var finished = false;
-    final publication = publishSavedFileAndroid(path: file.path).then((_) => finished = true);
+    final mediaScan = scanSavedFileAndroid(path: file.path).then((_) => finished = true);
 
     await tester.pump();
     expect(finished, isFalse);
     scan.complete(true);
     await tester.pump();
-    await publication;
+    await mediaScan;
     expect(finished, isTrue);
   });
 
