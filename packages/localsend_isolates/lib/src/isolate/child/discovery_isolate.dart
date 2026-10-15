@@ -124,7 +124,7 @@ Future<void> setupDiscoveryIsolate(
           await ref.read(discoveryProvider).sendAnnouncement();
           break;
         case DiscoveryRestartTask():
-          ref.read(discoveryProvider).restartListener();
+          ref.read(discoveryProvider).restartDiscovery();
           break;
         case DiscoverySubnetScanTask data:
           await ref
