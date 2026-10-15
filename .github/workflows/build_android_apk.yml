@@ -26,14 +26,14 @@ on:
         options: [ubuntu, windows, macos]
       timeout_minutes:
         required: true
-        type: number
+        type: string
 permissions:
   contents: read
 jobs:
   operation:
     if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/independent-driver' && inputs.timeout_minutes >= 3 && inputs.timeout_minutes <= 85
     runs-on: ${{ fromJSON('{"ubuntu":"ubuntu-24.04","windows":"windows-2022","macos":"macos-14"}')[inputs.runner_os] }}
-    timeout-minutes: ${{ inputs.timeout_minutes }}
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
     steps:
       - name: Checkout exact reviewed driver
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
