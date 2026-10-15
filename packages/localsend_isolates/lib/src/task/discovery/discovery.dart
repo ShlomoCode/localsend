@@ -27,7 +27,7 @@ class DiscoveryService {
   Completer<void> _retryCompleter = Completer();
   bool _listening = false;
 
-  /// Whether the current discovery was stopped by [restartListener], as
+  /// Whether the current discovery was stopped by [restartDiscovery], as
   /// opposed to stopping itself because the multicast sockets failed.
   bool _restartRequested = false;
 
@@ -54,7 +54,7 @@ class DiscoveryService {
     // advertise an HTTP port that nobody listens on otherwise.
     _ref.stream(syncProvider).listen((event) {
       if (advertisedState(event.prev) != advertisedState(event.next)) {
-        restartListener();
+        restartDiscovery();
       }
       if (event.prev.serverRunning != event.next.serverRunning) {
         unawaited(_discovery?.setAnswerAnnouncements(answer: event.next.serverRunning));
@@ -122,7 +122,7 @@ class DiscoveryService {
       _discovery = null;
 
       if (_restartRequested) {
-        // The stream ended because [restartListener] stopped the discovery.
+        // The stream ended because [restartDiscovery] stopped the discovery.
         _restartRequested = false;
       } else {
         // The stream ended because the multicast sockets failed permanently,
@@ -136,7 +136,7 @@ class DiscoveryService {
   }
 
   /// Restarts the discovery, e.g. after the port or the network settings changed.
-  void restartListener() {
+  void restartDiscovery() {
     final discovery = _discovery;
     if (discovery != null) {
       // Ends the listen stream, which makes [startListener] rebind.
