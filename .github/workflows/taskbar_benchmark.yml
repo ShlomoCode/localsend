@@ -1,0 +1,66 @@
+name: Taskbar progress benchmark
+
+on:
+  push:
+    branches: [codex/benchmark-taskbar-progress]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      BASELINE_SHA: e768240d1ad95f0f162b852b5ff37bec71cde1ef
+      CANDIDATE_SHA: 8479e6facdd8d23e2d2d1d96fca2c083d361928b
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: flutter-actions/setup-flutter@v4
+        with:
+          version: "3.41.9"
+          channel: stable
+      - name: Record environment
+        run: |
+          mkdir -p benchmark-results
+          {
+            sw_vers
+            uname -m
+            sysctl -n machdep.cpu.brand_string
+            xcodebuild -version
+            flutter --version
+            echo "baseline=$BASELINE_SHA"
+            echo "candidate=$CANDIDATE_SHA"
+            echo "harness=$GITHUB_SHA"
+          } > benchmark-results/environment.txt
+      - name: Prepare diagnostic entry point and native counters
+        run: node support/benchmarks/taskbar/prepare.mjs "$BASELINE_SHA" "$CANDIDATE_SHA"
+      - name: Configure release build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build macos --release --config-only --no-pub --target lib/taskbar_benchmark.dart --dart-define=BENCHMARK_PAIRS=50 --dart-define=BENCHMARK_FRAMES=600
+          cd macos
+          pod install
+      - name: Build unsigned diagnostic application
+        working-directory: app/macos
+        run: |
+          set -o pipefail
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -derivedDataPath "$RUNNER_TEMP/taskbar-derived" CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/taskbar-products" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= build > "$GITHUB_WORKSPACE/benchmark-results/build.log" 2>&1 || { tail -100 "$GITHUB_WORKSPACE/benchmark-results/build.log"; exit 1; }
+          codesign --force --deep --sign - "$RUNNER_TEMP/taskbar-products/LocalSend.app"
+          codesign --verify --deep --strict "$RUNNER_TEMP/taskbar-products/LocalSend.app"
+      - name: Measure 50 paired trials
+        run: node support/benchmarks/taskbar/run.mjs "$RUNNER_TEMP/taskbar-products/LocalSend.app/Contents/MacOS/LocalSend" benchmark-results
+      - name: Summarize paired results
+        run: |
+          node support/benchmarks/taskbar/summarize.mjs benchmark-results
+          cat benchmark-results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: taskbar-macos-50-pairs
+          path: benchmark-results/
+          retention-days: 30
