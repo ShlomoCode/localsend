@@ -50,11 +50,11 @@ jobs:
         working-directory: app/macos
         run: |
           set -o pipefail
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -derivedDataPath "$RUNNER_TEMP/taskbar-derived" CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/taskbar-products" ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= build > "$GITHUB_WORKSPACE/benchmark-results/build.log" 2>&1 || { tail -100 "$GITHUB_WORKSPACE/benchmark-results/build.log"; exit 1; }
-          codesign --force --deep --sign - "$RUNNER_TEMP/taskbar-products/LocalSend.app"
-          codesign --verify --deep --strict "$RUNNER_TEMP/taskbar-products/LocalSend.app"
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -derivedDataPath "$RUNNER_TEMP/taskbar-derived" ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= build > "$GITHUB_WORKSPACE/benchmark-results/build.log" 2>&1 || { tail -100 "$GITHUB_WORKSPACE/benchmark-results/build.log"; exit 1; }
+          codesign --force --deep --sign - "$RUNNER_TEMP/taskbar-derived/Build/Products/Release/LocalSend.app"
+          codesign --verify --deep --strict "$RUNNER_TEMP/taskbar-derived/Build/Products/Release/LocalSend.app"
       - name: Measure 50 paired trials
-        run: node support/benchmarks/taskbar/run.mjs "$RUNNER_TEMP/taskbar-products/LocalSend.app/Contents/MacOS/LocalSend" benchmark-results
+        run: node support/benchmarks/taskbar/run.mjs "$RUNNER_TEMP/taskbar-derived/Build/Products/Release/LocalSend.app/Contents/MacOS/LocalSend" benchmark-results
       - name: Summarize paired results
         run: |
           node support/benchmarks/taskbar/summarize.mjs benchmark-results
