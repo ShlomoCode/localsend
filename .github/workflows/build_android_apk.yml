@@ -1,89 +1,69 @@
-name: Build Android APK
-
+# Source template only. Publish on an authorized temporary driver branch under
+# an already registered workflow filename; never modify the default branch.
+name: Independent reviewed cloud operation
+run-name: independent:${{ inputs.operation_id }}
 on:
   workflow_dispatch:
-  workflow_call:
-
-env:
-  FLUTTER_VERSION: "3.41.9"
-  APK_BUILD_DIR: "/tmp/build"
-
+    inputs:
+      operation_id:
+        required: true
+        type: string
+      sourceCommit:
+        required: true
+        type: string
+      scenarioHash:
+        required: true
+        type: string
+      harnessPath:
+        required: true
+        type: string
+      harnessSha256:
+        required: true
+        type: string
+      runner_os:
+        required: true
+        type: choice
+        options: [ubuntu, windows, macos]
+permissions:
+  contents: read
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-
+  operation:
+    if: github.repository == 'ShlomoCode/localsend' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/independent-driver'
+    runs-on: ${{ fromJSON('{"ubuntu":"ubuntu-24.04","windows":"windows-2022","macos":"macos-14"}')[inputs.runner_os] }}
+    timeout-minutes: 85
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Get version from pubspec.yaml
-        id: get_version
-        run: |
-          VERSION=$(sed -n 's/^version: \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' app/pubspec.yaml)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-  build_apk:
-    needs: build
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Remove proprietary dependencies
-        run: sh support/scripts/remove_proprietary_dependencies.sh
-
-      - name: Copy files to env.APK_BUILD_DIR
-        run: |
-          mkdir -p $APK_BUILD_DIR
-          cp -r . $APK_BUILD_DIR
-
-      - name: Decode key.properties file
-        working-directory: ${{ env.APK_BUILD_DIR }}
+      - name: Checkout exact reviewed driver
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ShlomoCode/localsend
+          ref: ${{ github.sha }}
+          path: driver
+          persist-credentials: false
+      - name: Checkout exact reviewed source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ShlomoCode/localsend
+          ref: ${{ inputs.sourceCommit }}
+          path: source
+          persist-credentials: false
+      - name: Execute reviewed harness and retain typed evidence
+        shell: bash
         env:
-          ENCODED_STRING: ${{ secrets.ANDROID_KEY_PROPERTIES }}
-        run: echo $ENCODED_STRING | base64 -di > app/android/key.properties
-
-      - name: Decode android-keystore.jks file
-        working-directory: ${{ env.APK_BUILD_DIR }}
-        env:
-          ENCODED_STRING: ${{ secrets.ANDROID_KEY_STORE }}
-        run: mkdir secrets && echo $ENCODED_STRING | base64 -di > secrets/android-keystore.jks
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+          SOURCE_ROOT: ${{ github.workspace }}/source
+          OUTPUT_ROOT: ${{ github.workspace }}/independent-output
+          OPERATION_ID: ${{ inputs.operation_id }}
+          SOURCE_COMMIT: ${{ inputs.sourceCommit }}
+          SCENARIO_HASH: ${{ inputs.scenarioHash }}
+          HARNESS_PATH: ${{ inputs.harnessPath }}
+          HARNESS_SHA256: ${{ inputs.harnessSha256 }}
+          REQUESTED_RUNNER_OS: ${{ inputs.runner_os }}
+        run: node driver/.a5c/processes/localsend-independent/cloud-driver.mjs
+      - name: Retain original operation files
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Check rust-toolchain.toml
-        working-directory: ${{ env.APK_BUILD_DIR }}/packages/localsend_isolates
-        run: rustup show
-
-      - name: Dependencies
-        working-directory: ${{ env.APK_BUILD_DIR }}/app
-        run: flutter pub get
-
-      - name: Build APK
-        working-directory: ${{ env.APK_BUILD_DIR }}/app
-        run: flutter build apk --split-per-abi
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v6
-        with:
-          name: apk-result
-          path: |
-            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-x86_64-release.apk
+          name: independent-${{ inputs.operation_id }}
+          path: independent-output/
+          if-no-files-found: error
+          retention-days: 30
+          include-hidden-files: false
