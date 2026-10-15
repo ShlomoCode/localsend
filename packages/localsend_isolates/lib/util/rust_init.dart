@@ -10,7 +10,6 @@ Future<void> initRustLib() async {
     externalLibrary: await loadExternalLibrary(
       ExternalLibraryLoaderConfig(
         stem: config.stem,
-        // Resolve bundled Linux libraries without relying on the Flutter engine's RUNPATH.
         ioDirectory: Platform.isLinux ? Directory(p.join(p.dirname(Platform.resolvedExecutable), 'lib')).uri.toString() : config.ioDirectory,
         webPrefix: config.webPrefix,
         wasmBindgenName: config.wasmBindgenName,
