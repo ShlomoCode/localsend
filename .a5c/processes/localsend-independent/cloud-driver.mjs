@@ -11,11 +11,16 @@ const need = (condition, reason) => { if (!condition) throw new Error(reason); }
 const commitPattern = /^[a-f0-9]{40}$/;
 const hashPattern = /^[a-f0-9]{64}$/;
 export const operationPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-export function artifactPath(root, path) {
+// Uploaded raw paths use forward slashes, stay inside the output root, and
+// contain no hidden path segments: upload-artifact excludes those files.
+// The reviewed source harness may reside in .a5c; it is not an uploaded raw file.
+export function artifactPath(root, path, { sourceHarness = false } = {}) {
   need(typeof path === 'string' && path && !path.includes('\\') && !isAbsolute(path) && !path.split('/').some(segment => !segment || segment === '.' || segment === '..'), 'Artifact path must be relative without traversal');
+  need(sourceHarness || !path.split('/').some(segment => segment.startsWith('.')), 'Uploaded artifact must not contain hidden path segments');
   const target = realpathSync(resolve(root, path));
   const rel = relative(realpathSync(root), target);
   need(rel && !rel.startsWith('..') && !isAbsolute(rel) && lstatSync(target).isFile(), 'Artifact path escapes its root or is not a file');
+  need(sourceHarness || !rel.split(/[\\/]/).some(segment => segment.startsWith('.')), 'Uploaded artifact must not resolve through hidden path segments');
   return target;
 }
 export async function execute(executable, args, { cwd, env, timeoutMs = 60 * 60000, maxOutputBytes = 16 * 1024 * 1024 } = {}) {
@@ -35,6 +40,8 @@ export async function runDriver({ sourceRoot, outputRoot, operationId, sourceCom
   need(commitPattern.test(sourceCommit) && hashPattern.test(scenarioHash) && hashPattern.test(harnessSha256), 'Exact source, scenario and harness hashes required');
   need(['ubuntu', 'windows', 'macos'].includes(runnerOS) && ({ ubuntu: 'Linux', windows: 'Windows', macos: 'macOS' })[runnerOS] === env.RUNNER_OS, 'Runner OS differs from reviewed request');
   need(/^\d+$/.test(env.GITHUB_RUN_ID ?? '') && /^\d+$/.test(env.GITHUB_RUN_ATTEMPT ?? '') && commitPattern.test(env.GITHUB_SHA ?? '') && env.GITHUB_JOB, 'Actual provider identity required');
+  const timeoutMinutes = Number(env.DRIVER_TIMEOUT_MINUTES);
+  need(/^\d+$/.test(env.DRIVER_TIMEOUT_MINUTES ?? '') && Number.isSafeInteger(timeoutMinutes) && timeoutMinutes >= 3 && timeoutMinutes <= 85, 'Driver timeout must be an integer from 3 to 85 minutes');
   sourceRoot = realpathSync(sourceRoot); outputRoot = resolve(outputRoot);
   const outputRelative = relative(sourceRoot, outputRoot);
   need(outputRelative === '..' || outputRelative.startsWith('../') || outputRelative.startsWith('..\\') || isAbsolute(outputRelative), 'Output must be outside source checkout');
@@ -45,12 +52,14 @@ export async function runDriver({ sourceRoot, outputRoot, operationId, sourceCom
   };
   need(await git(['rev-parse', 'HEAD']) === sourceCommit, 'Checked-out source differs from reviewed commit');
   need(!(await git(['status', '--porcelain', '--untracked-files=no'])), 'Tracked source differs before execution');
-  const harness = artifactPath(sourceRoot, harnessPath);
+  const harness = artifactPath(sourceRoot, harnessPath, { sourceHarness: true });
   need(harnessPath.endsWith('.mjs') && sha(readFileSync(harness)) === harnessSha256, 'Harness bytes differ from reviewed source');
   const receiptId = `${operationId}:github:${env.GITHUB_RUN_ID}:attempt:${env.GITHUB_RUN_ATTEMPT}`;
-  const request = { schemaVersion: 1, operationId, sourceCommit, scenarioHash, receiptId, harness: { path: harnessPath, sha256: harnessSha256 }, runnerOS };
+  const request = { schemaVersion: 1, operationId, sourceCommit, scenarioHash, receiptId, timeoutMinutes, harness: { path: harnessPath, sha256: harnessSha256 }, runnerOS };
   const requestPath = join(outputRoot, 'request.json'); writeFileSync(requestPath, `${JSON.stringify(request)}\n`, { flag: 'wx' });
-  const result = await executeCommand(process.execPath, [harness], { cwd: sourceRoot, env: { ...env, LOCALSEND_DRIVER_REQUEST: requestPath, LOCALSEND_DRIVER_OUTPUT: outputRoot } });
+  // The workflow bounds the complete job, including checkout and upload. Keep
+  // the harness below that deadline to reserve time for setup and evidence.
+  const result = await executeCommand(process.execPath, [harness], { cwd: sourceRoot, env: { ...env, LOCALSEND_DRIVER_REQUEST: requestPath, LOCALSEND_DRIVER_OUTPUT: outputRoot }, timeoutMs: (timeoutMinutes - 2) * 60000 });
   writeFileSync(join(outputRoot, 'harness.stdout'), result.stdout); writeFileSync(join(outputRoot, 'harness.stderr'), result.stderr);
   need(!result.failure && result.code === 0, `Harness did not complete successfully: ${result.failure ?? result.code}`);
   need(await git(['rev-parse', 'HEAD']) === sourceCommit && !(await git(['status', '--porcelain', '--untracked-files=no'])), 'Tracked source changed during execution');
@@ -65,7 +74,7 @@ export async function runDriver({ sourceRoot, outputRoot, operationId, sourceCom
   }
   for (const observation of report.evidence.observations ?? []) need(seen.has(observation.rawPath) && report.rawFiles.some(ref => ref.path === observation.rawPath && ref.sha256 === observation.rawHash), 'Observation raw output is not retained');
   const retained = ['request.json', 'harness-result.json', 'harness.stdout', 'harness.stderr'].map(path => ({ path, sha256: sha(readFileSync(join(outputRoot, path))) }));
-  const manifest = { schemaVersion: 1, operationId, sourceCommit, scenarioHash, receiptId, stage: report.stage,
+  const manifest = { schemaVersion: 1, operationId, sourceCommit, scenarioHash, receiptId, timeoutMinutes, stage: report.stage,
     provider: { repository: env.GITHUB_REPOSITORY, runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT, job: env.GITHUB_JOB, runnerOS: env.RUNNER_OS, driverCommit: env.GITHUB_SHA, driverRef: env.GITHUB_REF },
     harness: request.harness, evidence: report.evidence, rawFiles: [...report.rawFiles, ...retained] };
   writeFileSync(join(outputRoot, 'result.json'), `${JSON.stringify(manifest)}\n`, { flag: 'wx' });
