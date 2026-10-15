@@ -13,6 +13,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       BASELINE_SHA: e768240d1ad95f0f162b852b5ff37bec71cde1ef
       CANDIDATE_SHA: 8479e6facdd8d23e2d2d1d96fca2c083d361928b
     steps:
@@ -49,7 +50,7 @@ jobs:
         working-directory: app/macos
         run: |
           set -o pipefail
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -derivedDataPath "$RUNNER_TEMP/taskbar-derived" CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/taskbar-products" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= build > "$GITHUB_WORKSPACE/benchmark-results/build.log" 2>&1 || { tail -100 "$GITHUB_WORKSPACE/benchmark-results/build.log"; exit 1; }
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -derivedDataPath "$RUNNER_TEMP/taskbar-derived" CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/taskbar-products" ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= build > "$GITHUB_WORKSPACE/benchmark-results/build.log" 2>&1 || { tail -100 "$GITHUB_WORKSPACE/benchmark-results/build.log"; exit 1; }
           codesign --force --deep --sign - "$RUNNER_TEMP/taskbar-products/LocalSend.app"
           codesign --verify --deep --strict "$RUNNER_TEMP/taskbar-products/LocalSend.app"
       - name: Measure 50 paired trials
