@@ -106,6 +106,9 @@ dependency_overrides:
       ref: 2dadd8afbf81e0e3e4791d7144e689555e58f649
   tray_manager:
     # Keep the tray identity stable so desktop visibility preferences survive restarts.
+    # TODO: Remove this override and the setIcon id argument when upgrading to tray_manager >=0.8.0
+    # (requires Flutter >=3.47.0 and API migration); upstream provides a stable Linux tray identity.
+    # https://github.com/leanflutter/tray_manager/issues/109
     git:
       url: https://github.com/ShlomoCode/tray_manager.git
       ref: 59985e2aeee26676b3ab64cb042fb92baf3dd98c
