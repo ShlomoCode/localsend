@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Host Mesa can require wl_fixes_interface, introduced in Wayland 1.24.
+# On Gentoo with Mesa 26.1.8, Wayland startup loads the host's libEGL_mesa.so.0,
+# which requires wl_fixes_interface. Ubuntu 22.04's Wayland 1.20 lacks this symbol;
+# bundle a newer client that provides it (introduced in Wayland 1.24).
 # TODO: Use apt instead when the repositories configured in AppImageBuilder_x86_64.yml
 # provide Wayland >= 1.24, through a backport or an Ubuntu release upgrade.
 appdir=$(realpath "${1:?Usage: download_wayland_client.sh AppDir}")
