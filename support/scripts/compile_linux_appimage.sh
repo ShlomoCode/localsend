@@ -4,6 +4,7 @@
 # (2) For AppImage:
 #     sudo apt install libfuse2
 #     Wayland client download: sudo apt install curl ca-certificates unzip zstd
+#     TODO: When download_wayland_client.sh is removed, remove these download dependencies if otherwise unused.
 #     Download from https://github.com/AppImageCrafters/appimage-builder/releases
 #     then sudo chmod +x appimage-builder-1.1.0-x86_64.AppImage && sudo mv appimage-builder-1.1.0-x86_64.AppImage /usr/local/bin/appimage-builder
 
