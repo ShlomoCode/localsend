@@ -25,6 +25,14 @@ class TextFieldTv extends StatefulWidget {
 }
 
 class _TextFieldTvState extends State<TextFieldTv> with Refena {
+  final _draftController = TextEditingController();
+
+  @override
+  void dispose() {
+    _draftController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTv = ref.watch(tvProvider);
@@ -37,31 +45,39 @@ class _TextFieldTvState extends State<TextFieldTv> with Refena {
           foregroundColor: Theme.of(context).colorScheme.onSurface,
         ),
         onPressed: () async {
-          await showDialog(
+          _draftController.text = widget.controller.text;
+          final confirmedText = await showDialog<String>(
             context: context,
             builder: (context) {
               return AlertDialog(
                 title: Text(widget.name),
                 content: TextFormField(
-                  controller: widget.controller,
+                  controller: _draftController,
                   textAlign: TextAlign.center,
-                  onChanged: widget.onChanged,
                   autofocus: true,
-                  onFieldSubmitted: (_) => context.pop(),
+                  onFieldSubmitted: (text) => context.pop(text),
                 ),
                 actions: [
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                    ),
+                  TextButton(
                     onPressed: () => context.pop(),
+                    child: Text(t.general.cancel),
+                  ),
+                  TextButton(
+                    onPressed: () => context.pop(_draftController.text),
                     child: Text(t.general.confirm),
                   ),
                 ],
               );
             },
           );
+          if (!mounted || confirmedText == null) {
+            return;
+          }
+
+          setState(() {
+            widget.controller.text = confirmedText;
+          });
+          widget.onChanged?.call(confirmedText);
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
