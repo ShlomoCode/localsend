@@ -1,1 +1,1 @@
-pub(super) use localsend_session::Target as TargetSelector;
+pub(super) use localsend_client::Target as TargetSelector;

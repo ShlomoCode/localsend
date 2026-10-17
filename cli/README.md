@@ -3,7 +3,7 @@
 `localsend-cli` sends and receives files on the local network. Run it without a subcommand for the interactive terminal interface, or use the commands below from a script or another process.
 
 The noninteractive commands and stdio protocol adapt the typed Rust interface in
-[`localsend-session`](../packages/session/README.md). Rust callers can use that library
+[`localsend-client`](../packages/client/README.md). Rust callers can use that library
 directly; JSON framing and terminal output stay in the CLI.
 
 Build the CLI from the repository root with `cargo build -p localsend-cli`. The examples below assume `localsend-cli` is on your `PATH`; you can also use `cargo run -p localsend-cli --` before the arguments.

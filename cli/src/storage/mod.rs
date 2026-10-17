@@ -10,7 +10,7 @@
 
 mod config;
 
-pub use localsend_session::{Identity, PairedChannel, PairedDevices};
+pub use localsend_client::{Identity, PairedChannel, PairedDevices};
 
 use crate::Args;
 use anyhow::Context;

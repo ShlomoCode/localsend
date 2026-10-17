@@ -167,7 +167,7 @@ pub(super) fn collect_files_with_log(
     picked: Vec<PathBuf>,
     log: impl FnMut(String),
 ) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
-    let offer = localsend_session::SendPayload::paths_with_log(picked, log);
+    let offer = localsend_client::SendPayload::paths_with_log(picked, log);
     let total_bytes = offer.total_bytes();
     let (files, sources) = offer.into_parts();
     let paths = sources
@@ -288,7 +288,7 @@ impl App {
 mod tests {
     use super::{MAX_STDIN_BYTES, read_stdin, strip_trailing_line_break};
     use bytes::Bytes;
-    use localsend_session::SendPayload;
+    use localsend_client::SendPayload;
     use std::fs;
     use std::io::Read;
     use std::path::{Path, PathBuf};

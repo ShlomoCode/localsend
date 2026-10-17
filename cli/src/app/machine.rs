@@ -1,9 +1,9 @@
-//! CLI rendering and stdio commands for the typed session library.
+//! CLI rendering and stdio commands for the typed client library.
 
 use super::sending::Payload;
 use crate::storage::Repository;
 use anyhow::{Context, anyhow};
-use localsend_session::{ReceivePolicy, SendPayload, Session, SessionConfig, SessionEvent, Target};
+use localsend_client::{ReceivePolicy, SendPayload, Session, SessionConfig, SessionEvent, Target};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{self, Write};

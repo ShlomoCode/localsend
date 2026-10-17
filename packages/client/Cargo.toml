@@ -1,5 +1,5 @@
 [package]
-name = "localsend-session"
+name = "localsend-client"
 version = "1.18.2"
 edition = "2024"
 

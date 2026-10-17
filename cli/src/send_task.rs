@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tokio::sync::mpsc;
 
-use localsend_session::TaskEvent;
-pub use localsend_session::{FileSource, SendCancel};
+use localsend_client::TaskEvent;
+pub use localsend_client::{FileSource, SendCancel};
 
 pub async fn run_send(
     identity: Arc<Identity>,
@@ -23,7 +23,7 @@ pub async fn run_send(
     events: mpsc::Sender<AppEvent>,
 ) {
     let (task_tx, mut task_rx) = mpsc::channel(64);
-    let upload = tokio::spawn(localsend_session::run_send(
+    let upload = tokio::spawn(localsend_client::run_send(
         identity, device, files, sources, progress, cancel, task_tx,
     ));
     while let Some(event) = task_rx.recv().await {

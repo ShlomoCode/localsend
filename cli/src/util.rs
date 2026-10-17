@@ -92,7 +92,7 @@ pub fn progress_bar(fraction: f64, width: usize) -> String {
 /// final path component and sanitized for the local filesystem, so it can
 /// neither escape the target directory nor carry illegal characters.
 pub fn unique_path(dir: &Path, file_name: &str) -> PathBuf {
-    localsend_session::util::unique_path(dir, file_name)
+    localsend_client::util::unique_path(dir, file_name)
 }
 
 /// Estimates the transfer speed from cumulative byte counts, smoothed with an

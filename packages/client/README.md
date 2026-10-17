@@ -1,6 +1,6 @@
-# LocalSend sessions for Rust callers
+# LocalSend client for Rust callers
 
-`localsend-session` manages a LocalSend identity, peer discovery, transfers, incoming receive decisions, cancellation, and shutdown. It uses the real HTTP and multicast implementation in `localsend` core. The CLI's noninteractive commands and JSON-line protocol adapt this same session implementation.
+`localsend-client` manages a LocalSend identity, peer discovery, transfers, incoming receive decisions, cancellation, and shutdown. It uses the real HTTP and multicast implementation in `localsend` core. The CLI's noninteractive commands and JSON-line protocol adapt this same session implementation.
 
 The library accepts typed Rust values and emits `SessionEvent` values. It does not read stdin, write terminal output, parse CLI arguments, or define a JSON command protocol. Callers choose their identity directory, destination, and receive policy. The existing `identity.pem` and `paired-v2.json` formats are preserved, so the CLI keeps its identity and pairings after this extraction.
 
@@ -8,7 +8,7 @@ For another crate alongside `cli/` in this workspace:
 
 ```toml
 [dependencies]
-localsend-session = { path = "../packages/session" }
+localsend-client = { path = "../packages/client" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
@@ -16,7 +16,7 @@ anyhow = "1"
 For example, send a file and wait for its completion:
 
 ```rust,no_run
-use localsend_session::{
+use localsend_client::{
     Identity, PairedDevices, ReceivePolicy, SendPayload, Session,
     SessionConfig, SessionEvent, Target,
 };
@@ -63,7 +63,7 @@ Poll `next_event` continuously while the session is active: it drives discovery,
 Run direct library and CLI process tests from the repository root:
 
 ```sh
-cargo test -p localsend-session -p localsend-cli --locked
+cargo test -p localsend-client -p localsend-cli --locked
 ```
 
 The direct library tests create real sessions and compare received bytes. The CLI process tests exercise one-shot commands and persistent stdio sessions. The [network lab](../../support/network_lab/README.md) runs the same CLI across routed, isolated, multihomed, IPv4, and IPv6 Linux topologies.

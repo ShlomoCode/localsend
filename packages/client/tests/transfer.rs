@@ -1,6 +1,6 @@
 //! A consumer can transfer files through the Rust API without a CLI process.
 
-use localsend_session::{
+use localsend_client::{
     Identity, PairedDevices, ReceivePolicy, SendPayload, Session, SessionConfig, SessionEvent,
     Target,
 };
@@ -19,7 +19,7 @@ impl Fixture {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "localsend-session-test-{}-{stamp}",
+            "localsend-client-test-{}-{stamp}",
             std::process::id()
         ));
         fs::create_dir(&path).unwrap();
