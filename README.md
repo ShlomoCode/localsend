@@ -196,6 +196,10 @@ JSON output, and a persistent `serve --stdio` session. See the [CLI automation g
 for commands and the JSON-line protocol, and the [network lab](support/network_lab/README.md)
 for end-to-end tests of real CLI processes in Linux network topologies.
 
+Rust integrations can use the [shared session library](packages/session/README.md) directly
+for device discovery, transfers, receive decisions, and cancellation. The CLI's noninteractive
+commands and stdio protocol use this same session implementation.
+
 To send a text message instead of files, use `--text` together with `--to`.
 Pass `-` to read the text from stdin:
 

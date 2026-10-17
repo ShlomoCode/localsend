@@ -8,6 +8,7 @@ on:
       - 'support/network_lab/**'
       - 'cli/**'
       - 'packages/core/**'
+      - 'packages/session/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'

@@ -11,25 +11,17 @@ use crate::util::SpeedMeter;
 use bytes::Bytes;
 use crossterm::event::KeyEvent;
 use localsend::discovery::StatefulDevice;
-use localsend::model::transfer::{FileDto, FileMetadata};
+use localsend::model::transfer::FileDto;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tokio::sync::mpsc;
-use uuid::Uuid;
-use walkdir::WalkDir;
-
-type CollectedPath = Result<(PathBuf, String), (PathBuf, String)>;
 
 /// Transfer metadata keyed by file ID, the content under the same IDs, and
 /// the total byte count.
 type Transfer = (HashMap<String, FileDto>, HashMap<String, FileSource>, u64);
-
-/// Largest text sent as a message (embedded in the request as a preview).
-/// Longer text is sent as a `.txt` file instead.
-const MAX_MESSAGE_BYTES: usize = 64_000;
 
 /// Largest input read from stdin, which is held in memory until sent.
 const MAX_STDIN_BYTES: u64 = 16_000_000;
@@ -86,37 +78,6 @@ fn strip_trailing_line_break(text: &mut Vec<u8>) {
     }
 }
 
-/// Builds the transfer of a text: a message carried by the preview of a
-/// single text file, so the receiver has nothing left to download. Text that
-/// is too long becomes a `.txt` file instead.
-///
-/// `text` is UTF-8, as checked by [`read_text`].
-pub(super) fn text_transfer_with_log(text: Bytes, mut log: impl FnMut(String)) -> Transfer {
-    let id = Uuid::new_v4().to_string();
-    let size = text.len() as u64;
-    let preview = match text.len() <= MAX_MESSAGE_BYTES {
-        true => Some(String::from_utf8_lossy(&text).into_owned()),
-        false => {
-            log("Text too long for a message, sending it as a file".to_string());
-            None
-        }
-    };
-    let file = FileDto {
-        id: id.clone(),
-        file_name: format!("{id}.txt"),
-        size,
-        file_type: "text/plain".to_string(),
-        sha256: None,
-        preview,
-        metadata: None,
-    };
-    (
-        HashMap::from([(id.clone(), file)]),
-        HashMap::from([(id, FileSource::Bytes(text))]),
-        size,
-    )
-}
-
 /// An outgoing transfer driven by the send task.
 pub(super) struct SendState {
     pub(super) session_id: Option<String>,
@@ -126,81 +87,6 @@ pub(super) struct SendState {
     pub(super) sent: Arc<AtomicU64>,
     pub(super) cancel: send_task::SendCancel,
     pub(super) speed: SpeedMeter,
-}
-
-/// Expands a file or directory into local paths and protocol-v2 file names.
-/// Directory names include the selected root so receivers can reconstruct it.
-fn collect_path(path: &Path) -> Vec<CollectedPath> {
-    let metadata = match path.metadata() {
-        Ok(metadata) => metadata,
-        Err(error) => {
-            return vec![Err((path.to_path_buf(), error.to_string()))];
-        }
-    };
-    if metadata.is_file() {
-        let file_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unnamed".to_string());
-        return vec![Ok((path.to_path_buf(), file_name))];
-    }
-    if !metadata.is_dir() {
-        return vec![Err((
-            path.to_path_buf(),
-            "not a regular file or directory".to_string(),
-        ))];
-    }
-
-    let root_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .or_else(|| {
-            path.canonicalize()
-                .ok()?
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        });
-    let Some(root_name) = root_name else {
-        return vec![Err((
-            path.to_path_buf(),
-            "directory has no transferable name".to_string(),
-        ))];
-    };
-
-    WalkDir::new(path)
-        .min_depth(1)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_map(|entry| match entry {
-            Ok(entry) if entry.file_type().is_file() => {
-                let relative = match entry.path().strip_prefix(path) {
-                    Ok(relative) => relative,
-                    Err(error) => {
-                        return Some(Err((entry.path().to_path_buf(), error.to_string())));
-                    }
-                };
-                let file_name = std::iter::once(root_name.clone())
-                    .chain(
-                        relative
-                            .components()
-                            .filter_map(|component| match component {
-                                Component::Normal(name) => {
-                                    Some(name.to_string_lossy().into_owned())
-                                }
-                                _ => None,
-                            }),
-                    )
-                    .collect::<Vec<_>>()
-                    .join("/");
-                Some(Ok((entry.path().to_path_buf(), file_name)))
-            }
-            Ok(_) => None,
-            Err(error) => Some(Err((
-                error.path().unwrap_or(path).to_path_buf(),
-                error.to_string(),
-            ))),
-        })
-        .collect()
 }
 
 /// Collects `picked` and spawns the send task towards `device`. Returns the
@@ -279,47 +165,18 @@ pub(super) fn collect_files(
 
 pub(super) fn collect_files_with_log(
     picked: Vec<PathBuf>,
-    mut log: impl FnMut(String),
+    log: impl FnMut(String),
 ) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
-    let mut files = HashMap::new();
-    let mut paths = HashMap::new();
-    let mut total_bytes = 0u64;
-    for collected in picked.iter().flat_map(|path| collect_path(path)) {
-        let (path, file_name) = match collected {
-            Ok(collected) => collected,
-            Err((path, error)) => {
-                log(format!(
-                    "Skipping unreadable path: {} ({error})",
-                    path.display()
-                ));
-                continue;
-            }
-        };
-        let metadata = match std::fs::metadata(&path) {
-            Ok(metadata) if metadata.is_file() => metadata,
-            _ => {
-                log(format!("Skipping unreadable file: {}", path.display()));
-                continue;
-            }
-        };
-        let id = Uuid::new_v4().to_string();
-        total_bytes += metadata.len();
-        files.insert(
-            id.clone(),
-            FileDto {
-                id: id.clone(),
-                file_name,
-                size: metadata.len(),
-                file_type: mime_guess::from_path(&path)
-                    .first_or_octet_stream()
-                    .to_string(),
-                sha256: None,
-                preview: None,
-                metadata: FileMetadata::from_fs_metadata(&metadata),
-            },
-        );
-        paths.insert(id, path);
-    }
+    let offer = localsend_session::SendPayload::paths_with_log(picked, log);
+    let total_bytes = offer.total_bytes();
+    let (files, sources) = offer.into_parts();
+    let paths = sources
+        .into_iter()
+        .map(|(id, source)| match source {
+            FileSource::Path(path) => (id, path),
+            FileSource::Bytes(_) => unreachable!("path collection produces file paths"),
+        })
+        .collect();
     (files, paths, total_bytes)
 }
 
@@ -429,11 +286,9 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        MAX_MESSAGE_BYTES, MAX_STDIN_BYTES, collect_path, read_stdin, strip_trailing_line_break,
-        text_transfer_with_log,
-    };
+    use super::{MAX_STDIN_BYTES, read_stdin, strip_trailing_line_break};
     use bytes::Bytes;
+    use localsend_session::SendPayload;
     use std::fs;
     use std::io::Read;
     use std::path::{Path, PathBuf};
@@ -472,12 +327,8 @@ mod tests {
         let file = temp.path().join("backup.sha256");
         fs::write(&file, "hash").unwrap();
 
-        let collected = collect_path(&file)
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-
-        assert_eq!(collected, vec![(file, "backup.sha256".to_string())]);
+        let (files, _) = SendPayload::paths(vec![file]).unwrap().into_parts();
+        assert_eq!(files.values().next().unwrap().file_name, "backup.sha256");
     }
 
     #[test]
@@ -489,24 +340,12 @@ mod tests {
         fs::write(root.join("backup.tar.zst"), "archive").unwrap();
         fs::write(nested.join("backup.sha256"), "hash").unwrap();
 
-        let mut collected = collect_path(&root)
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        collected.sort_by(|left, right| left.1.cmp(&right.1));
-
+        let (files, _) = SendPayload::paths(vec![root]).unwrap().into_parts();
+        let mut names: Vec<_> = files.values().map(|file| file.file_name.as_str()).collect();
+        names.sort();
         assert_eq!(
-            collected,
-            vec![
-                (
-                    root.join("backup.tar.zst"),
-                    "MLB-002/backup.tar.zst".to_string()
-                ),
-                (
-                    nested.join("backup.sha256"),
-                    "MLB-002/checksums/backup.sha256".to_string(),
-                ),
-            ]
+            names,
+            vec!["MLB-002/backup.tar.zst", "MLB-002/checksums/backup.sha256"]
         );
     }
 
@@ -516,7 +355,7 @@ mod tests {
         let root = temp.path().join("empty");
         fs::create_dir_all(&root).unwrap();
 
-        assert!(collect_path(&root).is_empty());
+        assert!(SendPayload::paths(vec![root]).is_err());
     }
 
     #[test]
@@ -536,8 +375,9 @@ mod tests {
 
     #[test]
     fn sends_short_text_as_a_message() {
-        let (files, sources, total_bytes) =
-            text_transfer_with_log(Bytes::from_static(b"hello"), |_| {});
+        let offer = SendPayload::message(Bytes::from_static(b"hello")).unwrap();
+        let total_bytes = offer.total_bytes();
+        let (files, sources) = offer.into_parts();
 
         assert_eq!(files.len(), 1);
         let file = files.values().next().unwrap();
@@ -550,8 +390,9 @@ mod tests {
 
     #[test]
     fn sends_long_text_as_a_file() {
-        let (files, _, _) =
-            text_transfer_with_log(vec![b'a'; MAX_MESSAGE_BYTES + 1].into(), |_| {});
+        let (files, _) = SendPayload::message(vec![b'a'; 64_001])
+            .unwrap()
+            .into_parts();
 
         let file = files.values().next().unwrap();
         assert_eq!(file.file_type, "text/plain");

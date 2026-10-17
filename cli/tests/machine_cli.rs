@@ -314,17 +314,97 @@ fn send_to_non_terminal_receiver_saves_the_actual_bytes() {
 }
 
 #[test]
+fn text_send_saves_the_original_utf8_bytes() {
+    let _serial = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let fixture = Fixture::new();
+    let receiver_config = fixture.dir("text-receiver-config");
+    let sender_config = fixture.dir("text-sender-config");
+    let destination = fixture.dir("text-downloads");
+    let receiver_port = free_port();
+    let mut sender_port = free_port();
+    while sender_port == receiver_port {
+        sender_port = free_port();
+    }
+    let receiver_port_text = receiver_port.to_string();
+    let sender_port_text = sender_port.to_string();
+    let text = "Hello\nשלום\tworld\u{0008}\r\n";
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut receiver = Cli::start(
+        "text receiver",
+        &receiver_config,
+        &[
+            "--port",
+            &receiver_port_text,
+            "--destination",
+            destination.to_str().unwrap(),
+            "receive",
+            "--auto-accept",
+            "--once",
+            "--timeout",
+            "25",
+            "--json",
+        ],
+    );
+    wait_for_port(receiver_port, deadline);
+    let mut sender = Cli::start(
+        "text sender",
+        &sender_config,
+        &[
+            "--port",
+            &sender_port_text,
+            "send",
+            "--to",
+            "127.0.0.1",
+            "--target-port",
+            &receiver_port_text,
+            "--timeout",
+            "25",
+            "--json",
+            "--text",
+            text,
+        ],
+    );
+    let sent = sender.until(deadline, |line| line["type"] == "send_completed");
+    assert_eq!(sent["success"], true, "{sent}");
+    let received = receiver.until(deadline, |line| line["type"] == "receive_completed");
+    assert_eq!(received["success"], true, "{received}");
+    assert_eq!(received["files"], 1, "{received}");
+    assert_eq!(received["bytes"], text.len(), "{received}");
+    sender.exits(deadline, true);
+    receiver.exits(deadline, true);
+    let saved: Vec<_> = fs::read_dir(destination)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        saved.len(),
+        1,
+        "text should be saved as one file: {saved:?}"
+    );
+    assert_eq!(
+        saved[0]
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some("txt")
+    );
+    assert_eq!(fs::read(&saved[0]).unwrap(), text.as_bytes());
+}
+
+#[test]
 fn discover_emits_one_machine_readable_snapshot() {
     let _serial = TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let fixture = Fixture::new();
     let config = fixture.dir("discover-config");
+    let port = free_port().to_string();
     let deadline = Instant::now() + PROCESS_LIMIT;
     let mut cli = Cli::start(
         "discover",
         &config,
-        &["discover", "--json", "--timeout", "1"],
+        &["--port", &port, "discover", "--json", "--timeout", "1"],
     );
     let snapshot = cli.next_json(deadline);
     assert_eq!(snapshot["type"], "discovery", "{snapshot}");
@@ -376,6 +456,25 @@ fn serve_stays_alive_across_requests_and_reports_errors() {
     cli.write_raw("{broken json");
     let malformed = cli.until(deadline, |line| line["ok"] == false);
     assert!(malformed["error"].is_string(), "{malformed}");
+    for (id, request) in [
+        (
+            "decision-no-session",
+            json!({"id":"decision-no-session","command":"receive_decision","accept":true}),
+        ),
+        (
+            "decision-no-accept",
+            json!({"id":"decision-no-accept","command":"receive_decision","session_id":"missing"}),
+        ),
+        (
+            "cancel-no-ids",
+            json!({"id":"cancel-no-ids","command":"cancel"}),
+        ),
+    ] {
+        cli.write(request);
+        let reply = cli.until(deadline, |line| line["id"] == id);
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert!(reply["error"].is_string(), "{reply}");
+    }
     cli.write(json!({"id":"status-2","command":"status"}));
     let status_again = cli.until(deadline, |line| line["id"] == "status-2");
     assert_eq!(status_again["ok"], true, "{status_again}");
