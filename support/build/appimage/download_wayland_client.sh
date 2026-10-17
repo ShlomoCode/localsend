@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Host Mesa can require wl_fixes_interface, introduced in Wayland 1.24.
 # TODO: Use apt instead when the Ubuntu baseline provides Wayland >= 1.24; Ubuntu 24.04 has 1.22.
-appdir=$(realpath "${1:?Usage: stage_wayland_client.sh AppDir}")
+appdir=$(realpath "${1:?Usage: download_wayland_client.sh AppDir}")
 test -d "$appdir"
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT

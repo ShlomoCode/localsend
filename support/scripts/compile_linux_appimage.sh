@@ -30,7 +30,7 @@ rm -rf appimage-build
 mkdir AppDir
 cp -r build/linux/x64/release/bundle/* AppDir
 cp support/build/appimage/AppImageBuilder_x86_64.yml AppImageBuilder.yml
-bash support/build/appimage/stage_wayland_client.sh AppDir || exit $?
+bash support/build/appimage/download_wayland_client.sh AppDir || exit $?
 appimage-builder
 sudo chmod +x LocalSend-*-x86_64.AppImage
 

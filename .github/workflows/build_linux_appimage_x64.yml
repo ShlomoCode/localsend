@@ -73,8 +73,8 @@ jobs:
       - name: Copy Recipe to correct location
         run: cp support/build/appimage/AppImageBuilder_x86_64.yml AppImageBuilder.yml
 
-      - name: Stage Wayland client
-        run: bash support/build/appimage/stage_wayland_client.sh AppDir
+      - name: Download Wayland client
+        run: bash support/build/appimage/download_wayland_client.sh AppDir
 
       - name: Build AppImage
         uses: AppImageCrafters/build-appimage@57c3bc6963f870ce3be103117de5b5e33ffbaeb6
