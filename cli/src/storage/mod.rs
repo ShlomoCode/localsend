@@ -4,16 +4,13 @@
 //!
 //! - `config.toml` ([`config`]): user-edited settings; a commented template
 //!   is written on the first run.
-//! - `identity.pem` ([`identity`]): this device's certificate and private
+//! - `identity.pem` ([`Identity`]): this device's certificate and private
 //!   key.
-//! - `paired-v2.json` ([`paired`]): paired devices; machine-written.
+//! - `paired-v2.json` ([`PairedDevices`]): paired devices; machine-written.
 
 mod config;
-mod identity;
-mod paired;
 
-pub use identity::Identity;
-pub use paired::{PairedChannel, PairedDevices};
+pub use localsend_client::{Identity, PairedChannel, PairedDevices};
 
 use crate::Args;
 use anyhow::Context;

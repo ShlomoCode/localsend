@@ -2227,24 +2227,39 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
- "futures-util",
  "gethostname",
  "localsend",
- "mime_guess",
+ "localsend-client",
  "pem 4.0.0",
  "qrcode",
  "ratatui",
  "ratatui-explorer",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "unicode-width",
+ "winresource",
+]
+
+[[package]]
+name = "localsend-client"
+version = "1.18.2"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "if-addrs",
+ "localsend",
+ "mime_guess",
+ "pem 4.0.0",
  "rcgen 0.14.8",
  "serde",
  "serde_json",
  "tokio",
  "tokio-util",
- "toml",
- "unicode-width",
  "uuid",
  "walkdir",
- "winresource",
 ]
 
 [[package]]

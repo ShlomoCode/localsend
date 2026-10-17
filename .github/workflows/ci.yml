@@ -88,6 +88,8 @@ jobs:
         run: cargo test --features full
       - name: Test (signaling server)
         run: cargo test --package server
+      - name: Test (client library and CLI, including real transfers)
+        run: cargo test --package localsend-client --package localsend-cli --locked
       - name: Check (plugin crate, CLI)
         run: cargo check --package rust_lib_localsend_app --package localsend-cli
 
