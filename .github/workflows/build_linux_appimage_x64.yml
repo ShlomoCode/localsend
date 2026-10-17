@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev libfuse2 build-essential pkg-config libffi-dev libexpat1-dev libxml2-dev python3-venv curl ca-certificates
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev libfuse2 curl ca-certificates unzip zstd
 
       - uses: subosito/flutter-action@v2
         with:
@@ -73,8 +73,8 @@ jobs:
       - name: Copy Recipe to correct location
         run: cp support/build/appimage/AppImageBuilder_x86_64.yml AppImageBuilder.yml
 
-      - name: Build and stage Wayland client
-        run: bash support/build/appimage/build_wayland_client.sh AppDir
+      - name: Stage Wayland client
+        run: bash support/build/appimage/stage_wayland_client.sh AppDir
 
       - name: Build AppImage
         uses: AppImageCrafters/build-appimage@57c3bc6963f870ce3be103117de5b5e33ffbaeb6
