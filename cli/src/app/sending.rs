@@ -26,8 +26,7 @@ type Transfer = (HashMap<String, FileDto>, HashMap<String, FileSource>, u64);
 /// Largest input read from stdin, which is held in memory until sent.
 const MAX_STDIN_BYTES: u64 = 16_000_000;
 
-/// What the terminal-free send mode sends.
-#[derive(Clone)]
+/// What the headless mode sends.
 pub(super) enum Payload {
     Files(Vec<PathBuf>),
     Text(Bytes),
@@ -116,6 +115,34 @@ pub(super) fn spawn_send(
     )
 }
 
+/// Spawns a text transfer using the shared payload preparation.
+pub(super) fn spawn_send_text(
+    ui: &mut Ui,
+    identity: Arc<Identity>,
+    device: StatefulDevice,
+    text: Bytes,
+    events_tx: mpsc::Sender<AppEvent>,
+) -> Result<SendState, String> {
+    let host = dialable_host(&device)?;
+    let payload =
+        localsend_client::SendPayload::message(text).map_err(|error| error.to_string())?;
+    let total_bytes = payload.total_bytes();
+    let (files, sources) = payload.into_parts();
+    if files.values().any(|file| file.preview.is_none()) {
+        ui.log(
+            Category::Send,
+            "Text too long for a message, sending it as a file",
+        );
+    }
+    spawn_transfer(
+        identity,
+        device,
+        host,
+        (files, sources, total_bytes),
+        events_tx,
+    )
+}
+
 fn dialable_host(device: &StatefulDevice) -> Result<String, String> {
     device
         .get_best_channel()
@@ -160,14 +187,9 @@ pub(super) fn collect_files(
     ui: &mut Ui,
     picked: Vec<PathBuf>,
 ) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
-    collect_files_with_log(picked, |message| ui.log(Category::Send, &message))
-}
-
-pub(super) fn collect_files_with_log(
-    picked: Vec<PathBuf>,
-    log: impl FnMut(String),
-) -> (HashMap<String, FileDto>, HashMap<String, PathBuf>, u64) {
-    let offer = localsend_client::SendPayload::paths_with_log(picked, log);
+    let offer = localsend_client::SendPayload::paths_with_log(picked, |message| {
+        ui.log(Category::Send, &message)
+    });
     let total_bytes = offer.total_bytes();
     let (files, sources) = offer.into_parts();
     let paths = sources

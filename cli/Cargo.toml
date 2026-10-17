@@ -25,8 +25,5 @@ tokio = { version = "1", features = ["full"] }
 toml = "1.1"
 unicode-width = "0.2"
 
-[dev-dependencies]
-pem = "4.0"
-
 [build-dependencies]
 winresource = "0.1"
