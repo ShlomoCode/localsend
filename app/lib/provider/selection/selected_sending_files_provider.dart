@@ -1,4 +1,4 @@
-import 'dart:convert' show jsonDecode, utf8;
+import 'dart:convert' show jsonDecode, utf8, LineSplitter;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -6,9 +6,12 @@ import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/util/native/cache_helper.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
 import 'package:localsend_app/util/native/cross_file_converters.dart';
+import 'package:localsend_app/util/native/directory_access_pool.dart';
 import 'package:localsend_app/util/send_ignore.dart';
 import 'package:localsend_isolates/model/file_type.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/metadata.dart';
+import 'package:localsend_isolates/rust/api/scoped_file.dart' as rust_scoped;
 import 'package:localsend_isolates/util/content_uri_helper.dart';
 import 'package:localsend_isolates/util/file_path_helper.dart';
 import 'package:logging/logging.dart';
@@ -27,8 +30,27 @@ final selectedSendingFilesProvider = ReduxProvider<SelectedSendingFilesNotifier,
 });
 
 class SelectedSendingFilesNotifier extends ReduxNotifier<List<CrossFile>> {
+  SelectedSendingFilesNotifier({DirectoryAccessPool? directoryPool}) : _directoryPool = directoryPool ?? directoryAccessPool;
+
+  final DirectoryAccessPool _directoryPool;
+  DirectoryAccessOwner? _directoryOwner;
+
   @override
   List<CrossFile> init() => [];
+
+  void replaceDirectoryOwners(List<CrossFile> nextFiles) {
+    final next = _directoryPool.retain(nextFiles.map((file) => file.scopedSource));
+    final old = _directoryOwner;
+    _directoryOwner = next;
+    old?.dispose();
+  }
+
+  @override
+  void dispose() {
+    _directoryOwner?.dispose();
+    _directoryOwner = null;
+    super.dispose();
+  }
 }
 
 /// Adds a message.
@@ -139,10 +161,12 @@ class AddFilesAction<T> extends AsyncReduxAction<SelectedSendingFilesNotifier, L
         newFiles.add(crossFile);
       }
     }
-    return List.unmodifiable([
+    final next = List<CrossFile>.unmodifiable([
       ...state,
       ...newFiles,
     ]);
+    notifier.replaceDirectoryOwners(next);
+    return next;
   }
 }
 
@@ -150,7 +174,9 @@ class AddFilesAction<T> extends AsyncReduxAction<SelectedSendingFilesNotifier, L
 class AddDirectoryAction extends AsyncReduxAction<SelectedSendingFilesNotifier, List<CrossFile>> {
   final String directoryPath;
 
-  AddDirectoryAction(this.directoryPath);
+  final String? accessToken;
+
+  AddDirectoryAction(this.directoryPath, {this.accessToken});
 
   @override
   Future<List<CrossFile>> reduce() async {
@@ -158,6 +184,39 @@ class AddDirectoryAction extends AsyncReduxAction<SelectedSendingFilesNotifier, 
     final newFiles = <CrossFile>[];
     final directoryName = p.basename(directoryPath);
     final sendIgnore = SendIgnore();
+    final token = accessToken;
+    if (token != null) {
+      final entries = await rust_scoped.listScopedDirectory(directoryPath: directoryPath, accessToken: token);
+      for (final entry in entries) {
+        final innerRelative = entry.relativePath;
+        final source = ScopedFile(directoryPath: directoryPath, accessToken: token, relativePath: innerRelative);
+        if (sendIgnore.isIgnoreFile(p.posix.basename(innerRelative))) {
+          sendIgnore.loadIgnoreContent(
+            parentPath: innerRelative.contains('/') ? p.posix.dirname(innerRelative) : null,
+            ignoreContents: const LineSplitter().convert(await rust_scoped.readScopedTextFile(file: source.toRust())),
+          );
+          continue;
+        }
+        if (sendIgnore.isIgnored(innerRelative)) continue;
+        final relative = '$directoryName/$innerRelative';
+        final file = CrossFile(
+          name: relative,
+          fileType: relative.guessFileType(),
+          size: entry.size.toInt(),
+          thumbnail: null,
+          asset: null,
+          path: p.join(directoryPath, innerRelative),
+          scopedSource: source,
+          bytes: null,
+          lastModified: entry.metadata?.modified,
+          lastAccessed: entry.metadata?.accessed,
+        );
+        if (!state.any((element) => element.isSameFile(otherFile: file))) newFiles.add(file);
+      }
+      final next = List<CrossFile>.unmodifiable([...state, ...newFiles]);
+      notifier.replaceDirectoryOwners(next);
+      return next;
+    }
     await for (final entity in Directory(directoryPath).list(recursive: true)) {
       if (entity is File) {
         final innerRelative = p.relative(entity.path, from: directoryPath).replaceAll('\\', '/');
@@ -272,7 +331,9 @@ class RemoveSelectedFileAction extends ReduxAction<SelectedSendingFilesNotifier,
 
   @override
   List<CrossFile> reduce() {
-    return List<CrossFile>.unmodifiable([...state]..removeAt(index));
+    final next = List<CrossFile>.unmodifiable([...state]..removeAt(index));
+    notifier.replaceDirectoryOwners(next);
+    return next;
   }
 
   @override
@@ -358,6 +419,7 @@ class LoadSelectionFromArgsAction extends AsyncReduxActionWithResult<SelectedSen
 class ClearSelectionAction extends ReduxAction<SelectedSendingFilesNotifier, List<CrossFile>> with GlobalActions {
   @override
   List<CrossFile> reduce() {
+    notifier.replaceDirectoryOwners(const []);
     return const [];
   }
 

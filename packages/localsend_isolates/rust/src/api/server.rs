@@ -1,3 +1,4 @@
+use crate::api::scoped_file::RsScopedFile;
 use crate::frb_generated::StreamSink;
 use flutter_rust_bridge::frb;
 pub use localsend::http::dto_v2::RegisterDtoV2;
@@ -8,7 +9,7 @@ use localsend::http::server::internal::{InternalConfig, InternalEvent};
 pub use localsend::http::server::v2::SessionEndReasonV2;
 use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
 use localsend::http::server::web::{
-    WebConfig, WebMode as CoreWebMode, WebDownloadConfig, WebDownloadEvent,
+    WebConfig, WebDownloadConfig, WebDownloadEvent, WebMode as CoreWebMode,
 };
 pub use localsend::http::server::web::{WebI18n, WebPages};
 use localsend::http::state::ClientInfo;
@@ -626,7 +627,9 @@ impl RsHttpServer {
         file_id: String,
         path: Option<String>,
         file_descriptor: Option<i32>,
+        scoped_source: Option<RsScopedFile>,
     ) -> anyhow::Result<()> {
+        let content = resolve_file_content(path, file_descriptor, scoped_source)?;
         let Some(content_tx) = self
             .pending_downloads
             .lock()
@@ -635,8 +638,6 @@ impl RsHttpServer {
         else {
             return Err(anyhow::anyhow!("No pending file download for this file"));
         };
-
-        let content = resolve_file_content(path, file_descriptor)?;
 
         content_tx
             .send(content)
@@ -738,10 +739,11 @@ fn resolve_upload_target(
 fn resolve_file_content(
     path: Option<String>,
     file_descriptor: Option<i32>,
+    scoped_source: Option<RsScopedFile>,
 ) -> anyhow::Result<FileContent> {
-    match (path, file_descriptor) {
-        (Some(path), None) => Ok(FileContent::Path(path.into())),
-        (None, Some(file_descriptor)) => {
+    match (path, file_descriptor, scoped_source) {
+        (Some(path), None, None) => Ok(FileContent::Path(path.into())),
+        (None, Some(file_descriptor), None) => {
             #[cfg(target_os = "android")]
             {
                 Ok(FileContent::Fd(file_descriptor))
@@ -754,6 +756,7 @@ fn resolve_file_content(
                 ))
             }
         }
+        (None, None, Some(source)) => Ok(FileContent::Scoped(source.acquire()?)),
         _ => Err(anyhow::anyhow!(
             "Exactly one download source must be provided"
         )),

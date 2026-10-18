@@ -1,4 +1,5 @@
 import 'package:localsend_isolates/rust/api/model.dart';
+import 'package:localsend_isolates/rust/api/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/server.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
@@ -106,12 +107,14 @@ class HttpServerService {
     required String fileId,
     required String? path,
     required int? fileDescriptor,
+    RsScopedFile? scopedSource,
   }) async {
     await _requireServer().respondFileDownload(
       sessionId: sessionId,
       fileId: fileId,
       path: path,
       fileDescriptor: fileDescriptor,
+      scopedSource: scopedSource,
     );
   }
 

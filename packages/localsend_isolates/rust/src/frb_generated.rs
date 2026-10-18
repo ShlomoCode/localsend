@@ -33,7 +33,7 @@ use crate::api::server::*;
 use crate::api::stream::*;
 use crate::api::webrtc::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
 
 // Section: boilerplate
@@ -44,7 +44,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1979579466;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -82155254;
 
 // Section: executor
 
@@ -1199,6 +1199,8 @@ fn wire__crate__api__http__RsHttpClient_upload_impl(
             let api_binary = <Option<Dart2RustStreamReceiver>>::sse_decode(&mut deserializer);
             let api_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_file_descriptor = <Option<i32>>::sse_decode(&mut deserializer);
+            let api_scoped_source =
+                <Option<crate::api::scoped_file::RsScopedFile>>::sse_decode(&mut deserializer);
             let api_content_length = <u64>::sse_decode(&mut deserializer);
             let api_cancel_token = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<RsCancellationToken>,
@@ -1251,6 +1253,7 @@ fn wire__crate__api__http__RsHttpClient_upload_impl(
                                 api_binary,
                                 api_path,
                                 api_file_descriptor,
+                                api_scoped_source,
                                 api_content_length,
                                 &*api_cancel_token_guard,
                             )
@@ -1545,6 +1548,8 @@ fn wire__crate__api__server__RsHttpServer_respond_file_download_impl(
             let api_file_id = <String>::sse_decode(&mut deserializer);
             let api_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_file_descriptor = <Option<i32>>::sse_decode(&mut deserializer);
+            let api_scoped_source =
+                <Option<crate::api::scoped_file::RsScopedFile>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1572,6 +1577,7 @@ fn wire__crate__api__server__RsHttpServer_respond_file_download_impl(
                             api_file_id,
                             api_path,
                             api_file_descriptor,
+                            api_scoped_source,
                         )
                         .await?;
                         Ok(output_ok)
@@ -3061,6 +3067,8 @@ fn wire__crate__api__crypto__hash_file_impl(
             let api_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_file_descriptor = <Option<i32>>::sse_decode(&mut deserializer);
             let api_bytes = <Option<Vec<u8>>>::sse_decode(&mut deserializer);
+            let api_scoped_source =
+                <Option<crate::api::scoped_file::RsScopedFile>>::sse_decode(&mut deserializer);
             let api_cancel_token = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<RsCancellationToken>,
             >>::sse_decode(&mut deserializer);
@@ -3093,6 +3101,7 @@ fn wire__crate__api__crypto__hash_file_impl(
                                 api_path,
                                 api_file_descriptor,
                                 api_bytes,
+                                api_scoped_source,
                                 &*api_cancel_token_guard,
                             )
                             .await;
@@ -3136,6 +3145,47 @@ fn wire__crate__api__filename__is_valid_file_name_impl(
         },
     )
 }
+fn wire__crate__api__scoped_file__list_scoped_directory_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "list_scoped_directory",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_directory_path = <String>::sse_decode(&mut deserializer);
+            let api_access_token = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::scoped_file::list_scoped_directory(
+                            api_directory_path,
+                            api_access_token,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__metadata__read_file_metadata_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3166,6 +3216,43 @@ fn wire__crate__api__metadata__read_file_metadata_impl(
                         let output_ok = Result::<_, ()>::Ok(
                             crate::api::metadata::read_file_metadata(api_path).await,
                         )?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__scoped_file__read_scoped_text_file_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "read_scoped_text_file",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_file = <crate::api::scoped_file::RsScopedFile>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::scoped_file::read_scoped_text_file(api_file).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -4242,6 +4329,20 @@ impl SseDecode for Vec<crate::api::discovery::RsDeviceLog> {
     }
 }
 
+impl SseDecode for Vec<crate::api::scoped_file::RsScopedEntry> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::scoped_file::RsScopedEntry>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for crate::api::http::LsHttpClientVersion {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4338,6 +4439,19 @@ impl SseDecode for Option<crate::api::model::PrepareUploadResponseDto> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::model::PrepareUploadResponseDto>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::scoped_file::RsScopedFile> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::scoped_file::RsScopedFile>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -4684,6 +4798,34 @@ impl SseDecode for crate::api::http::RsHttpClientError {
                 unimplemented!("");
             }
         }
+    }
+}
+
+impl SseDecode for crate::api::scoped_file::RsScopedEntry {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_relativePath = <String>::sse_decode(deserializer);
+        let mut var_size = <u64>::sse_decode(deserializer);
+        let mut var_metadata = <Option<crate::api::model::FileMetadata>>::sse_decode(deserializer);
+        return crate::api::scoped_file::RsScopedEntry {
+            relative_path: var_relativePath,
+            size: var_size,
+            metadata: var_metadata,
+        };
+    }
+}
+
+impl SseDecode for crate::api::scoped_file::RsScopedFile {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_directoryPath = <String>::sse_decode(deserializer);
+        let mut var_accessToken = <String>::sse_decode(deserializer);
+        let mut var_relativePath = <String>::sse_decode(deserializer);
+        return crate::api::scoped_file::RsScopedFile {
+            directory_path: var_directoryPath,
+            access_token: var_accessToken,
+            relative_path: var_relativePath,
+        };
     }
 }
 
@@ -5358,12 +5500,24 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         52 => wire__crate__api__crypto__hash_file_impl(port, ptr, rust_vec_len, data_len),
-        54 => {
+        54 => wire__crate__api__scoped_file__list_scoped_directory_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        55 => {
             wire__crate__api__metadata__read_file_metadata_impl(port, ptr, rust_vec_len, data_len)
         }
-        56 => wire__crate__api__discovery__start_discovery_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__server__start_server_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__crypto__verify_cert_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__scoped_file__read_scoped_text_file_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        58 => wire__crate__api__discovery__start_discovery_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__server__start_server_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__crypto__verify_cert_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5381,7 +5535,7 @@ fn pde_ffi_dispatcher_sync_impl(
         46 => wire__crate__api__cancel__create_cancellation_token_impl(ptr, rust_vec_len, data_len),
         47 => wire__crate__api__http__create_client_impl(ptr, rust_vec_len, data_len),
         53 => wire__crate__api__filename__is_valid_file_name_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__filename__sanitize_file_name_impl(ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__filename__sanitize_file_name_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -6136,6 +6290,50 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::http::RsHttpClientError>
     for crate::api::http::RsHttpClientError
 {
     fn into_into_dart(self) -> crate::api::http::RsHttpClientError {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::scoped_file::RsScopedEntry {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.relative_path.into_into_dart().into_dart(),
+            self.size.into_into_dart().into_dart(),
+            self.metadata.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::scoped_file::RsScopedEntry
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::scoped_file::RsScopedEntry>
+    for crate::api::scoped_file::RsScopedEntry
+{
+    fn into_into_dart(self) -> crate::api::scoped_file::RsScopedEntry {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::scoped_file::RsScopedFile {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.directory_path.into_into_dart().into_dart(),
+            self.access_token.into_into_dart().into_dart(),
+            self.relative_path.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::scoped_file::RsScopedFile
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::scoped_file::RsScopedFile>
+    for crate::api::scoped_file::RsScopedFile
+{
+    fn into_into_dart(self) -> crate::api::scoped_file::RsScopedFile {
         self
     }
 }
@@ -7160,6 +7358,16 @@ impl SseEncode for Vec<crate::api::discovery::RsDeviceLog> {
     }
 }
 
+impl SseEncode for Vec<crate::api::scoped_file::RsScopedEntry> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::scoped_file::RsScopedEntry>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for crate::api::http::LsHttpClientVersion {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7252,6 +7460,16 @@ impl SseEncode for Option<crate::api::model::PrepareUploadResponseDto> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::model::PrepareUploadResponseDto>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::scoped_file::RsScopedFile> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::scoped_file::RsScopedFile>::sse_encode(value, serializer);
         }
     }
 }
@@ -7512,6 +7730,24 @@ impl SseEncode for crate::api::http::RsHttpClientError {
                 unimplemented!("");
             }
         }
+    }
+}
+
+impl SseEncode for crate::api::scoped_file::RsScopedEntry {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.relative_path, serializer);
+        <u64>::sse_encode(self.size, serializer);
+        <Option<crate::api::model::FileMetadata>>::sse_encode(self.metadata, serializer);
+    }
+}
+
+impl SseEncode for crate::api::scoped_file::RsScopedFile {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.directory_path, serializer);
+        <String>::sse_encode(self.access_token, serializer);
+        <String>::sse_encode(self.relative_path, serializer);
     }
 }
 
@@ -7886,7 +8122,7 @@ mod io {
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
-    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate
@@ -8070,7 +8306,7 @@ mod web {
     };
     use flutter_rust_bridge::for_generated::wasm_bindgen;
     use flutter_rust_bridge::for_generated::wasm_bindgen::prelude::*;
-    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate

@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/device.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
 import 'package:localsend_isolates/src/isolate/child/http_provider.dart';
@@ -27,6 +28,7 @@ sealed class BaseHttpUploadTask {}
 class HttpUploadFile {
   final String remoteFileToken;
   final String fileId;
+  final ScopedFile? scopedSource;
   final String? filePath;
   final List<int>? fileBytes;
   final int fileSize;
@@ -34,6 +36,7 @@ class HttpUploadFile {
   HttpUploadFile({
     required this.remoteFileToken,
     required this.fileId,
+    this.scopedSource,
     required this.filePath,
     required this.fileBytes,
     required this.fileSize,
@@ -171,7 +174,8 @@ Future<void> setupHttpUploadIsolate(
                     .upload(
                       client: client,
                       stream: filePath == null && file.fileBytes != null ? Stream.value(file.fileBytes!) : null,
-                      path: !isContentUri ? filePath : null,
+                      path: !isContentUri && file.scopedSource == null ? filePath : null,
+                      scopedSource: file.scopedSource,
                       fileDescriptor: fileDescriptor,
                       contentLength: file.fileSize,
                       target: uploadTask.device,

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:file_picker/file_picker.dart' show FilePicker;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +16,7 @@ import 'package:localsend_app/util/determine_image_type.dart';
 import 'package:localsend_app/util/image_converter.dart';
 import 'package:localsend_app/util/native/channel/android_channel.dart' as android_channel;
 import 'package:localsend_app/util/native/cross_file_converters.dart';
+import 'package:localsend_app/util/native/directory_access_pool.dart';
 import 'package:localsend_app/util/native/pick_directory_path.dart';
 import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/util/ui/asset_picker_translated_text_delegate.dart';
@@ -219,6 +222,16 @@ Future<void> _pickFolder(BuildContext context, Ref ref) async {
       final result = await android_channel.pickDirectoryAndroid();
       if (result != null) {
         await ref.redux(selectedSendingFilesProvider).dispatchAsync(AddAndroidDirectoryAction(result));
+      }
+    } else if (Platform.isIOS) {
+      final access = await FilePicker.getDirectoryAccess();
+      if (access != null) {
+        final owner = access.accessToken == null ? null : directoryAccessPool.registerPicked(path: access.path, accessToken: access.accessToken!);
+        try {
+          await ref.redux(selectedSendingFilesProvider).dispatchAsync(AddDirectoryAction(access.path, accessToken: access.accessToken));
+        } finally {
+          owner?.dispose();
+        }
       }
     } else {
       final directoryPath = await pickDirectoryPath();

@@ -60,3 +60,8 @@ multicast = ["if-addrs", "socket2", "tokio-util"]
 webrtc-signaling = ["tokio-tungstenite"]
 webrtc = ["crypto", "flate2", "dep:webrtc", "webrtc-signaling", "x509-parser"]
 full = ["crypto", "discovery", "http", "multicast", "webrtc"]
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2 = "0.6.3"
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSData", "NSError", "NSString", "NSURL", "NSFileCoordinator", "NSFilePresenter"] }
