@@ -15,48 +15,84 @@ import 'package:localsend_isolates/model/device_info_result.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
 
-void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('org.localsend.localsend_app/localsend');
-  const permissionsChannel = MethodChannel('flutter.baseflow.com/permissions/methods');
+const _pickerChannel = MethodChannel('org.localsend.localsend_app/localsend');
+const _permissionsChannel = MethodChannel('flutter.baseflow.com/permissions/methods');
 
-  for (final option in [FilePickerOption.file, FilePickerOption.folder]) {
-    for (final errorCode in ['PICKER_FAILED', 'PERMISSION_DENIED', 'CANCELED']) {
-      testWidgets('$option with $errorCode shows the appropriate result', (tester) async {
-        debugDefaultTargetPlatformOverride = TargetPlatform.android;
-        addTearDown(() => debugDefaultTargetPlatformOverride = null);
-        var pickerCalled = false;
-        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-          if (call.method == (option == FilePickerOption.file ? 'pickFiles' : 'pickDirectory')) {
-            pickerCalled = true;
-            throw PlatformException(code: errorCode, message: 'Document provider failed');
-          }
-          return null;
-        });
-        addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
-        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(permissionsChannel, (call) async => {15: 1});
-        addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(permissionsChannel, null));
+void _testOnPlatform(String description, TargetPlatform platform, WidgetTesterCallback body) {
+  testWidgets(description, (tester) async {
+    debugDefaultTargetPlatformOverride = platform;
+    try {
+      await body(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+}
 
-        await tester.pumpWidget(
-          RefenaScope(
-            overrides: [
-              deviceInfoProvider.overrideWithBuilder(
-                (_) => DeviceInfoResult(deviceType: DeviceType.mobile, deviceModel: null, androidSdkInt: 35),
-              ),
-            ],
-            child: MaterialApp(
-              navigatorKey: Routerino.navigatorKey,
-              home: Scaffold(
-                body: Builder(
-                  builder: (context) => TextButton(
-                    onPressed: () => context.global.dispatchAsync(PickFileAction(option: option, context: context)),
-                    child: const Text('Pick'),
+void _mockAndroidPicker(WidgetTester tester, FilePickerOption option, Future<dynamic> Function() pick) {
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(_pickerChannel, (call) async {
+    if (call.method == (option == FilePickerOption.file ? 'pickFiles' : 'pickDirectory')) {
+      return pick();
+    }
+    return null;
+  });
+  addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(_pickerChannel, null));
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(_permissionsChannel, (call) async => {15: 1});
+  addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(_permissionsChannel, null));
+}
+
+Future<void> _pumpPickerPage(WidgetTester tester, FilePickerOption option, {bool android = false}) async {
+  await tester.pumpWidget(
+    RefenaScope(
+      overrides: [
+        if (android)
+          deviceInfoProvider.overrideWithBuilder(
+            (_) => DeviceInfoResult(deviceType: DeviceType.mobile, deviceModel: null, androidSdkInt: 35),
+          ),
+      ],
+      child: MaterialApp(
+        navigatorKey: Routerino.navigatorKey,
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (context) => Scaffold(
+                    body: Column(
+                      children: [
+                        const Text('Picker page'),
+                        TextButton(
+                          onPressed: () => context.global.dispatchAsync(PickFileAction(option: option, context: context)),
+                          child: const Text('Pick'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
+              child: const Text('Open page'),
             ),
           ),
-        );
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('Open page'));
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final option in [FilePickerOption.file, FilePickerOption.folder]) {
+    for (final errorCode in ['PICKER_FAILED', 'PERMISSION_DENIED', 'CANCELED']) {
+      _testOnPlatform('$option with $errorCode shows the appropriate result', TargetPlatform.android, (tester) async {
+        var pickerCalled = false;
+        _mockAndroidPicker(tester, option, () async {
+          pickerCalled = true;
+          throw PlatformException(code: errorCode, message: 'Document provider failed');
+        });
+        await _pumpPickerPage(tester, option, android: true);
 
         await tester.tap(find.text('Pick'));
         await tester.pump(const Duration(milliseconds: 300)); // The folder picker waits for its loading dialog.
@@ -82,51 +118,16 @@ void main() {
           expect(find.byType(ErrorDialog), findsNothing);
           expect(find.byType(NoPermissionDialog), findsNothing);
         }
-        debugDefaultTargetPlatformOverride = null;
       });
     }
   }
 
   for (final option in [FilePickerOption.file, FilePickerOption.folder]) {
-    testWidgets('$option on desktop leaves the current page open after a picker error', (tester) async {
+    _testOnPlatform('$option on desktop leaves the current page open after a picker error', TargetPlatform.windows, (tester) async {
       final originalSelector = FileSelectorPlatform.instance;
       FileSelectorPlatform.instance = _FailingFileSelector();
       addTearDown(() => FileSelectorPlatform.instance = originalSelector);
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-
-      await tester.pumpWidget(
-        RefenaScope(
-          child: MaterialApp(
-            navigatorKey: Routerino.navigatorKey,
-            home: Scaffold(
-              body: Builder(
-                builder: (context) => TextButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (context) => Scaffold(
-                        body: Column(
-                          children: [
-                            const Text('Picker page'),
-                            TextButton(
-                              onPressed: () => context.global.dispatchAsync(PickFileAction(option: option, context: context)),
-                              child: const Text('Pick'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  child: const Text('Open page'),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.tap(find.text('Open page'));
-      await tester.pumpAndSettle();
+      await _pumpPickerPage(tester, option);
       await tester.tap(find.text('Pick'));
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
@@ -139,63 +140,14 @@ void main() {
       await tester.tap(find.byType(TextButton).last);
       await tester.pumpAndSettle();
       expect(find.text('Picker page'), findsOneWidget);
-      debugDefaultTargetPlatformOverride = null;
-      FileSelectorPlatform.instance = originalSelector;
     });
   }
 
   for (final option in [FilePickerOption.file, FilePickerOption.folder]) {
-    testWidgets('$option preserves the current page if its loading route is removed while picking', (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    _testOnPlatform('$option preserves the current page if its loading route is removed while picking', TargetPlatform.android, (tester) async {
       final pickerResult = Completer<dynamic>();
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-        if (call.method == (option == FilePickerOption.file ? 'pickFiles' : 'pickDirectory')) {
-          return pickerResult.future;
-        }
-        return null;
-      });
-      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(permissionsChannel, (call) async => {15: 1});
-      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(permissionsChannel, null));
-
-      await tester.pumpWidget(
-        RefenaScope(
-          overrides: [
-            deviceInfoProvider.overrideWithBuilder(
-              (_) => DeviceInfoResult(deviceType: DeviceType.mobile, deviceModel: null, androidSdkInt: 35),
-            ),
-          ],
-          child: MaterialApp(
-            navigatorKey: Routerino.navigatorKey,
-            home: Scaffold(
-              body: Builder(
-                builder: (context) => TextButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (context) => Scaffold(
-                        body: Column(
-                          children: [
-                            const Text('Picker page'),
-                            TextButton(
-                              onPressed: () => context.global.dispatchAsync(PickFileAction(option: option, context: context)),
-                              child: const Text('Pick'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  child: const Text('Open page'),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.tap(find.text('Open page'));
-      await tester.pumpAndSettle();
+      _mockAndroidPicker(tester, option, () => pickerResult.future);
+      await _pumpPickerPage(tester, option, android: true);
       await tester.tap(find.text('Pick'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.byType(LoadingDialog), findsOneWidget);
@@ -211,7 +163,6 @@ void main() {
       await tester.tap(find.byType(TextButton).last);
       await tester.pumpAndSettle();
       expect(find.text('Picker page'), findsOneWidget);
-      debugDefaultTargetPlatformOverride = null;
     });
   }
 }
