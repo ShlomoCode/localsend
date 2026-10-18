@@ -6,6 +6,9 @@
 # Rust workspace build output
 /target/
 
+# Network lab packet captures and run logs
+/artifacts/network-lab/
+
 # Linux AppImage
 /app/AppDir
 /app/appimage-build

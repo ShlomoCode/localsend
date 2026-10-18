@@ -20,6 +20,18 @@ pub enum Command {
         #[arg(long, value_name = "TARGET")]
         to: Option<String>,
 
+        /// Port to use when --to is an IP address
+        #[arg(long, requires = "to")]
+        target_port: Option<u16>,
+
+        /// Maximum time to discover and complete the transfer, in seconds
+        #[arg(long, requires = "to", value_parser = clap::value_parser!(u64).range(1..=86400))]
+        timeout: Option<u64>,
+
+        /// Emit newline-delimited JSON instead of terminal output
+        #[arg(long, requires = "to")]
+        json: bool,
+
         /// Send this text as a message instead of files; `-` reads it from stdin
         #[arg(long, value_name = "TEXT", requires = "to", conflicts_with = "paths")]
         text: Option<String>,
@@ -27,6 +39,32 @@ pub enum Command {
         /// Files or directories to send (directories are collected recursively)
         #[arg(value_name = "PATH", required_unless_present = "text", num_args = 1..)]
         paths: Vec<PathBuf>,
+    },
+    /// Discover nearby devices and print one snapshot
+    Discover {
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=86400))]
+        timeout: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Receive transfers without a terminal
+    Receive {
+        /// Accept requests from any sender (default: paired senders only)
+        #[arg(long)]
+        auto_accept: bool,
+        /// Exit after one completed transfer
+        #[arg(long)]
+        once: bool,
+        /// Stop after this many seconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=86400))]
+        timeout: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Serve JSON-line commands and events over stdin/stdout
+    Serve {
+        #[arg(long, required = true)]
+        stdio: bool,
     },
 }
 
@@ -66,7 +104,23 @@ const HELP_SECTIONS: &str = "Events:\n  \
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    tokio::runtime::Runtime::new()?.block_on(app::run(args))
+    let json = matches!(
+        &args.command,
+        Some(Command::Send { json: true, .. })
+            | Some(Command::Discover { json: true, .. })
+            | Some(Command::Receive { json: true, .. })
+            | Some(Command::Serve { .. })
+    );
+    let result = tokio::runtime::Runtime::new()?.block_on(app::run(args));
+    if let Err(error) = &result
+        && json
+    {
+        println!(
+            "{}",
+            serde_json::json!({"type":"error","code":"command_failed","error":error.to_string()})
+        );
+    }
+    result
 }
 
 #[cfg(test)]
@@ -131,12 +185,50 @@ mod tests {
             Args::try_parse_from(["localsend-cli", "send", "--to", "Phone", "--text", "hello"])
                 .unwrap();
 
-        let Some(Command::Send { to, text, paths }) = args.command else {
+        let Some(Command::Send {
+            to, text, paths, ..
+        }) = args.command
+        else {
             panic!("expected the send command");
         };
         assert_eq!(to.as_deref(), Some("Phone"));
         assert_eq!(text.as_deref(), Some("hello"));
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn accepts_text_with_automation_send_options() {
+        let args = Args::try_parse_from([
+            "localsend-cli",
+            "send",
+            "--to",
+            "192.0.2.5",
+            "--text",
+            "hello",
+            "--target-port",
+            "53318",
+            "--timeout",
+            "10",
+            "--json",
+        ])
+        .unwrap();
+
+        let Some(Command::Send {
+            text,
+            paths,
+            target_port,
+            timeout,
+            json,
+            ..
+        }) = args.command
+        else {
+            panic!("expected the send command");
+        };
+        assert_eq!(text.as_deref(), Some("hello"));
+        assert!(paths.is_empty());
+        assert_eq!(target_port, Some(53318));
+        assert_eq!(timeout, Some(10));
+        assert!(json);
     }
 
     #[test]
