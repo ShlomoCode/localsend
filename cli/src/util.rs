@@ -1,6 +1,5 @@
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{cursor, execute};
-use localsend::util::filename;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -93,21 +92,7 @@ pub fn progress_bar(fraction: f64, width: usize) -> String {
 /// final path component and sanitized for the local filesystem, so it can
 /// neither escape the target directory nor carry illegal characters.
 pub fn unique_path(dir: &Path, file_name: &str) -> PathBuf {
-    let name = filename::sanitize_path(file_name, filename::Rules::current());
-
-    let candidate = dir.join(&name);
-    if !candidate.exists() {
-        return candidate;
-    }
-
-    let (stem, extension) = match name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
-        _ => (name.as_str(), String::new()),
-    };
-    (1..)
-        .map(|i| dir.join(format!("{stem} ({i}){extension}")))
-        .find(|candidate| !candidate.exists())
-        .unwrap()
+    localsend_client::util::unique_path(dir, file_name)
 }
 
 /// Estimates the transfer speed from cumulative byte counts, smoothed with an

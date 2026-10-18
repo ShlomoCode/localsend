@@ -191,6 +191,10 @@ localsend-cli send --to 192.168.27.26 report.pdf
 An alias must uniquely identify a discovered device. An IP address is probed directly
 over HTTPS on LocalSend's default port (`53317`).
 
+Rust integrations can use the [shared client library](packages/client/README.md) directly
+for device discovery, transfers, receive decisions, and cancellation. The CLI shares
+identity storage, target selection, payload preparation, and upload code with this library.
+
 To send a text message instead of files, use `--text` together with `--to`.
 Pass `-` to read the text from stdin:
 
