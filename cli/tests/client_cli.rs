@@ -68,7 +68,7 @@ async fn send_and_receive(
         .stdin(Stdio::null())
         .kill_on_drop(true);
 
-    let outcome = tokio::time::timeout(Duration::from_secs(45), async {
+    tokio::time::timeout(Duration::from_secs(45), async {
         let mut child_output = Box::pin(command.output());
         let mut output = None;
         let mut received = false;
@@ -91,8 +91,7 @@ async fn send_and_receive(
         Ok::<(), anyhow::Error>(())
     })
     .await
-    .context("CLI transfer timed out")?;
-    outcome
+    .context("CLI transfer timed out")?
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

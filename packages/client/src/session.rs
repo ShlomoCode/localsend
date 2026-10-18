@@ -4,7 +4,6 @@ use crate::paired::PairedDevices;
 use crate::sanitize;
 use crate::send_task::{self, SendCancel, TaskEvent};
 use crate::target::TargetSelector;
-use crate::util;
 use anyhow::{anyhow, ensure};
 use localsend::discovery::{
     DEFAULT_DISCOVERY_TIMEOUT, DeviceIdentity, DiscoveryConfig, DiscoveryEvent, DiscoveryHandle,
@@ -18,9 +17,10 @@ use localsend::http::server::{ServerConfigV2, ServerHandle, start_with_port};
 use localsend::model::discovery::ProtocolType;
 use localsend::model::transfer::FileDto;
 use localsend::multicast::{DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
+use localsend::util::filename;
 use localsend::util::interface::{InterfaceFilter, local_interface_addresses};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -144,11 +144,50 @@ struct Receiving {
     session_id: String,
     alias: String,
     files: HashMap<String, FileDto>,
+    paths: HashMap<String, PathBuf>,
+    attempts: HashMap<String, u64>,
     outstanding: HashSet<String>,
-    finished: usize,
-    bytes: u64,
-    failures: usize,
+    successful: HashSet<String>,
+    failed: HashSet<String>,
     ended: Option<SessionEndReasonV2>,
+}
+
+impl Receiving {
+    fn progress(&self) -> (usize, u64, usize) {
+        let bytes = self
+            .successful
+            .iter()
+            .filter_map(|id| self.files.get(id))
+            .map(|file| file.size)
+            .sum();
+        (self.successful.len(), bytes, self.failed.len())
+    }
+}
+
+fn reserve_receive_paths(dir: &Path, files: &HashMap<String, FileDto>) -> HashMap<String, PathBuf> {
+    let mut ids: Vec<_> = files.keys().collect();
+    ids.sort();
+    let mut reserved = HashSet::new();
+    let mut paths = HashMap::new();
+    for id in ids {
+        let name = filename::sanitize_path(&files[id].file_name, filename::Rules::current());
+        let (stem, extension) = match name.rsplit_once('.') {
+            Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
+            _ => (name.as_str(), String::new()),
+        };
+        for number in 0.. {
+            let candidate = if number == 0 {
+                dir.join(&name)
+            } else {
+                dir.join(format!("{stem} ({number}){extension}"))
+            };
+            if !candidate.exists() && reserved.insert(candidate.clone()) {
+                paths.insert(id.clone(), candidate);
+                break;
+            }
+        }
+    }
+    paths
 }
 
 struct Sending {
@@ -174,6 +213,7 @@ enum InternalEvent {
     ReceiveFileResult {
         session_id: String,
         file_id: String,
+        attempt: u64,
         result: Result<(), String>,
     },
 }
@@ -444,12 +484,13 @@ impl Session {
         {
             self.server.cancel_v2_session(id).await;
             let receiving = self.receiving.take().unwrap();
+            let (files, bytes, failed_files) = receiving.progress();
             self.events.push_back(SessionEvent::ReceiveCompleted {
                 session_id: id.to_string(),
                 alias: receiving.alias,
-                files: receiving.finished,
-                bytes: receiving.bytes,
-                failed_files: receiving.failures,
+                files,
+                bytes,
+                failed_files,
                 success: false,
                 error: Some("Cancelled".to_string()),
             });
@@ -556,6 +597,7 @@ impl Session {
             InternalEvent::ReceiveFileResult {
                 session_id,
                 file_id,
+                attempt,
                 result,
             } => {
                 if let Some(receiving) = self
@@ -563,15 +605,18 @@ impl Session {
                     .as_mut()
                     .filter(|r| r.session_id == session_id)
                 {
+                    if receiving.attempts.get(&file_id) != Some(&attempt) {
+                        return Ok(());
+                    }
                     receiving.outstanding.remove(&file_id);
                     match result {
                         Ok(()) => {
-                            receiving.finished += 1;
-                            receiving.bytes +=
-                                receiving.files.get(&file_id).map(|f| f.size).unwrap_or(0);
+                            receiving.failed.remove(&file_id);
+                            receiving.successful.insert(file_id);
                         }
                         Err(error) => {
-                            receiving.failures += 1;
+                            receiving.successful.remove(&file_id);
+                            receiving.failed.insert(file_id.clone());
                             self.events.push_back(SessionEvent::ReceiveFileFailed {
                                 session_id,
                                 file_id,
@@ -697,6 +742,7 @@ impl Session {
     }
 
     fn accept(&mut self, pending: PendingReceive) {
+        let paths = reserve_receive_paths(&self.config.destination, &pending.files);
         let ids = pending.files.keys().cloned().collect();
         if pending
             .decision
@@ -715,10 +761,11 @@ impl Session {
                 session_id: pending.session_id,
                 alias: pending.alias,
                 files: pending.files,
+                paths,
+                attempts: HashMap::new(),
                 outstanding: HashSet::new(),
-                finished: 0,
-                bytes: 0,
-                failures: 0,
+                successful: HashSet::new(),
+                failed: HashSet::new(),
                 ended: None,
             });
         }
@@ -733,14 +780,15 @@ impl Session {
             return;
         }
         let received = self.receiving.take().unwrap();
+        let (files, bytes, failed_files) = received.progress();
         let success =
-            matches!(received.ended, Some(SessionEndReasonV2::Finished)) && received.failures == 0;
+            matches!(received.ended, Some(SessionEndReasonV2::Finished)) && failed_files == 0;
         self.events.push_back(SessionEvent::ReceiveCompleted {
             session_id: received.session_id,
             alias: received.alias,
-            files: received.finished,
-            bytes: received.bytes,
-            failed_files: received.failures,
+            files,
+            bytes,
+            failed_files,
             success,
             error: None,
         });
@@ -803,7 +851,7 @@ impl Session {
             ServerEventV2::FileUpload {
                 session_id,
                 file_id,
-                file,
+                file: _,
                 target_tx,
             } => {
                 let Some(receiving) = self
@@ -813,8 +861,15 @@ impl Session {
                 else {
                     return Ok(());
                 };
+                let Some(path) = receiving.paths.get(&file_id).cloned() else {
+                    return Ok(());
+                };
+                let attempt = receiving.attempts.entry(file_id.clone()).or_default();
+                *attempt += 1;
+                let attempt = *attempt;
                 receiving.outstanding.insert(file_id.clone());
-                let path = util::unique_path(&self.config.destination, &file.file_name);
+                receiving.successful.remove(&file_id);
+                receiving.failed.remove(&file_id);
                 let (result_tx, result_rx) = oneshot::channel();
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
@@ -825,6 +880,7 @@ impl Session {
                         .send(InternalEvent::ReceiveFileResult {
                             session_id,
                             file_id,
+                            attempt,
                             result,
                         })
                         .await;
