@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:localsend_isolates/model/device.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/server.dart' show WebParams;
 import 'package:localsend_isolates/src/isolate/child/discovery_isolate.dart';
 import 'package:localsend_isolates/src/isolate/child/server_isolate.dart';
@@ -469,12 +470,14 @@ class IsolateHttpServerPrepareDownloadDecisionAction extends ReduxAction<Isolate
 class IsolateHttpServerFileDownloadTargetAction extends ReduxAction<IsolateController, ParentIsolateState> {
   final String sessionId;
   final String fileId;
+  final ScopedFile? scopedSource;
   final String? path;
   final int? fileDescriptor;
 
   IsolateHttpServerFileDownloadTargetAction({
     required this.sessionId,
     required this.fileId,
+    this.scopedSource,
     required this.path,
     required this.fileDescriptor,
   });
@@ -494,6 +497,7 @@ class IsolateHttpServerFileDownloadTargetAction extends ReduxAction<IsolateContr
             sessionId: sessionId,
             fileId: fileId,
             path: path,
+            scopedSource: scopedSource,
             fileDescriptor: fileDescriptor,
           ),
         ),

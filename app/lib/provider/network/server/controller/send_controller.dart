@@ -12,6 +12,7 @@ import 'package:localsend_app/util/user_agent_analyzer.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/dto/file_dto.dart';
 import 'package:localsend_isolates/model/file_type.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/util/android_channel.dart' as isolate_android_channel;
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
@@ -72,6 +73,7 @@ class SendController {
                 ),
                 asset: file.asset,
                 path: path,
+                scopedSource: file.scopedSource,
                 bytes: file.bytes,
               ),
             );
@@ -119,15 +121,21 @@ class SendController {
   /// from the source resolved here.
   Future<void> onFileDownload(HttpServerWebFileDownloadEvent event) async {
     final String? filePath;
+    final ScopedFile? scopedSource;
     final int? fileDescriptor;
     try {
-      final path = server.getStateOrNull()?.webDownloadState?.files[event.fileId]?.path;
-      if (path == null) {
+      final file = server.getStateOrNull()?.webDownloadState?.files[event.fileId];
+      final path = file?.path;
+      scopedSource = file?.scopedSource;
+      if (path == null && scopedSource == null) {
         // should not happen: the Rust server only emits events for offered files
         throw StateError('No path for web download file ${event.fileId}');
       }
 
-      if (path.startsWith('content://')) {
+      if (scopedSource != null) {
+        filePath = null;
+        fileDescriptor = null;
+      } else if (path!.startsWith('content://')) {
         filePath = null;
         fileDescriptor = await isolate_android_channel.getFileDescriptorAndroid(uri: path);
       } else {
@@ -148,6 +156,7 @@ class SendController {
             sessionId: event.sessionId,
             fileId: event.fileId,
             path: filePath,
+            scopedSource: scopedSource,
             fileDescriptor: fileDescriptor,
           ),
         );

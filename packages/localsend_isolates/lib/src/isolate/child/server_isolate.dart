@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:localsend_isolates/constants.dart';
 import 'package:localsend_isolates/model/dto/multicast_dto.dart';
 import 'package:localsend_isolates/model/file_type.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/model.dart' show FileDto;
 import 'package:localsend_isolates/rust/api/server.dart';
 import 'package:localsend_isolates/src/isolate/child/main.dart';
@@ -138,12 +139,14 @@ class HttpServerPrepareDownloadDecisionTask implements BaseHttpServerTask {
 class HttpServerFileDownloadTargetTask implements BaseHttpServerTask {
   final String sessionId;
   final String fileId;
+  final ScopedFile? scopedSource;
   final String? path;
   final int? fileDescriptor;
 
   HttpServerFileDownloadTargetTask({
     required this.sessionId,
     required this.fileId,
+    this.scopedSource,
     required this.path,
     required this.fileDescriptor,
   });
@@ -594,6 +597,7 @@ Future<void> setupHttpServerIsolate(
                 sessionId: targetTask.sessionId,
                 fileId: targetTask.fileId,
                 path: targetTask.path,
+                scopedSource: targetTask.scopedSource?.toRust(),
                 fileDescriptor: targetTask.fileDescriptor,
               );
           return;

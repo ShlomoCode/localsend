@@ -3,11 +3,11 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import '../frb_generated.dart';
+import 'cancel.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
-import 'package:localsend_isolates/rust/api/cancel.dart';
-import 'package:localsend_isolates/rust/frb_generated.dart';
-
+import 'scoped_file.dart';
 part 'crypto.freezed.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`
@@ -36,8 +36,19 @@ Future<SecurityContext> generateSecurityContext() => RustLib.instance.api.crateA
 /// Exactly one content source must be provided:
 /// a [path] to a regular file, a [file_descriptor] (Android only), or [bytes]
 /// for a file that only lives in memory.
-Stream<RsHashFileEvent> hashFile({String? path, int? fileDescriptor, Uint8List? bytes, required RsCancellationToken cancelToken}) =>
-    RustLib.instance.api.crateApiCryptoHashFile(path: path, fileDescriptor: fileDescriptor, bytes: bytes, cancelToken: cancelToken);
+Stream<RsHashFileEvent> hashFile({
+  String? path,
+  int? fileDescriptor,
+  Uint8List? bytes,
+  RsScopedFile? scopedSource,
+  required RsCancellationToken cancelToken,
+}) => RustLib.instance.api.crateApiCryptoHashFile(
+  path: path,
+  fileDescriptor: fileDescriptor,
+  bytes: bytes,
+  scopedSource: scopedSource,
+  cancelToken: cancelToken,
+);
 
 class KeyPair {
   final String privateKey;

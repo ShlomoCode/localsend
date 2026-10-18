@@ -16,6 +16,7 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = CrossFileMapper._());
       FileTypeMapper.ensureInitialized();
+      ScopedFileMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -39,6 +40,12 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
   );
   static AssetEntity? _$asset(CrossFile v) => v.asset;
   static const Field<CrossFile, AssetEntity> _f$asset = Field('asset', _$asset);
+  static ScopedFile? _$scopedSource(CrossFile v) => v.scopedSource;
+  static const Field<CrossFile, ScopedFile> _f$scopedSource = Field(
+    'scopedSource',
+    _$scopedSource,
+    opt: true,
+  );
   static String? _$path(CrossFile v) => v.path;
   static const Field<CrossFile, String> _f$path = Field('path', _$path);
   static List<int>? _$bytes(CrossFile v) => v.bytes;
@@ -61,6 +68,7 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
     #size: _f$size,
     #thumbnail: _f$thumbnail,
     #asset: _f$asset,
+    #scopedSource: _f$scopedSource,
     #path: _f$path,
     #bytes: _f$bytes,
     #lastModified: _f$lastModified,
@@ -74,6 +82,7 @@ class CrossFileMapper extends ClassMapperBase<CrossFile> {
       size: data.dec(_f$size),
       thumbnail: data.dec(_f$thumbnail),
       asset: data.dec(_f$asset),
+      scopedSource: data.dec(_f$scopedSource),
       path: data.dec(_f$path),
       bytes: data.dec(_f$bytes),
       lastModified: data.dec(_f$lastModified),
@@ -140,6 +149,7 @@ extension CrossFileValueCopy<$R, $Out> on ObjectCopyWith<$R, CrossFile, $Out> {
 
 abstract class CrossFileCopyWith<$R, $In extends CrossFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
+  ScopedFileCopyWith<$R, ScopedFile, ScopedFile>? get scopedSource;
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes;
   $R call({
     String? name,
@@ -147,6 +157,7 @@ abstract class CrossFileCopyWith<$R, $In extends CrossFile, $Out>
     int? size,
     Uint8List? thumbnail,
     AssetEntity? asset,
+    ScopedFile? scopedSource,
     String? path,
     List<int>? bytes,
     String? lastModified,
@@ -164,6 +175,9 @@ class _CrossFileCopyWithImpl<$R, $Out>
   late final ClassMapperBase<CrossFile> $mapper =
       CrossFileMapper.ensureInitialized();
   @override
+  ScopedFileCopyWith<$R, ScopedFile, ScopedFile>? get scopedSource =>
+      $value.scopedSource?.copyWith.$chain((v) => call(scopedSource: v));
+  @override
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes =>
       $value.bytes != null
       ? ListCopyWith(
@@ -179,6 +193,7 @@ class _CrossFileCopyWithImpl<$R, $Out>
     int? size,
     Object? thumbnail = $none,
     Object? asset = $none,
+    Object? scopedSource = $none,
     Object? path = $none,
     Object? bytes = $none,
     Object? lastModified = $none,
@@ -190,6 +205,7 @@ class _CrossFileCopyWithImpl<$R, $Out>
       if (size != null) #size: size,
       if (thumbnail != $none) #thumbnail: thumbnail,
       if (asset != $none) #asset: asset,
+      if (scopedSource != $none) #scopedSource: scopedSource,
       if (path != $none) #path: path,
       if (bytes != $none) #bytes: bytes,
       if (lastModified != $none) #lastModified: lastModified,
@@ -203,6 +219,7 @@ class _CrossFileCopyWithImpl<$R, $Out>
     size: data.get(#size, or: $value.size),
     thumbnail: data.get(#thumbnail, or: $value.thumbnail),
     asset: data.get(#asset, or: $value.asset),
+    scopedSource: data.get(#scopedSource, or: $value.scopedSource),
     path: data.get(#path, or: $value.path),
     bytes: data.get(#bytes, or: $value.bytes),
     lastModified: data.get(#lastModified, or: $value.lastModified),

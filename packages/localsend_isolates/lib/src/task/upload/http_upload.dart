@@ -1,4 +1,5 @@
 import 'package:localsend_isolates/model/device.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/http.dart';
 import 'package:localsend_isolates/rust/api/stream.dart';
@@ -19,6 +20,7 @@ class HttpUploadService {
   Future<void> upload({
     required RsHttpClient client,
     required Stream<List<int>>? stream,
+    ScopedFile? scopedSource,
     required String? path,
     required int? fileDescriptor,
     required int contentLength,
@@ -44,6 +46,7 @@ class HttpUploadService {
           token: token,
           binary: receiver,
           path: path,
+          scopedSource: scopedSource?.toRust(),
           fileDescriptor: fileDescriptor,
           contentLength: BigInt.from(contentLength),
           cancelToken: cancelToken,

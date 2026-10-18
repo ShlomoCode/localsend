@@ -1,4 +1,5 @@
 use crate::api::cancel::RsCancellationToken;
+use crate::api::scoped_file::RsScopedFile;
 use crate::frb_generated::StreamSink;
 
 pub fn verify_cert(cert: String, public_key: String) -> anyhow::Result<()> {
@@ -73,12 +74,15 @@ pub async fn hash_file(
     path: Option<String>,
     file_descriptor: Option<i32>,
     bytes: Option<Vec<u8>>,
+    scoped_source: Option<RsScopedFile>,
     cancel_token: &RsCancellationToken,
 ) {
     let result = async {
-        let content = match (path, file_descriptor, bytes) {
-            (Some(path), None, None) => localsend::model::transfer::FileContent::Path(path.into()),
-            (None, Some(file_descriptor), None) => {
+        let content = match (path, file_descriptor, bytes, scoped_source) {
+            (Some(path), None, None, None) => {
+                localsend::model::transfer::FileContent::Path(path.into())
+            }
+            (None, Some(file_descriptor), None, None) => {
                 #[cfg(target_os = "android")]
                 {
                     localsend::model::transfer::FileContent::Fd(file_descriptor)
@@ -89,10 +93,13 @@ pub async fn hash_file(
                     anyhow::bail!("File descriptors are only supported on Android");
                 }
             }
-            (None, None, Some(bytes)) => {
+            (None, None, Some(bytes), None) => {
                 let hash = localsend::crypto::hash::sha256_hex(&bytes);
                 let _ = sink.add(RsHashFileEvent::Done { hash });
                 return Ok(());
+            }
+            (None, None, None, Some(source)) => {
+                localsend::model::transfer::FileContent::Scoped(source.acquire()?)
             }
             _ => anyhow::bail!("Exactly one content source must be provided"),
         };

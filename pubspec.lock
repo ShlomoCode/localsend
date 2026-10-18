@@ -379,12 +379,13 @@ packages:
     source: hosted
     version: "7.0.1"
   file_picker:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: file_picker
-      sha256: "29cc1fdb20613876cc7afc529738c1c0f11a9ca159b010edad0c566ac330847e"
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: cdc55b22c321208a3a8c9d2977a7da4276025ab7
+      resolved-ref: cdc55b22c321208a3a8c9d2977a7da4276025ab7
+      url: "https://github.com/ShlomoCode/flutter_file_picker.git"
+    source: git
     version: "11.0.3"
   file_selector:
     dependency: transitive

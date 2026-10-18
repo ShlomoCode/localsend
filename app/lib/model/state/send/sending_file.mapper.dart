@@ -15,6 +15,7 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
   static SendingFileMapper ensureInitialized() {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = SendingFileMapper._());
+      ScopedFileMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -36,6 +37,12 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
     'asset',
     _$asset,
   );
+  static ScopedFile? _$scopedSource(SendingFile v) => v.scopedSource;
+  static const Field<SendingFile, ScopedFile> _f$scopedSource = Field(
+    'scopedSource',
+    _$scopedSource,
+    opt: true,
+  );
   static String? _$path(SendingFile v) => v.path;
   static const Field<SendingFile, String> _f$path = Field('path', _$path);
   static List<int>? _$bytes(SendingFile v) => v.bytes;
@@ -52,6 +59,7 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
     #token: _f$token,
     #thumbnail: _f$thumbnail,
     #asset: _f$asset,
+    #scopedSource: _f$scopedSource,
     #path: _f$path,
     #bytes: _f$bytes,
     #errorMessage: _f$errorMessage,
@@ -63,6 +71,7 @@ class SendingFileMapper extends ClassMapperBase<SendingFile> {
       token: data.dec(_f$token),
       thumbnail: data.dec(_f$thumbnail),
       asset: data.dec(_f$asset),
+      scopedSource: data.dec(_f$scopedSource),
       path: data.dec(_f$path),
       bytes: data.dec(_f$bytes),
       errorMessage: data.dec(_f$errorMessage),
@@ -129,12 +138,14 @@ extension SendingFileValueCopy<$R, $Out>
 
 abstract class SendingFileCopyWith<$R, $In extends SendingFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
+  ScopedFileCopyWith<$R, ScopedFile, ScopedFile>? get scopedSource;
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes;
   $R call({
     FileDto? file,
     String? token,
     Uint8List? thumbnail,
     AssetEntity? asset,
+    ScopedFile? scopedSource,
     String? path,
     List<int>? bytes,
     String? errorMessage,
@@ -151,6 +162,9 @@ class _SendingFileCopyWithImpl<$R, $Out>
   late final ClassMapperBase<SendingFile> $mapper =
       SendingFileMapper.ensureInitialized();
   @override
+  ScopedFileCopyWith<$R, ScopedFile, ScopedFile>? get scopedSource =>
+      $value.scopedSource?.copyWith.$chain((v) => call(scopedSource: v));
+  @override
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes =>
       $value.bytes != null
       ? ListCopyWith(
@@ -165,6 +179,7 @@ class _SendingFileCopyWithImpl<$R, $Out>
     Object? token = $none,
     Object? thumbnail = $none,
     Object? asset = $none,
+    Object? scopedSource = $none,
     Object? path = $none,
     Object? bytes = $none,
     Object? errorMessage = $none,
@@ -174,6 +189,7 @@ class _SendingFileCopyWithImpl<$R, $Out>
       if (token != $none) #token: token,
       if (thumbnail != $none) #thumbnail: thumbnail,
       if (asset != $none) #asset: asset,
+      if (scopedSource != $none) #scopedSource: scopedSource,
       if (path != $none) #path: path,
       if (bytes != $none) #bytes: bytes,
       if (errorMessage != $none) #errorMessage: errorMessage,
@@ -185,6 +201,7 @@ class _SendingFileCopyWithImpl<$R, $Out>
     token: data.get(#token, or: $value.token),
     thumbnail: data.get(#thumbnail, or: $value.thumbnail),
     asset: data.get(#asset, or: $value.asset),
+    scopedSource: data.get(#scopedSource, or: $value.scopedSource),
     path: data.get(#path, or: $value.path),
     bytes: data.get(#bytes, or: $value.bytes),
     errorMessage: data.get(#errorMessage, or: $value.errorMessage),
