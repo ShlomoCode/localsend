@@ -98,7 +98,7 @@ dependency_overrides:
     # https://github.com/vicajilau/flutter_file_picker
     git:
       url: https://github.com/ShlomoCode/flutter_file_picker.git
-      ref: 2d4ccd8a752158773839b2c9bcae99cab8b9099a
+      ref: 7d8828c33074dc57a2c123880b795a08efca42c1
   pasteboard:
     # This is temporary workaround, wait upstream for update
     git:

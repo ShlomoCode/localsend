@@ -382,8 +382,8 @@ packages:
     dependency: "direct overridden"
     description:
       path: "."
-      ref: "2d4ccd8a752158773839b2c9bcae99cab8b9099a"
-      resolved-ref: "2d4ccd8a752158773839b2c9bcae99cab8b9099a"
+      ref: "7d8828c33074dc57a2c123880b795a08efca42c1"
+      resolved-ref: "7d8828c33074dc57a2c123880b795a08efca42c1"
       url: "https://github.com/ShlomoCode/flutter_file_picker.git"
     source: git
     version: "11.0.3"
