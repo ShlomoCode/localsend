@@ -1,0 +1,110 @@
+{
+  "lan": {
+    "description": "Two hosts on one broadcast domain discover by multicast and transfer both ways.",
+    "segments": ["lan"],
+    "nodes": {
+      "alice": {"links": [{"segment": "lan", "ipv4": "10.61.1.10/24"}]},
+      "bob": {"links": [{"segment": "lan", "ipv4": "10.61.1.20/24"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": true, "alias_send": true, "reverse": true}]
+  },
+  "blocked_multicast": {
+    "description": "On-LAN multicast is dropped at both hosts; the local subnet HTTP scan finds the peer.",
+    "segments": ["lan"],
+    "nodes": {
+      "alice": {"links": [{"segment": "lan", "ipv4": "10.62.1.10/24"}], "block_multicast": true},
+      "bob": {"links": [{"segment": "lan", "ipv4": "10.62.1.20/24"}], "block_multicast": true}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": true, "alias_send": true, "reverse": true}]
+  },
+  "routed_vlans": {
+    "description": "A router connects two isolated broadcast domains; direct IP works, but a fresh alias is not discovered.",
+    "segments": ["red", "blue"],
+    "nodes": {
+      "alice": {"links": [{"segment": "red", "vlan": 101, "ipv4": "10.63.1.10/24"}], "routes": [{"to": "default", "via": "10.63.1.1"}]},
+      "router": {"router": true, "links": [{"segment": "red", "vlan": 101, "ipv4": "10.63.1.1/24"}, {"segment": "blue", "vlan": 102, "ipv4": "10.63.2.1/24"}]},
+      "bob": {"links": [{"segment": "blue", "vlan": 102, "ipv4": "10.63.2.20/24"}], "routes": [{"to": "default", "via": "10.63.2.1"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": false, "alias_send": false, "reverse": true}]
+  },
+  "large_subnet": {
+    "description": "Two hosts share a /16 broadcast domain but occupy different /24s; multicast is blocked to expose the scan limit.",
+    "segments": ["wide"],
+    "nodes": {
+      "alice": {"links": [{"segment": "wide", "ipv4": "10.64.1.10/16"}], "block_multicast": true},
+      "bob": {"links": [{"segment": "wide", "ipv4": "10.64.2.20/16"}], "block_multicast": true}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": false, "alias_send": false, "reverse": true}]
+  },
+  "large_subnet_multicast": {
+    "description": "Two hosts in different /24s of one /16 still discover each other when multicast works.",
+    "segments": ["wide"],
+    "nodes": {
+      "alice": {"links": [{"segment": "wide", "ipv4": "10.70.1.10/16"}]},
+      "bob": {"links": [{"segment": "wide", "ipv4": "10.70.2.20/16"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": true, "alias_send": true, "reverse": true}]
+  },
+  "dual_stack": {
+    "description": "IPv4 and IPv6 coexist on one LAN, including IPv6 link-local addresses.",
+    "segments": ["lan"],
+    "nodes": {
+      "alice": {"links": [{"segment": "lan", "ipv4": "10.65.1.10/24", "ipv6": "fd65:1::10/64"}]},
+      "bob": {"links": [{"segment": "lan", "ipv4": "10.65.1.20/24", "ipv6": "fd65:1::20/64"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": true, "alias_send": true, "reverse": true, "ipv6_target": "fd65:1::20", "link_local": true}]
+  },
+  "ipv6_only": {
+    "description": "Two hosts have IPv6 global and link-local addresses with no IPv4 addresses.",
+    "segments": ["lan"],
+    "nodes": {
+      "alice": {"links": [{"segment": "lan", "ipv6": "fd65:2::10/64"}]},
+      "bob": {"links": [{"segment": "lan", "ipv6": "fd65:2::20/64"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": true, "alias_send": true, "reverse": true, "link_local": true}]
+  },
+  "multi_interface": {
+    "description": "A host attached to LAN and a separate VPN-like L2 segment discovers peers on both interfaces.",
+    "segments": ["lan", "vpn"],
+    "nodes": {
+      "alice": {"links": [{"segment": "lan", "ipv4": "10.66.1.10/24"}, {"segment": "vpn", "ipv4": "10.66.2.10/24"}]},
+      "bob": {"links": [{"segment": "lan", "ipv4": "10.66.1.20/24"}]},
+      "vpn_peer": {"links": [{"segment": "vpn", "ipv4": "10.66.2.20/24"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": true, "alias_send": true, "reverse": true}, {"from": "alice", "to": "vpn_peer", "discovered": true, "alias_send": true}]
+  },
+  "double_router": {
+    "description": "Three L2 domains and two routers; direct known-IP transfer traverses both hops.",
+    "segments": ["left", "middle", "right"],
+    "nodes": {
+      "alice": {"links": [{"segment": "left", "ipv4": "10.67.1.10/24"}], "routes": [{"to": "default", "via": "10.67.1.1"}]},
+      "r1": {"router": true, "links": [{"segment": "left", "ipv4": "10.67.1.1/24"}, {"segment": "middle", "ipv4": "10.67.2.1/24"}], "routes": [{"to": "10.67.3.0/24", "via": "10.67.2.2"}]},
+      "r2": {"router": true, "links": [{"segment": "middle", "ipv4": "10.67.2.2/24"}, {"segment": "right", "ipv4": "10.67.3.1/24"}], "routes": [{"to": "10.67.1.0/24", "via": "10.67.2.1"}]},
+      "bob": {"links": [{"segment": "right", "ipv4": "10.67.3.20/24"}], "routes": [{"to": "default", "via": "10.67.3.1"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": false, "alias_send": false, "reverse": true}]
+  },
+  "nat_edge": {
+    "description": "A private LAN reaches a public-side peer through router masquerade; unsolicited reverse traffic cannot find the private peer.",
+    "segments": ["inside", "outside"],
+    "nodes": {
+      "alice": {"links": [{"segment": "inside", "ipv4": "10.69.1.10/24"}], "routes": [{"to": "default", "via": "10.69.1.1"}]},
+      "nat": {"router": true, "nat_out": "outside", "links": [{"segment": "inside", "ipv4": "10.69.1.1/24"}, {"segment": "outside", "ipv4": "10.69.2.1/24"}]},
+      "bob": {"links": [{"segment": "outside", "ipv4": "10.69.2.20/24"}]}
+    },
+    "checks": [{"from": "alice", "to": "bob", "discovered": false, "alias_send": false}, {"from": "bob", "to": "alice", "discovered": false, "reachable": false}]
+  },
+  "composite": {
+    "description": "A multihomed edge joins a local LAN and a routed private segment, with two routers and an ACL-isolated guest subnet.",
+    "segments": ["lan", "transit", "middle", "remote", "guest"],
+    "nodes": {
+      "alice": {"links": [{"segment": "lan", "ipv4": "10.68.1.10/24"}, {"segment": "transit", "ipv4": "10.68.2.10/24"}], "routes": [{"to": "10.68.3.0/24", "via": "10.68.2.1"}, {"to": "10.68.4.0/24", "via": "10.68.2.1"}]},
+      "local_peer": {"links": [{"segment": "lan", "ipv4": "10.68.1.20/24"}]},
+      "r1": {"router": true, "links": [{"segment": "transit", "ipv4": "10.68.2.1/24"}, {"segment": "middle", "ipv4": "10.68.5.1/24"}], "routes": [{"to": "10.68.1.0/24", "via": "10.68.2.10"}, {"to": "10.68.3.0/24", "via": "10.68.5.2"}, {"to": "10.68.4.0/24", "via": "10.68.5.2"}]},
+      "r2": {"router": true, "links": [{"segment": "middle", "ipv4": "10.68.5.2/24"}, {"segment": "remote", "ipv4": "10.68.3.1/24"}, {"segment": "guest", "ipv4": "10.68.4.1/24"}], "routes": [{"to": "10.68.1.0/24", "via": "10.68.5.1"}, {"to": "10.68.2.0/24", "via": "10.68.5.1"}], "drop_forward": [{"destination": "10.68.4.0/24"}, {"source": "10.68.4.0/24"}]},
+      "remote_peer": {"links": [{"segment": "remote", "ipv4": "10.68.3.20/24"}], "routes": [{"to": "default", "via": "10.68.3.1"}]},
+      "guest": {"links": [{"segment": "guest", "ipv4": "10.68.4.20/24"}], "routes": [{"to": "default", "via": "10.68.4.1"}]}
+    },
+    "checks": [{"from": "alice", "to": "local_peer", "discovered": true, "alias_send": true}, {"from": "alice", "to": "remote_peer", "discovered": false, "alias_send": false, "reverse": true}, {"from": "alice", "to": "guest", "discovered": false, "reachable": false}]
+  }
+}

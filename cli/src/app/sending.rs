@@ -26,7 +26,7 @@ type Transfer = (HashMap<String, FileDto>, HashMap<String, FileSource>, u64);
 /// Largest input read from stdin, which is held in memory until sent.
 const MAX_STDIN_BYTES: u64 = 16_000_000;
 
-/// What the headless mode sends.
+/// What the terminal-free send mode sends.
 pub(super) enum Payload {
     Files(Vec<PathBuf>),
     Text(Bytes),
@@ -106,34 +106,6 @@ pub(super) fn spawn_send(
         .into_iter()
         .map(|(id, path)| (id, FileSource::Path(path)))
         .collect();
-    spawn_transfer(
-        identity,
-        device,
-        host,
-        (files, sources, total_bytes),
-        events_tx,
-    )
-}
-
-/// Spawns a text transfer using the shared payload preparation.
-pub(super) fn spawn_send_text(
-    ui: &mut Ui,
-    identity: Arc<Identity>,
-    device: StatefulDevice,
-    text: Bytes,
-    events_tx: mpsc::Sender<AppEvent>,
-) -> Result<SendState, String> {
-    let host = dialable_host(&device)?;
-    let payload =
-        localsend_client::SendPayload::message(text).map_err(|error| error.to_string())?;
-    let total_bytes = payload.total_bytes();
-    let (files, sources) = payload.into_parts();
-    if files.values().any(|file| file.preview.is_none()) {
-        ui.log(
-            Category::Send,
-            "Text too long for a message, sending it as a file",
-        );
-    }
     spawn_transfer(
         identity,
         device,
