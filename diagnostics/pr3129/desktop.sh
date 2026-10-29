@@ -159,6 +159,7 @@ run_case() {
   eval "$(xdotool getwindowgeometry --shell "$wid")"
   xdotool mousemove 250 310 click 1
   assert_tab receive
+  sleep .3
   echo no_record_stationary >/tmp/pr3129-phase; sleep 8
   echo no_record_moving >/tmp/pr3129-phase
   xdotool key alt+F7
@@ -167,6 +168,7 @@ run_case() {
   xdotool key Return
   if [[ "$name" == original || "$name" == base1 || "$name" == fix1 ]]; then
     xdotool windowmove "$wid" 200 150
+    sleep .3
     eval "$(xdotool getwindowgeometry --shell "$wid")"
     drag_x=650; drag_y=168
     echo title60_recording >/tmp/pr3129-phase
