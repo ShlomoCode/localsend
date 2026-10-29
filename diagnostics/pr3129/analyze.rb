@@ -17,7 +17,7 @@ Dir.glob("#{root}/*/probe.jsonl").sort.each do |path|
     phases[phase]=metrics
   end
   geometries={}
-  %w[move title-drag].each do |kind|
+  %w[move title-drag terminal-move send-move no-record-move].each do |kind|
     p=File.join(File.dirname(path),"#{kind}-geometries.txt")
     points=File.readlines(p).map { |line| [line[/\bX=(-?\d+)/,1],line[/\bY=(-?\d+)/,1]] }
     geometries[kind]={samples:points.size,unique_positions:points.uniq.size,first:points.first,last:points.last}

@@ -67,9 +67,18 @@ jobs:
           path: |
             bundles
             build-evidence
-          key: ${{ steps.bundles.outputs.cache-primary-key }}
+          key: pr3129-bundles-v1-${{ hashFiles('diagnostics/pr3129/instrument.rb', 'diagnostics/pr3129/probe.dart', 'diagnostics/pr3129/fix.patch') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr3129-build-bundles
+          path: |
+            bundles
+            build-evidence
       - name: Exercise real GNOME desktop
-        run: dbus-run-session -- bash diagnostics/pr3129/desktop.sh
+        run: |
+          git rev-parse HEAD > evidence/harness-source.txt
+          dbus-run-session -- bash diagnostics/pr3129/desktop.sh
+          ruby diagnostics/pr3129/analyze.rb evidence > evidence/summary.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
