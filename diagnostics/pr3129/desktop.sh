@@ -71,7 +71,7 @@ move_pointer() {
 assert_tab() {
   local expected=$1
   if [[ "$name" == original ]]; then return; fi
-  ruby -rjson -e 'deadline=Process.clock_gettime(Process::CLOCK_MONOTONIC)+3; loop { j=JSON.parse(File.readlines(ARGV[0]).last); if j["tab"]==ARGV[1]; puts JSON.generate({expected:ARGV[1],observed:j["tab"],time:j["time"]}); break; end; abort "Expected #{ARGV[1]}, observed #{j["tab"]}" if Process.clock_gettime(Process::CLOCK_MONOTONIC)>deadline; sleep .1 }' "evidence/$name/probe.jsonl" "$expected" >>"evidence/$name/tab-assertions.jsonl"
+  ruby -rjson -e 'deadline=Process.clock_gettime(Process::CLOCK_MONOTONIC)+3; loop { j=JSON.parse(File.readlines(ARGV[0]).last); if j["tab"]==ARGV[1]; puts JSON.generate({expected:ARGV[1],observed:j["tab"],time:j["time"]}); break; end; abort "Expected #{ARGV[1]}, observed #{j["tab"]}" if Process.clock_gettime(Process::CLOCK_MONOTONIC)>deadline; sleep 0.1 }' "evidence/$name/probe.jsonl" "$expected" >>"evidence/$name/tab-assertions.jsonl"
 }
 run_case() {
 
