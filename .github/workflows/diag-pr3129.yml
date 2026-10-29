@@ -1,6 +1,8 @@
 name: Diagnose PR3129 GNOME repaint
 on:
   workflow_dispatch:
+  push:
+    branches: [diag/pr3129-gnome-runner]
 permissions:
   contents: read
 jobs:
