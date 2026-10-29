@@ -19,6 +19,8 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		E90D52B8096B253F54908565 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0628E22A788D91D99A60B3EB /* Pods_Runner.framework */; };
+		A1D000000000000000000011 /* DirectoryAccessPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000001 /* DirectoryAccessPlugin.swift */; };
+		A1D000000000000000000012 /* DirectoryAccessRegistry.m in Sources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000002 /* DirectoryAccessRegistry.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -85,6 +87,9 @@
 		A2BF1CF158EF83DE50B03565 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		B97818B16CFBA751581F52D0 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		E27045CC3CCE78EFE26BEAA2 /* Pods-ShareExtension.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ShareExtension.debug.xcconfig"; path = "Target Support Files/Pods-ShareExtension/Pods-ShareExtension.debug.xcconfig"; sourceTree = "<group>"; };
+		A1D000000000000000000001 /* DirectoryAccessPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryAccessPlugin.swift; sourceTree = "<group>"; };
+		A1D000000000000000000002 /* DirectoryAccessRegistry.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DirectoryAccessRegistry.m; sourceTree = "<group>"; };
+		A1D000000000000000000003 /* DirectoryAccessRegistry.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DirectoryAccessRegistry.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -175,6 +180,9 @@
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
+				A1D000000000000000000003 /* DirectoryAccessRegistry.h */,
+				A1D000000000000000000002 /* DirectoryAccessRegistry.m */,
+				A1D000000000000000000001 /* DirectoryAccessPlugin.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				841A12B829EC22BD00B99343 /* LocalNetworkAuthorization.swift */,
 			);
@@ -423,6 +431,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				A1D000000000000000000012 /* DirectoryAccessRegistry.m in Sources */,
+				A1D000000000000000000011 /* DirectoryAccessPlugin.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

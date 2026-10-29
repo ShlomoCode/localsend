@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:file_picker/file_picker.dart' show FilePicker;
+import 'package:localsend_app/util/native/directory_access_channel.dart' as directory_channel;
 import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:logging/logging.dart';
 
 final directoryAccessPool = DirectoryAccessPool(
-  release: (token) => FilePicker.releaseDirectoryAccess(accessToken: token),
+  release: directory_channel.releaseDirectoryAccess,
 );
 
 /// Owns picker directory leases on the main isolate. Only strings cross isolates.

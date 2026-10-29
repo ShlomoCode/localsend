@@ -92,13 +92,6 @@ dependency_overrides:
     git:
       url: https://github.com/Tienisto/device_apps.git
       ref: 5dc7956d938541254d2e175766b3b84ea38bb85b
-  file_picker:
-    # TODO: Remove after migrating to a released directory lease API (fixed version unknown).
-    # file_picker 13.1.0 still returns only directory paths and requires iOS 14; keep iOS 13 support.
-    # https://github.com/vicajilau/flutter_file_picker
-    git:
-      url: https://github.com/ShlomoCode/flutter_file_picker.git
-      ref: cdc55b22c321208a3a8c9d2977a7da4276025ab7
   pasteboard:
     # This is temporary workaround, wait upstream for update
     git:

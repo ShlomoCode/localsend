@@ -78,13 +78,13 @@ mod native {
         let retain = unsafe {
             libc::dlsym(
                 libc::RTLD_DEFAULT,
-                c"file_picker_directory_access_retain_v1".as_ptr(),
+                c"localsend_directory_access_retain_v1".as_ptr(),
             )
         };
         let release = unsafe {
             libc::dlsym(
                 libc::RTLD_DEFAULT,
-                c"file_picker_directory_access_release_v1".as_ptr(),
+                c"localsend_directory_access_release_v1".as_ptr(),
             )
         };
         if retain.is_null() || release.is_null() {
@@ -93,7 +93,7 @@ mod native {
                 "Directory access bridge is unavailable",
             ));
         }
-        // SAFETY: the versioned C ABI declarations match the picker header.
+        // SAFETY: the versioned C ABI declarations match the app registry header.
         Ok((
             unsafe { std::mem::transmute::<*mut libc::c_void, Retain>(retain) },
             unsafe { std::mem::transmute::<*mut libc::c_void, Release>(release) },
