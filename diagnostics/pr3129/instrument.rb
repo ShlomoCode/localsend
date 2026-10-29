@@ -2,6 +2,7 @@ p='app/lib/main.dart'
 s=File.read(p); s="import 'probe.dart';\n"+s; s=s.sub('  runApp(',"  startProbe();\n  runApp("); File.write(p,s)
 p='app/lib/pages/home_page.dart'; s=File.read(p);s="import '../probe.dart';\n"+s
 s=s.sub('return Scaffold(',"return PaintProbe(name: 'scaffold', child: Scaffold(")
+s=s.sub('    final vm = context.watch(homePageControllerProvider);', "    final vm = context.watch(homePageControllerProvider);\n    currentTab = vm.currentTab.name;")
 s=s.sub('body: Row(',"body: PaintProbe(name: 'body', child: Row(")
 s=s.sub("            ),\n            bottomNavigationBar:","            )),\n            bottomNavigationBar:")
 s=s.sub("          );\n        },","          ));\n        },")

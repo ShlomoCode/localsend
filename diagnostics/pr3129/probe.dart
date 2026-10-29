@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+String currentTab = '';
 final paints = <String,int>{};
 final frames = <Map<String,int>>[];
 void startProbe() {
@@ -16,7 +17,7 @@ void startProbe() {
     final path = Platform.environment['PROBE_LOG'];
     if (path == null) return;
     final phase = File('/tmp/pr3129-phase');
-    File(path).writeAsStringSync('${jsonEncode({'time':DateTime.now().toIso8601String(), 'phase':phase.existsSync()?phase.readAsStringSync().trim():'warmup','paints':Map.of(paints),'frames':List.of(frames)})}\n',mode:FileMode.append);
+    File(path).writeAsStringSync('${jsonEncode({'time':DateTime.now().toIso8601String(), 'tab':currentTab,'phase':phase.existsSync()?phase.readAsStringSync().trim():'warmup','paints':Map.of(paints),'frames':List.of(frames)})}\n',mode:FileMode.append);
     paints.clear(); frames.clear();
   });
 }

@@ -11,7 +11,7 @@ for n in $(seq 1 45); do wmctrl -m >evidence/window-manager.txt 2>&1 && grep -qi
 grep -qi GNOME evidence/window-manager.txt
 { uname -a; cat /etc/os-release; gnome-shell --version; glxinfo -B; xrandr; env | sort; } >evidence/environment.txt
 # The control proves a live terminal in the same real desktop, including a rendered command.
-gnome-terminal --title='PR3129 control terminal' -- bash -c 'echo PR3129_CONTROL_OK; touch /tmp/pr3129-terminal-ready; exec bash' >evidence/terminal.log 2>&1 &
+gnome-terminal --title='PR3129 control terminal' -- bash -c 'echo PR3129_CONTROL_OK; touch /tmp/pr3129-terminal-ready; exec bash --norc -i' >evidence/terminal.log 2>&1 &
 for n in $(seq 1 20); do test -e /tmp/pr3129-terminal-ready && break; sleep 1; done
 test -e /tmp/pr3129-terminal-ready
 terminal=$(xdotool search --name 'PR3129 control terminal' | head -1)
@@ -54,6 +54,18 @@ run_case() {
   done
   xdotool key Return
   echo stationary_after_move >/tmp/pr3129-phase; sleep 6
+  xdotool windowmove "$wid" 200 150
+  sleep 2
+  echo app_title_drag >/tmp/pr3129-phase
+  xdotool mousemove 250 165 mousedown 1
+  for i in $(seq 1 70); do
+    x=$((250+(i%18)*15)); y=$((165+(i%12)*8))
+    xdotool mousemove --sync "$x" "$y"
+    xdotool getwindowgeometry --shell "$wid" | tr '\n' ' ' >>"evidence/$name/title-drag-geometries.txt"; echo >>"evidence/$name/title-drag-geometries.txt"
+    sleep .06
+  done
+  xdotool mouseup 1
+
   # Return to predictable geometry, then exercise real navigation via pointer input.
   xdotool windowmove "$wid" 200 150
   sleep 2
@@ -63,7 +75,12 @@ run_case() {
     xdotool mousemove 250 305 click 1; sleep .45
     xdotool mousemove 250 250 click 1; sleep .45
   done
+  echo send_tab >/tmp/pr3129-phase
+  xdotool mousemove 250 305 click 1
+  sleep 3
+  ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 "evidence/$name/send-tab.png" >"evidence/$name/send-screenshot.log" 2>&1
   echo settled >/tmp/pr3129-phase; sleep 3
+
   ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 "evidence/$name/final.png" >"evidence/$name/screenshot.log" 2>&1
   kill -INT "$rec"; wait "$rec" || true
   xdotool getwindowgeometry --shell "$wid" >"evidence/$name/final-geometry.txt"
