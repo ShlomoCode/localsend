@@ -15,6 +15,7 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
   static WebDownloadFileMapper ensureInitialized() {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = WebDownloadFileMapper._());
+      ScopedFileMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -29,6 +30,12 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
     'asset',
     _$asset,
   );
+  static ScopedFile? _$scopedSource(WebDownloadFile v) => v.scopedSource;
+  static const Field<WebDownloadFile, ScopedFile> _f$scopedSource = Field(
+    'scopedSource',
+    _$scopedSource,
+    opt: true,
+  );
   static String? _$path(WebDownloadFile v) => v.path;
   static const Field<WebDownloadFile, String> _f$path = Field('path', _$path);
   static List<int>? _$bytes(WebDownloadFile v) => v.bytes;
@@ -41,6 +48,7 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
   final MappableFields<WebDownloadFile> fields = const {
     #file: _f$file,
     #asset: _f$asset,
+    #scopedSource: _f$scopedSource,
     #path: _f$path,
     #bytes: _f$bytes,
   };
@@ -49,6 +57,7 @@ class WebDownloadFileMapper extends ClassMapperBase<WebDownloadFile> {
     return WebDownloadFile(
       file: data.dec(_f$file),
       asset: data.dec(_f$asset),
+      scopedSource: data.dec(_f$scopedSource),
       path: data.dec(_f$path),
       bytes: data.dec(_f$bytes),
     );
@@ -116,8 +125,15 @@ extension WebDownloadFileValueCopy<$R, $Out>
 
 abstract class WebDownloadFileCopyWith<$R, $In extends WebDownloadFile, $Out>
     implements ClassCopyWith<$R, $In, $Out> {
+  ScopedFileCopyWith<$R, ScopedFile, ScopedFile>? get scopedSource;
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes;
-  $R call({FileDto? file, AssetEntity? asset, String? path, List<int>? bytes});
+  $R call({
+    FileDto? file,
+    AssetEntity? asset,
+    ScopedFile? scopedSource,
+    String? path,
+    List<int>? bytes,
+  });
   WebDownloadFileCopyWith<$R2, $In, $Out2> $chain<$R2, $Out2>(
     Then<$Out2, $R2> t,
   );
@@ -132,6 +148,9 @@ class _WebDownloadFileCopyWithImpl<$R, $Out>
   late final ClassMapperBase<WebDownloadFile> $mapper =
       WebDownloadFileMapper.ensureInitialized();
   @override
+  ScopedFileCopyWith<$R, ScopedFile, ScopedFile>? get scopedSource =>
+      $value.scopedSource?.copyWith.$chain((v) => call(scopedSource: v));
+  @override
   ListCopyWith<$R, int, ObjectCopyWith<$R, int, int>>? get bytes =>
       $value.bytes != null
       ? ListCopyWith(
@@ -144,12 +163,14 @@ class _WebDownloadFileCopyWithImpl<$R, $Out>
   $R call({
     FileDto? file,
     Object? asset = $none,
+    Object? scopedSource = $none,
     Object? path = $none,
     Object? bytes = $none,
   }) => $apply(
     FieldCopyWithData({
       if (file != null) #file: file,
       if (asset != $none) #asset: asset,
+      if (scopedSource != $none) #scopedSource: scopedSource,
       if (path != $none) #path: path,
       if (bytes != $none) #bytes: bytes,
     }),
@@ -158,6 +179,7 @@ class _WebDownloadFileCopyWithImpl<$R, $Out>
   WebDownloadFile $make(CopyWithData data) => WebDownloadFile(
     file: data.get(#file, or: $value.file),
     asset: data.get(#asset, or: $value.asset),
+    scopedSource: data.get(#scopedSource, or: $value.scopedSource),
     path: data.get(#path, or: $value.path),
     bytes: data.get(#bytes, or: $value.bytes),
   );

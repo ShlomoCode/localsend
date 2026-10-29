@@ -3,11 +3,11 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import '../frb_generated.dart';
+import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
-import 'package:localsend_isolates/rust/api/model.dart';
-import 'package:localsend_isolates/rust/frb_generated.dart';
-
+import 'scoped_file.dart';
 part 'server.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `handle_server_event`, `handle_web_event`, `recv_opt`, `resolve_file_content`, `resolve_upload_target`, `stop`
@@ -91,7 +91,13 @@ abstract class RsHttpServer implements RustOpaqueInterface {
   /// the file content should be read from (either a path or a file descriptor).
   ///
   /// The server reads the content and streams it to the web client.
-  Future<void> respondFileDownload({required String sessionId, required String fileId, String? path, int? fileDescriptor});
+  Future<void> respondFileDownload({
+    required String sessionId,
+    required String fileId,
+    String? path,
+    int? fileDescriptor,
+    RsScopedFile? scopedSource,
+  });
 
   /// Answers the pending [RsServerEvent::FileUpload] event with the target
   /// the file should be saved to (either a path or a file descriptor)

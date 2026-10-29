@@ -14,6 +14,7 @@ import 'package:localsend_app/provider/file_transfer_provider.dart';
 import 'package:localsend_app/provider/http_provider.dart';
 import 'package:localsend_app/provider/selection/selected_sending_files_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
+import 'package:localsend_app/util/native/directory_access_pool.dart';
 import 'package:localsend_app/widget/dialogs/pin_dialog.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/device.dart';
@@ -47,7 +48,10 @@ final sendProvider = NotifierProvider<SendNotifier, Map<String, SendSessionState
 });
 
 class SendNotifier extends Notifier<Map<String, SendSessionState>> {
-  SendNotifier();
+  SendNotifier({DirectoryAccessPool? directoryPool}) : _directoryPool = directoryPool ?? directoryAccessPool;
+
+  final DirectoryAccessPool _directoryPool;
+  final _sessionOwners = <String, DirectoryAccessOwner>{};
 
   /// Cancel tokens of the running checksum calculations.
   /// Session ID -> Cancel token
@@ -90,6 +94,19 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     required List<CrossFile> files,
     required bool background,
   }) async {
+    final operationOwner = _directoryPool.retain(files.map((file) => file.scopedSource));
+    try {
+      await _startSession(target: target, files: files, background: background);
+    } finally {
+      operationOwner.dispose();
+    }
+  }
+
+  Future<void> _startSession({
+    required Device target,
+    required List<CrossFile> files,
+    required bool background,
+  }) async {
     // Pinned to the device the user picked, so the request is not sent at all
     // if someone else answers on that address.
     final client = ref.read(httpProvider).pinnedTo(target.fingerprint);
@@ -99,52 +116,60 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     // The ids are assigned upfront, so the checksums calculated below
     // can be mapped back to the corresponding file.
     final selectedFiles = files.map((file) => (id: _uuid.v4(), file: file)).toList();
+    final sessionOwner = _directoryPool.retain(files.map((file) => file.scopedSource));
 
-    state = state.updateSession(
-      sessionId: sessionId,
-      state: (_) => SendSessionState(
+    try {
+      state = state.updateSession(
         sessionId: sessionId,
-        remoteSessionId: null,
-        background: background,
-        status: SessionStatus.waiting,
-        target: target,
-        files: {
-          for (final (:id, :file) in selectedFiles)
-            id: SendingFile(
-              file: FileDto(
-                id: id,
-                fileName: file.name,
-                size: file.size,
-                fileType: file.fileType,
-                hash: null,
-                // calculated below
-                preview: files.length == 1 && files.first.fileType == FileType.text && files.first.bytes != null
-                    ? utf8.decode(files.first.bytes!) // send simple message by embedding it into the preview
-                    : null,
-                metadata: file.lastModified != null || file.lastAccessed != null
-                    ? FileMetadata(
-                        lastModified: file.lastModified,
-                        lastAccessed: file.lastAccessed,
-                      )
-                    : null,
+        state: (_) => SendSessionState(
+          sessionId: sessionId,
+          remoteSessionId: null,
+          background: background,
+          status: SessionStatus.waiting,
+          target: target,
+          files: {
+            for (final (:id, :file) in selectedFiles)
+              id: SendingFile(
+                file: FileDto(
+                  id: id,
+                  fileName: file.name,
+                  size: file.size,
+                  fileType: file.fileType,
+                  hash: null,
+                  // calculated below
+                  preview: files.length == 1 && files.first.fileType == FileType.text && files.first.bytes != null
+                      ? utf8.decode(files.first.bytes!) // send simple message by embedding it into the preview
+                      : null,
+                  metadata: file.lastModified != null || file.lastAccessed != null
+                      ? FileMetadata(
+                          lastModified: file.lastModified,
+                          lastAccessed: file.lastAccessed,
+                        )
+                      : null,
+                ),
+                token: null,
+                thumbnail: file.thumbnail,
+                asset: file.asset,
+                path: file.path,
+                scopedSource: file.scopedSource,
+                bytes: file.bytes,
+                errorMessage: null,
               ),
-              token: null,
-              thumbnail: file.thumbnail,
-              asset: file.asset,
-              path: file.path,
-              bytes: file.bytes,
-              errorMessage: null,
-            ),
-        },
-        // Skipping the checksums marks all files as hashed, so the UI does not
-        // show the checksum progress.
-        hashedFileCount: createChecksums ? 0 : selectedFiles.length,
-        startTime: null,
-        endTime: null,
-        sendingTasks: [],
-        errorMessage: null,
-      ),
-    );
+          },
+          // Skipping the checksums marks all files as hashed, so the UI does not
+          // show the checksum progress.
+          hashedFileCount: createChecksums ? 0 : selectedFiles.length,
+          startTime: null,
+          endTime: null,
+          sendingTasks: [],
+          errorMessage: null,
+        ),
+      );
+    } catch (_) {
+      sessionOwner.dispose();
+      rethrow;
+    }
+    _sessionOwners[sessionId] = sessionOwner;
 
     ref
         .notifier(fileTransferProvider)
@@ -172,6 +197,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
           try {
             hashes[id] = await calculateFileHash(
               path: file.path,
+              scopedSource: file.scopedSource,
               bytes: file.bytes,
               cancelToken: hashCancelToken,
               onProgress: (bytes) {
@@ -606,6 +632,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
             remoteFileToken: file.token!,
             fileId: file.file.id,
             filePath: file.path,
+            scopedSource: file.scopedSource,
             fileBytes: file.bytes,
             fileSize: file.file.size,
           ),
@@ -615,94 +642,99 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
       return;
     }
 
-    final taskResult = ref
-        .redux(parentIsolateProvider)
-        .dispatchTakeResult(
-          IsolateHttpUploadFilesAction(
-            remoteSessionId: sessionState.remoteSessionId,
-            files: uploadFiles,
-            device: sessionState.target,
+    final operationOwner = _directoryPool.retain(files.map((file) => file.scopedSource));
+    try {
+      final taskResult = ref
+          .redux(parentIsolateProvider)
+          .dispatchTakeResult(
+            IsolateHttpUploadFilesAction(
+              remoteSessionId: sessionState.remoteSessionId,
+              files: uploadFiles,
+              device: sessionState.target,
+            ),
+          );
+
+      state = state.updateSession(
+        sessionId: sessionId,
+        state: (s) => s?.copyWith(
+          sendingTasks: [
+            ...?s.sendingTasks,
+            SendingTask(
+              taskId: taskResult.taskId,
+            ),
+          ],
+        ),
+      );
+
+      try {
+        await for (final event in taskResult.events) {
+          switch (event) {
+            case HttpUploadFileStartedEvent():
+              _logger.info('Sending ${state[sessionId]?.files[event.fileId]?.file.fileName}');
+              ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.sending);
+            case HttpUploadFileProgressEvent():
+              ref
+                  .notifier(fileTransferProvider)
+                  .setProgress(
+                    sessionId: sessionId,
+                    fileId: event.fileId,
+                    progress: event.progress,
+                  );
+              _updateForegroundServiceProgress(sessionId);
+            case HttpUploadFileFinishedEvent():
+              // set progress to 100% when successfully finished
+              ref
+                  .notifier(fileTransferProvider)
+                  .setProgress(
+                    sessionId: sessionId,
+                    fileId: event.fileId,
+                    progress: 1,
+                  );
+              _updateForegroundServiceProgress(sessionId);
+              ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.finished);
+            case HttpUploadFileFailedEvent():
+              _logger.warning('Error while sending file ${state[sessionId]?.files[event.fileId]?.file.fileName}: ${event.error}');
+              ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.failed);
+              state = state.updateSession(
+                sessionId: sessionId,
+                state: (s) => s?.withFileError(event.fileId, event.error),
+              );
+          }
+        }
+      } catch (e, st) {
+        // the whole task failed, mark all files of this task that did not finish as failed
+        _logger.warning('Error while sending files', e, st);
+        final error = e.humanErrorMessage;
+        final transferNotifier = ref.notifier(fileTransferProvider);
+        final failedFileIds = uploadFiles
+            .map((file) => file.fileId)
+            .where((id) => const {FileStatus.queue, FileStatus.sending}.contains(transferNotifier.getStatus(sessionId: sessionId, fileId: id)))
+            .toSet();
+        transferNotifier.setStatuses(
+          sessionId: sessionId,
+          statuses: {for (final id in failedFileIds) id: FileStatus.failed},
+        );
+        state = state.updateSession(
+          sessionId: sessionId,
+          state: (s) => s?.copyWith(
+            files: s.files.map((key, value) {
+              if (failedFileIds.contains(key)) {
+                return MapEntry(key, value.copyWith(errorMessage: error));
+              }
+              return MapEntry(key, value);
+            }),
           ),
         );
-
-    state = state.updateSession(
-      sessionId: sessionId,
-      state: (s) => s?.copyWith(
-        sendingTasks: [
-          ...?s.sendingTasks,
-          SendingTask(
-            taskId: taskResult.taskId,
+      } finally {
+        state = state.updateSession(
+          sessionId: sessionId,
+          state: (s) => s?.copyWith(
+            sendingTasks: s.sendingTasks?.where((task) => task.taskId != taskResult.taskId).toList(),
           ),
-        ],
-      ),
-    );
-
-    try {
-      await for (final event in taskResult.events) {
-        switch (event) {
-          case HttpUploadFileStartedEvent():
-            _logger.info('Sending ${state[sessionId]?.files[event.fileId]?.file.fileName}');
-            ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.sending);
-          case HttpUploadFileProgressEvent():
-            ref
-                .notifier(fileTransferProvider)
-                .setProgress(
-                  sessionId: sessionId,
-                  fileId: event.fileId,
-                  progress: event.progress,
-                );
-            _updateForegroundServiceProgress(sessionId);
-          case HttpUploadFileFinishedEvent():
-            // set progress to 100% when successfully finished
-            ref
-                .notifier(fileTransferProvider)
-                .setProgress(
-                  sessionId: sessionId,
-                  fileId: event.fileId,
-                  progress: 1,
-                );
-            _updateForegroundServiceProgress(sessionId);
-            ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.finished);
-          case HttpUploadFileFailedEvent():
-            _logger.warning('Error while sending file ${state[sessionId]?.files[event.fileId]?.file.fileName}: ${event.error}');
-            ref.notifier(fileTransferProvider).setStatus(sessionId: sessionId, fileId: event.fileId, status: FileStatus.failed);
-            state = state.updateSession(
-              sessionId: sessionId,
-              state: (s) => s?.withFileError(event.fileId, event.error),
-            );
-        }
+        );
       }
-    } catch (e, st) {
-      // the whole task failed, mark all files of this task that did not finish as failed
-      _logger.warning('Error while sending files', e, st);
-      final error = e.humanErrorMessage;
-      final transferNotifier = ref.notifier(fileTransferProvider);
-      final failedFileIds = uploadFiles
-          .map((file) => file.fileId)
-          .where((id) => const {FileStatus.queue, FileStatus.sending}.contains(transferNotifier.getStatus(sessionId: sessionId, fileId: id)))
-          .toSet();
-      transferNotifier.setStatuses(
-        sessionId: sessionId,
-        statuses: {for (final id in failedFileIds) id: FileStatus.failed},
-      );
-      state = state.updateSession(
-        sessionId: sessionId,
-        state: (s) => s?.copyWith(
-          files: s.files.map((key, value) {
-            if (failedFileIds.contains(key)) {
-              return MapEntry(key, value.copyWith(errorMessage: error));
-            }
-            return MapEntry(key, value);
-          }),
-        ),
-      );
     } finally {
-      state = state.updateSession(
-        sessionId: sessionId,
-        state: (s) => s?.copyWith(
-          sendingTasks: s.sendingTasks?.where((task) => task.taskId != taskResult.taskId).toList(),
-        ),
-      );
+      operationOwner.dispose();
     }
   }
 
@@ -784,6 +816,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     _hashCancelTokens.remove(sessionId)?.cancel();
     _prepareUploadCancelTokens.remove(sessionId)?.cancel();
     state = state.removeSession(ref, sessionId);
+    _sessionOwners.remove(sessionId)?.dispose();
     if (sessionState.status == SessionStatus.finished && ref.read(settingsProvider).sendMode == SendMode.single) {
       // clear selected files
       ref.redux(selectedSendingFilesProvider).dispatch(ClearSelectionAction());
@@ -803,6 +836,10 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     }
     _prepareUploadCancelTokens.clear();
     state = {};
+    for (final owner in _sessionOwners.values) {
+      owner.dispose();
+    }
+    _sessionOwners.clear();
     ref.notifier(fileTransferProvider).removeAllSessions();
   }
 
@@ -811,6 +848,15 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
       sessionId: sessionId,
       state: (s) => s?.copyWith(background: background),
     );
+  }
+
+  @override
+  void dispose() {
+    for (final owner in _sessionOwners.values) {
+      owner.dispose();
+    }
+    _sessionOwners.clear();
+    super.dispose();
   }
 }
 

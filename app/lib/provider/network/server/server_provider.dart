@@ -10,10 +10,12 @@ import 'package:localsend_app/provider/network/server/controller/send_controller
 import 'package:localsend_app/provider/network/server/server_utils.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/alias_generator.dart';
+import 'package:localsend_app/util/native/directory_access_pool.dart';
 import 'package:localsend_app/util/native/web_pages_loader.dart';
 import 'package:localsend_isolates/constants.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/dto/multicast_dto.dart';
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/server.dart' show WebI18n, WebMode, WebParams;
 import 'package:localsend_isolates/util/rust.dart';
 import 'package:logging/logging.dart';
@@ -63,6 +65,12 @@ final serverProvider = NotifierProvider<ServerService, ServerState?>(
 );
 
 class ServerService extends Notifier<ServerState?> {
+  DirectoryAccessOwner? _webOwner;
+
+  Iterable<ScopedFile?> _webSources(WebShareState? web) => switch (web) {
+    WebShareDownload(:final state) => state.files.values.map((file) => file.scopedSource),
+    _ => const <ScopedFile?>[],
+  };
   late final _serverUtils = ServerUtils(
     refFunc: () => ref,
     getState: () => state!,
@@ -76,6 +84,13 @@ class ServerService extends Notifier<ServerState?> {
   StreamSubscription<HttpServerEvent>? _subscription;
 
   ServerService();
+
+  @override
+  void dispose() {
+    _webOwner?.dispose();
+    _webOwner = null;
+    super.dispose();
+  }
 
   @override
   ServerState? init() {
@@ -123,107 +138,115 @@ class ServerService extends Notifier<ServerState?> {
       return null;
     }
 
-    alias = alias.trim();
-    if (alias.isEmpty) {
-      alias = generateRandomAlias();
-    }
-
-    if (port < 0 || port > 65535) {
-      port = defaultPort;
-    }
-
-    _logger.info('Starting server...');
-
-    // The server isolate derives its configuration from the sync state,
-    // so it must be published before the start task.
-    _syncServerState(alias: alias, port: port, https: https, serverRunning: true, download: web is WebShareDownload);
-
-    final settings = ref.read(settingsProvider);
-    // Custom pages provided by the user next to the executable, if any.
-    // A custom error-403.html replaces the built-in 403 page even while no web
-    // share is active; client certificates stay mandatory in that mode.
-    final customWebPages = await loadCustomWebPages();
-    final events = ref
-        .redux(parentIsolateProvider)
-        .dispatchTakeResult(
-          IsolateHttpServerStartAction(
-            pin: switch (web) {
-              WebShareUpload(:final pin) => pin,
-              _ => settings.receivePin,
-            },
-            verifyChecksums: settings.verifyChecksums,
-            web: WebParams(
-              mode: switch (web) {
-                WebShareDownload(:final state, :final pin) => WebMode.download(
-                  files: {
-                    for (final entry in state.files.entries) entry.key: entry.value.file.toRust(),
-                  },
-                  pin: pin,
-                ),
-                WebShareUpload() => const WebMode.upload(),
-                null => const WebMode.disabled(),
-              },
-              i18N: WebI18n(
-                waiting: t.web.waiting,
-                enterPin: t.web.enterPin,
-                invalidPin: t.web.invalidPin,
-                tooManyAttempts: t.web.tooManyAttempts,
-                rejected: t.web.rejected,
-                uploadRejected: t.sendPage.rejected,
-                busy: t.sendPage.busy,
-                files: t.web.files,
-                fileName: t.web.fileName,
-                size: t.web.size,
-                dropHint: t.sendTab.placeItems,
-              ),
-              pages: customWebPages,
-            ),
-            showToken: settings.showToken,
-          ),
-        );
-
-    final started = Completer<void>();
-    final subscription = events.listen(
-      (event) {
-        if (event is HttpServerStartedEvent) {
-          if (!started.isCompleted) {
-            started.complete();
-          }
-          return;
-        }
-        _handleEvent(event);
-      },
-      onError: (Object error) {
-        if (!started.isCompleted) {
-          started.completeError(error);
-        } else {
-          _logger.severe('HTTP server error: $error');
-        }
-      },
-    );
-
+    final webOwner = directoryAccessPool.retain(_webSources(web));
     try {
-      await started.future;
-    } catch (e) {
-      await subscription.cancel();
-      _syncServerState(alias: alias, port: port, https: https, serverRunning: false, download: false);
-      _logger.warning('Failed to start server', e);
+      alias = alias.trim();
+      if (alias.isEmpty) {
+        alias = generateRandomAlias();
+      }
+
+      if (port < 0 || port > 65535) {
+        port = defaultPort;
+      }
+
+      _logger.info('Starting server...');
+
+      // The server isolate derives its configuration from the sync state,
+      // so it must be published before the start task.
+      _syncServerState(alias: alias, port: port, https: https, serverRunning: true, download: web is WebShareDownload);
+
+      final settings = ref.read(settingsProvider);
+      // Custom pages provided by the user next to the executable, if any.
+      // A custom error-403.html replaces the built-in 403 page even while no web
+      // share is active; client certificates stay mandatory in that mode.
+      final customWebPages = await loadCustomWebPages();
+      final events = ref
+          .redux(parentIsolateProvider)
+          .dispatchTakeResult(
+            IsolateHttpServerStartAction(
+              pin: switch (web) {
+                WebShareUpload(:final pin) => pin,
+                _ => settings.receivePin,
+              },
+              verifyChecksums: settings.verifyChecksums,
+              web: WebParams(
+                mode: switch (web) {
+                  WebShareDownload(:final state, :final pin) => WebMode.download(
+                    files: {
+                      for (final entry in state.files.entries) entry.key: entry.value.file.toRust(),
+                    },
+                    pin: pin,
+                  ),
+                  WebShareUpload() => const WebMode.upload(),
+                  null => const WebMode.disabled(),
+                },
+                i18N: WebI18n(
+                  waiting: t.web.waiting,
+                  enterPin: t.web.enterPin,
+                  invalidPin: t.web.invalidPin,
+                  tooManyAttempts: t.web.tooManyAttempts,
+                  rejected: t.web.rejected,
+                  uploadRejected: t.sendPage.rejected,
+                  busy: t.sendPage.busy,
+                  files: t.web.files,
+                  fileName: t.web.fileName,
+                  size: t.web.size,
+                  dropHint: t.sendTab.placeItems,
+                ),
+                pages: customWebPages,
+              ),
+              showToken: settings.showToken,
+            ),
+          );
+
+      final started = Completer<void>();
+      final subscription = events.listen(
+        (event) {
+          if (event is HttpServerStartedEvent) {
+            if (!started.isCompleted) {
+              started.complete();
+            }
+            return;
+          }
+          _handleEvent(event);
+        },
+        onError: (Object error) {
+          if (!started.isCompleted) {
+            started.completeError(error);
+          } else {
+            _logger.severe('HTTP server error: $error');
+          }
+        },
+      );
+
+      try {
+        await started.future;
+      } catch (e) {
+        await subscription.cancel();
+        _syncServerState(alias: alias, port: port, https: https, serverRunning: false, download: false);
+        _logger.warning('Failed to start server', e);
+        rethrow;
+      }
+
+      _subscription = subscription;
+
+      final newServerState = ServerState(
+        alias: alias,
+        port: port,
+        https: https,
+        session: null,
+        web: web,
+      );
+
+      state = newServerState;
+      _webOwner?.dispose();
+      _webOwner = webOwner;
+      _logger.info('Server started. (Port: $port, ${https ? 'HTTPS' : 'HTTP'} only)');
+      return newServerState;
+    } catch (_) {
+      webOwner.dispose();
       rethrow;
     }
-
-    _subscription = subscription;
-
-    final newServerState = ServerState(
-      alias: alias,
-      port: port,
-      https: https,
-      session: null,
-      web: web,
-    );
-
-    state = newServerState;
-    _logger.info('Server started. (Port: $port, ${https ? 'HTTPS' : 'HTTP'} only)');
-    return newServerState;
   }
 
   Future<void> stopServer() async {
@@ -232,6 +255,8 @@ class ServerService extends Notifier<ServerState?> {
     _subscription = null;
     await ref.redux(parentIsolateProvider).dispatchAsync(IsolateHttpServerStopAction());
     state = null;
+    _webOwner?.dispose();
+    _webOwner = null;
     _logger.info('Server stopped.');
   }
 
@@ -246,8 +271,13 @@ class ServerService extends Notifier<ServerState?> {
     required bool https,
     WebShareState? web,
   }) async {
-    await stopServer();
-    return await startServer(alias: alias, port: port, https: https, web: web);
+    final handoff = directoryAccessPool.retain(_webSources(web));
+    try {
+      await stopServer();
+      return await startServer(alias: alias, port: port, https: https, web: web);
+    } finally {
+      handoff.dispose();
+    }
   }
 
   Future<void> acceptFileRequest(Map<String, String> fileNameMap) async {
@@ -287,13 +317,18 @@ class ServerService extends Notifier<ServerState?> {
     required List<CrossFile> files,
     String? pin,
   }) async {
-    final webDownloadState = await _sendController.buildWebDownloadState(files: files);
-    await restartServer(
-      alias: alias,
-      port: port,
-      https: https,
-      web: WebShareDownload(state: webDownloadState, pin: pin),
-    );
+    final buildOwner = directoryAccessPool.retain(files.map((file) => file.scopedSource));
+    try {
+      final webDownloadState = await _sendController.buildWebDownloadState(files: files);
+      await restartServer(
+        alias: alias,
+        port: port,
+        https: https,
+        web: WebShareDownload(state: webDownloadState, pin: pin),
+      );
+    } finally {
+      buildOwner.dispose();
+    }
   }
 
   /// Updates the pin of the active web share mode (download or upload page).

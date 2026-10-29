@@ -1,11 +1,12 @@
 use crate::api::cancel::RsCancellationToken;
+use crate::api::scoped_file::RsScopedFile;
 use crate::api::stream;
 use crate::frb_generated::StreamSink;
 use flutter_rust_bridge::frb;
 pub use localsend::http::client::{ClientError, LsHttpClientVersion};
 pub use localsend::http::dto::{
-    PrepareUploadRequestDto, PrepareUploadResponseDto, PrepareUploadResult,
-    RegisterDto, RegisterResponseDto,
+    PrepareUploadRequestDto, PrepareUploadResponseDto, PrepareUploadResult, RegisterDto,
+    RegisterResponseDto,
 };
 use localsend::model::discovery::ProtocolType;
 use localsend::util::error::ErrorChain;
@@ -106,11 +107,12 @@ impl RsHttpClient {
         binary: Option<stream::Dart2RustStreamReceiver>,
         path: Option<String>,
         file_descriptor: Option<i32>,
+        scoped_source: Option<RsScopedFile>,
         content_length: u64,
         cancel_token: &RsCancellationToken,
     ) {
         let result = async {
-            let content = resolve_file_content(binary, path, file_descriptor)?;
+            let content = resolve_file_content(binary, path, file_descriptor, scoped_source)?;
             let last_emit = std::cell::Cell::new(None::<std::time::Instant>);
             let progress_sink = sink.clone();
             let progress = move |sent| {
@@ -177,13 +179,16 @@ fn resolve_file_content(
     binary: Option<stream::Dart2RustStreamReceiver>,
     path: Option<String>,
     file_descriptor: Option<i32>,
+    scoped_source: Option<RsScopedFile>,
 ) -> Result<localsend::model::transfer::FileContent, RsHttpClientError> {
-    match (binary, path, file_descriptor) {
-        (Some(binary), None, None) => Ok(localsend::model::transfer::FileContent::Stream(
+    match (binary, path, file_descriptor, scoped_source) {
+        (Some(binary), None, None, None) => Ok(localsend::model::transfer::FileContent::Stream(
             binary.receiver,
         )),
-        (None, Some(path), None) => Ok(localsend::model::transfer::FileContent::Path(path.into())),
-        (None, None, Some(file_descriptor)) => {
+        (None, Some(path), None, None) => {
+            Ok(localsend::model::transfer::FileContent::Path(path.into()))
+        }
+        (None, None, Some(file_descriptor), None) => {
             #[cfg(target_os = "android")]
             {
                 Ok(localsend::model::transfer::FileContent::Fd(file_descriptor))
@@ -196,6 +201,11 @@ fn resolve_file_content(
                 ))
             }
         }
+        (None, None, None, Some(source)) => Ok(localsend::model::transfer::FileContent::Scoped(
+            source
+                .acquire()
+                .map_err(|error| RsHttpClientError::Io(error.to_string()))?,
+        )),
         _ => Err(RsHttpClientError::Other(
             "Exactly one upload content source must be provided".into(),
         )),

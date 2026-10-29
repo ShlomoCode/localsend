@@ -1,3 +1,4 @@
+use super::scoped_file::ScopedFile;
 use bytes::Bytes;
 use futures_util::stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -7,10 +8,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Limit queued file read-ahead to 2 MiB per active stream.
-const FILE_CHANNEL_CAPACITY: usize = 4;
+pub(super) const FILE_CHANNEL_CAPACITY: usize = 4;
 
 /// Buffer size used when reading a file into chunks.
-const READ_BUFFER_SIZE: usize = 512 * 1024;
+pub(super) const READ_BUFFER_SIZE: usize = 512 * 1024;
 
 /// A file's content as a stream of chunks, ending with an [`Err`] item when the
 /// file could not be read.
@@ -34,6 +35,9 @@ pub enum FileContent {
     /// A path to a regular file the content is read from.
     Path(PathBuf),
 
+    /// A file inside an Apple security-scoped directory.
+    Scoped(ScopedFile),
+
     /// A raw file descriptor the content is read from (Android only).
     #[cfg(target_os = "android")]
     Fd(std::os::fd::RawFd),
@@ -45,6 +49,8 @@ impl FileContent {
     /// [`FileContent::Stream`] is forwarded as-is. For [`FileContent::Path`] and
     /// [`FileContent::Fd`], a background task reads the file and forwards the
     /// chunks; the stream ends after the last chunk on EOF.
+    /// [`FileContent::Scoped`] keeps security-scoped coordinated access
+    /// alive on its reader thread until reading or cancellation finishes.
     ///
     /// An I/O failure is yielded as a final [`Err`] item rather than ending the
     /// stream early. The consumer builds a request or response body from this
@@ -53,6 +59,7 @@ impl FileContent {
     /// look successful on this side.
     pub fn into_stream(self) -> FileStream {
         match self {
+            FileContent::Scoped(file) => super::scoped_file::into_stream(file),
             FileContent::Stream(rx) => {
                 tracing::info!("Reading file content via byte stream from application");
                 Box::pin(ReceiverStream::new(rx).map(Ok))

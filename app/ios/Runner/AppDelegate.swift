@@ -22,6 +22,9 @@ import Flutter
           result(FlutterMethodNotImplemented)
         }
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "DirectoryAccessPlugin") {
+      DirectoryAccessPlugin.register(with: registrar)
+    }
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
   }
 }

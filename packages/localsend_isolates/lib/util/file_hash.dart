@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:localsend_isolates/model/scoped_file.dart';
 import 'package:localsend_isolates/rust/api/cancel.dart';
 import 'package:localsend_isolates/rust/api/crypto.dart' as rust_crypto;
 import 'package:localsend_isolates/util/android_channel.dart';
@@ -12,13 +13,16 @@ import 'package:localsend_isolates/util/android_channel.dart';
 /// the events are already throttled on the Rust side.
 /// Cancelling [cancelToken] aborts the calculation and throws.
 Future<String> calculateFileHash({
+  ScopedFile? scopedSource,
   required String? path,
   required List<int>? bytes,
   required RsCancellationToken cancelToken,
   void Function(int bytes)? onProgress,
 }) async {
   final Stream<rust_crypto.RsHashFileEvent> events;
-  if (path != null) {
+  if (scopedSource != null) {
+    events = rust_crypto.hashFile(scopedSource: scopedSource.toRust(), cancelToken: cancelToken);
+  } else if (path != null) {
     if (path.startsWith('content://')) {
       // Android SAF files can only be read through a file descriptor.
       // The descriptor is closed by Rust after the file has been read.
