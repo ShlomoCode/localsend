@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-trap 'code=$?; echo "HARNESS_FAILED line=$LINENO command=$BASH_COMMAND" >&2; wmctrl -lpG >evidence/failure-windows.txt 2>&1; xprop -root _NET_ACTIVE_WINDOW >evidence/failure-active-window.txt 2>&1; ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 evidence/failure.png >evidence/failure-capture.log 2>&1; exit "$code"' ERR
+trap 'code=$?; set +e; echo "HARNESS_FAILED line=$LINENO command=$BASH_COMMAND" >&2; wmctrl -lpG >evidence/failure-windows.txt 2>&1; xprop -root _NET_ACTIVE_WINDOW >evidence/failure-active-window.txt 2>&1; ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 evidence/failure.png >evidence/failure-capture.log 2>&1; exit "$code"' ERR
+for tool in Xvfb gnome-shell gnome-terminal dbus-update-activation-environment xdotool wmctrl xprop ffmpeg glxinfo ruby; do command -v "$tool"; done
 export DISPLAY=:99 XDG_RUNTIME_DIR=/tmp/runtime-$UID XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_TYPE=x11
 mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
 Xvfb :99 -screen 0 1440x1000x24 +extension GLX +render -noreset >evidence/xvfb.log 2>&1 &
