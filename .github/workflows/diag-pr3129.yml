@@ -23,10 +23,21 @@ jobs:
           flutter-version: '3.38.10'
           channel: stable
           cache: true
+      - uses: actions/cache@v4
+        id: bundles
+        with:
+          path: |
+            bundles
+            build-evidence
+          key: pr3129-bundles-v1-${{ hashFiles('diagnostics/pr3129/instrument.rb', 'diagnostics/pr3129/probe.dart', 'diagnostics/pr3129/fix.patch') }}
       - name: Build original and controlled variants
+        if: steps.bundles.outputs.cache-hit != 'true'
         run: |
           mkdir -p evidence bundles
           git rev-parse HEAD > evidence/source.txt
+          sha256sum app/pubspec.lock > evidence/lockfile-before.sha256
+          cp app/pubspec.lock evidence/pubspec.lock
+          cp .fvmrc evidence/source-fvmrc
           flutter --version > evidence/flutter.txt
           (cd app && flutter pub get)
           (cd app && flutter build linux --release)
@@ -41,8 +52,22 @@ jobs:
           (cd app && flutter build linux --profile)
           cp -a app/build/linux/x64/profile/bundle bundles/fix
           git diff > evidence/instrumentation-and-fix.patch
+          sha256sum app/pubspec.lock > evidence/lockfile-after.sha256
+          find bundles -type f -print0 | sort -z | xargs -0 sha256sum > evidence/bundle-sha256.txt
           cp "$FLUTTER_ROOT/packages/flutter/lib/src/widgets/page_view.dart" evidence/flutter-page-view.dart
           cp "$FLUTTER_ROOT/packages/flutter/lib/src/widgets/scroll_delegate.dart" evidence/flutter-scroll-delegate.dart
+          cp -a evidence build-evidence
+      - name: Restore retained build evidence
+        if: steps.bundles.outputs.cache-hit == 'true'
+        run: cp -a build-evidence evidence
+      - name: Save bundle cache before desktop exercise
+        if: steps.bundles.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            bundles
+            build-evidence
+          key: ${{ steps.bundles.outputs.cache-primary-key }}
       - name: Exercise real GNOME desktop
         run: dbus-run-session -- bash diagnostics/pr3129/desktop.sh
       - uses: actions/upload-artifact@v4
