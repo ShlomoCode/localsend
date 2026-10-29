@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 trap 'code=$?; set +e; echo "HARNESS_FAILED line=$LINENO command=$BASH_COMMAND" >&2; wmctrl -lpG >evidence/failure-windows.txt 2>&1; xprop -root _NET_ACTIVE_WINDOW >evidence/failure-active-window.txt 2>&1; ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 evidence/failure.png >evidence/failure-capture.log 2>&1; exit "$code"' ERR
 for tool in Xvfb gnome-shell gnome-terminal dbus-update-activation-environment xdotool wmctrl xprop ffmpeg glxinfo ruby; do command -v "$tool"; done
 export DISPLAY=:99 XDG_RUNTIME_DIR=/tmp/runtime-$UID XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_TYPE=x11
@@ -37,7 +37,7 @@ xdotool key Return
 sleep 1
 grep INPUT_CONTROL_OK /tmp/pr3129-input-control
 xdotool getwindowgeometry --shell "$terminal" >evidence/terminal-before.txt
-xdotool key alt+F7; xdotool mousemove 350 200; xdotool key Return
+xdotool key alt+F7; eval "$(xdotool getmouselocation --shell)"; xdotool mousemove "$((X+100))" "$((Y+50))"; xdotool key Return; sleep .5
 xdotool getwindowgeometry --shell "$terminal" >evidence/terminal-after.txt
 ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 evidence/control.png >evidence/control-capture.log 2>&1
 xdotool windowminimize "$terminal"
@@ -49,13 +49,14 @@ move_pointer() {
     ix=$((i%160)); iy=$((i%120))
     if ((ix>80)); then ix=$((160-ix)); fi
     if ((iy>60)); then iy=$((120-iy)); fi
-    trajectory+=(mousemove "$((anchor_x+ix*3))" "$((anchor_y+iy*2))" sleep .016)
+    trajectory+=(mousemove "$((anchor_x+ix*3))" "$((anchor_y+iy))" sleep .016)
   done
   printf 'start=%s count=%s nominal_interval=.016\n' "$EPOCHREALTIME" "$count" >"${output%.txt}-input.txt"
   xdotool "${trajectory[@]}" &
   motion_pid=$!
   while kill -0 "$motion_pid" 2>/dev/null; do
     printf 'time=%s ' "$EPOCHREALTIME" >>"$output"
+    xdotool getmouselocation --shell | sed -e 's/^X=/POINTER_X=/' -e 's/^Y=/POINTER_Y=/' | tr '\n' ' ' >>"$output"
     xdotool getwindowgeometry --shell "$target" | tr '\n' ' ' >>"$output"; echo >>"$output"
     if [[ "$target" == "$terminal" ]]; then
       xdotool getwindowgeometry --shell "$wid" | tr '\n' ' ' >>"evidence/$name/app-during-terminal-move.txt"; echo >>"evidence/$name/app-during-terminal-move.txt"
@@ -63,10 +64,17 @@ move_pointer() {
     sleep .025
   done
   wait "$motion_pid"
+  ruby -e 'p=ARGV[0];points=File.readlines(p).map { |l| [l[/\bX=(-?\d+)/,1],l[/\bY=(-?\d+)/,1]] }; abort "Window did not move: #{p}" unless points.uniq.size>20' "$output"
   printf 'end=%s\n' "$EPOCHREALTIME" >>"${output%.txt}-input.txt"
 }
 
+assert_tab() {
+  local expected=$1
+  if [[ "$name" == original ]]; then return; fi
+  ruby -rjson -e 'deadline=Process.clock_gettime(Process::CLOCK_MONOTONIC)+3; loop { j=JSON.parse(File.readlines(ARGV[0]).last); if j["tab"]==ARGV[1]; puts JSON.generate({expected:ARGV[1],observed:j["tab"],time:j["time"]}); break; end; abort "Expected #{ARGV[1]}, observed #{j["tab"]}" if Process.clock_gettime(Process::CLOCK_MONOTONIC)>deadline; sleep .1 }' "evidence/$name/probe.jsonl" "$expected" >>"evidence/$name/tab-assertions.jsonl"
+}
 run_case() {
+
   name=$1; bundle=$2
   mkdir -p "evidence/$name" "/tmp/profile-$name"
   echo warmup >/tmp/pr3129-phase
@@ -80,15 +88,21 @@ run_case() {
   xdotool windowsize "$wid" 950 700
   xdotool windowmove "$wid" 200 150
   sleep 10
+  wmctrl -lpG >"evidence/$name/initial-wmctrl.txt"
+  xwininfo -id "$wid" -stats >"evidence/$name/initial-xwininfo.txt"
+  xprop -id "$wid" _NET_FRAME_EXTENTS _GTK_FRAME_EXTENTS >"evidence/$name/frame-extents.txt"
+  assert_tab receive
   xdotool getwindowgeometry --shell "$wid" >"evidence/$name/initial-geometry.txt"
   ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 "evidence/$name/initial.png" >"evidence/$name/initial-capture.log" 2>&1
   ffmpeg -y -f x11grab -framerate 30 -video_size 1440x1000 -i :99 -c:v libx264 -preset ultrafast -crf 25 "evidence/$name/scenario.mp4" >"evidence/$name/ffmpeg.log" 2>&1 &
   rec=$!
   echo stationary >/tmp/pr3129-phase; sleep 8
   echo terminal_moving >/tmp/pr3129-phase
+  xdotool windowmove "$terminal" 350 150; sleep .3
   xdotool windowactivate --sync "$terminal"
   xdotool key alt+F7
-  move_pointer "$terminal" "evidence/$name/terminal-move-geometries.txt" 350 180
+  eval "$(xdotool getmouselocation --shell)"
+  move_pointer "$terminal" "evidence/$name/terminal-move-geometries.txt" "$X" "$Y"
   xdotool key Return
   xdotool windowminimize "$terminal"
   xdotool windowactivate --sync "$wid"
@@ -96,14 +110,16 @@ run_case() {
   echo moving >/tmp/pr3129-phase
   xdotool mousemove 650 165
   xdotool key alt+F7
-  move_pointer "$wid" "evidence/$name/move-geometries.txt" 400 160
+  eval "$(xdotool getmouselocation --shell)"
+  move_pointer "$wid" "evidence/$name/move-geometries.txt" "$X" "$Y"
   xdotool key Return
   echo stationary_after_move >/tmp/pr3129-phase; sleep 6
   xdotool windowmove "$wid" 200 150
   sleep 2
-  echo app_title_drag >/tmp/pr3129-phase
+  ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 "evidence/$name/before-native-title-drag.png" >"evidence/$name/pre-title-capture.log" 2>&1
+  echo native_title_drag >/tmp/pr3129-phase
   eval "$(xdotool getwindowgeometry --shell "$wid")"
-  drag_x=$((X+50)); drag_y=$((Y+15))
+  drag_x=650; drag_y=168
   xdotool mousemove "$drag_x" "$drag_y" mousedown 1
   move_pointer "$wid" "evidence/$name/title-drag-geometries.txt" "$drag_x" "$drag_y"
   xdotool mouseup 1
@@ -113,20 +129,23 @@ run_case() {
   sleep 2
   xdotool getwindowgeometry --shell "$wid" >"evidence/$name/tab-geometry.txt"
   eval "$(xdotool getwindowgeometry --shell "$wid")"
-  tab_x=$((X+50)); receive_y=$((Y+100)); send_y=$((Y+155))
+  tab_x=250; receive_y=310; send_y=354
   echo tab_animation >/tmp/pr3129-phase
   for i in $(seq 1 8); do
     xdotool mousemove "$tab_x" "$send_y" click 1; sleep .45
     xdotool mousemove "$tab_x" "$receive_y" click 1; sleep .45
   done
+  assert_tab receive
   echo send_tab >/tmp/pr3129-phase
   xdotool mousemove "$tab_x" "$send_y" click 1
   sleep 3
   ffmpeg -y -f x11grab -video_size 1440x1000 -i :99 -frames:v 1 "evidence/$name/send-tab.png" >"evidence/$name/send-screenshot.log" 2>&1
+  assert_tab send
   echo send_stationary >/tmp/pr3129-phase; sleep 6
   echo send_moving >/tmp/pr3129-phase
   xdotool key alt+F7
-  move_pointer "$wid" "evidence/$name/send-move-geometries.txt" 400 180
+  eval "$(xdotool getmouselocation --shell)"
+  move_pointer "$wid" "evidence/$name/send-move-geometries.txt" "$X" "$Y"
   xdotool key Return
   echo settled >/tmp/pr3129-phase; sleep 3
 
@@ -138,16 +157,18 @@ run_case() {
   # Compare app frame timings without recorder contention. Receive rotation is restored first.
   xdotool windowmove "$wid" 200 150
   eval "$(xdotool getwindowgeometry --shell "$wid")"
-  xdotool mousemove "$((X+50))" "$((Y+100))" click 1
+  xdotool mousemove 250 310 click 1
+  assert_tab receive
   echo no_record_stationary >/tmp/pr3129-phase; sleep 8
   echo no_record_moving >/tmp/pr3129-phase
   xdotool key alt+F7
-  move_pointer "$wid" "evidence/$name/no-record-move-geometries.txt" 400 160
+  eval "$(xdotool getmouselocation --shell)"
+  move_pointer "$wid" "evidence/$name/no-record-move-geometries.txt" "$X" "$Y"
   xdotool key Return
   if [[ "$name" == original || "$name" == base1 || "$name" == fix1 ]]; then
     xdotool windowmove "$wid" 200 150
     eval "$(xdotool getwindowgeometry --shell "$wid")"
-    drag_x=$((X+50)); drag_y=$((Y+15))
+    drag_x=650; drag_y=168
     echo title60_recording >/tmp/pr3129-phase
     ffmpeg -y -f x11grab -framerate 60 -video_size 1440x1000 -i :99 -c:v libx264 -preset ultrafast -crf 25 "evidence/$name/title60.mp4" >"evidence/$name/title60-ffmpeg.log" 2>&1 &
     rec60=$!
