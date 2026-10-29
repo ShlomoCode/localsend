@@ -1,0 +1,52 @@
+name: Diagnose PR3129 GNOME repaint
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup GNOME and build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev gnome-shell gnome-terminal dbus-x11 xvfb xdotool wmctrl ffmpeg mesa-utils ruby
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.10'
+          channel: stable
+          cache: true
+      - name: Build original and controlled variants
+        run: |
+          mkdir -p evidence bundles
+          git rev-parse HEAD > evidence/source.txt
+          flutter --version > evidence/flutter.txt
+          (cd app && flutter pub get)
+          (cd app && flutter build linux --release)
+          cp -a app/build/linux/x64/release/bundle bundles/original
+          ruby diagnostics/pr3129/instrument.rb
+          (cd app && flutter build linux --profile)
+          cp -a app/build/linux/x64/profile/bundle bundles/base
+          git restore app/lib
+          git apply --check diagnostics/pr3129/fix.patch
+          git apply diagnostics/pr3129/fix.patch
+          ruby diagnostics/pr3129/instrument.rb
+          (cd app && flutter build linux --profile)
+          cp -a app/build/linux/x64/profile/bundle bundles/fix
+          git diff > evidence/instrumentation-and-fix.patch
+          cp "$FLUTTER_ROOT/packages/flutter/lib/src/widgets/page_view.dart" evidence/flutter-page-view.dart
+          cp "$FLUTTER_ROOT/packages/flutter/lib/src/widgets/scroll_delegate.dart" evidence/flutter-scroll-delegate.dart
+      - name: Exercise real GNOME desktop
+        run: dbus-run-session -- bash diagnostics/pr3129/desktop.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr3129-gnome-evidence
+          path: |
+            evidence
+            diagnostics/pr3129
