@@ -11,7 +11,8 @@ trap 'rm -rf "$work"' EXIT
 
 mkdir -p "$work/classes" "$work/dex"
 javac -source 17 -target 17 -cp "$platform_jar" -d "$work/classes" \
-  "$here/src/org/localsend/gal331transport/MainActivity.java"
+  "$here/src/org/localsend/gal331transport/MainActivity.java" \
+  "$here/src/org/localsend/gal331transport/TransportService.java"
 jar cf "$work/helper.jar" -C "$work/classes" .
 "$tools/d8" --lib "$platform_jar" --output "$work/dex" "$work/helper.jar"
 "$tools/aapt2" link -o "$work/unsigned.apk" -I "$platform_jar" \

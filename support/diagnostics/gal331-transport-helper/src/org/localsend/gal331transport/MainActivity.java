@@ -21,18 +21,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
 import java.net.ProxySelector;
-import java.net.Socket;
 import java.net.URI;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
-    private final ExecutorService workers = Executors.newFixedThreadPool(8);
-    private volatile boolean running;
     private EditText host;
     private TextView status;
 
@@ -48,15 +42,25 @@ public final class MainActivity extends Activity {
         start.setText("Start transport");
         start.setOnClickListener(v -> startTransport());
         layout.addView(start);
+        Button stop = new Button(this);
+        stop.setText("Stop transport");
+        stop.setOnClickListener(v -> {
+            stopService(new Intent(this, TransportService.class));
+            status.setText("Transport stopped");
+        });
+        layout.addView(stop);
         Button probe = new Button(this);
         probe.setText("Probe HTTP transport");
         probe.setOnClickListener(v -> new Thread(() -> {
+            String proxies = "unknown";
             try {
                 String base = "http://" + host.getText().toString().trim() + ":18453";
-                String proxies = ProxySelector.getDefault().select(URI.create(base)).toString();
-                showStatus("proxy=" + proxies + " health=" + getText(base + "/health"));
+                proxies = ProxySelector.getDefault().select(URI.create(base)).toString();
+                showStatus("proxy=" + proxies + " http.proxyHost=" + System.getProperty("http.proxyHost")
+                        + " health=" + getText(base + "/health"));
             } catch (Exception e) {
-                showStatus("HTTP probe: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                showStatus("HTTP probe proxy=" + proxies + " http.proxyHost=" + System.getProperty("http.proxyHost")
+                        + " error=" + e.getClass().getSimpleName() + ": " + e.getMessage());
             }
         }).start());
         layout.addView(probe);
@@ -82,38 +86,14 @@ public final class MainActivity extends Activity {
     }
 
     private void startTransport() {
-        if (running) return;
-        running = true;
         String transportHost = host.getText().toString().trim();
-        status.setText("Connecting to " + transportHost + ":18453");
-        for (int i = 0; i < 8; i++) {
-            workers.execute(() -> workerLoop(transportHost));
-        }
+        Intent service = new Intent(this, TransportService.class);
+        service.putExtra("host", transportHost);
+        startForegroundService(service);
+        status.setText("Transport service connecting to " + transportHost + ":18453");
     }
 
-    private void workerLoop(String transportHost) {
-        String base = "http://" + transportHost + ":18453";
-        while (running) {
-            try {
-                String id = getText(base + "/take");
-                if (id.isEmpty()) continue;
-                try (Socket receiver = new Socket()) {
-                    receiver.connect(new InetSocketAddress("127.0.0.1", 53317), 10000);
-                    receiver.setTcpNoDelay(true);
-                    Thread upload = new Thread(() -> pushLoop(base, id, receiver));
-                    upload.start();
-                    pullLoop(base, id, receiver);
-                    upload.join(30000);
-                }
-                post(base + "/finish?id=" + id, new byte[0], 0);
-            } catch (Exception e) {
-                showStatus("Transport: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) { return; }
-            }
-        }
-    }
-
-    private static void pullLoop(String base, String id, Socket destination) throws Exception {
+    static void pullLoop(String base, String id, java.net.Socket destination) throws Exception {
         while (true) {
             HttpURLConnection connection = open(base + "/pull?id=" + id, "GET");
             int code = connection.getResponseCode();
@@ -135,7 +115,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static void pushLoop(String base, String id, Socket source) {
+    static void pushLoop(String base, String id, java.net.Socket source) {
         byte[] buffer = new byte[32768];
         try {
             InputStream input = source.getInputStream();
@@ -148,7 +128,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static HttpURLConnection open(String address, String method) throws Exception {
+    static HttpURLConnection open(String address, String method) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         connection.setRequestMethod(method);
         connection.setConnectTimeout(10000);
@@ -157,7 +137,7 @@ public final class MainActivity extends Activity {
         return connection;
     }
 
-    private static String getText(String address) throws Exception {
+    static String getText(String address) throws Exception {
         HttpURLConnection connection = open(address, "GET");
         try {
             int code = connection.getResponseCode();
@@ -174,7 +154,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static void post(String address, byte[] bytes, int length) throws Exception {
+    static void post(String address, byte[] bytes, int length) throws Exception {
         HttpURLConnection connection = open(address, "POST");
         connection.setDoOutput(true);
         connection.setFixedLengthStreamingMode(length);
@@ -278,9 +258,4 @@ public final class MainActivity extends Activity {
         }
     }
 
-    @Override public void onDestroy() {
-        running = false;
-        workers.shutdownNow();
-        super.onDestroy();
-    }
 }
