@@ -23,7 +23,7 @@ jobs:
           ref: v1.17.0
 
       - name: Remove proprietary dependencies
-        run: sh support/scripts/remove_proprietary_dependencies.sh
+        run: sh scripts/remove_proprietary_dependencies.sh
 
       - name: Configure gal source
         env:
@@ -51,7 +51,8 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.84.1
+          override: true
 
       - name: Resolve dependencies and verify gal commit
         working-directory: app
