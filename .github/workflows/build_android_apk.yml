@@ -2,15 +2,10 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
-    inputs:
-      helper_only:
-        type: boolean
-        default: false
   workflow_call:
 
 jobs:
   build_gal_comparison:
-    if: ${{ !inputs.helper_only }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -69,6 +64,9 @@ jobs:
           toolchain: 1.84.1
           override: true
 
+      - name: Install Android Rust targets
+        run: rustup target add --toolchain 1.84.1 aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+
       - name: Resolve dependencies
         working-directory: app
         run: flutter pub get
@@ -97,7 +95,6 @@ jobs:
             app/pubspec.lock
 
   build_transport_helper:
-    if: ${{ inputs.helper_only }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout diagnostic helper
@@ -110,7 +107,10 @@ jobs:
           java-version: '17'
 
       - name: Install Android build tools
-        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-35' 'build-tools;35.0.0'
+        run: |
+          sdkmanager_path=$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_path"
+          "$sdkmanager_path" --install 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Build transport helper
         run: bash support/diagnostics/gal331-transport-helper/build.sh "$RUNNER_TEMP/gal331-transport-helper.apk"
