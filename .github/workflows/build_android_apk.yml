@@ -2,10 +2,15 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      helper_only:
+        type: boolean
+        default: false
   workflow_call:
 
 jobs:
   build_gal_comparison:
+    if: ${{ !inputs.helper_only }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -94,6 +99,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Install Android build tools
         run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'

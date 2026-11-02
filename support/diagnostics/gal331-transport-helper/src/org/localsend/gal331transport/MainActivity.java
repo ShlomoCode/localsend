@@ -3,6 +3,7 @@ package org.localsend.gal331transport;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ContentResolver;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -46,6 +47,15 @@ public final class MainActivity extends Activity {
         inspect.setText("Inspect gallery");
         inspect.setOnClickListener(v -> inspectGallery());
         layout.addView(inspect);
+        Button inspectFile = new Button(this);
+        inspectFile.setText("Inspect chosen image");
+        inspectFile.setOnClickListener(v -> {
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            picker.setType("image/*");
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(picker, 2);
+        });
+        layout.addView(inspectFile);
         status = new TextView(this);
         status.setText("Ready");
         layout.addView(status);
@@ -150,6 +160,21 @@ public final class MainActivity extends Activity {
             if (descriptor == null) throw new Exception("Cannot open descriptor " + uri);
             return Os.fstat(descriptor.getFileDescriptor()).st_mtime;
         }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != 2 || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri selected = data.getData();
+        new Thread(() -> {
+            try {
+                ContentResolver resolver = getContentResolver();
+                showStatus("chosenUri=" + selected + " statMtimeSeconds=" + statMtime(resolver, selected)
+                        + " sha256=" + sha256(resolver, selected));
+            } catch (Exception e) {
+                showStatus(e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+        }).start();
     }
 
     private static String sha256(ContentResolver resolver, Uri uri) throws Exception {
