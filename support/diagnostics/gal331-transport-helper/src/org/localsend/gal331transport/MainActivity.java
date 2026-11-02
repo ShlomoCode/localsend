@@ -19,8 +19,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.Socket;
+import java.net.URI;
+import java.net.URL;
 import java.security.MessageDigest;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,6 +48,18 @@ public final class MainActivity extends Activity {
         start.setText("Start transport");
         start.setOnClickListener(v -> startTransport());
         layout.addView(start);
+        Button probe = new Button(this);
+        probe.setText("Probe HTTP transport");
+        probe.setOnClickListener(v -> new Thread(() -> {
+            try {
+                String base = "http://" + host.getText().toString().trim() + ":18453";
+                String proxies = ProxySelector.getDefault().select(URI.create(base)).toString();
+                showStatus("proxy=" + proxies + " health=" + getText(base + "/health"));
+            } catch (Exception e) {
+                showStatus("HTTP probe: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+        }).start());
+        layout.addView(probe);
         Button inspect = new Button(this);
         inspect.setText("Inspect gallery");
         inspect.setOnClickListener(v -> inspectGallery());
@@ -75,20 +92,20 @@ public final class MainActivity extends Activity {
     }
 
     private void workerLoop(String transportHost) {
+        String base = "http://" + transportHost + ":18453";
         while (running) {
-            try (Socket tunnel = new Socket()) {
-                tunnel.connect(new InetSocketAddress(transportHost, 18453), 10000);
-                tunnel.setTcpNoDelay(true);
-                tunnel.getOutputStream().write('R');
-                if (tunnel.getInputStream().read() != 'G') throw new Exception("No relay grant");
+            try {
+                String id = getText(base + "/take");
+                if (id.isEmpty()) continue;
                 try (Socket receiver = new Socket()) {
                     receiver.connect(new InetSocketAddress("127.0.0.1", 53317), 10000);
                     receiver.setTcpNoDelay(true);
-                    Thread upload = new Thread(() -> copy(tunnel, receiver));
+                    Thread upload = new Thread(() -> pushLoop(base, id, receiver));
                     upload.start();
-                    copy(receiver, tunnel);
+                    pullLoop(base, id, receiver);
                     upload.join(30000);
                 }
+                post(base + "/finish?id=" + id, new byte[0], 0);
             } catch (Exception e) {
                 showStatus("Transport: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 try { Thread.sleep(1500); } catch (InterruptedException ignored) { return; }
@@ -96,18 +113,78 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static void copy(Socket source, Socket destination) {
+    private static void pullLoop(String base, String id, Socket destination) throws Exception {
+        while (true) {
+            HttpURLConnection connection = open(base + "/pull?id=" + id, "GET");
+            int code = connection.getResponseCode();
+            if (code == 410) {
+                destination.shutdownOutput();
+                connection.disconnect();
+                return;
+            }
+            if (code == 200) {
+                try (InputStream input = connection.getInputStream()) {
+                    byte[] buffer = new byte[32768];
+                    int count;
+                    while ((count = input.read(buffer)) >= 0) destination.getOutputStream().write(buffer, 0, count);
+                }
+            } else if (code != 204) {
+                throw new Exception("Pull HTTP " + code);
+            }
+            connection.disconnect();
+        }
+    }
+
+    private static void pushLoop(String base, String id, Socket source) {
         byte[] buffer = new byte[32768];
         try {
             InputStream input = source.getInputStream();
-            OutputStream output = destination.getOutputStream();
             int count;
             while ((count = input.read(buffer)) >= 0) {
-                output.write(buffer, 0, count);
+                post(base + "/push?id=" + id, buffer, count);
             }
-            destination.shutdownOutput();
         } catch (Exception ignored) {
-            try { destination.shutdownOutput(); } catch (Exception ignoredAgain) { }
+            try { source.shutdownInput(); } catch (Exception ignoredAgain) { }
+        }
+    }
+
+    private static HttpURLConnection open(String address, String method) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(30000);
+        connection.setUseCaches(false);
+        return connection;
+    }
+
+    private static String getText(String address) throws Exception {
+        HttpURLConnection connection = open(address, "GET");
+        try {
+            int code = connection.getResponseCode();
+            if (code == 204) return "";
+            if (code != 200) throw new Exception("GET HTTP " + code);
+            try (InputStream input = connection.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[1024];
+                int count;
+                while ((count = input.read(buffer)) >= 0) output.write(buffer, 0, count);
+                return output.toString("UTF-8");
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private static void post(String address, byte[] bytes, int length) throws Exception {
+        HttpURLConnection connection = open(address, "POST");
+        connection.setDoOutput(true);
+        connection.setFixedLengthStreamingMode(length);
+        try {
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(bytes, 0, length);
+            }
+            if (connection.getResponseCode() != 200) throw new Exception("POST HTTP " + connection.getResponseCode());
+        } finally {
+            connection.disconnect();
         }
     }
 
