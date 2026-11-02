@@ -26,6 +26,15 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: v1.17.0
+          persist-credentials: false
+
+      - name: Checkout gal
+        uses: actions/checkout@v6
+        with:
+          repository: natsuk4ze/gal
+          ref: ${{ matrix.gal_sha }}
+          path: gal_source
+          persist-credentials: false
 
       - name: Remove proprietary dependencies
         run: sh scripts/remove_proprietary_dependencies.sh
@@ -34,12 +43,13 @@ jobs:
         env:
           GAL_SHA: ${{ matrix.gal_sha }}
         run: |
+          test "$(git -C gal_source rev-parse HEAD)" = "$GAL_SHA"
+          grep -Fqx '    compileSdk flutter.compileSdkVersion' gal_source/android/build.gradle
+          sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 35/' gal_source/android/build.gradle
           cat > app/pubspec_overrides.yaml <<EOT
           dependency_overrides:
             gal:
-              git:
-                url: https://github.com/natsuk4ze/gal.git
-                ref: $GAL_SHA
+              path: ../gal_source
           EOT
 
       - name: Set up JDK 17
@@ -59,17 +69,13 @@ jobs:
           toolchain: 1.84.1
           override: true
 
-      - name: Resolve dependencies and verify gal commit
+      - name: Resolve dependencies
         working-directory: app
-        env:
-          GAL_SHA: ${{ matrix.gal_sha }}
-        run: |
-          flutter pub get
-          grep -Fq "resolved-ref: \"$GAL_SHA\"" pubspec.lock
+        run: flutter pub get
 
       - name: Build arm64 APK
         working-directory: app
-        run: flutter build apk --debug --split-per-abi
+        run: flutter build apk --debug --split-per-abi --target-platform android-arm64
 
       - name: Record build identity
         env:
@@ -77,6 +83,8 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           printf 'LocalSend: v1.17.0 (7f21d1f9082a43803e05c37f021912e012145aa5)\nGal: %s\nVariant: %s\n' "$GAL_SHA" "$VARIANT" > app/build/app/outputs/flutter-apk/build-identity.txt
+          sha256sum gal_source/android/src/main/java/studio/midoridesign/gal/GalPlugin.java >> app/build/app/outputs/flutter-apk/build-identity.txt
+          git -C gal_source diff -- android/build.gradle >> app/build/app/outputs/flutter-apk/build-identity.txt
           sha256sum app/build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk >> app/build/app/outputs/flutter-apk/build-identity.txt
 
       - name: Upload arm64 APK
@@ -89,6 +97,7 @@ jobs:
             app/pubspec.lock
 
   build_transport_helper:
+    if: ${{ inputs.helper_only }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout diagnostic helper
