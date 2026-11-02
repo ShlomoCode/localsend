@@ -15,7 +15,7 @@ javac -source 17 -target 17 -cp "$platform_jar" -d "$work/classes" \
 jar cf "$work/helper.jar" -C "$work/classes" .
 "$tools/d8" --lib "$platform_jar" --output "$work/dex" "$work/helper.jar"
 "$tools/aapt2" link -o "$work/unsigned.apk" -I "$platform_jar" \
-  --manifest "$here/AndroidManifest.xml" --min-sdk-version 29 --target-sdk-version 35
+  --manifest "$here/AndroidManifest.xml" --min-sdk-version 29 --target-sdk-version 34
 (cd "$work/dex" && zip -q "$work/unsigned.apk" classes.dex)
 "$tools/zipalign" -f 4 "$work/unsigned.apk" "$work/aligned.apk"
 keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$work/key.p12" \

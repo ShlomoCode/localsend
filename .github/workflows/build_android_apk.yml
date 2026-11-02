@@ -6,6 +6,7 @@ on:
 
 jobs:
   build_gal_comparison:
+    if: false
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
