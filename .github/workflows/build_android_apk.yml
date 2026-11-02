@@ -109,11 +109,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android build tools
-        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Build transport helper
         run: bash support/diagnostics/gal331-transport-helper/build.sh "$RUNNER_TEMP/gal331-transport-helper.apk"
