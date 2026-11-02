@@ -81,6 +81,7 @@ jobs:
           path: |
             app/build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
             app/build/app/outputs/flutter-apk/build-identity.txt
+            app/pubspec.lock
 
   build_transport_helper:
     runs-on: ubuntu-22.04
