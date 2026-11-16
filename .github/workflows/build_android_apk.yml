@@ -35,7 +35,8 @@ jobs:
         with:
           workspaces: |
             . -> target
-            packages/localsend_isolates/rust -> ../rust_builder/build
+            . -> app/build/rust_lib_localsend_app/build
+          shared-key: gal3-android-debug
       - name: Prepare supported FOSS build
         run: sh support/scripts/remove_proprietary_dependencies.sh
       - name: Configure release signing
