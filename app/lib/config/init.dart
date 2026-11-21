@@ -2,13 +2,12 @@ import 'dart:async';
 
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:localsend_app/config/refena.dart';
 import 'package:localsend_app/config/theme.dart';
-import 'package:localsend_app/gen/strings.g.dart';
-import 'package:localsend_app/pages/changelog_page.dart';
+import 'package:localsend_app/gen/assets.gen.dart';
 import 'package:localsend_app/pages/home_page.dart';
 import 'package:localsend_app/pages/home_page_controller.dart';
 import 'package:localsend_app/pages/whats_new_page.dart';
@@ -43,6 +42,7 @@ import 'package:localsend_app/util/notification_strings.dart';
 import 'package:localsend_app/util/ui/dynamic_colors.dart';
 import 'package:localsend_app/util/ui/snackbar.dart';
 import 'package:localsend_app/widget/dialogs/local_network_dialog.dart';
+import 'package:localsend_app/widget/dialogs/whats_new_dialog.dart';
 import 'package:localsend_isolates/isolate.dart';
 import 'package:localsend_isolates/model/dto/file_dto.dart';
 import 'package:localsend_isolates/model/dto/multicast_dto.dart';
@@ -325,19 +325,13 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
     if (whatsNew != null) {
       // ignore: unawaited_futures
       ref.global.dispatchAsync(NavigateAction.push(whatsNew));
-    } else if (lastVersion != null && (compareVersions(version, lastVersion) ?? 0) > 0 && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 10),
-          // A snack bar with an action stays until it is dismissed by default. Keep that only for screen reader users, who need the time to reach the action.
-          persist: MediaQuery.accessibleNavigationOf(context),
-          content: Text(t.whatsNewPage.updated(version: version)),
-          action: SnackBarAction(
-            label: t.changelogPage.title,
-            onPressed: () => ref.global.dispatchAsync(NavigateAction.push(const ChangelogPage())),
-          ),
-        ),
-      );
+    } else if (lastVersion != null && (compareVersions(version, lastVersion) ?? 0) > 0) {
+      final releases = parseChangelog(await rootBundle.loadString(Assets.changelog));
+      final release = releases.where((release) => release.version == version).firstOrNull;
+      if (release != null && context.mounted) {
+        // ignore: unawaited_futures
+        WhatsNewDialog.open(context, release);
+      }
     }
   }
 

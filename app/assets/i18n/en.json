@@ -345,7 +345,6 @@
   },
   "whatsNewPage": {
     "title": "What's new in {version}",
-    "updated": "LocalSend was updated to {version}",
     "changes(interface=WhatsNewStrings)": {
       "v1_18_0": {
         "changes": [

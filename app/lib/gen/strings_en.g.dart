@@ -669,9 +669,6 @@ class Translations$whatsNewPage$en {
   /// en: 'What's new in {version}'
   String title({required Object version}) => 'What\'s new in ${version}';
 
-  /// en: 'LocalSend was updated to {version}'
-  String updated({required Object version}) => 'LocalSend was updated to ${version}';
-
   late final Translations$whatsNewPage$changes$en changes = Translations$whatsNewPage$changes$en.internal(_root);
 }
 

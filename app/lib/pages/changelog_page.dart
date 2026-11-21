@@ -63,16 +63,31 @@ class _ReleaseCard extends StatelessWidget {
         subtitle: date == null ? null : Text(SystemDateTimeFormatter.date(context, date)),
         expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        children: [
-          if (release.notes.isNotEmpty) _ltr(Text(release.notes)),
-          for (final category in ChangelogCategory.values)
-            if (release.entries.any((entry) => entry.category == category)) ...[
-              _CategoryHeader(category: category),
-              for (final entry in release.entries)
-                if (entry.category == category) _ltr(_EntryRow(entry: entry)),
-            ],
-        ],
+        children: [ChangelogReleaseBody(release: release)],
       ),
+    );
+  }
+}
+
+/// The notes and entries of one release, grouped by category.
+class ChangelogReleaseBody extends StatelessWidget {
+  final ChangelogRelease release;
+
+  const ChangelogReleaseBody({required this.release, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (release.notes.isNotEmpty) _ltr(Text(release.notes)),
+        for (final category in ChangelogCategory.values)
+          if (release.entries.any((entry) => entry.category == category)) ...[
+            _CategoryHeader(category: category),
+            for (final entry in release.entries)
+              if (entry.category == category) _ltr(_EntryRow(entry: entry)),
+          ],
+      ],
     );
   }
 }
@@ -158,7 +173,7 @@ class _EntryRow extends StatelessWidget {
                     for (final (index, segment) in segments.indexed)
                       TextSpan(
                         text: segment,
-                        style: index.isOdd ? const TextStyle(fontFamily: 'monospace') : null,
+                        style: index.isOdd ? TextStyle(fontFamily: _monospaceFont(Theme.of(context).platform)) : null,
                       )
                   else
                     TextSpan(text: entry.text),
@@ -185,4 +200,13 @@ InlineSpan _badge({required String label, required Color backgroundColor, requir
       child: Text(label, style: TextStyle(color: foregroundColor, fontSize: 12)),
     ),
   );
+}
+
+/// 'monospace' is a generic family only on Android and Linux.
+String _monospaceFont(TargetPlatform platform) {
+  return switch (platform) {
+    TargetPlatform.iOS || TargetPlatform.macOS => 'Menlo',
+    TargetPlatform.windows => 'Consolas',
+    _ => 'monospace',
+  };
 }
