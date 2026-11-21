@@ -35,7 +35,7 @@ class ChangelogRelease {
 }
 
 final _heading = RegExp(r'^## (\S+)(?: \((\d{4}-\d{2}-\d{2})\))?');
-final _entry = RegExp(r'^- (\w+)(?:\(([^)]*)\))?(!)?: (.+)$');
+final _entry = RegExp(r'^(\w+)(?:\(([^)]*)\))?(!)?: (.+)$');
 
 const _categories = {
   'feat': ChangelogCategory.feature,
@@ -49,11 +49,11 @@ List<ChangelogRelease> parseChangelog(String markdown) {
   String? version;
   DateTime? date;
   var notes = <String>[];
-  var entries = <ChangelogEntry>[];
+  var entryLines = <String>[];
 
   void finishRelease() {
     if (version != null) {
-      releases.add(ChangelogRelease(version: version, date: date, notes: notes.join('\n'), entries: entries));
+      releases.add(ChangelogRelease(version: version, date: date, notes: notes.join('\n'), entries: entryLines.map(_parseEntry).toList()));
     }
   }
 
@@ -68,9 +68,12 @@ List<ChangelogRelease> parseChangelog(String markdown) {
         null => null,
       };
       notes = [];
-      entries = [];
+      entryLines = [];
     } else if (line.startsWith('- ')) {
-      entries.add(_parseEntry(line));
+      entryLines.add(line.substring(2));
+    } else if (line.startsWith(' ') && entryLines.isNotEmpty) {
+      // An indented line continues the entry above it.
+      entryLines.last = '${entryLines.last} ${line.trimLeft()}';
     } else if (line.isNotEmpty) {
       notes.add(line);
     }
@@ -80,22 +83,24 @@ List<ChangelogRelease> parseChangelog(String markdown) {
   return releases;
 }
 
-ChangelogEntry _parseEntry(String line) {
-  final match = _entry.firstMatch(line);
-  final category = _categories[match?.group(1)];
-  if (match == null || category == null) {
-    // Keep the prefix of types without a group of their own (e.g. `i18n:`), the text is not self-explanatory without it.
-    return ChangelogEntry(category: ChangelogCategory.other, scopes: const [], breaking: false, text: line.substring(2));
+ChangelogEntry _parseEntry(String entry) {
+  final match = _entry.firstMatch(entry);
+  if (match == null) {
+    return ChangelogEntry(category: ChangelogCategory.other, scopes: const [], breaking: false, text: entry);
   }
 
+  final type = match.group(1)!;
+  final category = _categories[type];
+  final text = match.group(4)!;
   return ChangelogEntry(
-    category: category,
+    category: category ?? ChangelogCategory.other,
     scopes: [
       for (final scope in (match.group(2) ?? '').split(','))
         if (scope.trim().isNotEmpty) scope.trim(),
     ],
     breaking: match.group(3) != null,
-    text: match.group(4)!,
+    // Keep the prefix of types without a group of their own (e.g. `i18n:`), the text is not self-explanatory without it.
+    text: category == null ? '$type: $text' : text,
   );
 }
 

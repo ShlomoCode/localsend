@@ -329,8 +329,8 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 10),
-          // A snack bar with an action stays until it is dismissed by default.
-          persist: false,
+          // A snack bar with an action stays until it is dismissed by default. Keep that only for screen reader users, who need the time to reach the action.
+          persist: MediaQuery.accessibleNavigationOf(context),
           content: Text(t.whatsNewPage.updated(version: version)),
           action: SnackBarAction(
             label: t.changelogPage.title,
