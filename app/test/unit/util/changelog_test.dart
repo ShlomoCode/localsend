@@ -1,3 +1,4 @@
+import 'package:localsend_app/model/changelog.dart';
 import 'package:localsend_app/util/changelog.dart';
 import 'package:test/test.dart';
 

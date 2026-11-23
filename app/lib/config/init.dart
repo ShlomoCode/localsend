@@ -8,6 +8,7 @@ import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:localsend_app/config/refena.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/assets.gen.dart';
+import 'package:localsend_app/pages/changelog_page.dart';
 import 'package:localsend_app/pages/home_page.dart';
 import 'package:localsend_app/pages/home_page_controller.dart';
 import 'package:localsend_app/pages/whats_new_page.dart';
@@ -330,7 +331,11 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
       final release = releases.where((release) => release.version == version).firstOrNull;
       if (release != null && context.mounted) {
         // ignore: unawaited_futures
-        WhatsNewDialog.open(context, release);
+        WhatsNewDialog.open(context, release).then((showChangelog) async {
+          if (showChangelog) {
+            await ref.global.dispatchAsync(NavigateAction.push(const ChangelogPage()));
+          }
+        });
       }
     }
   }

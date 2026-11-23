@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:localsend_app/gen/strings.g.dart';
-import 'package:localsend_app/pages/changelog_page.dart';
-import 'package:localsend_app/util/changelog.dart';
+import 'package:localsend_app/model/changelog.dart';
+import 'package:localsend_app/widget/changelog_release.dart';
 import 'package:routerino/routerino.dart';
 
 class WhatsNewDialog extends StatelessWidget {
@@ -9,14 +9,13 @@ class WhatsNewDialog extends StatelessWidget {
 
   const WhatsNewDialog({required this.release, super.key});
 
-  static Future<void> open(BuildContext context, ChangelogRelease release) async {
-    final openChangelog = await showDialog<bool>(
+  /// Returns whether the user asked to see the full changelog.
+  static Future<bool> open(BuildContext context, ChangelogRelease release) async {
+    final showChangelog = await showDialog<bool>(
       context: context,
       builder: (_) => WhatsNewDialog(release: release),
     );
-    if (openChangelog == true && context.mounted) {
-      await context.push(() => const ChangelogPage());
-    }
+    return showChangelog ?? false;
   }
 
   @override
@@ -26,8 +25,7 @@ class WhatsNewDialog extends StatelessWidget {
       elevation: 0,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 500),
-        child: Card(
-          margin: EdgeInsets.zero,
+        child: ChangelogReleaseCard(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -50,11 +48,11 @@ class WhatsNewDialog extends StatelessWidget {
                   spacing: 8,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.of(context).pop(true),
+                      onPressed: () => context.pop(true),
                       child: Text(t.changelogPage.title),
                     ),
                     FilledButton(
-                      onPressed: () => Navigator.of(context).pop(false),
+                      onPressed: () => context.pop(false),
                       child: Text(t.general.close),
                     ),
                   ],
