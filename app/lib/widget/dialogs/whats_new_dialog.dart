@@ -44,14 +44,15 @@ class WhatsNewDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                OverflowBar(
+                  alignment: MainAxisAlignment.end,
+                  overflowAlignment: OverflowBarAlignment.end,
+                  spacing: 8,
                   children: [
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(true),
                       child: Text(t.changelogPage.title),
                     ),
-                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: () => Navigator.of(context).pop(false),
                       child: Text(t.general.close),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 enum ChangelogCategory { feature, security, performance, fix, other }
 
 class ChangelogEntry {
@@ -36,7 +38,7 @@ const _categories = {
 
 List<ChangelogRelease> parseChangelog(String markdown) {
   return [
-    for (final section in markdown.split(RegExp(r'^## ', multiLine: true)).skip(1)) _parseRelease(section.trim().split('\n')),
+    for (final section in markdown.split(RegExp(r'^## ', multiLine: true)).skip(1)) _parseRelease(const LineSplitter().convert(section.trim())),
   ];
 }
 
