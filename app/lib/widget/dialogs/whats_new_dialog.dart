@@ -4,7 +4,6 @@ import 'package:localsend_app/pages/changelog_page.dart';
 import 'package:localsend_app/util/changelog.dart';
 import 'package:routerino/routerino.dart';
 
-/// Shows the changes of [release] after the app has been updated to it.
 class WhatsNewDialog extends StatelessWidget {
   final ChangelogRelease release;
 
@@ -22,33 +21,48 @@ class WhatsNewDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Styled like a release card of the changelog page, so the same content looks the same in both places.
-    return AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      actionsPadding: const EdgeInsets.all(16),
-      title: ChangelogReleaseTitle(
-        release: release,
-        title: t.whatsNewPage.title(version: release.version),
-      ),
-      content: SizedBox(
-        width: 500,
-        child: SingleChildScrollView(
-          child: ChangelogReleaseBody(release: release),
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 500),
+        child: Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ChangelogReleaseTitle(
+                  release: release,
+                  title: t.whatsNewPage.title(version: release.version),
+                ),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: ChangelogReleaseBody(release: release),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: Text(t.changelogPage.title),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: Text(t.general.close),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(t.changelogPage.title),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(t.general.close),
-        ),
-      ],
     );
   }
 }

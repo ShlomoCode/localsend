@@ -82,7 +82,6 @@ const _scopeLabels = {
   'mobile': 'Mobile',
 };
 
-/// The notes and entries of one release, grouped by category.
 class ChangelogReleaseBody extends StatelessWidget {
   final ChangelogRelease release;
 
@@ -140,9 +139,7 @@ class ChangelogReleaseBody extends StatelessWidget {
                                 for (final scope in entry.scopes)
                                   _badge(_scopeLabels[scope.toLowerCase()] ?? scope, colors.secondaryContainer, colors.onSecondaryContainer),
                                 if (entry.breaking) _badge(t.changelogPage.breaking, breakingColor.withValues(alpha: 0.15), breakingColor),
-                                // Text between backticks is inline code.
-                                for (final (index, segment) in entry.text.split('`').indexed)
-                                  TextSpan(text: segment, style: index.isOdd ? codeStyle : null),
+                                ..._spansWithInlineCode(entry.text, codeStyle),
                               ],
                             ),
                           ),
@@ -170,4 +167,10 @@ InlineSpan _badge(String label, Color backgroundColor, Color foregroundColor) {
       child: Text(label, style: TextStyle(color: foregroundColor, fontSize: 12)),
     ),
   );
+}
+
+List<InlineSpan> _spansWithInlineCode(String text, TextStyle codeStyle) {
+  return [
+    for (final (index, segment) in text.split('`').indexed) TextSpan(text: segment, style: index.isOdd ? codeStyle : null),
+  ];
 }
