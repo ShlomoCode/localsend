@@ -80,6 +80,7 @@ const _scopeLabels = {
   'cli': 'CLI',
   'desktop': 'Desktop',
   'mobile': 'Mobile',
+  'i18n': 'Translation',
 };
 
 class ChangelogReleaseBody extends StatelessWidget {

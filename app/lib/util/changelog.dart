@@ -31,6 +31,7 @@ final _entry = RegExp(r'^(\w+)(?:\((.+?)\))?(!)?: (.+)$');
 
 const _categories = {
   'feat': ChangelogCategory.feature,
+  'i18n': ChangelogCategory.feature,
   'security': ChangelogCategory.security,
   'perf': ChangelogCategory.performance,
   'fix': ChangelogCategory.fix,
@@ -65,9 +66,13 @@ ChangelogEntry _parseEntry(String entry) {
   final category = _categories[type];
   return ChangelogEntry(
     category: category ?? ChangelogCategory.other,
-    scopes: [...?match.group(2)?.split(',').map((scope) => scope.trim())],
+    scopes: [
+      // A translation is a feature to the user, the badge keeps the context that the `i18n:` prefix gave.
+      if (type == 'i18n') type,
+      ...?match.group(2)?.split(',').map((scope) => scope.trim()),
+    ],
     breaking: match.group(3) != null,
-    // Types without a group of their own (e.g. `i18n:`) keep their prefix, the text is not self-explanatory without it.
+    // Types without a group of their own (e.g. `docs:`) keep their prefix, the text is not self-explanatory without it.
     text: category == null ? '$type: ${match.group(4)}' : match.group(4)!,
   );
 }

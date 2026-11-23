@@ -28,8 +28,9 @@ Android+iOS only hotfix update.
     expect(feature.text, 'replace `--file` with the `send` command (@otanim)');
     expect((fix.category, fix.breaking), (ChangelogCategory.fix, false));
     expect(fix.scopes, ['android', 'ios']);
-    expect((i18n.category, i18n.text), (ChangelogCategory.other, 'i18n: add Kyrgyz (@nidara-duo)'));
-    expect(releases[1].entries.single.text, 'Initial Release');
+    expect((i18n.category, i18n.text), (ChangelogCategory.feature, 'add Kyrgyz (@nidara-duo)'));
+    expect(i18n.scopes, ['i18n']);
+    expect((releases[1].entries.single.category, releases[1].entries.single.text), (ChangelogCategory.other, 'Initial Release'));
   });
 
   test('isNewerVersion compares numerically', () {
