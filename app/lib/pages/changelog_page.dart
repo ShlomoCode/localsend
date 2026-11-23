@@ -100,6 +100,7 @@ class ChangelogReleaseBody extends StatelessWidget {
         _ => 'monospace',
       },
     );
+    final breakingColor = theme.brightness == Brightness.dark ? Colors.orange.shade200 : Colors.orange.shade900;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -138,7 +139,7 @@ class ChangelogReleaseBody extends StatelessWidget {
                               children: [
                                 for (final scope in entry.scopes)
                                   _badge(_scopeLabels[scope.toLowerCase()] ?? scope, colors.secondaryContainer, colors.onSecondaryContainer),
-                                if (entry.breaking) _badge(t.changelogPage.breaking, Colors.orange, Colors.black),
+                                if (entry.breaking) _badge(t.changelogPage.breaking, breakingColor.withValues(alpha: 0.15), breakingColor),
                                 // Text between backticks is inline code.
                                 for (final (index, segment) in entry.text.split('`').indexed)
                                   TextSpan(text: segment, style: index.isOdd ? codeStyle : null),
