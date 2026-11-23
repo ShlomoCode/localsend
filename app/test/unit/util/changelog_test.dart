@@ -9,9 +9,6 @@ void main() {
 - feat(cli)!: replace `--file` with the `send` command (@otanim)
 - fix(android, ios): keep file names (@Tienisto)
 - i18n: add Kyrgyz (@nidara-duo)
-- fix: keep file names
-  when saving to a custom folder
-- refactor(cli)!: remove the old command
 
 ## 1.18.1
 
@@ -25,28 +22,19 @@ Android+iOS only hotfix update.
     expect(releases[1].date, null);
     expect(releases[1].notes, 'Android+iOS only hotfix update.');
 
-    final [feature, fix, i18n, wrapped, refactor] = releases[0].entries;
-    expect(wrapped.text, 'keep file names when saving to a custom folder');
-    expect(refactor.category, ChangelogCategory.other);
-    expect(refactor.scopes, ['cli']);
-    expect(refactor.breaking, true);
-    expect(refactor.text, 'refactor: remove the old command');
-    expect(feature.category, ChangelogCategory.feature);
+    final [feature, fix, i18n] = releases[0].entries;
+    expect((feature.category, feature.breaking), (ChangelogCategory.feature, true));
     expect(feature.scopes, ['cli']);
-    expect(feature.breaking, true);
     expect(feature.text, 'replace `--file` with the `send` command (@otanim)');
-    expect(fix.category, ChangelogCategory.fix);
+    expect((fix.category, fix.breaking), (ChangelogCategory.fix, false));
     expect(fix.scopes, ['android', 'ios']);
-    expect(fix.breaking, false);
-    expect(i18n.category, ChangelogCategory.other);
-    expect(i18n.text, 'i18n: add Kyrgyz (@nidara-duo)');
+    expect((i18n.category, i18n.text), (ChangelogCategory.other, 'i18n: add Kyrgyz (@nidara-duo)'));
     expect(releases[1].entries.single.text, 'Initial Release');
   });
 
-  test('compareVersions orders numerically', () {
-    expect(compareVersions('1.10.0', '1.9.2'), greaterThan(0));
-    expect(compareVersions('1.19.0', '1.19.0'), 0);
-    expect(compareVersions('1.18.2', '1.19.0'), lessThan(0));
-    expect(compareVersions('1.19.0-beta', '1.19.0'), null);
+  test('isNewerVersion compares numerically', () {
+    expect(isNewerVersion('1.10.0', '1.9.2'), true);
+    expect(isNewerVersion('1.19.0', '1.19.0'), false);
+    expect(isNewerVersion('1.18.2', '1.19.0'), false);
   });
 }

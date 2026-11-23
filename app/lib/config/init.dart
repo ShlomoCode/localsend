@@ -325,7 +325,7 @@ Future<void> postInit(BuildContext context, Ref ref, bool appStart) async {
     if (whatsNew != null) {
       // ignore: unawaited_futures
       ref.global.dispatchAsync(NavigateAction.push(whatsNew));
-    } else if (lastVersion != null && (compareVersions(version, lastVersion) ?? 0) > 0) {
+    } else if (lastVersion != null && isNewerVersion(version, lastVersion)) {
       final releases = parseChangelog(await rootBundle.loadString(Assets.changelog));
       final release = releases.where((release) => release.version == version).firstOrNull;
       if (release != null && context.mounted) {

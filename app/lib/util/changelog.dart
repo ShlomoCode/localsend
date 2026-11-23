@@ -9,12 +9,7 @@ class ChangelogEntry {
   final bool breaking;
   final String text;
 
-  const ChangelogEntry({
-    required this.category,
-    required this.scopes,
-    required this.breaking,
-    required this.text,
-  });
+  const ChangelogEntry({required this.category, required this.scopes, required this.breaking, required this.text});
 }
 
 class ChangelogRelease {
@@ -26,16 +21,11 @@ class ChangelogRelease {
 
   final List<ChangelogEntry> entries;
 
-  const ChangelogRelease({
-    required this.version,
-    required this.date,
-    required this.notes,
-    required this.entries,
-  });
+  const ChangelogRelease({required this.version, required this.date, required this.notes, required this.entries});
 }
 
-final _heading = RegExp(r'^## (\S+)(?: \((\d{4}-\d{2}-\d{2})\))?');
-final _entry = RegExp(r'^(\w+)(?:\(([^)]*)\))?(!)?: (.+)$');
+final _heading = RegExp(r'^(\S+)(?: \((.+)\))?');
+final _entry = RegExp(r'^(\w+)(?:\((.+?)\))?(!)?: (.+)$');
 
 const _categories = {
   'feat': ChangelogCategory.feature,
@@ -45,42 +35,23 @@ const _categories = {
 };
 
 List<ChangelogRelease> parseChangelog(String markdown) {
-  final releases = <ChangelogRelease>[];
-  String? version;
-  DateTime? date;
-  var notes = <String>[];
-  var entryLines = <String>[];
+  return [
+    for (final section in markdown.split(RegExp(r'^## ', multiLine: true)).skip(1)) _parseRelease(section.trim().split('\n')),
+  ];
+}
 
-  void finishRelease() {
-    if (version != null) {
-      releases.add(ChangelogRelease(version: version, date: date, notes: notes.join('\n'), entries: entryLines.map(_parseEntry).toList()));
-    }
-  }
-
-  for (final rawLine in markdown.split('\n')) {
-    final line = rawLine.trimRight();
-    final heading = _heading.firstMatch(line);
-    if (heading != null) {
-      finishRelease();
-      version = heading.group(1);
-      date = switch (heading.group(2)) {
-        final value? => DateTime.tryParse(value),
-        null => null,
-      };
-      notes = [];
-      entryLines = [];
-    } else if (line.startsWith('- ')) {
-      entryLines.add(line.substring(2));
-    } else if (line.startsWith(' ') && entryLines.isNotEmpty) {
-      // An indented line continues the entry above it.
-      entryLines.last = '${entryLines.last} ${line.trimLeft()}';
-    } else if (line.isNotEmpty) {
-      notes.add(line);
-    }
-  }
-  finishRelease();
-
-  return releases;
+ChangelogRelease _parseRelease(List<String> lines) {
+  final heading = _heading.firstMatch(lines.first)!;
+  final body = lines.skip(1).where((line) => line.isNotEmpty);
+  return ChangelogRelease(
+    version: heading.group(1)!,
+    date: DateTime.tryParse(heading.group(2) ?? ''),
+    notes: body.where((line) => !line.startsWith('- ')).join('\n'),
+    entries: [
+      for (final line in body)
+        if (line.startsWith('- ')) _parseEntry(line.substring(2)),
+    ],
+  );
 }
 
 ChangelogEntry _parseEntry(String entry) {
@@ -88,40 +59,26 @@ ChangelogEntry _parseEntry(String entry) {
   if (match == null) {
     return ChangelogEntry(category: ChangelogCategory.other, scopes: const [], breaking: false, text: entry);
   }
-
   final type = match.group(1)!;
   final category = _categories[type];
-  final text = match.group(4)!;
   return ChangelogEntry(
     category: category ?? ChangelogCategory.other,
-    scopes: [
-      for (final scope in (match.group(2) ?? '').split(','))
-        if (scope.trim().isNotEmpty) scope.trim(),
-    ],
+    scopes: [...?match.group(2)?.split(',').map((scope) => scope.trim())],
     breaking: match.group(3) != null,
-    // Keep the prefix of types without a group of their own (e.g. `i18n:`), the text is not self-explanatory without it.
-    text: category == null ? '$type: $text' : text,
+    // Types without a group of their own (e.g. `i18n:`) keep their prefix, the text is not self-explanatory without it.
+    text: category == null ? '$type: ${match.group(4)}' : match.group(4)!,
   );
 }
 
-/// Compares dotted numeric versions such as `1.19.0`. Returns `null` if one of them has another format.
-int? compareVersions(String a, String b) {
-  final partsA = _versionParts(a);
-  final partsB = _versionParts(b);
-  if (partsA == null || partsB == null) {
-    return null;
-  }
-
-  for (var i = 0; i < partsA.length || i < partsB.length; i++) {
-    final diff = (i < partsA.length ? partsA[i] : 0).compareTo(i < partsB.length ? partsB[i] : 0);
-    if (diff != 0) {
-      return diff;
+/// Whether [version] is a later release than [other], for dotted numeric versions such as `1.19.0`.
+bool isNewerVersion(String version, String other) {
+  final [a, b] = [
+    for (final v in [version, other]) v.split('.').map((part) => int.tryParse(part) ?? 0).toList(),
+  ];
+  for (var i = 0; i < a.length && i < b.length; i++) {
+    if (a[i] != b[i]) {
+      return a[i] > b[i];
     }
   }
-  return 0;
-}
-
-List<int>? _versionParts(String version) {
-  final parts = version.split('.').map(int.tryParse).toList();
-  return parts.contains(null) ? null : parts.cast<int>();
+  return a.length > b.length;
 }
